@@ -78,7 +78,7 @@ module Rigor
       # would turn the warm fast lane into a permanent miss on every project that enables a bundled plugin.
       def self.env_only_config_entries(loader)
         [deferred_signature_paths_entry(loader), project_signature_paths_entry(loader), core_root_entry(loader),
-         subordinate_signature_paths_entry(loader)].compact
+         subordinate_signature_paths_entry(loader), collection_signature_paths_entry(loader)].compact
       end
 
       # Issue #2517 — which directory the env loaded core from. The selected core's files are digested by
@@ -159,6 +159,23 @@ module Rigor
       end
 
       private_class_method :subordinate_signature_paths_entry
+
+      # Issue #3030 — which of the loader's `signature_paths:` are `rbs collection` gem directories decides whether
+      # their `_`-prefixed directories load, so it changes the env built from byte-identical files. Absent when
+      # there is none, so every project without a collection lockfile keeps its key.
+      def self.collection_signature_paths_entry(loader)
+        return nil unless loader.respond_to?(:collection_signature_paths)
+
+        collection = Array(loader.collection_signature_paths).map(&:to_s).sort
+        return nil if collection.empty?
+
+        Descriptor::ConfigEntry.new(
+          key: "rbs.collection_signature_paths",
+          value_hash: Digest::SHA256.hexdigest(collection.join("\n"))
+        )
+      end
+
+      private_class_method :collection_signature_paths_entry
 
       # Public (ADR-87 WD4) so the boot-slimming run-cache probe reconstructs the identical `gems` +
       # `rbs.libraries` key slots the runner writes, from the config-derived library list, without a loader.

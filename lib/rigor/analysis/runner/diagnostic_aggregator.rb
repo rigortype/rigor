@@ -3,6 +3,7 @@
 require_relative "../check_rules/rule_ids"
 require_relative "../crash_signature"
 require_relative "../diagnostic"
+require_relative "../run_cache_key"
 require_relative "../severity_stamp"
 
 module Rigor
@@ -99,6 +100,7 @@ module Rigor
             dependency_source_budget_diagnostics +
             dependency_source_config_conflict_diagnostics +
             rbs_coverage_diagnostics +
+            rbs_collection_setup_hint_diagnostics +
             rbs_inline_annotation_hint_diagnostics(expansion) +
             expansion.fetch(:errors)
         end
@@ -287,6 +289,40 @@ module Rigor
           return [] if missing.empty?
 
           [build_rbs_coverage_missing_diagnostic(missing)]
+        end
+
+        # Issue #3030 — one `:info` when the run found no `rbs_collection.lock.yaml` but the directory looks set up for
+        # one ({Environment::RbsCollectionDiscovery.missing_lockfile_hint}): the dependency RBS a collection would
+        # load is absent, and Rigor does not resolve it from `manifest.yaml` or a gemspec itself.
+        def rbs_collection_setup_hint_diagnostics
+          # The run-result key and the `--incremental` fingerprint carry the same answer ({RunCacheKey}).
+          hint = RunCacheKey.collection_setup_hint(@configuration)
+          return [] if hint.nil?
+
+          [build_rbs_collection_setup_hint_diagnostic(hint)]
+        end
+
+        RBS_COLLECTION_SETUP_STEPS = {
+          collection_test_dir: "This looks like a gem_rbs_collection test directory: run the collection's " \
+                               "`bin/test` setup for this gem first (it writes the lockfile and " \
+                               "`.gem_rbs_collection/`), then run Rigor here again.",
+          collection_config: "An `rbs_collection.yaml` is here: run `rbs collection install` to write the " \
+                             "lockfile, then run Rigor again."
+        }.freeze
+        private_constant :RBS_COLLECTION_SETUP_STEPS
+
+        def build_rbs_collection_setup_hint_diagnostic(hint)
+          Diagnostic.new(
+            path: ".rigor.yml",
+            line: 1,
+            column: 1,
+            message: "No `rbs_collection.lock.yaml` was found, so no `rbs collection` RBS was loaded: the signatures " \
+                     "of this directory's gem dependencies are absent and calls into them read `Dynamic[top]`. " \
+                     "#{RBS_COLLECTION_SETUP_STEPS.fetch(hint)}",
+            severity: :info,
+            rule: "rbs.coverage.collection-not-installed",
+            source_family: :builtin
+          )
         end
 
         # Issue #2441 — the same project-own set `Environment.for_project` skips the collection copy of.

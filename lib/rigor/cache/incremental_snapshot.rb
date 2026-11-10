@@ -333,8 +333,7 @@ module Rigor
           "sig:#{digest_signature_paths(project_sig_roots(configuration))}",
           "pre_eval:#{digest_pre_eval(configuration.pre_eval)}"
         ]
-        parts.concat(extra_signature_parts(configuration))
-        parts.concat(dependency_source_parts(configuration))
+        parts.concat(project_input_parts(configuration))
         identity = EngineSource.process_identity
         parts << "engine-source:#{identity}" if identity
         # Issue #1700 — the gated vendored signatures the run's source activates. A file that gains or drops a
@@ -404,6 +403,22 @@ module Rigor
         rows.empty? ? [] : ["dependency-source:#{rows.sort.inspect}"]
       end
       private_class_method :dependency_source_parts
+
+      # The parts read off the project beside its configuration, in the order the fingerprint has always joined them:
+      # the extra signature roots, the `dependencies.source_inference` gems, and (#3030) the collection setup hint.
+      def self.project_input_parts(configuration)
+        extra_signature_parts(configuration) + dependency_source_parts(configuration) +
+          collection_setup_hint_parts(configuration)
+      end
+      private_class_method :project_input_parts
+
+      # Issue #3030 — the `rbs.coverage.collection-not-installed` hint, a run-level row read off the working directory
+      # that no other part covers. No part without a hint, so every other project's fingerprint is as it was.
+      def self.collection_setup_hint_parts(configuration)
+        hint = Analysis::RunCacheKey.collection_setup_hint(configuration)
+        hint ? ["rbs-collection-hint:#{hint}"] : []
+      end
+      private_class_method :collection_setup_hint_parts
 
       def self.digest_file_if_present(path)
         path = path&.to_s

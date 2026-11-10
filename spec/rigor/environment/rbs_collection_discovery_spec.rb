@@ -364,4 +364,99 @@ RSpec.describe Rigor::Environment::RbsCollectionDiscovery do
       expect(resolve.to_s).to eq(File.join(tmpdir, "c.lock.yaml"))
     end
   end
+
+  # Issue #3030 — rbs's `RBS::FileFinder.each_file(skip_hidden: true)` rule for a collection gem directory.
+  describe ".hidden_file?" do
+    it "is true below a _-prefixed directory at any depth, and false for a _-prefixed file name" do
+      root = "/c/gem/1.0"
+
+      expect(described_class.hidden_file?(root, "/c/gem/1.0/_test/test.rbs")).to be(true)
+      expect(described_class.hidden_file?(root, "/c/gem/1.0/lib/_scripts/x.rbs")).to be(true)
+      expect(described_class.hidden_file?(root, "/c/gem/1.0/_private.rbs")).to be(false)
+      expect(described_class.hidden_file?(root, "/c/gem/1.0/lib/gem.rbs")).to be(false)
+    end
+
+    # The gem directory is the boundary: a `_`-prefixed directory above it (the `_test/` holding the lockfile)
+    # says nothing about the gem's own files.
+    it "reads only the path below the gem directory" do
+      root = "/repo/gems/a/1.0/_test/.gem_rbs_collection/b/1.0"
+
+      expect(described_class.hidden_file?(root, "#{root}/b.rbs")).to be(false)
+    end
+  end
+
+  # Issue #3030 — a `signature_paths:` root whose real path ends in a collection entry's `<name>/<version>`.
+  describe ".without_signature_path_copies" do
+    let(:collection) do
+      %w[mygem other].map { |name| File.join(tmpdir, ".gem_rbs_collection", name, "1.0") }
+    end
+
+    it "drops the entry a gems/<name>/<version> working tree copies, so `..` and a symlink count" do
+      FileUtils.mkdir_p(File.join(tmpdir, "gems", "mygem", "1.0", "_test"))
+      File.symlink(File.join(tmpdir, "gems", "mygem", "1.0"), File.join(tmpdir, "link"))
+      dotted = File.join(tmpdir, "gems", "mygem", "1.0", "_test", "..")
+
+      expect(described_class.without_signature_path_copies(collection, [dotted])).to eq([collection[1]])
+      expect(described_class.without_signature_path_copies(collection, [File.join(tmpdir, "link")]))
+        .to eq([collection[1]])
+    end
+
+    it "keeps every entry for a root that names another gem, another version, or nothing on disk" do
+      FileUtils.mkdir_p(File.join(tmpdir, "gems", "mygem", "2.0"))
+      FileUtils.mkdir_p(File.join(tmpdir, "sig"))
+      roots = [File.join(tmpdir, "gems", "mygem", "2.0"), File.join(tmpdir, "sig"), File.join(tmpdir, "absent")]
+
+      expect(described_class.without_signature_path_copies(collection, roots)).to eq(collection)
+    end
+
+    # A partial override laid out by name and version is not a copy of the gem: the collection still loads.
+    it "keeps the entry for a <name>/<version> root outside a gems/ tree" do
+      override = File.join(tmpdir, "sig", "overrides", "mygem", "1.0")
+      FileUtils.mkdir_p(override)
+
+      expect(described_class.without_signature_path_copies(collection, [override])).to eq(collection)
+    end
+
+    # A `local` source's symlink: the root IS the installed entry, whatever its layout.
+    it "drops the entry whose real path is the root's" do
+      tree = File.join(tmpdir, "src", "mygem-tree")
+      FileUtils.mkdir_p(tree)
+      FileUtils.mkdir_p(File.dirname(collection[0]))
+      File.symlink(tree, collection[0])
+
+      expect(described_class.without_signature_path_copies(collection, [tree])).to eq([collection[1]])
+    end
+  end
+
+  # Issue #3030 — the hint for a directory set up for a collection lockfile that has none.
+  describe ".missing_lockfile_hint" do
+    def hint(root, lockfile_path: nil, auto_detect: true)
+      described_class.missing_lockfile_hint(lockfile_path: lockfile_path, project_root: root, auto_detect: auto_detect)
+    end
+
+    let(:test_dir) { File.join(tmpdir, "gems", "mygem", "1.0", "_test").tap { |dir| FileUtils.mkdir_p(dir) } }
+
+    it "names a gem_rbs_collection test directory without a lockfile" do
+      expect(hint(test_dir)).to eq(:collection_test_dir)
+    end
+
+    it "names a directory with an rbs_collection.yaml and no lockfile" do
+      File.write(File.join(tmpdir, "rbs_collection.yaml"), "sources: []\n")
+
+      expect(hint(tmpdir)).to eq(:collection_config)
+    end
+
+    it "is nil once the lockfile is there, in an ordinary directory, or with the lookup off" do
+      other = File.join(tmpdir, "other", "mygem", "1.0", "_test").tap { |dir| FileUtils.mkdir_p(dir) }
+
+      expect(hint(other)).to be_nil
+      expect(hint(test_dir, auto_detect: false)).to be_nil
+      File.write(File.join(test_dir, "rbs_collection.lock.yaml"), "---\ngems: []\n")
+      expect(hint(test_dir)).to be_nil
+    end
+
+    it "names the directory when a configured lockfile is absent, whatever auto_detect says" do
+      expect(hint(test_dir, lockfile_path: "missing.lock.yaml", auto_detect: false)).to eq(:collection_test_dir)
+    end
+  end
 end

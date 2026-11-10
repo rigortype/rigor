@@ -118,6 +118,73 @@ module Rigor
         gem_paths_from(collection_root, data, Set.new).map { |dir| dir.parent.basename.to_s }.uniq
       end
 
+      # Issue #3030 — whether `file`, found under the collection gem directory `root`, sits below a `_`-prefixed
+      # directory (`_test/`, `_scripts/`). Such a file is not part of the gem's signatures: rbs's
+      # `EnvironmentLoader` loads a collection gem as a library, and `RBS::FileFinder.each_file(skip_hidden: true)`
+      # drops every file with a `_`-prefixed directory between it and the library root. A `git` source never
+      # copies them into the collection (`Sources::Git#cp_r` prunes them), but a `local` source symlinks the whole
+      # `<name>/<version>/` directory, so gem_rbs_collection's own `bin/test` setup brings each gem's `_test/`
+      # fixtures along. Only the directories count, as in rbs: a `_`-prefixed file name is loaded.
+      def self.hidden_file?(root, file)
+        relative = Pathname(file.to_s).relative_path_from(Pathname(root.to_s))
+        relative.ascend.drop(1).any? { |part| part.basename.to_s.start_with?("_") }
+      end
+
+      # Issue #3030 — `collection_paths` ({.discover}) without each gem directory a `signature_paths:` root already
+      # loads a copy of. A root is a copy of the entry `<collection>/<name>/<version>` when its real path is the
+      # entry's real path (a `local` source symlinks the working tree in), or when it is a gem_rbs_collection working
+      # tree for the same gem and version, `.../gems/<name>/<version>` (a `git` source installs a copy of it). That is
+      # what an author editing the tree points `signature_paths:` at from its `_test/` directory while the lockfile
+      # installs the same gem, and loading both declares every member twice. The `signature_paths:` copy is kept, as
+      # it is the one being edited. Any other root, such as a partial override `sig/overrides/foo/1.0`, leaves the
+      # collection copy loaded. Real paths are read so `..` and a symlinked spelling answer the same; a root that
+      # does not exist matches nothing.
+      def self.without_signature_path_copies(collection_paths, signature_roots)
+        reals = signature_roots.filter_map { |root| real_path(root) }
+        return collection_paths if reals.empty?
+
+        trees = reals.filter_map do |real|
+          real = Pathname(real)
+          [real.parent.basename.to_s, real.basename.to_s] if real.parent.parent.basename.to_s == "gems"
+        end.to_set
+        reals = reals.to_set
+        collection_paths.reject do |path|
+          path = Pathname(path.to_s)
+          trees.include?([path.parent.basename.to_s, path.basename.to_s]) || reals.include?(real_path(path))
+        end
+      end
+
+      def self.real_path(path)
+        File.realpath(path.to_s)
+      rescue SystemCallError
+        nil
+      end
+      private_class_method :real_path
+
+      # Issue #3030 — why a run with no collection lockfile looks like it was meant to have one: `:collection_test_dir`
+      # when `project_root` is a gem_rbs_collection test directory (`gems/<name>/<version>/_test/`, whose lockfile
+      # gem_rbs_collection's `bin/test` setup writes), `:collection_config` when it holds an `rbs_collection.yaml`
+      # (`rbs collection install` has not run), and nil otherwise, or when a lockfile resolves or the lookup is off.
+      # Rigor resolves no `manifest.yaml` or gemspec dependency itself, so without the lockfile the dependency RBS
+      # is absent. Two `stat`s and no read.
+      def self.missing_lockfile_hint(lockfile_path:, project_root: Dir.pwd, auto_detect: true)
+        return nil if lockfile_path.nil? && !auto_detect
+        return nil if resolve_lockfile_path(lockfile_path: lockfile_path, project_root: project_root,
+                                            auto_detect: auto_detect)
+
+        root = Pathname(File.expand_path(project_root.to_s))
+        return :collection_test_dir if collection_test_dir?(root)
+        return :collection_config if root.join("rbs_collection.yaml").file?
+
+        nil
+      end
+
+      # `gems/<name>/<version>/_test/`, the layout of a gem_rbs_collection working tree.
+      def self.collection_test_dir?(root)
+        root.basename.to_s == "_test" && root.parent.parent.parent.basename.to_s == "gems"
+      end
+      private_class_method :collection_test_dir?
+
       # Returns the resolved lockfile path (`Pathname`) or `nil` when neither explicit nor auto-detect
       # produces one. Public so the stats banner can surface what rigor found.
       def self.resolve_lockfile_path(lockfile_path:, project_root: Dir.pwd, auto_detect: true)

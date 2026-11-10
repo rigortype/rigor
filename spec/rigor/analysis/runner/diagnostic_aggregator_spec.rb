@@ -289,6 +289,39 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
     end
   end
 
+  # Issue #3030 — the routing hint for a directory set up for an `rbs collection` lockfile that has none.
+  describe "rbs_collection_setup_hint_diagnostics" do
+    it "reports one :info naming the bin/test setup in a gem_rbs_collection test directory" do
+      allow(Rigor::Environment::RbsCollectionDiscovery).to receive(:missing_lockfile_hint)
+        .and_return(:collection_test_dir)
+
+      diagnostics = build_aggregator.rbs_collection_setup_hint_diagnostics
+
+      expect(diagnostics.map(&:rule)).to eq(["rbs.coverage.collection-not-installed"])
+      expect(diagnostics.first.severity).to eq(:info)
+      expect(diagnostics.first.message).to include("rbs_collection.lock.yaml").and include("`bin/test`")
+    end
+
+    it "names `rbs collection install` beside an rbs_collection.yaml" do
+      allow(Rigor::Environment::RbsCollectionDiscovery).to receive(:missing_lockfile_hint)
+        .and_return(:collection_config)
+
+      expect(build_aggregator.rbs_collection_setup_hint_diagnostics.first.message)
+        .to include("run `rbs collection install`")
+    end
+
+    it "passes the configured lockfile and auto-detect setting, and is silent with no hint" do
+      allow(Rigor::Environment::RbsCollectionDiscovery).to receive(:missing_lockfile_hint).and_return(nil)
+      configuration = Rigor::Configuration.new(
+        "rbs_collection" => { "lockfile" => "custom.lock.yaml", "auto_detect" => false }
+      )
+
+      expect(build_aggregator(configuration: configuration).rbs_collection_setup_hint_diagnostics).to eq([])
+      expect(Rigor::Environment::RbsCollectionDiscovery).to have_received(:missing_lockfile_hint)
+        .with(lockfile_path: "custom.lock.yaml", auto_detect: false)
+    end
+  end
+
   describe "rbs_inline_annotation_hint_diagnostics" do
     def expansion_for(*paths)
       { files: paths, errors: [] }
@@ -806,8 +839,8 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
     # The class doc's constraint: "callers MUST NOT reorder the concatenation". One diagnostic per stream
     # (each with a distinguishable `rule`) proves both that every stream is actually invoked AND that the
     # documented order (`plugin_load, prepare, pre_eval, dependency_source, budget, config_conflict,
-    # rbs_coverage, rbs_inline_hint, expansion errors`) still holds — a `+` swapped for the wrong operand
-    # (nil_inject/type_swap) would either drop a stream or shuffle this list.
+    # rbs_coverage, rbs_collection_setup_hint, rbs_inline_hint, expansion errors`) still holds — a `+`
+    # swapped for the wrong operand (nil_inject/type_swap) would either drop a stream or shuffle this list.
     it "concatenates every pre-file stream in the documented order" do # rubocop:disable RSpec/ExampleLength
       registry = Rigor::Plugin::Registry.new(load_errors: [load_error("plugin load boom")])
       index = Rigor::Analysis::DependencySourceInference::Index.new(
@@ -826,6 +859,8 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
       )
       allow(Rigor::Environment::LockfileResolver).to receive(:locked_gems).and_return({})
       allow(Rigor::Configuration).to receive(:rbs_inline_library_resolvable?).and_return(true)
+      allow(Rigor::Environment::RbsCollectionDiscovery).to receive(:missing_lockfile_hint)
+        .and_return(:collection_config)
 
       aggregator = build_aggregator(
         configuration: configuration, registry: registry, dependency_source_index: index,
@@ -847,6 +882,7 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
       expect(rules).to eq(%w[
         load-error prepare-rule pre-eval.parse-error dynamic.dependency-source.gem-not-found
         dynamic.dependency-source.budget-exceeded dynamic.dependency-source.config-conflict
+        rbs.coverage.collection-not-installed
       ] + [nil])
     end
 

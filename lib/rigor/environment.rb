@@ -351,6 +351,11 @@ module Rigor
           auto_detect: rbs_collection_auto_detect,
           skip_gem_names: skip_gem_names
         ).map(&:to_s)
+        # Issue #3030 — a gem the project's `signature_paths:` already loads a copy of (a gem_rbs_collection working
+        # tree next to its `_test/` lockfile) loads from there alone. The coverage classification below still sees
+        # the whole list: the gem has RBS either way.
+        covered_collection_paths = collection_paths
+        collection_paths = RbsCollectionDiscovery.without_signature_path_copies(collection_paths, resolved_paths)
         # Issue #2978 — the collection copies of the locked gems whose own `sig/` the bundle discovery loaded.
         behind_gem_sig_paths = collection_paths_behind_gem_sigs(collection_paths, gem_sig_paths, locked)
         # ADR-25 — RBS signature directories contributed by loaded plugins via their manifest
@@ -370,7 +375,7 @@ module Rigor
         # `sig/` declares them, and an overlay (`data/gem_overlay/activesupport`) would collide with it.
         missing_gems, overlay_paths = missing_gems_and_overlay_paths(
           locked: locked.except(*project_gems), default_libraries: merged_libraries, bundle_sig_paths: gem_sig_paths,
-          rbs_collection_paths: collection_paths, plugin_registry: plugin_registry,
+          rbs_collection_paths: covered_collection_paths, plugin_registry: plugin_registry,
           signature_paths: resolved_paths, bundle_root: bundle_root
         )
         loader_signature_paths = resolved_paths + plugin_sig_paths + gem_sig_paths +
@@ -402,6 +407,9 @@ module Rigor
           # Issue #2978 — a gem's collection copy loads behind the gem's own `sig/`: each member that `sig/` (or any
           # other eagerly loaded signature file) declares stands down from the copy (#2422), and the rest loads.
           subordinate_signature_paths: behind_gem_sig_paths,
+          # Issue #3030 — the collection gem directories, loaded as rbs loads a library: without the files below a
+          # `_`-prefixed directory (each gem's `_test/` fixtures).
+          collection_signature_paths: collection_paths,
           required_features: required_features || RequiredFeatures.scan(source_files, sig_paths: resolved_paths),
           core_root: core_root
         )

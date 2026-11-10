@@ -121,8 +121,9 @@ stops the job, nil will be returned instead" — settled it.
 RBS ships a runtime type checker. It wraps the methods of the classes you name, runs your Ruby, and
 reports every argument or return value that does not match the loaded declarations. A call it rejects
 is a **witness**: the evidence a "say less" change needs, and the way to tell a real Rigor finding from
-a false positive. This runs the library's code, so for a gem you do not own, do it in a disposable
-environment.
+a false positive. This **executes the library's code with the user's privileges**. For the project's
+own code or a gem already in the user's bundle that is the same trust as running its tests. For any
+other gem, run it in a container or VM, or ask the user before executing it.
 
 Write a short script that calls the method with an input aimed at the exit Rigor or your reading
 pointed to — for `return nil unless carrier_accepts?(parcel)`, a parcel the carrier rejects:
@@ -134,12 +135,17 @@ Courier::Client.new.deliver(Courier::Parcel.new(2, 50))
 ```
 
 ```sh
-RBS_TEST_TARGET='Courier::*' RBS_TEST_OPT='-I sig' RBS_TEST_RAISE=1 ruby -I lib -rrbs/test/setup witness.rb
+RBS_TEST_TARGET='Courier::*' RBS_TEST_OPT='-I sig' ruby -I lib -rrbs/test/setup witness.rb
 # [Courier::Client#deliver] ReturnTypeError: expected `::String` but returns `nil`
 ```
 
-Add `-rbundler/setup` before `-rrbs/test/setup` under Bundler, and `-r <library>` in `RBS_TEST_OPT` for
-each standard library the declarations use. Run it again after the change: it must pass. The same check
+Under Bundler, run the same line as `bundle exec ruby -I lib -rrbs/test/setup witness.rb`. Do not add
+`-rbundler/setup` instead: when Bundler switches versions it re-executes Ruby without `-I` and `-r`, the
+script fails to load, and the non-zero exit looks like a witness. Add `-r <library>` to `RBS_TEST_OPT`
+for each standard library the declarations use.
+
+A witness is the `ReturnTypeError` (or `ArgumentTypeError`) naming the method, not a non-zero exit: read
+the error. Run it again after the change: it must exit 0. The same check
 fits a test suite as `RBS::UnitTest`'s `assert_send_type "(untyped) -> String?", receiver, :deliver,
 arg`, which also checks the call against the declaration loaded for the class, so it fails before the
 fix and passes after it.

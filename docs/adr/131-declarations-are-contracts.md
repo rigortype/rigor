@@ -124,7 +124,7 @@ because a reviewer otherwise cannot tell restraint from oversight.
 Upstream, the existing collection declaration was written by a contributor, not by the gem's author, so
 it earns no deference by authorship. What protects it is the direction criterion's asymmetry: replacing
 it with something narrower needs the gem's documentation, and replacing it with something wider needs a
-witness, so neither an agent's reading nor a Rigor finding alone moves it.
+witness or that documentation, so neither an agent's reading nor a Rigor finding alone moves it.
 
 ### WD5 — A new skill, not a widening of `rigor-type-oracle`
 
@@ -136,6 +136,11 @@ trigger, the same argument ADR-108 WD1 made against folding the oracle into `rig
 separate section on what a declaration promises, which names the contract source and points to the new
 skill. Its `AGENTS.md` fragment admits the contract source in its lead paragraph and gains one bullet for
 the `void` rule, so both hold in sessions that load neither skill (ADR-108 WD2's routing criterion).
+
+One skill covers the three targets — a gem's own `sig/`, an application's `sig/`, a gem_rbs_collection
+entry — because the judgment is identical and three near-identical descriptions would compete for the
+same tasks. What differs (who to ask, which gate proves the change, what the write-up looks like) lives
+in per-target `references/`.
 
 ### WD6 — The runtime witness: RBS's own checker confirms what Rigor locates
 
@@ -157,14 +162,9 @@ call aimed at that exit, rejected by the runtime checker under the old declarati
 new, is the witness a "say less" change needs. The asymmetry matters: a run that raises nothing proves
 only that the tried inputs behave, so it never supports a narrower declaration. `rbs prototype runtime`
 is not part of this: it emits every type as `untyped` and serves only to find undeclared methods and
-parameter shapes. A witness executes the library's code, so for a gem the writer does not own it runs in
-a disposable environment, and it is cited in the pull request rather than committed, because the
-collection's `_test/` code is checked statically.
-
-One skill covers the three targets — a gem's own `sig/`, an application's `sig/`, a gem_rbs_collection
-entry — because the judgment is identical and three near-identical descriptions would compete for the
-same tasks. What differs (who to ask, which gate proves the change, what the write-up looks like) lives
-in per-target `references/`.
+parameter shapes. A witness executes the library's code with the user's privileges, so for a gem the
+user does not already run it belongs in a container or VM or waits for the user's go-ahead; it is cited
+in the pull request rather than committed, because the collection's `_test/` code is checked statically.
 
 ## Rejected / deferred alternatives
 
@@ -197,8 +197,9 @@ Negative / carry-over:
   `def.return-type-mismatch` reports only the last expression and has false positives. Until #3062
   surfaces the computed verdict, early returns and untyped falsy arms are reading leads, and every
   candidate needs a witness either way.
-- A witness runs the library's code. The skill confines that to a disposable environment for third-party
-  gems, but it is still execution that a static checker's workflow did not need before.
+- A witness runs the library's code with the user's privileges. The skill sends third-party gems to a
+  container or VM or to the user's go-ahead, but it is still execution that a static checker's workflow
+  did not need before.
 - The eval suite is unrun at landing: its cases need a Rigor-configured project, as ADR-108 WD7's did.
 - Another catalogue entry, frozen into the public skill vocabulary at v1.0 with the rest
   ([ADR-50](50-release-engineering-and-stability-strategy.md) WD1).

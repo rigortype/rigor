@@ -85,17 +85,19 @@ default branch's README may describe another release: use it to ask, not to deci
 
 ## Signal 6 — the runtime witness
 
-Every change that makes a declaration say less needs a witness here; a Rigor finding alone does not go
-upstream. Run the witness from Signal 6 of `01-finding-candidates.md` in `$SCRATCH`, against the
-unpacked source and the copied declarations:
+Every change that makes a declaration say less needs a witness or that version's documentation here; a
+Rigor finding alone does not go upstream. Give both when you can. Run the witness from Signal 6 of
+`01-finding-candidates.md` in `$SCRATCH`, against the unpacked source and the copied declarations:
 
 ```sh
+: "${SCRATCH:?}"
 cd "$SCRATCH"
-RBS_TEST_TARGET='Namespace::*' RBS_TEST_OPT='-I sig' RBS_TEST_RAISE=1 ruby -I lib -rrbs/test/setup witness.rb
+RBS_TEST_TARGET='Namespace::*' RBS_TEST_OPT='-I sig' ruby -I lib -rrbs/test/setup witness.rb
 ```
 
-This executes the gem's code; run it somewhere disposable, and install whatever it requires at runtime
-there, not in the collection checkout. Record the call and the error. After editing the declaration,
+**This executes the gem's code with the user's privileges, and installing what it needs at runtime
+installs more.** A scratch directory is not isolation. Run it in a container or VM, or ask the user
+before executing a gem that is not already in their bundle. Record the call and the error. After editing the declaration,
 copy it into `$SCRATCH/sig` again and confirm the same run passes. `witness.rb` is evidence for the pull
 request description, not a committed test: the collection's `_test/` code is checked statically.
 
@@ -118,7 +120,7 @@ request description, not a committed test: the collection's `_test/` code is che
    touched. It runs `rbs validate`, `steep check` and the untyped-call check.
 3. `rigor check` on `_test/` reports nothing new compared with before the change.
 4. Every change that says less has a witness that fails under the old declaration and passes under the
-   new one, for each version you changed.
+   new one, or a quote from that version's documentation, for each version you changed.
 
 ## The pull request
 

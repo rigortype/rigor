@@ -28,13 +28,13 @@ rigor skill --full rigor-type-oracle
 ```
 
 Its `references/02-agents-md-fragment.md` section carries the paragraph
-and the five bullets. Copy that block **verbatim** — including its
+and the six bullets. Copy that block **verbatim** — including its
 single-long-line shape, which is deliberate (some renderers turn a
 newline inside a paragraph into a line break).
 
-Do not paraphrase it from memory, and do not shorten it: the five bullets
+Do not paraphrase it from memory, and do not shorten it: the six bullets
 are the load-bearing part — expression, method signature, parameter,
-the gap rule, and provenance.
+the gap rule, provenance, and the declared-`void` contract.
 
 ## Where it goes
 
@@ -44,7 +44,7 @@ the gap rule, and provenance.
 | Only `CLAUDE.md` exists | Append it there. |
 | Both exist | Put it in `AGENTS.md`. Add `@AGENTS.md` to `CLAUDE.md` only if it is not already pulled in. |
 | Neither exists | **Create `AGENTS.md`** with this as its first section. |
-| A types / type-checking section already exists | Merge into it; keep the five bullets intact. Never write a second, competing rule. |
+| A types / type-checking section already exists | Merge into it; keep the six bullets intact. Never write a second, competing rule. |
 
 Never overwrite unrelated content. If the project already states a rule
 about type authorship that contradicts this one, stop and show the user

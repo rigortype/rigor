@@ -1,0 +1,2 @@
+- **[skills]** The new `rigor-rbs-contract` skill audits, repairs and extends RBS declarations as contracts for a gem's own `sig/`, an application's `sig/`, or a gem_rbs_collection entry ([#3061](https://github.com/rigortype/rigor/pull/3061)).
+  - It changes a declaration only on Rigor's proof or the library's documented behaviour, and keeps a declared `void` unless the library documents a value.

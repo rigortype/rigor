@@ -17,7 +17,7 @@ the project is already onboarded, add it now.
   only if it is not already pulled in.
 - **Neither exists** → create `AGENTS.md` with this as its first section.
 - **A "Types" / "Type checking" section already exists** → merge into it
-  rather than adding a second one, and keep the five bullets intact.
+  rather than adding a second one, and keep the six bullets intact.
 
 Never overwrite unrelated content, and never rewrite a rule the project
 already wrote for itself — show the user the conflict instead.
@@ -27,13 +27,14 @@ already wrote for itself — show the user the conflict instead.
 ```markdown
 ## Types come from Rigor, not from reading code
 
-This project is type-checked by [Rigor](https://github.com/rigortype/rigor). A type you did not obtain from Rigor is a guess, and a guessed type is never written anywhere: not in `sig/`, not in an inline annotation (`#:`, `# @rbs`), not in a doc comment, not in a review comment, and not as the reason for a nil check or an `is_a?` guard.
+This project is type-checked by [Rigor](https://github.com/rigortype/rigor). A type you did not obtain from Rigor is a guess, and a guessed type is never written anywhere: not in `sig/`, not in an inline annotation (`#:`, `# @rbs`), not in a doc comment, not in a review comment, and not as the reason for a nil check or an `is_a?` guard. The one other source is a contract: what a declaration promises callers may rest on the library's documentation, quoted, or for this project's own code on the owner's explicit decision.
 
 - The type of an expression: `rigor type-of FILE:LINE:COL`, or `rigor annotate FILE` for a whole file.
 - The signature of a method: `rigor sig-gen --print FILE`; paste what it prints, never what you expect.
 - A parameter type is the one thing inference does not give you: derive it from the call sites with `rigor sig-gen --observe PATH` and keep it only while `rigor check` stays green.
-- When Rigor answers `Dynamic[top]` or `untyped`, or `sig-gen` skips the method, do not fill the gap. Report the exact command and its output; the gap is the finding.
+- When Rigor answers `Dynamic[top]` or `untyped`, or `sig-gen` skips the method, do not fill the gap from your reading. Report the exact command and its output; the gap is the finding. Only a contract source, cited as above, fills it.
 - Every type you state to a human carries the command that produced it, so it can be re-run.
+- A declared `void` or `boolish` return, or a declared type deliberately wider than the body (anything but `untyped`), is a contract, not a missing type: never tighten it to what the body happens to return unless the library documents that value or, for this project's own code, the owner decides. Auditing or repairing RBS declarations is the `rigor-rbs-contract` skill.
 
 The `rigor-type-oracle` skill (`rigor skill --full rigor-type-oracle`) has the full procedure. With the Rigor MCP server connected, `rigor_type_of`, `rigor_annotate`, and `rigor_sig_gen` are the same oracle as tool calls.
 ```

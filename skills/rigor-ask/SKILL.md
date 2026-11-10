@@ -130,6 +130,7 @@ A good hand-off is two or three sentences of orientation plus the pointer:
 - baseline reduction → **`rigor-baseline-reduce`** · coverage holes → **`rigor-protection-uplift`**
 - a missing gem/DSL → **`rigor-plugin-author`** · monkey-patch clusters → **`rigor-monkeypatch-resolve`**
 - about to *write* a type (RBS, `#:`, a Sorbet `sig`, a YARD tag, a doc sentence) → **`rigor-type-oracle`**
+- auditing, fixing, or contributing RBS declarations (a gem's `sig/`, a gem_rbs_collection entry) → **`rigor-rbs-contract`**
 
 When in doubt, give less and point — it respects the user's "three skills
 to remember" promise and keeps each answer to the part only `rigor-ask`

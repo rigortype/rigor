@@ -130,6 +130,7 @@ module Rigor
         rigor-editor-setup
         rigor-mcp-setup
         rigor-protection-uplift
+        rigor-rbs-contract
         rigor-plugin-tune
         rigor-plugin-author
         rigor-upgrade

@@ -1,0 +1,18 @@
+module Courier
+  class Parcel < Struct[untyped]
+    attr_accessor id: untyped
+    attr_accessor weight: untyped
+  end
+
+  class Chain
+  end
+
+  class Client
+    @middleware: Chain?
+
+    def deliver: (untyped parcel) -> String
+    def dispatch: (untyped parcel) -> void
+    def middleware: () ?{ (Chain) -> void } -> Chain
+    def label: (untyped parcel) -> untyped
+  end
+end

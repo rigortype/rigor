@@ -3,6 +3,7 @@
 require_relative "../check_rules/rule_ids"
 require_relative "../crash_signature"
 require_relative "../diagnostic"
+require_relative "../run_cache_key"
 require_relative "../severity_stamp"
 
 module Rigor
@@ -294,11 +295,8 @@ module Rigor
         # one ({Environment::RbsCollectionDiscovery.missing_lockfile_hint}): the dependency RBS a collection would
         # load is absent, and Rigor does not resolve it from `manifest.yaml` or a gemspec itself.
         def rbs_collection_setup_hint_diagnostics
-          hint = Environment::RbsCollectionDiscovery.missing_lockfile_hint(
-            lockfile_path: @configuration.rbs_collection_lockfile,
-            project_root: Dir.pwd,
-            auto_detect: @configuration.rbs_collection_auto_detect
-          )
+          # The run-result key and the `--incremental` fingerprint carry the same answer ({RunCacheKey}).
+          hint = RunCacheKey.collection_setup_hint(@configuration)
           return [] if hint.nil?
 
           [build_rbs_collection_setup_hint_diagnostic(hint)]

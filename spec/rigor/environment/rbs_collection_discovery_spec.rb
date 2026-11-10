@@ -391,7 +391,7 @@ RSpec.describe Rigor::Environment::RbsCollectionDiscovery do
       %w[mygem other].map { |name| File.join(tmpdir, ".gem_rbs_collection", name, "1.0") }
     end
 
-    it "drops the entry a root names by its real path, so `..` and a symlink count" do
+    it "drops the entry a gems/<name>/<version> working tree copies, so `..` and a symlink count" do
       FileUtils.mkdir_p(File.join(tmpdir, "gems", "mygem", "1.0", "_test"))
       File.symlink(File.join(tmpdir, "gems", "mygem", "1.0"), File.join(tmpdir, "link"))
       dotted = File.join(tmpdir, "gems", "mygem", "1.0", "_test", "..")
@@ -407,6 +407,24 @@ RSpec.describe Rigor::Environment::RbsCollectionDiscovery do
       roots = [File.join(tmpdir, "gems", "mygem", "2.0"), File.join(tmpdir, "sig"), File.join(tmpdir, "absent")]
 
       expect(described_class.without_signature_path_copies(collection, roots)).to eq(collection)
+    end
+
+    # A partial override laid out by name and version is not a copy of the gem: the collection still loads.
+    it "keeps the entry for a <name>/<version> root outside a gems/ tree" do
+      override = File.join(tmpdir, "sig", "overrides", "mygem", "1.0")
+      FileUtils.mkdir_p(override)
+
+      expect(described_class.without_signature_path_copies(collection, [override])).to eq(collection)
+    end
+
+    # A `local` source's symlink: the root IS the installed entry, whatever its layout.
+    it "drops the entry whose real path is the root's" do
+      tree = File.join(tmpdir, "src", "mygem-tree")
+      FileUtils.mkdir_p(tree)
+      FileUtils.mkdir_p(File.dirname(collection[0]))
+      File.symlink(tree, collection[0])
+
+      expect(described_class.without_signature_path_copies(collection, [tree])).to eq([collection[1]])
     end
   end
 

@@ -318,7 +318,7 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
 
       expect(build_aggregator(configuration: configuration).rbs_collection_setup_hint_diagnostics).to eq([])
       expect(Rigor::Environment::RbsCollectionDiscovery).to have_received(:missing_lockfile_hint)
-        .with(lockfile_path: "custom.lock.yaml", project_root: Dir.pwd, auto_detect: false)
+        .with(lockfile_path: "custom.lock.yaml", auto_detect: false)
     end
   end
 

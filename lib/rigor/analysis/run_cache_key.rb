@@ -99,7 +99,7 @@ module Rigor
           gems: [Cache::RbsDescriptor.rbs_gem_entry],
           dependencies: dependency_source_entries(configuration),
           configs: rbs_config_entries + engine_source_entries + lockfile_entries(configuration) +
-                   template_unit_entries(template_units_digest) + shadow_harness_entries + [
+                   collection_setup_hint_entries(configuration) + template_unit_entries(template_units_digest) + shadow_harness_entries + [
                      config_entry("configuration", Marshal.dump(configuration.to_h)),
                      config_entry("engine",
                                   "#{Rigor::VERSION}:#{Cache::Descriptor::SCHEMA_VERSION}:#{explain}"),
@@ -177,6 +177,24 @@ module Rigor
       def lockfile_entries(configuration)
         bundler, collection = resolved_lockfile_paths(configuration)
         [lockfile_entry("bundler.lockfile", bundler), lockfile_entry("rbs_collection.lockfile", collection)]
+      end
+
+      # Issue #3030 — the `rbs.coverage.collection-not-installed` hint is a run-level row read off the working
+      # directory (an `rbs_collection.yaml`, a gem_rbs_collection `_test/` layout), which neither the lockfile slot
+      # nor the configuration covers: without this slot a warm run replayed the hint after the file went, or
+      # missed it after the file came. No slot when there is no hint, so every other project keeps its key.
+      def collection_setup_hint_entries(configuration)
+        hint = collection_setup_hint(configuration)
+        hint.nil? ? [] : [config_entry("rbs_collection.setup_hint", hint.to_s)]
+      end
+
+      # The hint {Analysis::Runner::DiagnosticAggregator} reports, read the same way. Shared with
+      # {Cache::IncrementalSnapshot.fingerprint}.
+      def collection_setup_hint(configuration)
+        Environment::RbsCollectionDiscovery.missing_lockfile_hint(
+          lockfile_path: configuration.rbs_collection_lockfile,
+          auto_detect: configuration.rbs_collection_auto_detect
+        )
       end
 
       # ADR-10 slice 3, issue #1814 — the `dependencies.source_inference` gems' `(name, version, mode)` rows, which the

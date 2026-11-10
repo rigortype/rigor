@@ -122,6 +122,26 @@ RSpec.describe "rbs collection RBS in a gem_rbs_collection _test/ directory" do
     end
   end
 
+  # Issue #1700's gated vendored `prime` directory is kept whole only when no quarantined signature file declares a
+  # type it declares. A skipped `_test/` file that redeclares `Prime` is not quarantined, it was never loaded, so it
+  # must not send the build down the fallback and re-plan path.
+  it "does not count a skipped _test/ file against a gated vendored directory" do
+    gem_dir = File.join(repo, "gems", "primer", "1.0")
+    FileUtils.mkdir_p(File.join(gem_dir, "_test"))
+    File.write(File.join(gem_dir, "primer.rbs"), "class Prime\n  def each: () -> Integer\nend\n")
+    File.write(File.join(gem_dir, "_test", "test.rbs"), "module Prime\nend\n")
+    loader_class = Rigor::Environment::RbsLoader
+    allow(loader_class).to receive(:build_env_attempt).and_call_original
+
+    rbs_loader = loader_class.new(
+      libraries: [Rigor::Environment::RequiredFeatures.token("prime")],
+      signature_paths: [gem_dir], collection_signature_paths: [gem_dir]
+    )
+
+    expect(instance_types(rbs_loader, "Prime", :each)).to eq(["() -> ::Integer"])
+    expect(loader_class).to have_received(:build_env_attempt).once
+  end
+
   describe "(b) a signature_paths: copy of a locked gem" do
     def write_gems
       write_gem("mygem", {
@@ -195,6 +215,21 @@ RSpec.describe "rbs collection RBS in a gem_rbs_collection _test/ directory" do
 
       expect(collection_entry?(rbs_loader, "activesupport")).to be(false)
       expect(rbs_loader.signature_paths.map(&:to_s).grep(%r{gem_overlay/activesupport})).to eq([])
+    end
+
+    # A partial override laid out as `<name>/<version>` outside a `gems/` tree adds to the collection copy.
+    it "keeps the lockfile copy beside a partial override laid out by name and version" do
+      write_gems
+      write_test_dir(%w[mygem other], copy: %w[mygem])
+      override = File.join(test_dir, "sig", "overrides", "mygem", "1.0")
+      FileUtils.mkdir_p(override)
+      File.write(File.join(override, "extra.rbs"), "class Mygem\n  def extra: () -> Symbol\nend\n")
+
+      rbs_loader = loader(signature_paths: [override])
+
+      expect(collection_entry?(rbs_loader, "mygem")).to be(true)
+      expect(instance_types(rbs_loader, "Mygem", :run)).to eq(["() -> ::Integer"])
+      expect(instance_types(rbs_loader, "Mygem", :extra)).to eq(["() -> ::Symbol"])
     end
 
     # The control: a signature root whose real path does not end in a locked `<name>/<version>`.

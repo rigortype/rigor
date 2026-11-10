@@ -131,25 +131,35 @@ module Rigor
       end
 
       # Issue #3030 — `collection_paths` ({.discover}) without each gem directory a `signature_paths:` root already
-      # loads a copy of: a root whose real path ends in that gem's `<name>/<version>`. That is the layout of a
-      # gem_rbs_collection working tree (`gems/<name>/<version>/`), which an author editing it points
-      # `signature_paths:` at while the `_test/` lockfile installs the same gem from the same tree; loading both
-      # declares every member twice. The `signature_paths:` copy is kept, as it is the one being edited. The real
-      # path is read so `..` and a symlinked spelling answer the same; a root that does not exist matches nothing.
+      # loads a copy of. A root is a copy of the entry `<collection>/<name>/<version>` when its real path is the
+      # entry's real path (a `local` source symlinks the working tree in), or when it is a gem_rbs_collection working
+      # tree for the same gem and version, `.../gems/<name>/<version>` (a `git` source installs a copy of it). That is
+      # what an author editing the tree points `signature_paths:` at from its `_test/` directory while the lockfile
+      # installs the same gem, and loading both declares every member twice. The `signature_paths:` copy is kept, as
+      # it is the one being edited. Any other root, such as a partial override `sig/overrides/foo/1.0`, leaves the
+      # collection copy loaded. Real paths are read so `..` and a symlinked spelling answer the same; a root that
+      # does not exist matches nothing.
       def self.without_signature_path_copies(collection_paths, signature_roots)
-        copies = signature_roots.filter_map do |root|
-          real = Pathname(File.realpath(root.to_s))
-          [real.parent.basename.to_s, real.basename.to_s]
-        rescue SystemCallError
-          nil
-        end.to_set
-        return collection_paths if copies.empty?
+        reals = signature_roots.filter_map { |root| real_path(root) }
+        return collection_paths if reals.empty?
 
+        trees = reals.filter_map do |real|
+          real = Pathname(real)
+          [real.parent.basename.to_s, real.basename.to_s] if real.parent.parent.basename.to_s == "gems"
+        end.to_set
+        reals = reals.to_set
         collection_paths.reject do |path|
           path = Pathname(path.to_s)
-          copies.include?([path.parent.basename.to_s, path.basename.to_s])
+          trees.include?([path.parent.basename.to_s, path.basename.to_s]) || reals.include?(real_path(path))
         end
       end
+
+      def self.real_path(path)
+        File.realpath(path.to_s)
+      rescue SystemCallError
+        nil
+      end
+      private_class_method :real_path
 
       # Issue #3030 — why a run with no collection lockfile looks like it was meant to have one: `:collection_test_dir`
       # when `project_root` is a gem_rbs_collection test directory (`gems/<name>/<version>/_test/`, whose lockfile

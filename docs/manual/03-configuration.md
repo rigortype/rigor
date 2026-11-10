@@ -248,14 +248,20 @@ collection's own test setup:
 
    ```yaml
    paths: ["."]
+   signature_paths: ["."]
    ```
 
-   Rigor finds the lockfile and loads the gem and its dependencies from it.
-   You do not need `signature_paths: [".."]`. If you add it, Rigor loads the gem
-   from your working tree and skips the lockfile's copy of the same gem and
-   version, so the gem is not loaded twice. Add `signature_paths: ["."]` if you
-   also want the `.rbs` files in `_test/` itself, as the `Steepfile` that
-   `bin/test` writes does.
+   This is the shape of the `Steepfile` that `bin/test` writes (`check "."`,
+   `signature "."`). Rigor finds the lockfile and loads the gem and its
+   dependencies from it, and `signature_paths: ["."]` loads the `.rbs` files in
+   `_test/` itself. Without that line, the types those test signatures declare
+   are absent and calls into them are not checked.
+
+   `signature_paths: [".."]` is also safe. It loads the gem from your working
+   tree, and Rigor skips the lockfile's copy of the same gem and version, so the
+   gem is not loaded twice. Use it when the lockfile's copy is not your working
+   tree, for example when `rbs_collection.yaml` names a `git` source instead of
+   the collection's `gems/` directory.
 3. Run `rigor check` in `_test/`.
 
 Rigor skips every `_`-prefixed directory inside a collected gem, such as another

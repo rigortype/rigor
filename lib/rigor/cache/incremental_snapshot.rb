@@ -335,6 +335,9 @@ module Rigor
         ]
         parts.concat(extra_signature_parts(configuration))
         parts.concat(dependency_source_parts(configuration))
+        # Issue #3030 — the collection setup hint, a run-level row read off the working directory.
+        hint = Analysis::RunCacheKey.collection_setup_hint(configuration)
+        parts << "rbs-collection-hint:#{hint}" if hint
         identity = EngineSource.process_identity
         parts << "engine-source:#{identity}" if identity
         # Issue #1700 — the gated vendored signatures the run's source activates. A file that gains or drops a

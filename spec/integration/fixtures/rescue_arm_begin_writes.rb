@@ -261,7 +261,7 @@ end
 # `x.r` reads its declared `"s" | nil`, not the guard's `"s"`.
 class ChainBox
   def r = rand > 0.5 ? "s" : nil
-  def r=(v) = nil
+  def r=(v); end
 end
 
 def rescue_chain_fact(x)

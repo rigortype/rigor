@@ -2995,9 +2995,9 @@ module Rigor
       # invalidate ({#begin_fact_collector}). A retry `edge` collects the same scopes for its own widening; the
       # collector is separate so each evaluation pass filters against exactly its own raise points.
       #
-      # Returns `[type, scope, body_scope]`: the construct's value and exit scope (the else-clause's when present),
-      # and the scope the primary body alone ended with — the `else` runs only when nothing raised, so its effects
-      # are no raise point's.
+      # Returns `[type, scope]`: the construct's value and exit scope (the else-clause's when present). The scope the
+      # primary body alone ended with is recorded as a raise point before the `else` runs — the `else` runs only when
+      # nothing raised, so its effects are no raise point's.
       def eval_begin_primary_under(node, entry_scope, edge: nil, collector: nil)
         body_type, body_scope =
           if node.statements
@@ -3010,9 +3010,9 @@ module Rigor
 
         if node.else_clause
           else_type, else_scope = sub_eval(node.else_clause, body_scope)
-          [else_type, else_scope, body_scope]
+          [else_type, else_scope]
         else
-          [body_type, body_scope, body_scope]
+          [body_type, body_scope]
         end
       end
 
@@ -3175,10 +3175,10 @@ module Rigor
 
       # Runs `block` with `frames` — a retry edge and/or a {BodyRaiseScopes}, nils skipped — on top of the
       # thread-local stack {#record_raise_points} reads.
-      def with_raise_frame(*frames, &)
-        frames = frames.compact
-        return yield if frames.empty?
+      def with_raise_frame(first, second, &)
+        return yield if first.nil? && second.nil?
 
+        frames = first && second ? [first, second] : [first || second]
         state = TypingState.current
         previous = state[RETRY_FRAMES]
         state.with(RETRY_FRAMES, (previous ? previous + frames : frames).freeze, &)

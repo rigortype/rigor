@@ -1,1 +1,0 @@
-- **[skills]** `rigor-rbs-contract` now requires a negative control before trusting a runtime witness, ships a declaration-mutation procedure that lists the declarations no run checks, and covers a new declaration set (skeleton, new-method returns, blocks, dependencies without RBS) ([#PR](https://github.com/rigortype/rigor/pull/PR)).

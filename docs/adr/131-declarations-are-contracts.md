@@ -1,10 +1,14 @@
 # ADR-131 — Declarations are contracts: documented intent as an RBS authoring source
 
-Status: **Accepted, 2026-11-11 — implemented by [#3061](https://github.com/rigortype/rigor/pull/3061).** Ships `skills/rigor-rbs-contract/` (body, four `references/`, an eval
+Status: **Accepted, 2026-11-11 — implemented by [#3061](https://github.com/rigortype/rigor/pull/3061).** Ships `skills/rigor-rbs-contract/` (body, five `references/`, an eval
 suite) and amends the `rigor-type-oracle` skill and its `AGENTS.md` fragment so the two agree. Nothing in
 the engine changes. Archetype: deliberative. Stakes: mid — guidance only and reversible in one docs PR,
 but it decides what agents write into adopting projects' `sig/` and into RBS sent to
 `ruby/gem_rbs_collection`.
+
+**Amended 2026-11-11, after a field trial on rgl 0.6.7.** A witness counts only once its negative
+control has failed (WD7), and the skill gains a path for a new declaration set. Grounding:
+[`docs/notes/20261111-rbs-contract-field-trial-rgl.md`](../notes/20261111-rbs-contract-field-trial-rgl.md).
 
 Grounding: the collection audits
 ([2026-11-06](../notes/20261106-gem-rbs-collection-audit.md),
@@ -165,6 +169,28 @@ is not part of this: it emits every type as `untyped` and serves only to find un
 parameter shapes. A witness executes the library's code with the user's privileges, so for a gem the
 user does not already run it belongs in a container or VM or waits for the user's go-ahead; it is cited
 in the pull request rather than committed, because the collection's `_test/` code is checked statically.
+
+### WD7 — A witness needs its negative control; declaration mutants supply it at scale
+
+RBS's runtime checker skips some declarations without saying so: it checks a method only against a
+declaration on the same class or module that defines it in Ruby, so a declaration inherited from a
+module or superclass by a class that defines or overrides the method is skipped unless it carries
+`%a{rbs:test:target}` (`RBS::Test::Tester#skip_method?`). On rgl, `remove_edge` declared `-> bool` on
+the module `MutableGraph` and overridden in the class `DirectedAdjacencyGraph` returned a `Set`, and the
+run exited 0; redeclared on the class, the same run raised `expected bool but returns Set[5]`. rgl's
+test suite ran under the checker with that rule hiding a family of declarations. A clean run is therefore evidence only after the same run has failed under a declaration
+broken on purpose.
+
+The scalable form is the repository's own mutation idea (`tool/mutation`, ADR-62/63) turned on the
+declarations: replace each non-`void` return with `bot`, and each `T?` with `T`, one at a time, re-run
+the witnesses, and list the mutants no run notices. A mutant counts as killed only by a new type error
+naming the mutated method or one of its aliases, and one that does not load is an error, never a
+survivor — a first version that compared whole error lines counted run-to-run noise as kills, and one
+that spliced byte offsets broke files with non-ASCII comments. On the rgl draft, 61 mutants ran in about 70 seconds: 56 killed,
+5 survived, three of them the skip rule, one a method nothing called, and one a `?` no witness reached.
+A survivor is not a defect; it is the limit of what the evidence covers, and the write-up names it. The
+skill carries the procedure and a short script in `references/05-declaration-mutants.md`; whether it
+becomes a `rigor` command is a follow-up ([#3072](https://github.com/rigortype/rigor/issues/3072)), because a command would be frozen public surface (ADR-50).
 
 ## Rejected / deferred alternatives
 

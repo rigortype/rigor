@@ -60,6 +60,12 @@ half.
 Private and protected methods are skipped unless you pass `--include-private`; a collection entry rarely
 wants them.
 
+`sig-gen` writes method signatures and nothing else: no `include` / `extend`, no `attr_*`, no `alias`, no
+constants, and no method that only exists through metaprogramming (`define_method`, `class_eval` strings).
+Readers come back as `untyped-return` skips rather than `attr_reader` lines. Some methods are also
+absent without a skip row (#3068). So for a new declaration set its output is the types, not the
+skeleton: see the target reference's "New declaration set" section.
+
 ## Signal 3 — `rigor check` over code that uses the library
 
 Use-site code is where an input contract shows up: the project's own callers, the gem's `spec/` or
@@ -141,8 +147,10 @@ RBS_TEST_TARGET='Courier::*' RBS_TEST_OPT='-I sig' ruby -I lib -rrbs/test/setup 
 
 Under Bundler, run the same line as `bundle exec ruby -I lib -rrbs/test/setup witness.rb`. Do not add
 `-rbundler/setup` instead: when Bundler switches versions it re-executes Ruby without `-I` and `-r`, the
-script fails to load, and the non-zero exit looks like a witness. Add `-r <library>` to `RBS_TEST_OPT`
-for each standard library the declarations use.
+script fails to load, and the non-zero exit looks like a witness. When the target's bundle does not
+contain `rbs` (a gem's own `Gemfile` usually does not), run plain `ruby` with `GEM_PATH` naming both the
+directory where the target's gems are installed and one where `rbs` is installed. Add `-r <library>` to
+`RBS_TEST_OPT` for each standard library the declarations use.
 
 A witness is the `ReturnTypeError` (or `ArgumentTypeError`) naming the method, not a non-zero exit: read
 the error. Run it again after the change: it must exit 0. The same check
@@ -150,14 +158,29 @@ fits a test suite as `RBS::UnitTest`'s `assert_send_type "(untyped) -> String?",
 arg`, which also checks the call against the declaration loaded for the class, so it fails before the
 fix and passes after it.
 
+**Run the negative control first.** Run every witness once under a declaration you have broken on
+purpose and confirm it reports the type error; only then does a clean run under the real declaration
+mean anything. The checker silently skips some declarations. It checks a method only against a
+declaration written on the same class or module that defines the method in Ruby. A declaration
+inherited from a module or superclass, applied to a method an including class or subclass defines or
+overrides, is skipped unless it carries `%a{rbs:test:target}`. So are methods of classes created
+without `class … end` (`Struct.new`, `Class.new`, `Data.define`) and of classes loaded before
+`rbs/test/setup`. A witness that calls a skipped method exits 0 whatever the declaration says. On rgl,
+`remove_edge` declared `-> bool` on the module `MutableGraph` (which defines an abstract version) and
+overridden in the class `DirectedAdjacencyGraph` returned a `Set` and the run passed; redeclared on the
+class, the same run raised `expected bool but returns Set[5]`.
+
 A run that raises nothing is not a witness the other way: it shows only that the inputs you tried
 behave. When no input you can justify produces the excluded value, the finding is "left unchanged — no
-witness", not a change. For a project with a test suite, running the whole suite once under
-`rbs/test/setup` checks every declaration the suite exercises.
+witness", not a change. A whole test suite run under `rbs/test/setup` checks only the declarations its
+calls reach and the checker does not skip; the declaration-mutation pass in
+[`05-declaration-mutants.md`](05-declaration-mutants.md) lists the ones it does not, which is the
+negative control for every declaration at once.
 
 `rbs prototype runtime` is a different tool: it prints the methods, arities, mixins and constants of the
-loaded classes, with every type `untyped`. It is useful for finding undeclared methods — including ones
-`define_method` creates — and parameter shapes, never for a return type.
+loaded classes, with every type `untyped`. It is useful for the skeleton of a new declaration set and
+for finding undeclared methods — including ones `define_method` creates — and parameter shapes, never
+for a return type. It loads the library, so the witness safety rule applies to it too.
 
 ## Triage before deciding
 

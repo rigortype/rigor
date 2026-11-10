@@ -211,6 +211,15 @@ The `sig.skipped.*` reasons are:
   down with it. The rest of the signatures are unaffected;
   the skipped method is reported on stderr, and it is worth
   reporting to us.
+- `sig.skipped.platform-guarded` — the method is defined in
+  a file Ruby loads only under a `RUBY_ENGINE`,
+  `RUBY_PLATFORM` or `defined?(…)` require guard (the
+  `if RUBY_ENGINE == 'truffleruby'` → `require
+  "stackprof/truffleruby"` shape), so it is not an ordinary
+  definition for every platform. sig-gen withholds the
+  proposal when another scanned file also defines the
+  method, or when the inferred return is `bot` — the shape
+  a raising stub takes (#3035).
 
 ### Tighter returns keep the declared parameters
 

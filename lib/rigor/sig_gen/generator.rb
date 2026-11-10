@@ -28,6 +28,7 @@ require_relative "declaration_equivalence"
 require_relative "inline_declarations"
 require_relative "layout_index"
 require_relative "method_candidate"
+require_relative "platform_guarded_files"
 require_relative "type_name_qualification"
 require_relative "writer"
 require_relative "../rooted_glob"
@@ -165,6 +166,11 @@ module Rigor
       def run
         resolved = resolve_paths(@paths)
         @resolved_paths = resolved
+        # Issue #3035 — the scanned files Ruby loads only through a platform-conditional require; their
+        # candidates are demoted in {#demote_platform_guarded}.
+        @platform_guarded_files = PlatformGuardedFiles.call(
+          resolved, ruby_version: @configuration.target_ruby
+        )
         @environment = build_environment(resolved)
         # ADR-84 WD2, as `Runner#run_analysis` mints it for `check` (#2300): one return-memo bucket for the whole
         # run. Without it the memo keys on each file's merged `discovered_def_nodes`, a new table per file, so a
@@ -184,10 +190,12 @@ module Rigor
           resolved.flat_map { |path| analyse_file(path, @environment) }
         end
         demoted = shelter_withheld_classes(
-          demote_overridden_base_methods(
-            demote_bot_proposals(
-              demote_unresolvable_superclasses(
-                demote_generic_reopenings(demote_inline_generic_classes(resolve_superclass_spellings(candidates)))
+          demote_platform_guarded(
+            demote_overridden_base_methods(
+              demote_bot_proposals(
+                demote_unresolvable_superclasses(
+                  demote_generic_reopenings(demote_inline_generic_classes(resolve_superclass_spellings(candidates)))
+                )
               )
             )
           )
@@ -417,8 +425,11 @@ module Rigor
       end
 
       # The reasons that withhold a member because of what its class's subclasses or callees do, not because the class
-      # itself cannot be declared.
-      WITHHELD_FOR_OVERRIDES = %i[overridden_bot abstract_method template_method overridden_by_unsigned_subclass].freeze
+      # itself cannot be declared. `:platform_guarded` counts too (#3035): a class whose every proposal the guard
+      # withheld — the raising-stub shape — still needs its shell on a subclass's file, or the subclass's own
+      # declaration reads `unresolvable-superclass` against a class this platform does load.
+      WITHHELD_FOR_OVERRIDES = %i[overridden_bot abstract_method template_method overridden_by_unsigned_subclass
+                                  platform_guarded].freeze
       private_constant :WITHHELD_FOR_OVERRIDES
 
       # Issue #3029 — a class whose members {#demote_bot_proposals} or {#demote_overridden_base_methods} withheld,
@@ -502,6 +513,54 @@ module Rigor
           namespace_kinds: candidate.namespace_kinds, class_shells: candidate.class_shells,
           class_superclasses: candidate.class_superclasses
         )
+      end
+
+      # Issue #3035 — a file Ruby loads only under a `RUBY_ENGINE` / `RUBY_PLATFORM` / `defined?(…)`
+      # require guard is not an ordinary definition for the platform sig-gen cannot pick:
+      # `stackprof/truffleruby.rb`'s raising `StackProf.run` stub proposed `-> bot` against the C
+      # extension's real signature. {PlatformGuardedFiles} names those files; a candidate from one is
+      # demoted when another file also provides the method — the guarded proposal would compete with
+      # or duplicate the definition this platform actually loads — or when its inferred return is
+      # `bot`, the shape a raising stub takes and never a contract worth writing from a file the
+      # current engine may never read. It runs after every demotion — LAST of them — so an earlier
+      # pass still sees the guarded candidate as emittable: a platform-conditional override is no
+      # "unsigned subclass" ({#demote_overridden_base_methods}), {BotProposalGuard} still reads its
+      # `bot` on the discovery tables, and demoting the base for a file this platform never loads
+      # would withhold a declaration the guarded file cannot shadow here. It runs BEFORE
+      # {#shelter_withheld_classes}, which must see the final emittable set: a class left with
+      # nothing to emit only because this pass withheld its last member still needs its shell.
+      def demote_platform_guarded(candidates)
+        guarded = @platform_guarded_files
+        return candidates if guarded.nil? || guarded.empty?
+
+        providers = method_providers(candidates)
+        candidates.map do |candidate|
+          next candidate unless platform_guarded_demote?(candidate, guarded, providers)
+
+          demoted_candidate(candidate, :platform_guarded)
+        end
+      end
+
+      # `[class_name, kind, method_name]` → the expanded paths of every candidate providing it, the
+      # guarded file's own included — "another definition also provides" is the `!= own` test.
+      def method_providers(candidates)
+        candidates.each_with_object(Hash.new { |hash, key| hash[key] = [] }) do |candidate, acc|
+          next if candidate.class_name.nil?
+
+          acc[[candidate.class_name, candidate.kind, candidate.method_name]] <<
+            File.expand_path(candidate.path)
+        end
+      end
+
+      def platform_guarded_demote?(candidate, guarded, providers)
+        return false unless Classification::EMITTABLE.include?(candidate.classification)
+        return false if candidate.class_name.nil?
+
+        own = File.expand_path(candidate.path)
+        return false unless guarded.include?(own)
+
+        slot = [candidate.class_name, candidate.kind, candidate.method_name]
+        candidate.inferred_return&.erase_to_rbs == "bot" || providers[slot].any? { |path| path != own }
       end
 
       # Issue #722 — resolves each recorded superclass token to the class Ruby means by it, and rewrites the

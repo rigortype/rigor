@@ -1,0 +1,2 @@
+- **[sig-gen]** `rigor sig-gen` no longer proposes signatures from files Ruby loads only under a `RUBY_ENGINE` / `RUBY_PLATFORM` / `defined?(...)` require guard. ([#3042](https://github.com/rigortype/rigor/pull/3042))
+  - A candidate from such a file is skipped as `sig.skipped.platform-guarded` when another scanned file also provides the method, or when its inferred return is `bot` — the shape a raising stub like stackprof's `truffleruby.rb` takes.

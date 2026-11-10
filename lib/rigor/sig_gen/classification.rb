@@ -76,7 +76,11 @@ module Rigor
         top_level_def: "sig.skipped.top-level-def",
         # #1968 — a bare `public` / `private` / `protected` that may not run (in control flow or a block) sits
         # between a bare `module_function` and the def, so whether the def is a module function is unknown.
-        uncertain_module_function: "sig.skipped.uncertain-module-function"
+        uncertain_module_function: "sig.skipped.uncertain-module-function",
+        # #3035 — the def lives in a file Ruby loads only under a `RUBY_ENGINE` / `RUBY_PLATFORM` /
+        # `defined?(…)` require guard, and the proposal would either duplicate a method another file
+        # provides or read `bot` off a raising stub the current platform never loads.
+        platform_guarded: "sig.skipped.platform-guarded"
       }.freeze
     end
   end

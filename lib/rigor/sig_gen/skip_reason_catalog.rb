@@ -203,6 +203,21 @@ module Rigor
                        "writes neither rather than guess (#1968).",
           next_step: "Move the visibility call to the module body's own statements, or name the methods it " \
                      "should cover (`public :name`, `module_function :name`), so the reading is certain."
+        ),
+        "sig.skipped.platform-guarded" => Entry.new(
+          id: "sig.skipped.platform-guarded",
+          summary: "The method is defined in a file loaded only under a platform guard, so its proposal was withheld.",
+          explanation: "The file is `require`d / `require_relative`d only inside a conditional on " \
+                       "`RUBY_ENGINE`, `RUBY_PLATFORM` or `defined?(…)`, so it is not an ordinary definition " \
+                       "for every platform — the shape is `if RUBY_ENGINE == 'truffleruby'` guarding a " \
+                       "pure-Ruby fallback whose real methods a C extension provides elsewhere. sig-gen " \
+                       "withholds the proposal when another scanned file also defines the method (the " \
+                       "guarded copy would compete with or duplicate the definition this platform loads), " \
+                       "or when the inferred return is `bot` — the shape a raising stub takes, and never a " \
+                       "contract worth writing from a file the current engine may never read (#3035).",
+          next_step: "Declare the method for the platform the project targets — hand-write the `sig/` " \
+                     "entry, or cover the file that defines it on this platform in the `sig-gen` paths — " \
+                     "rather than taking the guarded file's stub as the contract."
         )
       }.freeze
 

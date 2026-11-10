@@ -61,7 +61,7 @@ jobs:
       # users will have. BUNDLE_VERSION=system stops that Bundler re-executing the locked version.
       - name: Set up Ruby
         id: setup
-        uses: ruby/setup-ruby@v1.336.0
+        uses: ruby/setup-ruby@v1.338.0
         with:
           ruby-version: ${{ inputs.ruby || 'head' }}
           bundler: default

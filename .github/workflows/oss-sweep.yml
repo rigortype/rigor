@@ -58,7 +58,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Ruby (Rigor runtime)
-        uses: ruby/setup-ruby@v1.336.0
+        uses: ruby/setup-ruby@v1.338.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -207,7 +207,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Ruby (Rigor runtime)
-        uses: ruby/setup-ruby@v1.336.0
+        uses: ruby/setup-ruby@v1.338.0
         with:
           ruby-version: "4.0"
           bundler-cache: true

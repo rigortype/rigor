@@ -84,6 +84,6 @@ RSpec.describe "Set#first on a constant-folded Set", type: :runner do
   end
 
   it "leaves first(n) to RBS" do
-    expect(dumped(%(dump_type(Set["r"].first(1))))).to eq(["Array[Dynamic[top]]"])
+    expect(dumped(%(s = Set["r"]; dump_type(s.first(1))))).to eq(["Array[Dynamic[top]]"])
   end
 end

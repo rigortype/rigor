@@ -42,6 +42,22 @@ Prefer `rigor sig-gen --print` / `--diff` over hand-written or AI-authored RBS. 
 signal about the engine, so propose the generated output first and hand-edit only after the user has
 reviewed that alternative. Correcting existing `.rbs` is fine when the task authorizes it.
 
+### Respect a declared `void`
+
+Every Ruby method returns its last expression, so a body almost always *has* a value. An author who
+declares `-> void` is saying that the value is not part of the contract and callers must not depend on
+it. That is the meaning [`special-types.md` § `void`](../type-specification/special-types.md) binds, and
+`static.value-use.void` enforces it. `boolish` is the same kind of promise: only truthiness is
+meaningful. `rigor sig-gen` already never proposes over a declared `void` (#836).
+
+Do not hand-tighten either one to the value the implementation happens to return. That covers `sig/`,
+review suggestions, and RBS sent upstream to gem_rbs_collection. The test is whether the library
+*documents* the value: a doc comment, the README, or the API reference. An implementation detail does
+not count. In ruby/gem_rbs_collection#1129, sidekiq's `Client#push` documents "Returns a unique Job ID.
+If middleware stops the job, nil will be returned instead", so `String?` was right. `perform_async` and
+`Client.enqueue*` document nothing, so their `void` stayed, although their bodies return the same
+`push` result.
+
 Outside this repository, the shipped `rigor-type-oracle` skill carries the same provenance rule where
 the adopting project has installed it; otherwise treat AI-authored RBS according to that project's
 contract.

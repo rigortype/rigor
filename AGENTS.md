@@ -105,6 +105,10 @@ When editing `.rbs`, prefer `rigor sig-gen` and surface an inference gap before 
 signature. Follow [`docs/agents/type-authoring.md`](docs/agents/type-authoring.md) for the exceptions
 and the review boundary; the section name is retained for existing cross-references.
 
+A declared `void` (or `boolish`) return is a contract, not a missing type. Ruby returns the last
+expression implicitly, so `void` tells callers not to use the value. Do not tighten it to whatever the
+body happens to return — here or in upstream RBS — unless the library documents that value.
+
 ## Repository Layout
 
 - `plugins/` is production support for real gems/frameworks; `examples/` is plugin-contract walkthroughs.

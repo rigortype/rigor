@@ -23,8 +23,8 @@ matters in an application: a baseline may already be hiding exactly these.
 
 Also worth reading here: `def.override-return-widened` (a subclass's declaration widens what its parent
 promised). `static.value-use.void` (code uses a value a declaration says is `void`) is off in every
-profile until a project enables it, so its silence proves nothing; `rigor explain static.value-use.void`
-says how to turn it on.
+profile and fires only under the `use-of-void-value` bleeding-edge feature, so its silence proves
+nothing.
 
 What it cannot see: only the **last expression** is compared. An explicit `return nil` earlier in the
 body, or a falsy arm behind an untyped value (`mime && new(mime[0])` where `mime` is untyped reads as

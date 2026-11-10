@@ -32,7 +32,7 @@ This project is type-checked by [Rigor](https://github.com/rigortype/rigor). A t
 - The type of an expression: `rigor type-of FILE:LINE:COL`, or `rigor annotate FILE` for a whole file.
 - The signature of a method: `rigor sig-gen --print FILE`; paste what it prints, never what you expect.
 - A parameter type is the one thing inference does not give you: derive it from the call sites with `rigor sig-gen --observe PATH` and keep it only while `rigor check` stays green.
-- When Rigor answers `Dynamic[top]` or `untyped`, or `sig-gen` skips the method, do not fill the gap. Report the exact command and its output; the gap is the finding.
+- When Rigor answers `Dynamic[top]` or `untyped`, or `sig-gen` skips the method, do not fill the gap from your reading. Report the exact command and its output; the gap is the finding. Only a contract source, cited as above, fills it.
 - Every type you state to a human carries the command that produced it, so it can be re-run.
 - A declared `void` or `boolish` return, or a declared type deliberately wider than the body (anything but `untyped`), is a contract, not a missing type: never tighten it to what the body happens to return unless the library documents that value or, for this project's own code, the owner decides. Auditing or repairing RBS declarations is the `rigor-rbs-contract` skill.
 

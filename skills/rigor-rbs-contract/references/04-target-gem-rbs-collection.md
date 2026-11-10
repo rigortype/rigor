@@ -13,7 +13,12 @@ checks RBS against *application* code, not against the gem's implementation.
 
 ## Setup
 
-Paths below use `gems/NAME/X.Y` for the entry and `$GEM_DIR` for the installed gem.
+Paths below use `gems/NAME/X.Y` for the entry, `$COLLECTION` for the checkout, `$GEM_DIR` for the gem's
+source and `$SCRATCH` for a scratch directory. **Run every block from here to Signal 3 in one shell
+session**, or as one script: an agent's shell tool often keeps no variables between calls, and an empty
+`$GEM_DIR` or `$SCRATCH` turns `cp -R "$GEM_DIR/lib" "$SCRATCH/lib"` into a copy of `/lib`. If the
+variables cannot persist, set them again at the top of each block and guard them, for example
+`: "${GEM_DIR:?}" "${SCRATCH:?}"`.
 
 1. In the checkout: `bin/setup`.
 2. Fetch the source of the version the entry describes. Unpacking reads it without building native
@@ -92,7 +97,7 @@ Quote what you rely on in the write-up.
    would: `&.` or an `if` on a newly nilable return, calls to newly declared methods, the newly accepted
    argument shapes. A new file pair `test_N.rb` / `test_N.rbs` is fine when the existing test does not
    fit.
-2. `bin/test gems/NAME/X.Y` passes for every version you touched. It runs `rbs validate`, `steep check`
+2. `"$COLLECTION"/bin/test gems/NAME/X.Y`, run from `$COLLECTION`, passes for every version you touched. It runs `rbs validate`, `steep check`
    and the untyped-call check.
 3. `rigor check` on `_test/` reports nothing new compared with before the change.
 

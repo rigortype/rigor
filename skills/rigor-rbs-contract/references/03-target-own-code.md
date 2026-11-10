@@ -69,8 +69,8 @@ follow [`04-target-gem-rbs-collection.md`](04-target-gem-rbs-collection.md) for 
 is released, a local corrected copy can stand in:
 
 - in `rbs_collection.yaml`, set that gem to `ignore: true`, then run `rbs collection install` again so
-  `rbs_collection.lock.yaml` and `.gem_rbs_collection/` drop it — otherwise the collection copy still
-  loads next to yours and the duplicate declarations fail to build, which reads as a quieter run, not a
+  `rbs_collection.lock.yaml` drops it (the old directory under `.gem_rbs_collection/` stays, but only
+  gems listed in the lockfile load) — otherwise the collection copy still loads next to yours and the duplicate declarations fail to build, which reads as a quieter run, not a
   fixed one;
 - copy its RBS into a project directory on `signature_paths`, apply the fix, and note the upstream pull
   request next to it;

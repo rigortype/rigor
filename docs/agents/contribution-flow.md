@@ -18,11 +18,12 @@ a changelog entry. It is the conditional detail pointed to by `AGENTS.md`.
 
 - **Small, uncontroversial docs** — a typo, a one-line fix, a `docs/CURRENT_WORK.md` update — commit
   straight to `master` (a skill takes this path only for a typo-class fix; see
-  [`skill-authoring.md`](skill-authoring.md) § "The `waza` review"); CI skips an all-`.md` push, so a
+  [`skill-authoring.md`](skill-authoring.md) § "The `waza` review"); CI skips a push whose every file is
+  `.md` or another path the Ruby suite never reads (the list is in the `changes` job of `ci.yml`), so a
   PR here buys nothing but a redundant run.
   **Anything larger** — a multi-point revision, a new document, a reorganization — is a change worth
-  reviewing like any other: branch + PR. Touching even one non-`.md` file makes it code regardless of
-  size: branch + PR. When unsure which side a change is on, default to a branch — the direct-push
+  reviewing like any other: branch + PR. Touching even one file the suite reads (anything outside `.md` and
+  that list) makes it code regardless of size: branch + PR. When unsure which side a change is on, default to a branch — the direct-push
   path is the one that's expensive to undo.
 - Name a branch for the change it makes, not the tool that made it: no `claude/`, `codex/`, or other
   tool-identifying prefix. Renaming a branch that already has an open PR is not safe — it can close

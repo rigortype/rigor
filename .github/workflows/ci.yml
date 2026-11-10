@@ -22,7 +22,9 @@ on:
       - "tool/sorbet/**"
       - "Dockerfile"
       - "Dockerfile.dockerignore"
-      - "apps/rigor-playground/frontend/**"
+      - "apps/rigor-playground/frontend/*.html"
+      - "apps/rigor-playground/frontend/_headers"
+      - "apps/rigor-playground/frontend/_redirects"
       - "apps/rigor-playground/wasm/**/*.html"
       - "apps/rigor-playground/wasm/**/*.mjs"
       - "apps/rigor-playground/wasm/**/*.json"
@@ -58,10 +60,11 @@ permissions:
   contents: read
 
 jobs:
-  # ── 0. Change detection — skip the code suite for md-only PRs ────
-  # A pull request that touches only *.md gains nothing from the RSpec
-  # suite, self-check, lint, or the RBS matrix — the same reasoning that
-  # lets a Markdown-only *push* skip the whole workflow (paths-ignore
+  # ── 0. Change detection — skip the code suite for no-code PRs ────
+  # A pull request that touches only Markdown and the other paths listed in
+  # the detect step gains nothing from the RSpec suite, self-check, lint,
+  # or the RBS matrix — the same reasoning that
+  # lets a no-code *push* skip the whole workflow (paths-ignore
   # above). But `pull_request` cannot use paths-ignore: a paths-filtered
   # required check hangs pending and blocks the merge. So this job always
   # runs, and the code jobs gate on its `code` output. Non-PR events
@@ -95,7 +98,7 @@ jobs:
         id: tree
         run: echo "tree=$(git rev-parse --verify -q "$GITHUB_SHA^{tree}" || true)" >> "$GITHUB_OUTPUT"
 
-      - name: Detect code changes (non-Markdown, non-shell)
+      - name: Detect code changes
         id: detect
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
@@ -177,7 +180,10 @@ jobs:
             done
             echo "No attestation of group tree '${group_tree:-?}' signed by a pull_request run of that tree's own ci.yml (signers: '$(tr '\n' ' ' <<<"$signers")'): running the suite."
           fi
-          if ! changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA"); then
+          # --no-renames lists a move's old path too: with rename detection
+          # only the destination shows, so moving a file the suite reads
+          # into a skipped directory would look like a no-code change.
+          if ! changed=$(git diff --name-only --no-renames "$BASE_SHA...$HEAD_SHA"); then
             echo "diff failed — failing safe to the full suite."
             echo "code=true" >> "$GITHUB_OUTPUT"
             echo "nix=true" >> "$GITHUB_OUTPUT"
@@ -205,7 +211,7 @@ jobs:
           # minus the workflows, which it cannot exclude `ci.yml` from.
           # When a spec starts reading one of these, drop it from both.
           skip_re='\.(md|sh)$|^editors/|^data/oss-sweep/|^tool/(steep|sorbet)/|^Dockerfile(\.dockerignore)?$'
-          skip_re="$skip_re|^apps/rigor-playground/(frontend/|wasm/.*\.(html|mjs|json)$|fly\.toml$|Dockerfile$)"
+          skip_re="$skip_re|^apps/rigor-playground/(frontend/[^/]*\.html$|frontend/_(headers|redirects)$|wasm/.*\.(html|mjs|json)$|fly\.toml$|Dockerfile$)"
           skip_re="$skip_re|^\.github/workflows/(vscode-extension|playground-wasm|container|oss-sweep|ruby-next|engine-warm|engine-wall|release-gate)\.yml$"
           non_code=$(printf '%s\n' "$changed" | grep -vE "$skip_re" || true)
           if [ -n "$non_code" ]; then
@@ -612,8 +618,8 @@ jobs:
           path: ~/.cache/rubocop_cache
           key: ${{ steps.restore-rubocop.outputs.cache-primary-key }}
 
-  # ── 3a. Docs check for a Markdown-only PR ───────────────────────
-  # The `changes` gate above skips every code job for a Markdown-only PR —
+  # ── 3a. Docs check for a no-code PR (Markdown and the like) ──────
+  # The `changes` gate above skips every code job for such a PR —
   # including the spec suite, which is where `spec/docs/` (link integrity,
   # agent-index and ADR budgets, changelog fragments, handbook snippets)
   # normally runs. Without this job such a PR reported "CI required" green
@@ -897,7 +903,7 @@ jobs:
     name: Self-check diff (warm == cold)
     needs: [changes, self-check]
     runs-on: ubuntu-latest
-    # Skip on a Markdown-only PR (self-check was skipped, so there are no
+    # Skip on a no-code PR (self-check was skipped, so there are no
     # artifacts to diff). Otherwise run whenever self-check was not
     # outright cancelled, so a discrepancy still surfaces when one variant
     # failed.
@@ -1199,7 +1205,7 @@ jobs:
             echo "Change detection did not succeed (result: $CHANGES_RESULT)"
             failed=1
           fi
-          # A gated job that was skipped (the code jobs on a Markdown-only
+          # A gated job that was skipped (the code jobs on a no-code
           # PR, Docs check on a code PR, Nix package when no package input
           # changed) is acceptable;
           # only an outright failure or cancellation blocks the merge.
@@ -1224,7 +1230,7 @@ jobs:
     needs: [changes, required]
     # always(): a job skipped anywhere upstream of `required` (Docs check on a
     # code PR) would otherwise skip this one implicitly. Only a PR into master
-    # attests: a Markdown-only run skips the code suite on the ground that its
+    # attests: a no-code run skips the code suite on the ground that its
     # base's code passed CI, which holds for master (every code change came
     # through the queue or a full push run) but not for another branch. A
     # fork's run gets no OIDC token, so only a same-repository head attests.

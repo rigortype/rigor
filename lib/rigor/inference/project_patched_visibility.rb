@@ -100,8 +100,9 @@ module Rigor
         # `key => visibility` for {ProjectPatchedMethods#lookup_through_ancestors} to apply to the body it finds farther
         # on. `module_function :x` also binds the public singleton copy: for a name the class binds, {.applied} yields
         # it to bind here; for an inherited one (issue #2108) `singleton_copies` records `[class_name, name]`, which
-        # {ProjectPatchedMethods#singleton_copy_entry} resolves through the owner's instance ancestors at call time —
-        # the copy's body is whichever method the name reaches there, which the scan cannot name.
+        # {ProjectPatchedMethods#singleton_copy_entry} resolves through the owner's instance ancestors at call time
+        # (an approximation: Ruby snapshots the body when module_function runs)
+        # — the copy's body is whichever method the name reaches there, which the scan cannot name.
         # Yields each copy that binds (`module_function :x`'s singleton), at the call's line, for the caller to
         # bind.
         def apply(pending, bound, homes, overrides, singleton_copies)

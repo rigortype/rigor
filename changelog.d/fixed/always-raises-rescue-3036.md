@@ -1,0 +1,3 @@
+- **[engine]** `flow.always-raises` no longer fires on a zero division inside a `begin` or `def` body whose `rescue` can catch the `ZeroDivisionError`. ([#3039](https://github.com/rigortype/rigor/pull/3039))
+  - `rescue ZeroDivisionError`, `rescue StandardError`, `rescue Exception`, and a bare `rescue` all silence the rule; a rescue naming an unrelated class still reports.
+  - A raise inside a `def`, `->`, or block nested in the `begin` body still reports, since those bodies run when called rather than while the `begin` evaluates.

@@ -1774,6 +1774,31 @@ RSpec.describe Rigor::Analysis::Runner do
       result = analyze("5 / 0 # rigor:disable always-raises\n")
       expect(result.diagnostics.find { |d| d.rule == "flow.always-raises" }).to be_nil
     end
+
+    # Issue #3036 — a raise an enclosing rescue catches flows to the handler, not the caller.
+    it "stays silent when an enclosing rescue catches ZeroDivisionError" do
+      sources = {
+        "begin/rescue ZeroDivisionError" =>
+          "begin\n  1 / 0\nrescue ZeroDivisionError => e\n  report(e)\nend\n",
+        "begin/rescue StandardError" =>
+          "begin\n  1 / 0\nrescue StandardError\nend\n",
+        "begin/bare rescue" =>
+          "begin\n  1 / 0\nrescue\nend\n",
+        "def body with rescue" =>
+          "def foo\n  1 / 0\nrescue ZeroDivisionError\nend\n"
+      }
+      sources.each do |label, src|
+        diag = analyze(src).diagnostics.find { |d| d.rule == "flow.always-raises" }
+        expect(diag).to(be_nil, "expected no always-raises diagnostic for #{label}")
+      end
+    end
+
+    it "still fires when the enclosing rescue handles an unrelated class" do
+      diag = analyze(
+        "begin\n  1 / 0\nrescue ArgumentError\n  report\nend\n"
+      ).diagnostics.find { |d| d.rule == "flow.always-raises" }
+      expect(diag).not_to be_nil
+    end
   end
 
   describe "plugin diagnostic emission (v0.1.0 slice 5-A/5-B)" do

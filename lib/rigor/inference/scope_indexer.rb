@@ -8338,25 +8338,38 @@ module Rigor
       end
 
       # The elements of the literal array `name` is assigned in `nodes`' scope, or nil when it is written any
-      # other number of times or its value is not an array literal — the constant may then hold anything.
+      # other number of times or its value is not an array literal — the constant may then hold anything. Only
+      # a single plain `NAME = […]` write closes; in-place mutation (`KINDS << :include`) is unmodeled.
       def constant_array_elements(name, nodes)
         writes = constant_write_nodes(nodes, name)
-        return unless writes.one?
+        return unless writes.one? && writes.first.is_a?(Prism::ConstantWriteNode)
 
         value = writes.first.value
         value.elements if value.is_a?(Prism::ArrayNode)
       end
 
-      # Every `NAME = …` write in `nodes`' scope — stopping where {#collect_local_send_names} stops, since a
-      # nested `def` or declaration binds its own constants — so {#constant_array_elements} can tell one
-      # literal-array assignment from none or several.
+      # Every write binding the bare constant `name` in `nodes`' scope — a plain `NAME = …`, a multi-assign
+      # target or an operator / `&&=` / `||=` write, mirroring {#local_binding?} — stopping where
+      # {#collect_local_send_names} stops, since a nested `def` or declaration binds its own constants — so
+      # {#constant_array_elements} can tell one literal-array assignment from none or several.
       def constant_write_nodes(nodes, name)
         nodes.flat_map do |node|
           next [] if LOCAL_SCOPE_BOUNDARIES.any? { |kind| node.is_a?(kind) }
 
-          own = node.is_a?(Prism::ConstantWriteNode) && node.name == name ? [node] : []
+          own = constant_binding?(node, name) ? [node] : []
           own + constant_write_nodes(node.compact_child_nodes, name)
         end
+      end
+
+      # A node that binds the bare constant `name`: every `Prism::Constant*` binding class — write, target,
+      # operator, `&&=` and `||=` — except the `ConstantReadNode` and `ConstantPath*` spellings, which read
+      # `name` or bind a qualified `A::NAME` rather than `name` itself.
+      def constant_binding?(node, name)
+        return false unless node.respond_to?(:name) && node.name == name
+
+        klass = node.class.name
+        klass.start_with?("Prism::Constant") && !klass.start_with?("Prism::ConstantPath") &&
+          !node.is_a?(Prism::ConstantReadNode)
       end
 
       # The children of an iterator call {#iterated_element_source} matched, minus its block's parameters — the

@@ -187,6 +187,21 @@ RSpec.describe "a class body's computed-name `send` read as a mixin (#3006)" do
                    "def t = self.m1\n")).to be_empty
     end
 
+    it "does not fire when the constant is rebound by `&&=`" do
+      expect(check("  KINDS = [:before_save]\n  KINDS &&= build_kinds\n  KINDS.each { |k| send(k, M1) }\n  " \
+                   "def t = self.m1\n")).to be_empty
+    end
+
+    it "does not fire when the constant is written by a multi-assign target" do
+      expect(check("  KINDS = [:before_save]\n  KINDS, _other = build, nil\n  KINDS.each { |k| send(k, M1) }\n  " \
+                   "def t = self.m1\n")).to be_empty
+    end
+
+    it "does not fire when the constant is rebound by an operator write" do
+      expect(check("  KINDS = [:before_save]\n  KINDS += extra_kinds\n  KINDS.each { |k| send(k, M1) }\n  " \
+                   "def t = self.m1\n")).to be_empty
+    end
+
     it "does not fire when the constant's value is not an array literal" do
       expect(check("  KINDS = build_kinds\n  KINDS.each { |k| send(k, M1) }\n  def t = self.m1\n"))
         .to be_empty

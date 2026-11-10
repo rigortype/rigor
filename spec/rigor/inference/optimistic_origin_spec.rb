@@ -980,6 +980,43 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
     end
   end
 
+  # Issue #2617 — a write in value position (`if (v = h[k])`) yields its right-hand side, so the write
+  # resolves through it. The binding lookup alone could not see the mark from the scope a certainty
+  # consumer reads: the `if`'s entry scope predates the predicate's evaluation, so `v` has no binding
+  # there yet and `flow.always-truthy-condition` fired on the optimistic read.
+  describe ".resolve through a write in value position" do
+    def write_of(source)
+      Prism.parse(source, scopes: [%i[v h k]]).value.statements.body.first
+    end
+
+    it "resolves a local and an ivar write to the right-hand side's recorded mark" do
+      { "v = h[k]" => :optimistic_local, "@v = h[k]" => :optimistic_ivar }.each do |source, reader|
+        write = write_of(source)
+        call = write.value
+        scope_with_mark = scope.record_optimistic_origin(call, described_class::IMPLICITLY_RETURNS_NIL)
+
+        expect(described_class.resolve(write, scope_with_mark))
+          .to eq(described_class::IMPLICITLY_RETURNS_NIL), "for #{source}"
+        expect(scope_with_mark.public_send(reader, write.name))
+          .to be_nil, "the binding itself is still unmarked under #{reader}"
+      end
+    end
+
+    it "still resolves through the binding a post-write scope carries" do
+      write = write_of("v = h[k]")
+      bound = scope.with_local(:v, Rigor::Type::Combinator.nominal_of("String"))
+                   .with_optimistic_local(:v, described_class::IMPLICITLY_RETURNS_NIL)
+
+      expect(described_class.resolve(write, bound)).to eq(described_class::IMPLICITLY_RETURNS_NIL)
+    end
+
+    it "does not resolve a write whose right-hand side carries no mark" do
+      write = write_of("v = \"lit\"")
+
+      expect(described_class.resolve(write, scope)).to be_nil
+    end
+  end
+
   describe ".destructuring_marks" do
     let(:marked) do
       scope.with_local(:v, Rigor::Type::Combinator.nominal_of("String"))

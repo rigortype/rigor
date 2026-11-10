@@ -11,6 +11,8 @@ module Rigor
       # `ModuleNode`, and a `CallNode` respectively. `enclosing_def` is sig-gen's proposal (#2719, #2914); the other
       # two blocks (`||`, `&&`) are not a single class test, so their bodies still infer `Prism::Node?`. A narrower
       # declaration would be an unmarked sig-gen divergence (ADR-107).
+      # Known Steep 2.0.0 limitation (surfaced by `library "prism"`, #2718): it does not narrow `rfind` through an
+      # `is_a?` block, so it warns that the body is `Prism::Node?`; the declaration keeps the precise shape.
       def enclosing_def: () -> (Prism::DefNode | nil)
       def enclosing_module: () -> ::Prism::Node?
       def enclosing_block: (Symbol method_name) -> ::Prism::Node?

@@ -1,0 +1,4 @@
+- **[rbs]** Running Rigor in a gem_rbs_collection `_test/` directory no longer loads collected gems' `_test/` fixtures or a gem twice, so their classes stop reading `Dynamic[top]`. ([#3043](https://github.com/rigortype/rigor/pull/3043))
+  - A collection gem now loads as `rbs` loads it, without the files below a `_`-prefixed directory, which a `local` source's symlink brought along.
+  - A collection entry whose `<name>/<version>` a `signature_paths:` directory's real path ends in gives way to that directory, so the working tree and the lockfile copy no longer both declare every member.
+  - With no `rbs_collection.lock.yaml` in a directory set up for one, a new `rbs.coverage.collection-not-installed` info names the setup step; the manual explains running Rigor in a `_test/` directory.

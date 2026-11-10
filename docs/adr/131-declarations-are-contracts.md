@@ -184,10 +184,10 @@ broken on purpose.
 The scalable form is the repository's own mutation idea (`tool/mutation`, ADR-62/63) turned on the
 declarations: replace each non-`void` return with `bot`, and each `T?` with `T`, one at a time, re-run
 the witnesses, and list the mutants no run notices. A mutant counts as killed only by a new type error
-naming the mutated method, and one that does not load is an error, never a survivor — a first version
-that compared whole error lines counted run-to-run noise as kills, and one that spliced byte offsets
-broke files with non-ASCII comments. On the rgl draft, 61 mutants ran in about 70 seconds: 55 killed,
-6 survived, three of them the skip rule, one a method nothing called, and one a `?` no witness reached.
+naming the mutated method or one of its aliases, and one that does not load is an error, never a
+survivor — a first version that compared whole error lines counted run-to-run noise as kills, and one
+that spliced byte offsets broke files with non-ASCII comments. On the rgl draft, 61 mutants ran in about 70 seconds: 56 killed,
+5 survived, three of them the skip rule, one a method nothing called, and one a `?` no witness reached.
 A survivor is not a defect; it is the limit of what the evidence covers, and the write-up names it. The
 skill carries the procedure and a short script in `references/05-declaration-mutants.md`; whether it
 becomes a `rigor` command is a follow-up ([#3072](https://github.com/rigortype/rigor/issues/3072)), because a command would be frozen public surface (ADR-50).

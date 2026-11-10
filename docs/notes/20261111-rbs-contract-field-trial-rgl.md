@@ -45,11 +45,11 @@ documented `nil` (Dijkstra on an unreachable target).
    declared `-> bool` on `MutableGraph` and overridden in `DirectedAdjacencyGraph` returned a `Set` and
    the run exited 0. rgl's suite (77 tests, one expected failure) ran under `rbs/test/setup` while every
    such declaration went unchecked. A declaration-mutation pass (break each return in turn, re-run,
-   list what no run notices) found them mechanically: on the draft, 61 mutants, 55 killed, 6 survived —
+   list what no run notices) found them mechanically: on the draft, 61 mutants, 56 killed, 5 survived —
    three of them this skip rule (`Graph#directed?`, `#has_vertex?`, `#has_edge?`), `Graph#to_s` never
-   called, `Graph#eql?` reached only through its `==` alias, and the `?` on `Edge::DirectedEdge#<=>`
-   with no witness. The first version of the pass miscounted (it compared whole error lines, so value
-   noise read as kills, and missed `[]` methods); review of #3073 caught it. ADR-131 WD7.
+   called, and the `?` on `Edge::DirectedEdge#<=>` with no witness. The first versions of the pass
+   miscounted (whole error lines compared, so value noise read as kills; `[]` methods and calls
+   through an alias missed); review of #3073 caught them. ADR-131 WD7.
 2. **A new entry is the commonest collection contribution, and the skill had no path for it.** The
    loop was audit-shaped. "Adopt a `new_method` proposal verbatim" would have shipped `set_source -> 0`,
    `reset -> {}`, `find_shortest_paths -> nil`, `Graph#directed? -> false` (a default subclasses
@@ -90,4 +90,3 @@ What worked as written: the early-return warning predicted exactly which wrong d
 
 Bellman-Ford, bidirectional, bipartite, DOT, Edmonds-Karp, GraphXML, Prim, transitivity and
 condensation were left undeclared. The `stream` stub the draft relies on was not reviewed as an entry.
-Why `Graph#eql?` survives (its `==` alias bypassing the hook) was not confirmed.

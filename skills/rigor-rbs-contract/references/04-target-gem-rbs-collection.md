@@ -164,7 +164,9 @@ installed collection, so the Steepfile names the entry (`signature ".."`) and ea
 itself:
 
 Add `-r <library>` to `rbs` and a `library "<library>"` line to the Steepfile for each standard library
-`manifest.yaml` lists, which `bin/test` would otherwise install:
+`manifest.yaml` lists, which `bin/test` would otherwise install. A library that is part of core in the
+`rbs` you run (`set` under rbs 4.2) has no separate signatures, and `-r set` fails with "Cannot find
+type definitions"; leave it out there:
 
 ```sh
 rbs -r <each manifest library> -I "$COLLECTION/gems/NAME/X.Y" -I <each dependency entry> validate

@@ -71,7 +71,7 @@ Gem::Specification.new do |spec|
                        Dir.glob("plugins/*/lib")
 
   spec.add_dependency "language_server-protocol", ">= 3.17", "< 4.0"
-  spec.add_dependency "prism", ">= 1.0", "< 2.0"
+  spec.add_dependency "prism", ">= 1.0", "< 3.0"
   spec.add_dependency "rbs", ">= 3.0", "< 5.0"
 
   # ADR-39 — the bundled Rails plugins (`rigor-activerecord`,

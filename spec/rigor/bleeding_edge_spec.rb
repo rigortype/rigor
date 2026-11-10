@@ -33,7 +33,7 @@ RSpec.describe Rigor::BleedingEdge do
       expect(described_class::GRADUATED).to eq([])
     end
 
-    # ADR-103 WD15 — the v0.4.0 default-on preview. Its gate is `Configuration#effects_enabled?` /
+    # ADR-103 WD15 — the v0.5.0 default-on preview. Its gate is `Configuration#effects_enabled?` /
     # `Configuration.load`, not an engine call site, so the registry entry carries no severity map either.
     it "ships effects-on-by-default as a behaviour feature with no severity diff" do
       feature = described_class.feature("effects-on-by-default")

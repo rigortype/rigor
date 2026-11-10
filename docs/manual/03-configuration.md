@@ -308,8 +308,8 @@ config with no `effects:` key at all behave as `effects: {}` — collection,
 `effects.check`, and everything else on this page all turn on at their
 defaults. It only fills an *absence*: write `effects: false` and you stay
 opted out regardless, and any `effects:` block you do write is left exactly
-as written. It previews what becomes the default at **v0.4.0**
-([ADR-103](../adr/103-effect-labels.md) § WD15).
+as written. It previews what becomes the default at **v0.5.0**
+([ADR-103](../adr/103-effect-labels.md) § WD15, moved by § WD18).
 
 #### Entry-point presets
 

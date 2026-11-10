@@ -34,7 +34,7 @@ jobs:
         with:
           sarif_file: rigor.sarif
 
-      # Effect labels (opt-in until v0.4.0, then the default): if the project
+      # Effect labels (opt-in until v0.5.0, then the default): if the project
       # has an `effects:` block and a committed .rigor-effects.yml, uncomment
       # this to fail the build when a branch changes what the code *does*.
       # Left commented because `effects check` exits 1 when the snapshot file

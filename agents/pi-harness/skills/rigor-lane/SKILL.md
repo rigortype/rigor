@@ -59,6 +59,10 @@ issue comments contradict the contract, escalate — do not silently widen scope
 3. Push the change-named branch.
 4. Print the tip SHA and stop (orchestrator / external poll owns CI).
 
+The lane never merges and never runs `gh pr ready`. After `Approved`, the
+agent that owns the PR lands it (`docs/agents/contribution-flow.md` §
+"Landing a pull request", step 6).
+
 LaneOutput shape:
 
 ```text

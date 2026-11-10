@@ -36,6 +36,9 @@ CiWatchOutput:
 
 - CI: `CI green` / `CI red` / `CI stalled` (include head SHA)
 - Human may still be required for push/PR approval (ADR-115 trial findings)
+- Landing: the orchestrator owning an `Approved` PR lands it via
+  `bin/land-pr N <reviewed-head-sha>` per `docs/agents/contribution-flow.md`
+  step 6; the reviewer and the lane never merge
 
 Model band: Opus / Grok-class (bound by `scripts/run-role.sh`).
 

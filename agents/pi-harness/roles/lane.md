@@ -28,6 +28,9 @@ report the head SHA and **stop** — you do not own CI.
 - Draft PR via `--body-file` (never backticks in shell heredocs for `gh`)
 - Push a **change-named** branch; print **head SHA**
 - Finish: `Head SHA <sha> — lane done` or `Blocked — need human`
+- The lane never merges or readies its PR: after `Approved`, the parent /
+  orchestrator that owns the PR lands it (`docs/agents/contribution-flow.md`
+  § "Landing a pull request", step 6)
 - Optional short `notes:` for residual risk / wrong turns (orchestrator may
   fold into the batch experience note)
 

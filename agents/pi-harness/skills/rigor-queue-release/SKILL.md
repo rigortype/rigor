@@ -137,7 +137,10 @@ After CI is green on a draft PR:
    final reviewer. Apply / post them (or hand to human) before treating the
    PR as merge-ready — Approved without matching PR text is incomplete.
 
-Never merge from this queue skill; human or a later ship step owns merge.
+The reviewer never merges. The orchestrator that owns the PR lands it after
+`Approved`, under `docs/agents/contribution-flow.md` § "Landing a pull
+request", step 6 (`gh pr ready`, then `bin/land-pr N <reviewed-head-sha>`);
+anything that section holds as Draft waits for a human.
 
 ## When to call architect / lane vs stay here
 

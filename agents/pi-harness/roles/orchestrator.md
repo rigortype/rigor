@@ -23,6 +23,11 @@ after gates. You do not replace ADR-98’s backlog; you consume it.
 - CI verdict: `CI green` / `CI red` / `CI stalled` with head SHA
 - Merge judgment (human may still be required for push/PR approval —
   see ADR-115 trial findings)
+- Landing: the orchestrator that owns an `Approved` PR lands it itself
+  (`gh pr ready`, then `bin/land-pr N <reviewed-head-sha>`) under
+  `docs/agents/contribution-flow.md` § "Landing a pull request", step 6.
+  Never the reviewer or the lane. Anything outside those conditions (serious
+  decision, Draft hold, skill PR without its `waza` comment) waits for a human
 
 ## Hard constraints
 

@@ -79,7 +79,7 @@ are not: [`references/02-contract-rules.md`](references/02-contract-rules.md).
 | Target | Who decides a contract | Mode | Reference |
 | --- | --- | --- | --- |
 | The project's own code — a gem's `sig/`, an application's `sig/` | the owner | **interactive**: batch the open contract questions and ask | [`03-target-own-code.md`](references/03-target-own-code.md) |
-| A gem you do not own — a gem_rbs_collection entry, or a local override of one | the gem's documentation | **autonomous** up to a finished branch and description; undocumented contracts are left alone and listed; the pull request opens on the user's go-ahead | [`04-target-gem-rbs-collection.md`](references/04-target-gem-rbs-collection.md) |
+| A gem you do not own — a gem_rbs_collection entry, or a local override of one | the gem's documentation | **autonomous** up to a finished branch and description; undocumented contracts are left alone and listed; pushing and opening the pull request wait for the user's go-ahead | [`04-target-gem-rbs-collection.md`](references/04-target-gem-rbs-collection.md) |
 
 An application whose wrong signature comes from a dependency's community RBS is the second row: fix it
 upstream, and keep a local override only until the fix is released.
@@ -107,6 +107,10 @@ upstream, and keep a local override only until the fix is released.
 
 Every candidate from step 1 is changed with its cited evidence, left alone with its reason, or reported
 as an open question for the owner; the target's gate is green; and the write-up lists all three groups.
+
+When the owner does not answer an open question, or the documentation cannot be found, stop there: leave
+those declarations as they are, finish and prove the changes the evidence did settle, and hand back the
+open list. Never resolve an open question by picking the option the body happens to match.
 
 ## Gaps are findings here too
 

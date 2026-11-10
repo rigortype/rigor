@@ -3,8 +3,9 @@
 RBS for a gem you do not own, in a checkout of
 [`ruby/gem_rbs_collection`](https://github.com/ruby/gem_rbs_collection). The gem's documentation is the
 authority, so this target can run without questions up to a finished branch and pull request
-description. **Opening the pull request is the user's call**: show them the branch and the description
-and open it only on their go-ahead, unless they already gave it for this change.
+description. **Pushing the branch and opening the pull request are the user's call**: both are
+outward-facing, even to a fork. Show them the local branch and the description, and push or open only
+on their go-ahead, unless they already gave it for this change.
 
 The collection's own guide is `docs/CONTRIBUTING.md` in the checkout; read it once. Two of its points
 shape this workflow: focus on the API the README and documentation present, and write `_test/` code that
@@ -15,12 +16,18 @@ checks RBS against *application* code, not against the gem's implementation.
 Paths below use `gems/NAME/X.Y` for the entry and `$GEM_DIR` for the installed gem.
 
 1. In the checkout: `bin/setup`.
-2. Install the version the entry describes and find its source:
+2. Fetch the source of the version the entry describes. Unpacking reads it without building native
+   extensions or running anything:
 
    ```sh
-   gem install NAME -v '~> X.Y.0'
-   GEM_DIR=$(ruby -e 'puts Gem::Specification.find_by_name("NAME", "~> X.Y.0").gem_dir')
+   COLLECTION=$PWD
+   SRC=$(mktemp -d)
+   (cd "$SRC" && gem fetch NAME -v '~> X.Y.0' && gem unpack NAME-*.gem)
+   GEM_DIR=$(ls -d "$SRC"/NAME-*/ | head -n 1)
    ```
+
+   If the gem is already installed, `ruby -e 'puts Gem::Specification.find_by_name("NAME", "~> X.Y.0").gem_dir'`
+   gives the same directory.
 
 3. Run the entry's tests once before changing anything, so you know they were green:
 
@@ -40,7 +47,7 @@ in only what is under review:
 SCRATCH=$(mktemp -d)
 mkdir -p "$SCRATCH/sig"
 cp -R "$GEM_DIR/lib" "$SCRATCH/lib"
-rsync -a --exclude _test --exclude .gem_rbs_collection gems/NAME/X.Y/ "$SCRATCH/sig/"
+rsync -a --exclude _test --exclude .gem_rbs_collection "$COLLECTION/gems/NAME/X.Y/" "$SCRATCH/sig/"
 printf 'paths: ["lib"]\nsignature_paths: ["sig"]\n' > "$SCRATCH/.rigor.yml"
 cd "$SCRATCH"
 rigor check --format=json lib
@@ -55,13 +62,15 @@ or read Signal 1 for the methods whose types do not touch the dependency.
 ## Signal 3 — the entry's `_test/` code
 
 ```sh
-cd gems/NAME/X.Y/_test
+cd "$COLLECTION/gems/NAME/X.Y/_test"
 printf 'paths: ["."]\nsignature_paths: ["."]\n' > .rigor.yml    # with rbs_collection.lock.yaml present
-rigor check --format=json
+rigor check --no-cache --format=json
 ```
 
 Without an `rbs_collection.lock.yaml`, use `signature_paths: [".."]` instead, and expect missing
-dependency RBS. Keep `.rigor.yml` out of the commit: list it in `.git/info/exclude`.
+dependency RBS. `--no-cache` keeps a `.rigor/` cache directory out of the entry. Keep `.rigor.yml` out of
+the commit by listing it in `.git/info/exclude`, and check `git status` before committing: nothing under
+`_test/` but your test files belongs in the diff.
 
 ## Signal 5 — the gem's documentation
 

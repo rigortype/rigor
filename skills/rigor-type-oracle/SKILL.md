@@ -107,9 +107,12 @@ None of the three sources says what a declaration *promises* to callers.
 Ruby returns every method's last expression, so a body almost always has
 a value; a declared `void` says callers must not depend on it, and
 `boolish` says only its truthiness counts. **Never tighten `void`,
-`boolish`, or any declaration wider than the body to what the body
-happens to return** — in `sig/`, in an inline annotation, or in RBS sent
-upstream — unless the library documents that value.
+`boolish`, or a declared type deliberately wider than the body (anything
+but `untyped`) to what the body happens to return** — in `sig/`, in an
+inline annotation, or in RBS sent upstream — unless the library documents
+that value or, for the project's own code, the owner decides. A
+`sig-gen` proposal over `untyped` is not this case; it is the second
+source above.
 
 The reverse also holds. A contract the body does not prove — `String?`
 because the method's documentation says it returns `nil` when a job is

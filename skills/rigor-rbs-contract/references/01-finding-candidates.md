@@ -16,13 +16,15 @@ rigor check --no-baseline --format=json lib
 ```
 
 The rule to look for is **`def.return-type-mismatch`**: the body's last expression has a type the
-declared return does not accept. Its message names both sides — `declared String, inferred String?` — so
+declared return does not accept. Its message names both sides — `declared String, inferred String?`, or a literal such as
+`inferred "a"?` — so
 it is a direct refutation and the strongest evidence this skill gets from a tool. `--no-baseline`
 matters in an application: a baseline may already be hiding exactly these.
 
 Also worth reading here: `def.override-return-widened` (a subclass's declaration widens what its parent
-promised) and `static.value-use.void` (code inside the library uses a value its own declaration says is
-`void` — usually a sign the `void` is still right and the caller is the problem).
+promised). `static.value-use.void` (code uses a value a declaration says is `void`) is off in every
+profile until a project enables it, so its silence proves nothing; `rigor explain static.value-use.void`
+says how to turn it on.
 
 What it cannot see: only the **last expression** is compared. An explicit `return nil` earlier in the
 body, or a falsy arm behind an untyped value (`mime && new(mime[0])` where `mime` is untyped reads as
@@ -70,13 +72,15 @@ Read each finding against the question "is this call correct Ruby that the libra
 A use-site diagnostic can also be a Rigor false positive. If the call is correct and the declaration is
 correct too, reproduce it minimally and route it through `rigor-ask`; do not bend the RBS around it.
 
-## Signal 4 — `rigor type-of` on a return expression
+## Signal 4 — `rigor type-of` on a returned value
 
 ```sh
 rigor type-of lib/foo.rb:LINE:COL
 ```
 
-Use it to confirm or rule out a lead. `String?` is proof. `Dynamic[top] | Foo` means one arm is unknown —
+Point it at the returned *value*, not the `return` keyword: in `return nil unless ok`, the column of
+`nil` answers `nil`, while the column of `return` answers `bot` (the statement itself never produces a
+value). Use it to confirm or rule out a lead. `String?` is proof. `Dynamic[top] | Foo` means one arm is unknown —
 the declaration may or may not be right, and the decision needs documentation or a run.
 
 ## Leads from reading — locate only

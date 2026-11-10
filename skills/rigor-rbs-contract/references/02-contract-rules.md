@@ -44,9 +44,10 @@ a documented or demonstrated `nil` is.
 
 ## Rules that come up on almost every run
 
-**`void` and `boolish` stand.** Every Ruby method returns its last expression, so a body nearly always has
+**`void` and `boolish` stand.** (For the project's own code, the owner may decide otherwise; that is a
+contract decision, so ask rather than infer.) Every Ruby method returns its last expression, so a body nearly always has
 a value. `-> void` says that value is not part of the contract; `boolish` says only its truthiness is.
-Rigor enforces the first through `static.value-use.void`. Do not tighten either to the body's value unless
+`static.value-use.void` reports a use of the first where a project enables it. Do not tighten either to the body's value unless
 the library documents that value. In sidekiq 7.0, `perform_async` and `Client.enqueue*` return `push`'s
 result from their bodies, but nothing documents it, so their `void` stayed while `push` itself became
 `String?`.

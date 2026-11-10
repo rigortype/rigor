@@ -65,8 +65,9 @@ thing and copies the inferred type over the declaration.
 > needs a contract source. Rigor's proof is evidence for the first kind; for the second it is enough
 > only where the slot was undeclared or `untyped`, which is what `sig-gen` already proposes.
 
-This adds a fourth source to ADR-108's three, scoped to contracts, and keeps ADR-108's provenance rule
-intact: the documented contract is cited exactly as a command is.
+This adds a fourth source to ADR-108's three. It is scoped to contracts — what a declaration promises —
+not to the type of an expression, which still comes only from Rigor; and it keeps ADR-108's provenance
+rule intact: the documented contract is cited exactly as a command is.
 
 ### WD1 — The evidence order
 
@@ -113,9 +114,10 @@ oversight.
 any task. Auditing and repairing a set of declarations is task-shaped: a multi-step loop that ends in a
 diff and usually a pull request. One description cannot route both without blunting the oracle's
 trigger, the same argument ADR-108 WD1 made against folding the oracle into `rigor-ask`. So
-`rigor-rbs-contract` is a new skill, the oracle gains a contract row in its sources table and a pointer to
-it, and the oracle's `AGENTS.md` fragment gains one bullet so the `void` rule holds in sessions that load
-neither skill (ADR-108 WD2's routing criterion).
+`rigor-rbs-contract` is a new skill. The oracle keeps its three sources for a type itself and gains a
+separate section on what a declaration promises, which names the contract source and points to the new
+skill. Its `AGENTS.md` fragment admits the contract source in its lead paragraph and gains one bullet for
+the `void` rule, so both hold in sessions that load neither skill (ADR-108 WD2's routing criterion).
 
 One skill covers the three targets — a gem's own `sig/`, an application's `sig/`, a gem_rbs_collection
 entry — because the judgment is identical and three near-identical descriptions would compete for the
@@ -130,7 +132,7 @@ in per-target `references/`.
 | Treat reading the implementation as a contract source | Rejected | It is the guess ADR-108 exists to stop, and #1129's `perform_async` is the counterexample: the body's value is exactly what the declaration hides. |
 | One skill per target (gem author, application, collection) | Rejected | Shared judgment, colliding descriptions. Per-target `references/` instead (WD5). |
 | Widen `rigor-type-oracle` to own the loop | Rejected | Trigger mismatch (WD5). |
-| Report-only `sig-gen` classification for declarations narrower than the body | Deferred | The skill runs on today's commands, with the gap stated: `rigor check`'s `def.return-type-mismatch` finds a fully typed last expression the declaration excludes, and nothing finds an explicit early `return nil` or a falsy arm behind an untyped value (marcel). Those stay reading leads that need documentation or a run. A command that reports them, and a public form of the collection audit's harness, are follow-up issues, not preconditions. |
+| Report-only `sig-gen` classification for declarations narrower than the body | Deferred | The skill runs on today's commands, with the gap stated: `rigor check`'s `def.return-type-mismatch` finds a fully typed last expression the declaration excludes, and nothing finds an explicit early `return nil` or a falsy arm behind an untyped value (marcel). Those stay reading leads that need documentation or a run. A command that reports them ([#3062](https://github.com/rigortype/rigor/issues/3062)) and a public form of the collection audit's harness are follow-ups, not preconditions. |
 
 ## Consequences
 

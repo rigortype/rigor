@@ -222,9 +222,7 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     it "still demotes a subclass of the demoted class once its bare shell is on disk" do
       write("lib/issue_query.rb", <<~RUBY)
         class IssueQuery < Query
-          def label(thing)
-            thing.name
-          end
+          def label = "x"
         end
       RUBY
 

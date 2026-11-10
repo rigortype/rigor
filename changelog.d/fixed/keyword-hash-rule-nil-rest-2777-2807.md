@@ -1,1 +1,0 @@
-- **[inference]** A `def` parameter now binds its RBS-declared type instead of `Dynamic[top]` when the overload's only keyword rest is `**nil`, which accepts no keywords. ([#3065](https://github.com/rigortype/rigor/pull/3065))

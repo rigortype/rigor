@@ -108,7 +108,8 @@ module Rigor
       # positionals, in the `*rest`, or (shifting every post positional) in a post positional.
       def keyword_hash_reaches?(function, slot, shape)
         return false if shape.accepts_keywords
-        return false unless declares_keywords?(function)
+        return false if function.required_keywords.empty? && function.optional_keywords.empty? &&
+                        function.rest_keywords.nil?
 
         case slot.kind
         when :required_positional then slot.index >= function.required_positionals.size
@@ -116,15 +117,6 @@ module Rigor
         when :rest_positional, :trailing_positional then true
         else false
         end
-      end
-
-      # Whether the overload declares any keyword a call may pass. `**nil` accepts none, so a rest typed `nil`
-      # declares no keyword rest.
-      def declares_keywords?(function)
-        return true unless function.required_keywords.empty? && function.optional_keywords.empty?
-
-        rest = function.rest_keywords
-        !rest.nil? && !rest.type.is_a?(RBS::Types::Bases::Nil)
       end
 
       def leading(function, shape, position)

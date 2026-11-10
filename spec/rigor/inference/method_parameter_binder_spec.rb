@@ -212,7 +212,6 @@ RSpec.describe Rigor::Inference::MethodParameterBinder do
               def posts_rest: (Integer x, *Symbol s, Float u, String t) -> void
               def trail: (Integer x, ?String y, Symbol z, path: String) -> void
               def f: (Integer x, ?String y, ?path: String) -> void
-              def kwnil: (Integer x, ?String y, **nil) -> void
             end
           RBS
           project_env = Rigor::Environment.for_project(root: dir)
@@ -290,14 +289,6 @@ RSpec.describe Rigor::Inference::MethodParameterBinder do
             .to eq(a: nominal("Integer"), b: untyped, c: untyped)
           expect(binder.bind(def_node("def f(a, b = ''); a; end")))
             .to eq(a: nominal("Integer"), b: untyped)
-        end
-      end
-
-      # #2777 — a declaration-side `**nil` accepts no keywords, so it declares none and `b` binds `?String y`.
-      it "binds past a declaration-side **nil as if no keywords were declared" do
-        with_shape_demo do |binder|
-          expect(binder.bind(def_node("def kwnil(a, b = ''); a; end")))
-            .to eq(a: nominal("Integer"), b: nominal("String"))
         end
       end
 

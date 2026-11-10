@@ -57,7 +57,8 @@ Local runs are targeted; the full gate is CI on the pull request.
   where a skill's own gate requires it (release prep, dependency and Ruby bumps).
 - A push straight to `master` that changes only Markdown or other paths the Ruby suite never reads
   (the list is in `ci.yml`'s `changes` job: `.sh`, `editors/`, the playground's frontend, …) skips
-  CI: run `make docs-check` first. Such a PR runs it in CI. `make verify-sequential` is for investigating parallel-only flakes.
+  CI: run `make docs-check` first. Such a PR runs it in CI. `make verify-sequential` is for
+  investigating parallel-only flakes.
 
 Keep `make check` and `make check-plugins` clean; CI runs each as its own gate. Fix the cause — an
 engine regression, a missing blocklist entry, or a plugin-contract misuse — instead of weakening a

@@ -46,7 +46,8 @@ every branch in series.*
 run into `master` that passes `CI required` attests the tree it tested, the head merged with `master`
 at that moment. A queue run whose merged tree has such an attestation reuses that result and skips
 the suite, so the result that will land is still checked once. Only a run into `master` attests: a
-Markdown-only run (or one of the other no-code path sets `ci.yml` lists) skips the code suite because its base's code already passed CI, which holds for
+Markdown-only run (or one of the other no-code path sets `ci.yml` lists) skips the code suite because
+its base's code already passed CI, which holds for
 every code change on `master` and not for another branch.
 
 The attestation is a signed artifact attestation (Sigstore, `actions/attest-build-provenance`) whose

@@ -32,7 +32,7 @@ Model defaults (patterns; first match from `pi --list-models` wins):
     patterns: devin/swe-2-flash  opencode-go/deepseek-v4.1-flash  opencode-go/*deepseek*flash*  opencode/*deepseek*flash*  *deepseek*flash*
     preferred ids: devin/swe-2-flash (non-complex implementation), opencode-go/deepseek-v4.1-flash
   reviewer
-    patterns: xai/grok-4.6  xai/grok  grok  devin/swe-2  claude-bridge/claude-opus-5-5  claude-bridge/claude-fable-5-1
+    patterns: xai/grok-4.6  xai/grok  grok  devin/swe-2  claude-bridge/claude-opus-5-5  claude-bridge/claude-fable-5-2
     preferred: xai/grok-4.6:xhigh + devin/swe-2:high (co-primary; xai/grok-4.7 only for deep RCA);
       Opus/Fable only via MODEL= per roles/reviewer.md; Claude via claude-bridge only
   docs
@@ -124,7 +124,7 @@ case "$ROLE" in
       "grok"
       "devin/swe-2"
       "claude-bridge/claude-opus-5-5"
-      "claude-bridge/claude-fable-5-1"
+      "claude-bridge/claude-fable-5-2"
     )
     CYCLE="xai/grok*,grok*,devin/swe-2,claude-bridge/*opus*,claude-bridge/*fable*"
     ;;

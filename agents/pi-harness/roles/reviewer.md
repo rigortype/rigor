@@ -8,7 +8,7 @@ Model bands for the **Approved** gate:
 | swe-2 | `devin/swe-2` | `high` | **Co-primary** independent pass — free-tier this month, run on every review |
 | Grok 4.7 | `xai/grok-4.7` | `max` | **Deep RCA / long investigation only** — not default review |
 | Opus | `claude-bridge/claude-opus-5-5` | `high` | Added when the change is judged complex |
-| Fable | `claude-bridge/claude-fable-5-1` | `medium` | **Reserved** for complex design / architecture-shaped review |
+| Fable | `claude-bridge/claude-fable-5-2` | `medium` | **Reserved** for complex design / architecture-shaped review |
 
 Agents: `rigor-reviewer-grok`, `rigor-reviewer-swe2`, `rigor-reviewer-opus`, `rigor-reviewer`.
 

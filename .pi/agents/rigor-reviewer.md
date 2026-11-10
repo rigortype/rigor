@@ -6,7 +6,7 @@ description: >-
 advertise: true
 aliases: reviewer
 acceptanceRole: read-only
-model: claude-bridge/claude-fable-5-1
+model: claude-bridge/claude-fable-5-2
 thinking: medium
 systemPromptMode: replace
 inheritProjectContext: true

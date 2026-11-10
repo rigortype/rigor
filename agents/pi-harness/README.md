@@ -65,7 +65,7 @@ Defaults (first match from `pi --list-models`; override with `MODEL=`):
 | --- | --- | --- |
 | architect / orchestrator | `devin/swe-2` | `claude-bridge/claude-opus-5-5`, `xai/grok-4.7` (deep RCA), `xai/grok-4.6`, `grok*` |
 | lane | `devin/swe-2-flash` | `opencode-go/deepseek-v4.1-flash`, `opencode-go/*deepseek*flash*`, `opencode/*deepseek*flash*`, `*deepseek*flash*` |
-| reviewer | co-primary Grok **4.6**:xhigh + `devin/swe-2:high`; +Opus if complex; Fable reserved | `xai/grok-4.6`, `devin/swe-2`, `claude-bridge/claude-opus-5-5`, `claude-bridge/claude-fable-5-1` (RCA: `xai/grok-4.7`) |
+| reviewer | co-primary Grok **4.6**:xhigh + `devin/swe-2:high`; +Opus if complex; Fable reserved | `xai/grok-4.6`, `devin/swe-2`, `claude-bridge/claude-opus-5-5`, `claude-bridge/claude-fable-5-2` (RCA: `xai/grok-4.7`) |
 | docs | `antigravity/gemini-3.8-flash` | `opencode/gemini*flash*`, `google/gemini*flash*` |
 
 If no provider is configured, the script **exits with `pi auth` / `/login`

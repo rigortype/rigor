@@ -2,3 +2,4 @@
   - gem_rbs_collection declares `Addressable::URI.parse` as `(String | URI) -> URI`, but `parse(nil)` returns nil, so `Addressable::URI.parse(a['href'])` on a `String?` reported a mismatch on correct code (mastodon `fetch_link_card_service.rb`).
   - Rigor now ships a bundled overlay for `addressable` that composes the nil arm over the collection's copy as an overload continuation; `parse(String | URI)` still answers `Addressable::URI` and `parse(123)` still reports.
   - The overlay loads only when `rbs collection` supplies the gem's signatures — a project with no `addressable` RBS at all sees no change.
+  - Loading it does not open the `ActiveSupport::Duration` / `ActiveSupport::Concern` open-receiver exemption: that protection stays keyed on the activesupport overlay itself loading, so a collection project that loads `addressable` but not activesupport's overlay still reports `call.undefined-method` on its own `ActiveSupport::Duration`.

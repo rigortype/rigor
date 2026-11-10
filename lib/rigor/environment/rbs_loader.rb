@@ -1670,17 +1670,19 @@ module Rigor
         end
 
         # Rigor-owned per-gem RBS overlays (`data/gem_overlay/<gem>/`), ADR-72. Unlike the unconditional
-        # `core_overlay`, each gem's overlay is loaded ONLY when that gem is locked in the project's
-        # Gemfile.lock but ships no RBS of its own — {Environment.for_project} decides eligibility and passes
-        # the already-filtered gem-name set here. One directory per gem name keeps the membership check a
-        # cheap `File.directory?`.
+        # `core_overlay`, each gem's overlay is loaded only when that gem is locked in the project's
+        # Gemfile.lock AND {Environment.for_project} finds its coverage source overlay-eligible
+        # ({Environment::GEM_OVERLAY_COVERAGE_SOURCES} — `:missing` for every overlay but addressable's
+        # `:rbs_collection` correction, #2857) with no reachable plugin twin; this method receives the
+        # already-filtered gem-name set. One directory per gem name keeps the membership check a cheap
+        # `File.directory?`.
         GEM_OVERLAY_SIGS_ROOT = File.expand_path(
           "../../../data/gem_overlay",
           __dir__
         ).freeze
 
-        # @param gem_names — overlay-eligible Gemfile.lock gem names (the caller filters
-        #   to the `:missing`-coverage, no-conflicting-plugin set).
+        # @param gem_names — overlay-eligible Gemfile.lock gem names (the caller filters to the
+        #   coverage-source-eligible, no-conflicting-plugin set).
         # @return the bundled overlay directory for each gem that ships one; empty when
         #   none match or the overlay root is absent.
         def gem_overlay_sig_paths(gem_names)
@@ -1694,13 +1696,16 @@ module Rigor
 
         # @param path — typically an entry from an {RbsLoader} instance's
         #   {#signature_paths}.
-        # @return whether `path` sits under the bundled gem-overlay root — what
-        #   `CheckRules::GEM_OVERLAY_OPEN_RECEIVERS`'s gate consults so that a class name's membership in
-        #   that list alone never grants the open-receiver exemption; the overlay directory that made the
-        #   entry true must have actually loaded THIS run too (issue #632, tracked further by #660).
-        #   `GEM_OVERLAY_SIGS_ROOT` is defined inside this `class << self` block, so it is reachable from
-        #   here directly but NOT as `RbsLoader::GEM_OVERLAY_SIGS_ROOT` from outside — this method is the
-        #   public seam callers outside this class use instead of reaching for the constant themselves.
+        # @return whether `path` sits under the bundled gem-overlay root — the prefix half of
+        #   "this run loaded a `data/gem_overlay/` directory". Callers needing ONE gem's overlay ask
+        #   {.gem_overlay_sig_paths} for that gem's directory instead: `signature_standdowns` uses this
+        #   to recognise overlay rows across every gem, while `CheckRules#gem_overlay_loaded?` keys on
+        #   the activesupport overlay alone (#3041 — a project can load the addressable overlay without
+        #   the activesupport one, and only the latter may open `ActiveSupport::Duration` /
+        #   `ActiveSupport::Concern`). `GEM_OVERLAY_SIGS_ROOT` is defined inside this `class << self`
+        #   block, so it is reachable from here directly but NOT as `RbsLoader::GEM_OVERLAY_SIGS_ROOT`
+        #   from outside — this method is the public seam callers outside this class use instead of
+        #   reaching for the constant themselves.
         def under_gem_overlay_root?(path)
           path.to_s.start_with?("#{GEM_OVERLAY_SIGS_ROOT}/")
         end

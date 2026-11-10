@@ -371,14 +371,15 @@ module Rigor
         # below the user's explicit `signature_paths:` and above the opportunistic bundle / collection
         # discovery. A duplicate-declaration conflict degrades through the same O7 failure-memo path.
         plugin_sig_paths = plugin_registry ? plugin_registry.signature_paths.map(&:to_s) : []
-        # ADR-72 — Gemfile.lock-gated bundled RBS overlays. For each locked gem that ships no RBS through any
-        # resolution path (`:missing`) and has a Rigor-bundled overlay, load that overlay so its core-class
-        # extensions resolve (e.g. `Integer#minutes` on a Rails project) — turning a systematic false
-        # `call.undefined-method` into a no-op while a project WITHOUT the gem still sees the genuine
-        # diagnostic. Appended last so any RBS the project already supplies wins, and skipped for a gem whose
-        # opt-in plugin twin is REACHABLE — loaded as a plugin, or wired in by `signature_paths:` (#672) —
-        # so the two never both declare the methods. The paths ride in `loader_signature_paths`, so the env
-        # cache descriptor digests them for free.
+        # ADR-72 — Gemfile.lock-gated bundled RBS overlays. For each locked gem whose coverage source its
+        # overlay may load under ({GEM_OVERLAY_COVERAGE_SOURCES} — `:missing` for every overlay but
+        # addressable's `:rbs_collection` correction, #2857) and that has a Rigor-bundled overlay, load that
+        # overlay so its core-class extensions resolve (e.g. `Integer#minutes` on a Rails project) —
+        # turning a systematic false `call.undefined-method` into a no-op while a project WITHOUT the gem
+        # still sees the genuine diagnostic. Appended last so any RBS the project already supplies wins,
+        # and skipped for a gem whose opt-in plugin twin is REACHABLE — loaded as a plugin, or wired in by
+        # `signature_paths:` (#672) — so the two never both declare the methods. The paths ride in
+        # `loader_signature_paths`, so the env cache descriptor digests them for free.
         # Issue #2441 — the project's own path gems are neither missing RBS nor overlay-eligible: the project's
         # `sig/` declares them, and an overlay (`data/gem_overlay/activesupport`) would collide with it.
         missing_gems, overlay_paths = missing_gems_and_overlay_paths(
@@ -519,9 +520,12 @@ module Rigor
         bundle_root
       end
 
-      # The `:missing` classification (locked gems with no RBS through any resolution path), computed once
-      # and consumed twice: as `[gem_name, version, variants]` entries for the ADR-82 WD9 constant-ownership
-      # index, and as the eligible-gem set for the ADR-72 overlay resolution. Returns `[entries, overlay_paths]`.
+      # The per-gem RBS coverage classification (locked gems against every resolution path), computed
+      # once and consumed twice: its `:missing` rows become `[gem_name, version, variants]` entries for
+      # the ADR-82 WD9 constant-ownership index, and the full row set feeds the ADR-72 overlay resolution,
+      # which admits a gem when its row's source is one the gem's overlay may load under
+      # ({GEM_OVERLAY_COVERAGE_SOURCES} — `:missing` by default, `:rbs_collection` for addressable).
+      # Returns `[entries, overlay_paths]`.
       def missing_gems_and_overlay_paths(locked:, default_libraries:, bundle_sig_paths:,
                                          rbs_collection_paths:, plugin_registry:, signature_paths: [],
                                          bundle_root: nil)

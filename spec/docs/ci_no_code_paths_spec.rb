@@ -96,12 +96,24 @@ RSpec.describe "CI no-code path list (ci.yml `skip_re`)" do
     MESSAGE
   end
 
+  it "decides on skip_re alone: one `non_code=` that is exactly `grep -vE \"$skip_re\"`" do
+    # The guard evaluates the `skip_re` assignments, not the line that uses them, so a second filter there
+    # (`grep -vE "$skip_re|^lib/"`, or a later `non_code=` rewrite) would skip the suite unseen.
+    lines = File.readlines(CI_NO_CODE_WORKFLOW).grep(/^\s*non_code=/).map(&:strip)
+
+    expect(lines.size).to eq(1)
+    expect(lines.first).to end_with('| grep -vE "$skip_re" || true)')
+    expect(lines.first).to eq(%q{non_code=$(printf '%s\n' "$changed" | grep -vE "$skip_re" || true)})
+  end
+
   it "keeps the push trigger's paths-ignore inside the PR-side skip list" do
     workflow = YAML.load_file(CI_NO_CODE_WORKFLOW)
     globs = (workflow["on"] || workflow[true]).dig("push", "paths-ignore")
     expect(globs).not_to be_empty
 
     flags = File::FNM_PATHNAME | File::FNM_EXTGLOB | File::FNM_DOTMATCH
+    # With FNM_PATHNAME a trailing `dir/**` matches only direct children, but GitHub's matches the whole subtree.
+    globs = globs.map { |glob| glob.sub(%r{/\*\*\z}, "/**/*") }
     ignored = tracked_files.select { |path| globs.any? { |glob| File.fnmatch(glob, path, flags) } }
     run_on_push_only = ignored - skipped_paths
 

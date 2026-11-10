@@ -3341,6 +3341,68 @@ end
       expect(run.skip_reason).to eq(:platform_guarded)
     end
 
+    it "skips the stub when the guard is a compound `&&` that also reads RUBY_VERSION" do
+      entry = write_fixture("lib/backend.rb", <<~RUBY)
+        if RUBY_ENGINE == "truffleruby" && RUBY_VERSION >= "3.0"
+          require_relative "backend/truffleruby"
+        end
+      RUBY
+      stub_file = write_fixture("lib/backend/truffleruby.rb", <<~RUBY)
+        module Backend
+          def self.run = raise("unsupported engine")
+        end
+      RUBY
+
+      candidates = generator(paths: [entry, stub_file]).run
+      run = candidates.find { |c| c.method_name == :run }
+
+      expect(run.classification).to eq(Rigor::SigGen::Classification::SKIPPED)
+      expect(run.skip_reason).to eq(:platform_guarded)
+    end
+
+    it "skips the stub when the guard's other `||` operand reads ENV" do
+      entry = write_fixture("lib/backend.rb", <<~RUBY)
+        require_relative "backend/truffleruby" if RUBY_ENGINE == "truffleruby" || ENV["FORCE_STUB"]
+      RUBY
+      stub_file = write_fixture("lib/backend/truffleruby.rb", <<~RUBY)
+        module Backend
+          def self.run = raise("unsupported engine")
+        end
+      RUBY
+
+      candidates = generator(paths: [entry, stub_file]).run
+      run = candidates.find { |c| c.method_name == :run }
+
+      expect(run.classification).to eq(Rigor::SigGen::Classification::SKIPPED)
+      expect(run.skip_reason).to eq(:platform_guarded)
+    end
+
+    it "shelters a class the guard withheld whole, so a subclass keeps its proposal" do
+      entry = write_fixture("lib/backend.rb", <<~RUBY)
+        if RUBY_ENGINE == "truffleruby"
+          require_relative "backend/truffleruby"
+        end
+      RUBY
+      stub_file = write_fixture("lib/backend/truffleruby.rb", <<~RUBY)
+        class Backend
+          def self.run = raise("unsupported engine")
+        end
+      RUBY
+      sub = write_fixture("lib/sub.rb", <<~RUBY)
+        class Sub < Backend
+          def size = 3
+        end
+      RUBY
+
+      candidates = generator(paths: [entry, stub_file, sub]).run
+      size = candidates.find { |c| c.class_name == "Sub" && c.method_name == :size }
+      run = candidates.find { |c| c.class_name == "Backend" && c.method_name == :run }
+
+      expect(run.skip_reason).to eq(:platform_guarded)
+      expect(Rigor::SigGen::Classification::EMITTABLE).to include(size.classification)
+      expect(size.class_shells).to include("Backend")
+    end
+
     it "yields a method another file also provides to that file's proposal" do
       entry = write_fixture("lib/prof.rb", <<~RUBY)
         if RUBY_PLATFORM =~ /jruby/

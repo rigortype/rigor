@@ -425,8 +425,11 @@ module Rigor
       end
 
       # The reasons that withhold a member because of what its class's subclasses or callees do, not because the class
-      # itself cannot be declared.
-      WITHHELD_FOR_OVERRIDES = %i[overridden_bot abstract_method template_method overridden_by_unsigned_subclass].freeze
+      # itself cannot be declared. `:platform_guarded` counts too (#3035): a class whose every proposal the guard
+      # withheld — the raising-stub shape — still needs its shell on a subclass's file, or the subclass's own
+      # declaration reads `unresolvable-superclass` against a class this platform does load.
+      WITHHELD_FOR_OVERRIDES = %i[overridden_bot abstract_method template_method overridden_by_unsigned_subclass
+                                  platform_guarded].freeze
       private_constant :WITHHELD_FOR_OVERRIDES
 
       # Issue #3029 — a class whose members {#demote_bot_proposals} or {#demote_overridden_base_methods} withheld,

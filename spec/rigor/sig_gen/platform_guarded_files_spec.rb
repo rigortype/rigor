@@ -76,6 +76,35 @@ RSpec.describe Rigor::SigGen::PlatformGuardedFiles do
     expect(guarded_set(entry, backend)).to be_empty
   end
 
+  it "marks a file required under a compound guard that also reads RUBY_VERSION" do
+    entry = write_fixture("lib/app.rb", <<~RUBY)
+      if RUBY_ENGINE == "truffleruby" && RUBY_VERSION >= "3.0"
+        require_relative "app/truffleruby"
+      end
+    RUBY
+    stub_file = write_fixture("lib/app/truffleruby.rb", "module App; end\n")
+
+    expect(guarded_set(entry, stub_file)).to include(File.expand_path(stub_file))
+  end
+
+  it "marks a file required under a guard whose other `||` operand reads ENV" do
+    entry = write_fixture("lib/app.rb", <<~RUBY)
+      require_relative "app/truffleruby" if RUBY_ENGINE == "truffleruby" || ENV["FORCE_STUB"]
+    RUBY
+    stub_file = write_fixture("lib/app/truffleruby.rb", "module App; end\n")
+
+    expect(guarded_set(entry, stub_file)).to include(File.expand_path(stub_file))
+  end
+
+  it "does not treat RUBY_VERSION alone as a platform guard" do
+    entry = write_fixture("lib/app.rb", <<~RUBY)
+      require_relative "app/newer" if RUBY_VERSION >= "3.0"
+    RUBY
+    newer = write_fixture("lib/app/newer.rb", "module App; end\n")
+
+    expect(guarded_set(entry, newer)).to be_empty
+  end
+
   it "marks a require under a `case` on RUBY_ENGINE" do
     entry = write_fixture("lib/app.rb", <<~RUBY)
       case RUBY_ENGINE

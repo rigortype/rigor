@@ -28,8 +28,12 @@ module Rigor
     #
     # Limits, deliberately: require sites in files OUTSIDE the scanned set are invisible (a sibling
     # the run did not read may require the file unguarded); `load`, `autoload` and computed features
-    # are not edges; and a file that fails to parse poisons the whole answer — its require edges are
-    # unknowable, so {.call} returns an empty set rather than risk a false guarded verdict.
+    # are not edges; a `require` sitting in the guard's own predicate — an `&&` / `||` operand, say —
+    # inherits the branch's guarded mark without the walk checking whether Ruby reaches it before the
+    # platform test decides; the `begin … rescue LoadError` fallback (`require "json"` else
+    # `require "json/pure"`) is not a platform guard, so both of its edges read unguarded; and a file
+    # that fails to parse poisons the whole answer — its require edges are unknowable, so {.call}
+    # returns an empty set rather than risk a false guarded verdict.
     module PlatformGuardedFiles
       # The constants a conditional predicate may read to make a require platform-dependent.
       GUARD_CONSTANTS = %i[RUBY_ENGINE RUBY_PLATFORM].freeze
@@ -108,15 +112,20 @@ module Rigor
         !predicate.nil? && platform_expression?(predicate)
       end
 
-      # Iterative like {#walk_require_sites}: a predicate can chain thousands of `||` operands.
+      # Iterative like {#walk_require_sites}: a predicate can chain thousands of `||` operands. A hit is
+      # the only answer — a constant that is NOT a guard (`RUBY_VERSION`, `ENV`, a namespaced path) does
+      # not end the walk, or `RUBY_ENGINE == "x" && RUBY_VERSION >= "y"` would read unguarded on the
+      # strength of which operand the stack pops first.
       def platform_expression?(root)
         stack = [root]
         until stack.empty?
           node = stack.pop
+          next unless node.is_a?(Prism::Node)
           return true if node.is_a?(Prism::DefinedNode)
-          return GUARD_CONSTANTS.include?(node.name) if node.is_a?(Prism::ConstantReadNode)
+          return true if node.is_a?(Prism::ConstantReadNode) && GUARD_CONSTANTS.include?(node.name)
           # `::RUBY_ENGINE` names the same constant; `Foo::RUBY_ENGINE` is a different one.
-          return node.parent.nil? && GUARD_CONSTANTS.include?(node.name) if node.is_a?(Prism::ConstantPathNode)
+          return true if node.is_a?(Prism::ConstantPathNode) && node.parent.nil? &&
+                         GUARD_CONSTANTS.include?(node.name)
 
           node.rigor_each_child { |child| stack << child }
         end

@@ -780,6 +780,20 @@ RSpec.describe Rigor::Analysis::Runner do
           undefined = result.diagnostics.select { |d| d.rule == "call.undefined-method" }
 
           expect(undefined.map(&:method_name)).to eq(["bar"])
+
+          # Pin the loading split `gem_overlay_loaded?` keys on — `bar` firing is only
+          # meaningful while the addressable overlay IS in the run's signature paths and
+          # the activesupport overlay is NOT. A `WorkerSession` builds the same
+          # `Environment.for_project` axes `check` does for this configuration.
+          loaded = Rigor::Analysis::WorkerSession.new(
+            configuration: configuration, cache_store: nil
+          ).environment.rbs_loader.signature_paths.map(&:to_s)
+          addressable_overlay = Rigor::Environment::RbsLoader.gem_overlay_sig_paths(["addressable"]).map(&:to_s)
+          activesupport_overlay = Rigor::Environment::RbsLoader.gem_overlay_sig_paths(["activesupport"]).map(&:to_s)
+          expect(addressable_overlay).not_to be_empty
+          expect(activesupport_overlay).not_to be_empty
+          expect(loaded).to include(*addressable_overlay)
+          expect(loaded & activesupport_overlay).to be_empty
         end
       end
     end

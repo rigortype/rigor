@@ -3,6 +3,9 @@
 module Courier
   Parcel = Struct.new(:id, :weight)
 
+  class Chain
+  end
+
   class Client
     # Sends the parcel to the carrier.
     #
@@ -16,6 +19,13 @@ module Courier
     # Queues a parcel for delivery.
     def dispatch(parcel)
       deliver(parcel)
+    end
+
+    # Yields the middleware chain for configuration and returns it.
+    def middleware
+      @middleware ||= Chain.new
+      yield @middleware if block_given?
+      @middleware
     end
 
     def label(parcel)

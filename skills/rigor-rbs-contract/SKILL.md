@@ -58,16 +58,23 @@ prove is written only on the word of the party entitled to make it, and cited: t
 documentation for code you do not own, the owner's explicit answer for code they do.
 
 **Direction rule.** Making a declaration *say less* — a return that admits `nil`, a parameter that
-accepts more — needs evidence that the case is real: Rigor's proof, a test, a run, or documentation.
-Making it *say more* — a narrower return, a narrower parameter, `void` replaced by a value — needs a
-contract source. A `sig-gen` proposal counts only where the slot was undeclared or `untyped`.
+accepts more — needs a **witness** that the case is real: a call shown, by RBS's own runtime type checker,
+to return or to need what the old declaration excludes; or the library's documentation. Rigor's findings
+locate these cases and name the exit to aim at, but they have false positives, so on their own they are
+a lead, not a witness. Making it *say more* — a narrower return, a narrower parameter, `void` replaced by
+a value — needs a contract source. A `sig-gen` proposal counts only where the slot was undeclared or
+`untyped`.
 
-Three consequences come up on almost every run:
+Four consequences come up on almost every run:
 
 - **`void`, `boolish` and a deliberately wide nominal stand** unless the library documents a value.
   The body returning something is not documentation.
-- **Reading the implementation finds candidates; it does not decide them.** The one exception is a
-  parameter's structural need — an argument used only through `to_s` accepts `_ToS`.
+- **Reading the implementation finds candidates; it does not decide them.** The one exception is an
+  undeclared or `untyped` parameter's structural need — an argument used only through `to_s` accepts
+  `_ToS`. A *declared* parameter is a promise too; today's body is no reason to widen it.
+- **A wholly wrong declaration is treated as missing.** When the declared type and the body share
+  nothing (declared a connection pool, returns an `Integer`), it is neither saying less nor more: type
+  the slot as if it were undeclared, and witness that the declared type never comes back.
 - **One alias that is both input and output carries two contracts.** When they differ, split it rather
   than weaken it until both fit.
 
@@ -90,23 +97,26 @@ upstream, and keep a local override only until the fix is released.
    per signal, and what each one can and cannot see:
    [`references/01-finding-candidates.md`](references/01-finding-candidates.md).
 2. **Triage.** Drop the shapes that are not contract findings — abstract methods, mutable registries
-   proposed as `[]`, platform-guarded files, a `Dynamic` inference — before spending evidence on them.
+   proposed as `[]`, platform-guarded files, a `Dynamic` inference, a memoised value Rigor reads as
+   nilable — before spending evidence on them.
 3. **Decide.** For each remaining candidate, gather the evidence the direction rule asks for and cite
-   it: the command and its output, the quote and where it is, or the owner's answer. A candidate without
-   the evidence it needs is not changed; it is reported.
+   it: the witness call and the error it raised, the command and its output, the quote with its
+   `file:line` in the version under review, or the owner's answer. A candidate without the evidence it
+   needs is not changed; it is reported.
 4. **Write.** Change the declaration. Prefer `rigor sig-gen` output verbatim where it applies; write by
    hand only what the evidence supports, and nothing beyond it.
-5. **Prove.** Run the target's gate. Add a use-site test that would have failed under the old
-   declaration — a `nil` check on a newly optional return, a call with the newly accepted argument —
-   so the contract, not just the syntax, is exercised.
-6. **Explain.** Every change carries its evidence. Every candidate you deliberately left alone —
-   above all a `void` whose body returns a value — carries its reason, so a reviewer can tell restraint
-   from oversight.
+5. **Prove.** Run the target's gate. For every change that says less, keep the runtime witness: the
+   call fails RBS's type checker under the old declaration and passes under the new one. Add a use-site
+   test that exercises the new contract — a `nil` check on a newly optional return, a call with the
+   newly accepted argument.
+6. **Explain.** Every change carries its evidence. Every Rigor finding and every candidate you
+   deliberately left alone — above all a `void` whose body returns a value, and a Rigor finding no
+   witness confirmed — carries its reason, so a reviewer can tell restraint from oversight.
 
 ## Done when
 
-Every candidate from step 1 is changed with its cited evidence, left alone with its reason, or reported
-as an open question for the owner; the target's gate is green; and the write-up lists all three groups.
+Every candidate from step 1, including every row Rigor reported, is changed with its cited evidence,
+left alone with its reason, or reported as an open question; the target's gate is green; and the write-up lists all three groups.
 
 When the owner does not answer an open question, or the documentation cannot be found, stop there: leave
 those declarations as they are, finish and prove the changes the evidence did settle, and hand back the

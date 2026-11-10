@@ -59,8 +59,13 @@ YARD type is not, and `rigor-type-oracle` covers why.
    project's own RBS task.
 3. If the project also runs Steep or another RBS consumer, run it. Rigor is not the only reader of these
    files.
-4. Where you widened a return, a test or a use site now handles the new case; where you widened a
-   parameter, a test now passes the newly accepted argument.
+4. Where you widened a return, a witness shows the case is real (see `01-finding-candidates.md`
+   § "Signal 6") and a test or a use site now handles it; where you widened a parameter, a test now
+   passes the newly accepted argument. The owner may accept a change without a witness — say so in the
+   write-up — but a Rigor finding alone is never presented as proof.
+5. If the project has a test suite, run it once with `rbs/test/setup` and `RBS_TEST_TARGET` set to the
+   project's namespace. Every declaration the suite exercises is then checked against real values,
+   which catches what no static signal sees.
 
 ## When the wrong signature belongs to a dependency
 

@@ -16,10 +16,16 @@ rigor check --no-baseline --format=json lib
 ```
 
 The rule to look for is **`def.return-type-mismatch`**: the body's last expression has a type the
-declared return does not accept. Its message names both sides — `declared String, inferred String?`, or a literal such as
-`inferred "a"?` — so
-it is a direct refutation and the strongest evidence this skill gets from a tool. `--no-baseline`
-matters in an application: a baseline may already be hiding exactly these.
+declared return does not accept. Its message names both sides — `declared String, inferred String?`, or
+a literal such as `inferred "a"?`. It compares a union member by member, so a typed member beside
+`Dynamic` still counts: sidekiq 7.0's `Client#push` against its old `-> String` reports
+`declared String, inferred Dynamic[top]?`. `--no-baseline` matters in an application: a baseline may
+already be hiding exactly these.
+
+A mismatch is a **lead**, not a witness. The rule has false positives: a memoised value re-read after a
+`yield` (`@c ||= Chain.new(self); yield @c if block_given?; @c`) reads as `Chain?` although it can
+never be `nil` — sidekiq's `Config#client_middleware` is that shape. A mismatch becomes a change only
+with a runtime witness (Signal 6) or documentation.
 
 Also worth reading here: `def.override-return-widened` (a subclass's declaration widens what its parent
 promised). `static.value-use.void` (code uses a value a declaration says is `void`) is off in every
@@ -29,7 +35,7 @@ nothing.
 What it cannot see: only the **last expression** is compared. An explicit `return nil` earlier in the
 body, or a falsy arm behind an untyped value (`mime && new(mime[0])` where `mime` is untyped reads as
 `Dynamic[top] | Marcel::Magic`), produces no diagnostic. The rule is also silent when the declared return
-is `untyped` or `void`, and when the body is `Dynamic`.
+is `untyped` or `void`, and when the whole inferred type is `Dynamic`.
 
 ## Signal 2 — `rigor sig-gen --diff` against the declarations
 
@@ -45,9 +51,11 @@ Each entry in `candidates` has a `classification`:
 | `tighter_return` | Rigor proved a return narrower than `declared_return_rbs` | over `untyped`: an adoptable proposal. Over anything else: a "say more" change, which needs a contract source — the proposal alone is not enough |
 | `skipped` | no proposal; `skip_reason` says why | nothing — see triage below |
 
-`sig-gen` never proposes over a declared `void`, never tightens a declared nominal to a literal, and never
-reports a declaration that is *narrower* than the body. So an empty `--diff` does not mean the
-declarations are sound; Signal 1 and the leads below cover that half.
+`sig-gen` never proposes over a declared `void` and never tightens a declared nominal to a literal. It
+also compares a declaration that is *narrower* than the body over every exit — an early `return nil`
+included — but classifies the result `equivalent`, which `--diff` does not print (#3062). So an empty
+`--diff` does not mean the declarations are sound; Signal 1, the leads below and Signal 6 cover that
+half.
 
 Private and protected methods are skipped unless you pass `--include-private`; a collection entry rarely
 wants them.
@@ -86,7 +94,7 @@ the declaration may or may not be right, and the decision needs documentation or
 ## Leads from reading — locate only
 
 These are worth searching for because no command reports them, but each is a lead, not evidence. A
-lead becomes a candidate only with documentation, a test, or a run that shows the case is real.
+lead becomes a change only with documentation or a witness (Signal 6).
 
 - an explicit `return` or `return nil` before the last expression;
 - `x && y`, `x&.y`, or `find`/`detect`/`Hash#[]` whose `nil` result is returned as is;
@@ -96,15 +104,54 @@ lead becomes a candidate only with documentation, a test, or a run that shows th
 
 ## Signal 5 — the documentation
 
-Read the library's documentation as its own sweep, not only to confirm a lead:
+Read the documentation that ships with the version under review — doc comments and the README in that
+version's source — as its own sweep, not only to confirm a lead, and note each quote's `file:line`. A
+website or wiki describes some other release; see `02-contract-rules.md` for what it may support.
 
 - doc comments containing "Returns", "nil", "or", "raises", "yields";
 - the README's examples, which show which calls the authors consider the public API;
 - the API reference, for public methods the RBS does not declare.
 
 A documented return that the declaration contradicts is a candidate even when every Rigor signal is
-silent — that is how sidekiq's `Client#push` (`String`, documented to return `nil` when middleware stops
-the job) was settled.
+silent. For sidekiq's `Client#push`, Signal 1 found the candidate and the doc comment — "If middleware
+stops the job, nil will be returned instead" — settled it.
+
+## Signal 6 — a runtime witness
+
+RBS ships a runtime type checker. It wraps the methods of the classes you name, runs your Ruby, and
+reports every argument or return value that does not match the loaded declarations. A call it rejects
+is a **witness**: the evidence a "say less" change needs, and the way to tell a real Rigor finding from
+a false positive. This runs the library's code, so for a gem you do not own, do it in a disposable
+environment.
+
+Write a short script that calls the method with an input aimed at the exit Rigor or your reading
+pointed to — for `return nil unless carrier_accepts?(parcel)`, a parcel the carrier rejects:
+
+```ruby
+# witness.rb
+require "courier"
+Courier::Client.new.deliver(Courier::Parcel.new(2, 50))
+```
+
+```sh
+RBS_TEST_TARGET='Courier::*' RBS_TEST_OPT='-I sig' RBS_TEST_RAISE=1 ruby -I lib -rrbs/test/setup witness.rb
+# [Courier::Client#deliver] ReturnTypeError: expected `::String` but returns `nil`
+```
+
+Add `-rbundler/setup` before `-rrbs/test/setup` under Bundler, and `-r <library>` in `RBS_TEST_OPT` for
+each standard library the declarations use. Run it again after the change: it must pass. The same check
+fits a test suite as `RBS::UnitTest`'s `assert_send_type "(untyped) -> String?", receiver, :deliver,
+arg`, which also checks the call against the declaration loaded for the class, so it fails before the
+fix and passes after it.
+
+A run that raises nothing is not a witness the other way: it shows only that the inputs you tried
+behave. When no input you can justify produces the excluded value, the finding is "left unchanged — no
+witness", not a change. For a project with a test suite, running the whole suite once under
+`rbs/test/setup` checks every declaration the suite exercises.
+
+`rbs prototype runtime` is a different tool: it prints the methods, arities, mixins and constants of the
+loaded classes, with every type `untyped`. It is useful for finding undeclared methods — including ones
+`define_method` creates — and parameter shapes, never for a return type.
 
 ## Triage before deciding
 
@@ -118,6 +165,8 @@ Drop these before spending evidence on them:
 | a proposal of `[]` or `{}` | usually a collection the method fills later, or a registry callers append to; the element type is the contract, not "empty" |
 | a proposal of `bot` or `top` | `bot` is almost always an abstract or raising method; `top` says nothing a declaration should adopt |
 | a `tighter_return` that drops an arm the code clearly has (an `else`, a `rescue`) | an inference gap; report it, do not adopt it |
+| a `def.return-type-mismatch` adding `nil` to a memoised value (`@x ||= …`, possibly re-read after a `yield`) | a known false-positive shape; it needs a witness, and usually none exists |
+| a mismatch whose `nil` comes only from a lookup (`Hash#[]`, `find`, `detect`) on a key or element the library always supplies | worst-case reading; it needs a witness with an input the library allows |
 
 `rigor explain <skip-reason>` documents each skip reason in full.
 
@@ -125,9 +174,10 @@ Drop these before spending evidence on them:
 
 | Question | Signal |
 | --- | --- |
-| Is a declared return narrower than the body's last expression? | 1 |
-| Is a declared return narrower than an early `return` or an untyped falsy arm? | leads + documentation or a run |
-| Is a public method undeclared? | 2 (`new_method`), 5 |
+| Is a declared return narrower than the body's last expression? | 1, confirmed by 6 |
+| Is a declared return narrower than an early `return` or an untyped falsy arm? | leads, confirmed by 6 or 5 |
+| Is a Rigor finding real or a false positive? | 6 |
+| Is a public method undeclared? | 2 (`new_method`), 5, `rbs prototype runtime` |
 | Could an `untyped` return be precise? | 2 (`tighter_return` over `untyped`) |
 | Is a parameter too narrow? | 3 |
 | Is a `void` hiding a documented value? | 5 |

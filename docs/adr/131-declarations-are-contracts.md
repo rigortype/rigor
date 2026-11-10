@@ -60,10 +60,12 @@ thing and copies the inferred type over the declaration.
 > own, the owner's explicit answer for code they do.
 
 > **Direction criterion.** A change that makes a declaration *say less* — a return that admits a value
-> it excluded, a parameter that accepts more — needs evidence that the excluded case is real. A change
-> that makes it *say more* — a narrower return, a narrower parameter, a `void` replaced by a value —
-> needs a contract source. Rigor's proof is evidence for the first kind; for the second it is enough
-> only where the slot was undeclared or `untyped`, which is what `sig-gen` already proposes.
+> it excluded, a parameter that accepts more — needs a *witness* that the excluded case is real: a call
+> RBS's runtime type checker rejects under the old declaration, or the library's documentation. A
+> change that makes it *say more* — a narrower return, a narrower parameter, a `void` replaced by a value
+> — needs a contract source. Rigor's findings locate the first kind and name the exit to aim at, but are
+> not a witness on their own; for the second they are enough only where the slot was undeclared or
+> `untyped`, which is what `sig-gen` already proposes.
 
 This adds a fourth source to ADR-108's three. It is scoped to contracts — what a declaration promises —
 not to the type of an expression, which still comes only from Rigor; and it keeps ADR-108's provenance
@@ -73,15 +75,26 @@ rule intact: the documented contract is cited exactly as a command is.
 
 | Evidence | Admissible for | Cited as |
 | --- | --- | --- |
-| The library's documentation — a doc comment on the method, the README, the API reference | any contract on code the writer does not own | a quote and its location |
+| The library's documentation for the version under review — a doc comment on the method, the README shipped in that gem | any contract on code the writer does not own | a quote and its `file:line` in that version's source |
 | The owner's answer, in conversation, for the project's own code | any contract on that code | the question and the answer, and preferably a doc comment written from it |
-| Rigor's proof — `rigor check`'s `def.return-type-mismatch`, a `sig-gen` proposal, `type-of` | refuting a declaration; filling an undeclared or `untyped` slot | the command and its output (ADR-108 WD5) |
-| Observation — call sites (`sig-gen --params=observed`), a test or a one-off run that exercises a case | that a case is real; a parameter's lower bound (ADR-108 WD3) | the command, or the test |
-| Reading the implementation | locating a candidate; a parameter's structural need (`_ToS` for an argument used only by `to_s`) | — never the sole support for a narrower contract |
+| A runtime witness — a call `rbs/test/setup` or `RBS::UnitTest#assert_send_type` rejects under the old declaration and accepts under the new | saying less; showing a wholly wrong declaration is never returned | the call and the error (WD6) |
+| Rigor's findings — `rigor check`'s `def.return-type-mismatch`, a `sig-gen` proposal, `type-of` | locating a candidate and its exit; filling an undeclared or `untyped` slot | the command and its output (ADR-108 WD5) |
+| Observation — call sites (`sig-gen --params=observed`, `rigor check` on use-site code) | a parameter's lower bound (ADR-108 WD3); a correct call a declared parameter rejects | the command, or the test |
+| Reading the implementation | locating a candidate; the structural need of an undeclared or `untyped` parameter (`_ToS` for an argument used only by `to_s`) | — never the sole support for a change to a declared slot |
 
 The last row is the one most worth stating. Reading `perform_async`'s body says it returns `push`'s
 result; that is exactly the inference a declaration is entitled to hide. Reading is how a candidate is
-found, not how it is decided.
+found, not how it is decided. A *declared* parameter is no exception: [ADR-5](5-robustness-principle.md)
+says a supplied signature binds in both directions, so widening one from today's body promises callers
+what the next release need not keep.
+
+Documentation is pinned to the version. A website, wiki or default-branch README describes some other
+release; it may support a question in the write-up, never a change on its own.
+
+A declaration that shares nothing with the body — sidekiq 7.0's `Config#total_concurrency`, declared
+`ConnectionPool[RedisClientAdapter]` over `capsules.each_value.sum(&:concurrency)` — is neither less nor
+more. It is treated as undeclared: typed from the documentation or `sig-gen`, with a witness that the
+old type never comes back.
 
 ### WD2 — `void`, `boolish` and other wide declarations stand unless the library documents a value
 
@@ -105,8 +118,13 @@ comment — the citation the next contributor, and any downstream RBS, will need
 not own, the documentation is the authority, so the skill can run unattended up to a finished branch
 and pull request description; opening the pull request is outward-facing and stays the user's call. A
 contract the documentation does not state is left as it is and listed under "deliberately left
-unchanged". That list is part of the write-up, because a reviewer otherwise cannot tell restraint from
-oversight.
+unchanged", and so is every Rigor finding no witness confirmed. That list is part of the write-up,
+because a reviewer otherwise cannot tell restraint from oversight.
+
+Upstream, the existing collection declaration was written by a contributor, not by the gem's author, so
+it earns no deference by authorship. What protects it is the direction criterion's asymmetry: replacing
+it with something narrower needs the gem's documentation, and replacing it with something wider needs a
+witness, so neither an agent's reading nor a Rigor finding alone moves it.
 
 ### WD5 — A new skill, not a widening of `rigor-type-oracle`
 
@@ -118,6 +136,30 @@ trigger, the same argument ADR-108 WD1 made against folding the oracle into `rig
 separate section on what a declaration promises, which names the contract source and points to the new
 skill. Its `AGENTS.md` fragment admits the contract source in its lead paragraph and gains one bullet for
 the `void` rule, so both hold in sessions that load neither skill (ADR-108 WD2's routing criterion).
+
+### WD6 — The runtime witness: RBS's own checker confirms what Rigor locates
+
+Rigor's findings are leads with known false positives. sidekiq 7.0's `Config#client_middleware` is
+`@client_chain ||= Chain.new(self); yield @client_chain if block_given?; @client_chain`, and `rigor
+check` reports `declared Chain, inferred Chain?`; the method never returns `nil`. An unattended run that
+widened on that finding would push a `nil` check onto every caller of the gem — the exported false
+positive this project's rule forbids.
+
+RBS already ships the confirming instrument. `rbs/test/setup`, run with `RBS_TEST_TARGET`, wraps the named
+classes' methods with `Module#prepend` and checks every argument and return value against the loaded
+declarations; `RBS::UnitTest#assert_send_type` does the same for one call inside a test. Verified on
+the eval fixture: a `deliver` call on a rejected parcel raises `ReturnTypeError: expected ::String but
+returns nil` under `-> String` and passes under `-> String?`, while the memoised `middleware` that `rigor
+check` flags raises nothing on any call.
+
+So the two tools divide the work: Rigor (and reading) says which exit may return the excluded value; a
+call aimed at that exit, rejected by the runtime checker under the old declaration and accepted under the
+new, is the witness a "say less" change needs. The asymmetry matters: a run that raises nothing proves
+only that the tried inputs behave, so it never supports a narrower declaration. `rbs prototype runtime`
+is not part of this: it emits every type as `untyped` and serves only to find undeclared methods and
+parameter shapes. A witness executes the library's code, so for a gem the writer does not own it runs in
+a disposable environment, and it is cited in the pull request rather than committed, because the
+collection's `_test/` code is checked statically.
 
 One skill covers the three targets — a gem's own `sig/`, an application's `sig/`, a gem_rbs_collection
 entry — because the judgment is identical and three near-identical descriptions would compete for the
@@ -132,7 +174,8 @@ in per-target `references/`.
 | Treat reading the implementation as a contract source | Rejected | It is the guess ADR-108 exists to stop, and #1129's `perform_async` is the counterexample: the body's value is exactly what the declaration hides. |
 | One skill per target (gem author, application, collection) | Rejected | Shared judgment, colliding descriptions. Per-target `references/` instead (WD5). |
 | Widen `rigor-type-oracle` to own the loop | Rejected | Trigger mismatch (WD5). |
-| Report-only `sig-gen` classification for declarations narrower than the body | Deferred | The skill runs on today's commands, with the gap stated: `rigor check`'s `def.return-type-mismatch` finds a fully typed last expression the declaration excludes, and nothing finds an explicit early `return nil` or a falsy arm behind an untyped value (marcel). Those stay reading leads that need documentation or a run. A command that reports them ([#3062](https://github.com/rigortype/rigor/issues/3062)) and a public form of the collection audit's harness are follow-ups, not preconditions. |
+| Rigor's finding alone as sufficient for a "say less" change | Rejected | `def.return-type-mismatch` has false positives (WD6's memoised `client_middleware`); sent upstream unattended, each one becomes a `nil` check imposed on every caller. A witness or documentation is required. |
+| Report-only `sig-gen` classification for declarations narrower than the body | Deferred | `sig-gen` already compares a declaration against the body over every exit, early `return nil` included, but classifies a declaration narrower than the body as `equivalent`, which `--diff` never prints; `rigor check` compares only the last expression. Surfacing that verdict ([#3062](https://github.com/rigortype/rigor/issues/3062)) would turn reading leads into tool leads; a witness would still decide. It and a public form of the collection audit's harness are follow-ups, not preconditions. |
 
 ## Consequences
 
@@ -150,10 +193,12 @@ Negative / carry-over:
 - "Documented" is a judgment. A README example is weaker evidence than a doc comment that states the
   return; the skill asks for a quote so the judgment is reviewable, but cannot make it mechanical.
 - The unsound-declaration case — a body that can return what the declaration excludes — is the most
-  valuable one to find and the worst covered. `def.return-type-mismatch` sees only a fully typed last
-  expression; an explicit `return nil` earlier, or a falsy arm behind an untyped value, is invisible to
-  every current command. Until that changes the skill treats them as reading leads that need
-  documentation or a run, which is the direction criterion applied honestly rather than a tool result.
+  valuable one to find and the worst surfaced. `sig-gen` computes it over every exit and discards it;
+  `def.return-type-mismatch` reports only the last expression and has false positives. Until #3062
+  surfaces the computed verdict, early returns and untyped falsy arms are reading leads, and every
+  candidate needs a witness either way.
+- A witness runs the library's code. The skill confines that to a disposable environment for third-party
+  gems, but it is still execution that a static checker's workflow did not need before.
 - The eval suite is unrun at landing: its cases need a Rigor-configured project, as ADR-108 WD7's did.
 - Another catalogue entry, frozen into the public skill vocabulary at v1.0 with the rest
   ([ADR-50](50-release-engineering-and-stability-strategy.md) WD1).
@@ -161,7 +206,7 @@ Negative / carry-over:
 ## Relationship to other ADRs
 
 - **[ADR-5](5-robustness-principle.md)** — lenient parameters, strict returns; WD3 is that asymmetry
-  applied to a shared alias.
+  applied to a shared alias, and WD1's rule for declared parameters is its "binds in both directions".
 - **[ADR-14](14-rbs-sig-generation.md)** — `sig-gen`'s authorship policy; the direction criterion is why
   its proposals are evidence only for undeclared or `untyped` slots.
 - **[ADR-107](107-checked-types-and-typeless-comments.md)** — its amendment made a declared `void`

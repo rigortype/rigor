@@ -79,8 +79,25 @@ the commit by listing it in `.git/info/exclude`, and check `git status` before c
 
 ## Signal 5 — the gem's documentation
 
-Read the doc comments in `$GEM_DIR/lib`, the README, and the published API reference for the version.
-Quote what you rely on in the write-up.
+Read the doc comments in `$GEM_DIR/lib` and the README in `$GEM_DIR` — the source of the version under
+review. Quote what you rely on in the write-up with its path and line in that source. A website or the
+default branch's README may describe another release: use it to ask, not to decide.
+
+## Signal 6 — the runtime witness
+
+Every change that makes a declaration say less needs a witness here; a Rigor finding alone does not go
+upstream. Run the witness from Signal 6 of `01-finding-candidates.md` in `$SCRATCH`, against the
+unpacked source and the copied declarations:
+
+```sh
+cd "$SCRATCH"
+RBS_TEST_TARGET='Namespace::*' RBS_TEST_OPT='-I sig' RBS_TEST_RAISE=1 ruby -I lib -rrbs/test/setup witness.rb
+```
+
+This executes the gem's code; run it somewhere disposable, and install whatever it requires at runtime
+there, not in the collection checkout. Record the call and the error. After editing the declaration,
+copy it into `$SCRATCH/sig` again and confirm the same run passes. `witness.rb` is evidence for the pull
+request description, not a committed test: the collection's `_test/` code is checked statically.
 
 ## Writing the change
 
@@ -97,9 +114,11 @@ Quote what you rely on in the write-up.
    would: `&.` or an `if` on a newly nilable return, calls to newly declared methods, the newly accepted
    argument shapes. A new file pair `test_N.rb` / `test_N.rbs` is fine when the existing test does not
    fit.
-2. `"$COLLECTION"/bin/test gems/NAME/X.Y`, run from `$COLLECTION`, passes for every version you touched. It runs `rbs validate`, `steep check`
-   and the untyped-call check.
+2. `"$COLLECTION"/bin/test gems/NAME/X.Y`, run from `$COLLECTION`, passes for every version you
+   touched. It runs `rbs validate`, `steep check` and the untyped-call check.
 3. `rigor check` on `_test/` reports nothing new compared with before the change.
+4. Every change that says less has a witness that fails under the old declaration and passes under the
+   new one, for each version you changed.
 
 ## The pull request
 
@@ -119,6 +138,7 @@ Changed in `gems/NAME/X.Y`:
 Deliberately left unchanged:
 
 - `Klass#other` stays `void`. Its implementation returns the same value, but NAME does not document a return value for it.
+- `Klass#memo` stays `Chain`. Rigor reports `Chain?`, but no input returns `nil` (the value is memoised).
 
 ## How this was found
 
@@ -126,9 +146,10 @@ The signal that surfaced it — the Rigor command and the finding, or the docume
 
 ## Verification
 
-The test added, and the `bin/test gems/NAME/X.Y` result for each version.
+The witness for each change that says less: the call, and the runtime type checker's error under the old declaration (it passes under the new one). The test added, and the `bin/test gems/NAME/X.Y` result for each version.
 ```
 
 Write each paragraph and list item on one line; GitHub renders a newline inside a paragraph as a line
-break. "Deliberately left unchanged" is not optional when a `void`, `boolish` or wide declaration was
-kept over a body that returns more: it is the evidence that the restraint was a decision.
+break. "Deliberately left unchanged" lists every Rigor finding you did not act on and every `void`,
+`boolish` or wide declaration kept over a body that returns more: it is the evidence that the restraint
+was a decision.

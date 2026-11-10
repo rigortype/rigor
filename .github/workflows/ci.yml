@@ -3,10 +3,10 @@ name: CI
 on:
   push:
     branches: [master]
-    # A Markdown- or shell-script-only push (ADRs, notes, CHANGELOG,
-    # READMEs, skills, the agent-harness and probe scripts) does not change
-    # analysable code and no spec runs a `.sh` file, so skip the full suite
-    # for it. Mixed commits still run — paths-ignore only skips when EVERY
+    # A push that touches only files the Ruby suite never reads (Markdown,
+    # shell scripts, the VS Code extension, the playground frontend and the
+    # like; the list is in the `changes` job) does not change analysable
+    # code, so skip the full suite for it. Mixed commits still run — paths-ignore only skips when EVERY
     # changed file matches. Applied to `push` only: `pull_request` stays unfiltered at
     # the trigger level, because a paths-filtered required check hangs
     # pending and blocks the merge. The equivalent PR-side skip is done
@@ -16,6 +16,18 @@ on:
     paths-ignore:
       - "**/*.md"
       - "**/*.sh"
+      - "editors/**"
+      - "data/oss-sweep/**"
+      - "tool/steep/**"
+      - "tool/sorbet/**"
+      - "Dockerfile"
+      - "Dockerfile.dockerignore"
+      - "apps/rigor-playground/frontend/**"
+      - "apps/rigor-playground/wasm/**/*.html"
+      - "apps/rigor-playground/wasm/**/*.mjs"
+      - "apps/rigor-playground/wasm/**/*.json"
+      - "apps/rigor-playground/fly.toml"
+      - "apps/rigor-playground/Dockerfile"
   pull_request:
   # The merge queue on master (ADR-123) runs this workflow on each queued
   # PR merged onto master and the entries ahead of it, and merges only when
@@ -173,15 +185,34 @@ jobs:
           fi
           echo "Changed files:"
           printf '%s\n' "$changed"
-          # `.sh` joins `.md` as a file the Ruby suite never reads: no spec,
-          # Makefile target or workflow runs one (checked 2026-11-10). If a
-          # spec ever starts exercising a shell script, drop it from here.
-          non_code=$(printf '%s\n' "$changed" | grep -vE '\.(md|sh)$' || true)
+          # Paths the Ruby suite never reads (checked 2026-11-10: no spec,
+          # Makefile target or `lib/` code opens them; `spec/docs/`, which
+          # the docs-check job still runs, checks the links and the one
+          # `editors/vscode/src/runtime.ts` value they carry):
+          #   - `.md` and `.sh`;
+          #   - `editors/`, which `vscode-extension.yml` builds and tests;
+          #   - `apps/rigor-playground`'s frontend, its wasm page, script
+          #     and manifest, `fly.toml` and `Dockerfile`, which
+          #     `playground-wasm.yml` builds (its Ruby files and gemspec
+          #     stay code: `make lint` lints `apps/`);
+          #   - `data/oss-sweep/`, which only `oss-sweep.yml` reads;
+          #   - the root `Dockerfile`, which `container.yml` builds;
+          #   - `tool/steep/` and `tool/sorbet/`, bundles no CI job runs;
+          #   - the workflows other than this file, each with its own
+          #     trigger. `ci.yml` is deliberately absent, as is any new
+          #     workflow, so both run the suite until listed here.
+          # The `push` trigger's `paths-ignore` above mirrors this list
+          # minus the workflows, which it cannot exclude `ci.yml` from.
+          # When a spec starts reading one of these, drop it from both.
+          skip_re='\.(md|sh)$|^editors/|^data/oss-sweep/|^tool/(steep|sorbet)/|^Dockerfile(\.dockerignore)?$'
+          skip_re="$skip_re|^apps/rigor-playground/(frontend/|wasm/.*\.(html|mjs|json)$|fly\.toml$|Dockerfile$)"
+          skip_re="$skip_re|^\.github/workflows/(vscode-extension|playground-wasm|container|oss-sweep|ruby-next|engine-warm|engine-wall|release-gate)\.yml$"
+          non_code=$(printf '%s\n' "$changed" | grep -vE "$skip_re" || true)
           if [ -n "$non_code" ]; then
-            echo "Files other than Markdown and shell scripts changed — running the full suite."
+            echo "Files the Ruby suite reads changed — running the full suite."
             echo "code=true" >> "$GITHUB_OUTPUT"
           else
-            echo "Markdown- and shell-script-only PR — skipping the code suite."
+            echo "Only files the Ruby suite never reads changed — skipping the code suite."
             echo "code=false" >> "$GITHUB_OUTPUT"
           fi
           if grep -qE "$nix_inputs" <<<"$changed"; then

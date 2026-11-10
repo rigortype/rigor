@@ -10,6 +10,11 @@ manual's "Start here", which goes from two skills to remember to three). ADR-107
 the same rule turned inward on Rigor's own tree, where it additionally forbids type-shaped comments.
 Nothing in the engine changes.
 
+**Amendment proposed by [ADR-131](131-declarations-are-contracts.md), 2026-11-11.** A fourth,
+contract-scoped source: what a declaration promises is settled by the library's documentation or the
+owner's answer, cited, and a declared `void` is not tightened to the body's value. The skill and its
+`AGENTS.md` fragment gain the matching section and bullet.
+
 Grounding: the five-model probe of 2026-09-08 recorded in § "Evidence" below, run over what is now
 `skills/rigor-type-oracle/evals/fixtures/budget_ledger.rb`;
 the oracle's own answers on that fixture, verified against the installed CLI and recorded in

@@ -17,7 +17,7 @@ the project is already onboarded, add it now.
   only if it is not already pulled in.
 - **Neither exists** → create `AGENTS.md` with this as its first section.
 - **A "Types" / "Type checking" section already exists** → merge into it
-  rather than adding a second one, and keep the five bullets intact.
+  rather than adding a second one, and keep the six bullets intact.
 
 Never overwrite unrelated content, and never rewrite a rule the project
 already wrote for itself — show the user the conflict instead.
@@ -34,6 +34,7 @@ This project is type-checked by [Rigor](https://github.com/rigortype/rigor). A t
 - A parameter type is the one thing inference does not give you: derive it from the call sites with `rigor sig-gen --observe PATH` and keep it only while `rigor check` stays green.
 - When Rigor answers `Dynamic[top]` or `untyped`, or `sig-gen` skips the method, do not fill the gap. Report the exact command and its output; the gap is the finding.
 - Every type you state to a human carries the command that produced it, so it can be re-run.
+- A declared `void` or `boolish` return is a contract, not a missing type: never tighten it, or any declaration, to what the body happens to return unless the library documents that value. Auditing or repairing RBS declarations is the `rigor-rbs-contract` skill.
 
 The `rigor-type-oracle` skill (`rigor skill --full rigor-type-oracle`) has the full procedure. With the Rigor MCP server connected, `rigor_type_of`, `rigor_annotate`, and `rigor_sig_gen` are the same oracle as tool calls.
 ```

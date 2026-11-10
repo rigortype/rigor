@@ -69,6 +69,9 @@ scope the moment you are about to write or assert one:
 - **Working an existing `.rigor-baseline.yml` down** →
   `rigor-baseline-reduce`. That is fixing diagnostics, not sourcing a
   type.
+- **Auditing, repairing, or contributing RBS declarations** — a gem's
+  `sig/`, an application's `sig/`, a gem_rbs_collection entry →
+  `rigor-rbs-contract`. This skill still governs every type it writes.
 - **Raising type protection from a `coverage --protection` list** →
   `rigor-protection-uplift`. It owns the "where should a type go, and how
   do I verify it" loop; this skill owns "where does the type itself come
@@ -76,7 +79,9 @@ scope the moment you are about to write or assert one:
 
 ## The three allowed sources
 
-Every type you write comes from exactly one of these. There is no fourth.
+Every type you write comes from exactly one of these. There is no fourth
+source for a type itself; what a *declaration* promises is the separate
+contract question below.
 
 | What you need | Ask Rigor with | What you write |
 | --- | --- | --- |
@@ -95,6 +100,23 @@ adopting, under the gate that `rigor check` gains no new diagnostic.
 
 Exact command forms, flags, position syntax, JSON shapes, and how to read
 each output: [`references/01-oracle-commands.md`](references/01-oracle-commands.md).
+
+## A declaration is a contract, not a missing type
+
+None of the three sources says what a declaration *promises* to callers.
+Ruby returns every method's last expression, so a body almost always has
+a value; a declared `void` says callers must not depend on it, and
+`boolish` says only its truthiness counts. **Never tighten `void`,
+`boolish`, or any declaration wider than the body to what the body
+happens to return** — in `sig/`, in an inline annotation, or in RBS sent
+upstream — unless the library documents that value.
+
+The reverse also holds. A contract the body does not prove — `String?`
+because the method's documentation says it returns `nil` when a job is
+halted — is not a guess when it is cited: the library's documentation,
+quoted, for code you do not own; the owner's explicit answer for code
+they do. Auditing, repairing, or contributing a set of RBS declarations
+on that basis is **`rigor-rbs-contract`**.
 
 ## The gap protocol — a gap is a finding, not a blank to fill
 

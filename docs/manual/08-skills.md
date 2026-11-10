@@ -80,6 +80,17 @@ is not repeated here.)
   minimal hand-RBS residual, under a double gate (the site becomes
   protected *and* `rigor check` gains no new diagnostic). See
   [Type-protection coverage](15-type-protection-coverage.md).
+- **`rigor-rbs-contract`** — audits, repairs, and extends RBS
+  declarations as *contracts*: a gem's own `sig/`, an application's
+  `sig/`, or an entry contributed to `ruby/gem_rbs_collection`. It finds
+  where a declaration and the code disagree (`rigor check`'s
+  `def.return-type-mismatch`, `rigor sig-gen --diff`, use-site checks,
+  the library's documentation), changes a declaration only on cited
+  evidence, keeps a declared `void` unless the library documents a
+  value, and proves each change with a use-site test. On your own code
+  it asks you the contract questions the evidence leaves open; on a gem
+  you do not own, the gem's documentation decides. See
+  [ADR-131](../adr/131-declarations-are-contracts.md).
 - **`rigor-baseline-reduce`** — works an existing `.rigor-baseline.yml`
   down rule by rule. It prioritises with `rigor triage`, classifies each
   site as a real bug / safe stylistic finding / false positive, and

@@ -58,6 +58,10 @@ If middleware stops the job, nil will be returned instead", so `String?` was rig
 `Client.enqueue*` document nothing, so their `void` stayed, although their bodies return the same
 `push` result.
 
+The shipped `rigor-rbs-contract` skill carries this rule, and the rest of the contract reading behind
+it, to adopting projects and gem_rbs_collection contributors
+([ADR-131](../adr/131-declarations-are-contracts.md)). Follow it when auditing or contributing RBS.
+
 Outside this repository, the shipped `rigor-type-oracle` skill carries the same provenance rule where
 the adopting project has installed it; otherwise treat AI-authored RBS according to that project's
 contract.

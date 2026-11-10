@@ -1305,7 +1305,7 @@ RSpec.describe Rigor::Analysis::Runner do
           expect(truthy_diags(result)).to be_empty
         end
 
-        it "does not fire on `if (v = @h[k])` — an ivar-read right-hand side marks the same way" do
+        it "does not fire on `if (@v = @h[k])` — an ivar-read right-hand side marks the same way" do
           result = analyze(<<~RUBY)
             class Holder
               def lookup(k, s)

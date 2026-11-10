@@ -261,5 +261,28 @@ RSpec.describe Rigor::CLI::SigGenCommand do
 
       expect(sig_text).not_to match(/Query\b(?!Column)/)
     end
+
+    # The dropped nested class is no longer declared, so a written subclass of it would fail its own build.
+    it "demotes a subclass of the dropped nested class" do
+      write("lib/other.rb", "class Other < Query::QueryError\n  def b = 2\nend\n")
+
+      sig_gen_write
+
+      configuration = Rigor::Configuration.load(File.join(root, ".rigor.yml"))
+      result = guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil), %w[lib])
+
+      expect(sig_text).not_to include("Other")
+      expect(result.diagnostics.map(&:rule)).not_to include("rbs.coverage.definition-build-failed")
+    end
+
+    it "reports a demoted container that has no methods of its own" do
+      write("lib/query.rb", "class QueryColumn\n  def initialize(name) = @name = name\nend\n" \
+                            "class Query < BaseRecord\n  class QueryError < StandardError\n  end\nend\n")
+      err = StringIO.new
+      described_class.new(argv: ["--write", "lib", "--config=#{File.join(root, '.rigor.yml')}"],
+                          out: StringIO.new, err: err).run
+
+      expect(err.string).to include("  Query < BaseRecord\n")
+    end
   end
 end

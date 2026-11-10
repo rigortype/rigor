@@ -289,6 +289,39 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
     end
   end
 
+  # Issue #3030 — the routing hint for a directory set up for an `rbs collection` lockfile that has none.
+  describe "rbs_collection_setup_hint_diagnostics" do
+    it "reports one :info naming the bin/test setup in a gem_rbs_collection test directory" do
+      allow(Rigor::Environment::RbsCollectionDiscovery).to receive(:missing_lockfile_hint)
+        .and_return(:collection_test_dir)
+
+      diagnostics = build_aggregator.rbs_collection_setup_hint_diagnostics
+
+      expect(diagnostics.map(&:rule)).to eq(["rbs.coverage.collection-not-installed"])
+      expect(diagnostics.first.severity).to eq(:info)
+      expect(diagnostics.first.message).to include("rbs_collection.lock.yaml").and include("`bin/test`")
+    end
+
+    it "names `rbs collection install` beside an rbs_collection.yaml" do
+      allow(Rigor::Environment::RbsCollectionDiscovery).to receive(:missing_lockfile_hint)
+        .and_return(:collection_config)
+
+      expect(build_aggregator.rbs_collection_setup_hint_diagnostics.first.message)
+        .to include("run `rbs collection install`")
+    end
+
+    it "passes the configured lockfile and auto-detect setting, and is silent with no hint" do
+      allow(Rigor::Environment::RbsCollectionDiscovery).to receive(:missing_lockfile_hint).and_return(nil)
+      configuration = Rigor::Configuration.new(
+        "rbs_collection" => { "lockfile" => "custom.lock.yaml", "auto_detect" => false }
+      )
+
+      expect(build_aggregator(configuration: configuration).rbs_collection_setup_hint_diagnostics).to eq([])
+      expect(Rigor::Environment::RbsCollectionDiscovery).to have_received(:missing_lockfile_hint)
+        .with(lockfile_path: "custom.lock.yaml", project_root: Dir.pwd, auto_detect: false)
+    end
+  end
+
   describe "rbs_inline_annotation_hint_diagnostics" do
     def expansion_for(*paths)
       { files: paths, errors: [] }

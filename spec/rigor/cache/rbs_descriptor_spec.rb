@@ -106,9 +106,13 @@ RSpec.describe Rigor::Cache::RbsDescriptor do
     end
     let(:extra_sig_dir) { sig_dir("extra_sig", "extra.rbs", "class DigestGateExtra\nend\n") }
     # Issue #2978 — a gem's collection copy redeclaring `DigestGateCopy#c`: eager, both copies load; subordinate,
-    # the copy's `c` stands down to the project's.
+    # the copy's `c` stands down to the project's. Issue #3030 — and a `_test/` fixture, which loads unless the
+    # directory is named a collection gem directory.
     let(:collection_sig_dir) do
-      sig_dir("collection_sig", "copy.rbs", "class DigestGateCopy\n  def c: () -> Symbol\nend\n")
+      path = sig_dir("collection_sig", "copy.rbs", "class DigestGateCopy\n  def c: () -> Symbol\nend\n")
+      FileUtils.mkdir_p(File.join(path, "_test"))
+      File.write(File.join(path, "_test", "fixture.rbs"), "class DigestGateFixture\nend\n")
+      path
     end
     # Issue #2517 — a selected core: the gem's own plus one class, so the env builds and still reads apart.
     let(:core_dir) do
@@ -150,7 +154,8 @@ RSpec.describe Rigor::Cache::RbsDescriptor do
         deferred_signature_paths: [[plugin_sig_dir], []],
         project_signature_paths: [[], [project_sig_dir]],
         core_root: [nil, core_dir],
-        subordinate_signature_paths: [[], [collection_sig_dir]]
+        subordinate_signature_paths: [[], [collection_sig_dir]],
+        collection_signature_paths: [[], [collection_sig_dir]]
       }
     end
 

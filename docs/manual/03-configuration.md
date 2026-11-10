@@ -233,6 +233,38 @@ explicitly with `bundler.bundle_path:`, or supply signatures another way:
 | `dependencies.budget_per_gem` | Integer | `5000` | Per-gem source-walk cap, counted in **method definitions** (not time): the walker stops harvesting a gem's catalog once it reaches this many `def`s, then emits `dynamic.dependency-source.budget-exceeded` and degrades the rest to `Dynamic[top]`. Range 1250–20000. |
 | `dependencies.budget_overrun_strategy` | String | `"walker_cap"` | What happens to calls on a gem that hit `budget_per_gem` (ADR-10 § 5b). `walker_cap` (default) lets methods past the cap fall through to the engine's normal user-class resolution. `dependency_silence` instead resolves any call on a class from a budget-exceeded gem to `Dynamic[top]`, silencing `call.undefined-method` on that gem's unrecorded surface at the cost of weaker static checking there. |
 
+#### Running Rigor in a gem_rbs_collection `_test/` directory
+
+To check a signature you are writing for
+[`ruby/gem_rbs_collection`](https://github.com/ruby/gem_rbs_collection), run
+Rigor in the gem's `gems/<name>/<version>/_test/` directory after the
+collection's own test setup:
+
+1. Run `bin/test gems/<name>/<version>` once from the collection root. It
+   writes `rbs_collection.yaml` and `rbs_collection.lock.yaml` into `_test/`
+   and installs the gem and its dependencies into `_test/.gem_rbs_collection/`,
+   with your working tree linked in as a `local` source.
+2. Put a `.rigor.yml` in `_test/`:
+
+   ```yaml
+   paths: ["."]
+   ```
+
+   Rigor finds the lockfile and loads the gem and its dependencies from it.
+   You do not need `signature_paths: [".."]`. If you add it, Rigor loads the gem
+   from your working tree and skips the lockfile's copy of the same gem and
+   version, so the gem is not loaded twice. Add `signature_paths: ["."]` if you
+   also want the `.rbs` files in `_test/` itself, as the `Steepfile` that
+   `bin/test` writes does.
+3. Run `rigor check` in `_test/`.
+
+Rigor skips every `_`-prefixed directory inside a collected gem, such as another
+gem's `_test/` fixtures, as `rbs` does. Rigor does not read `manifest.yaml`
+or a gemspec to find dependencies. Without a lockfile it loads none of them and
+reports `rbs.coverage.collection-not-installed` (`:info`), which tells you to run
+the `bin/test` setup, or `rbs collection install` where an `rbs_collection.yaml`
+is present.
+
 ### Execution
 
 | Key | Type | Default | Meaning |

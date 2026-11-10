@@ -21,6 +21,7 @@ RSpec.describe Rigor::Cache::RbsEnvironment do
       signature_paths: [sig_dir],
       deferred_signature_paths: [sig_dir],
       subordinate_signature_paths: [sig_dir],
+      collection_signature_paths: [sig_dir],
       virtual_rbs: [["forwarded_virtual.rbs", "class ForwardedVirtual\nend\n"]]
     )
   end

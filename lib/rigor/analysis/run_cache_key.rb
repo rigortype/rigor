@@ -99,7 +99,8 @@ module Rigor
           gems: [Cache::RbsDescriptor.rbs_gem_entry],
           dependencies: dependency_source_entries(configuration),
           configs: rbs_config_entries + engine_source_entries + lockfile_entries(configuration) +
-                   collection_setup_hint_entries(configuration) + template_unit_entries(template_units_digest) + shadow_harness_entries + [
+                   collection_setup_hint_entries(configuration) + template_unit_entries(template_units_digest) +
+                   shadow_harness_entries + [
                      config_entry("configuration", Marshal.dump(configuration.to_h)),
                      config_entry("engine",
                                   "#{Rigor::VERSION}:#{Cache::Descriptor::SCHEMA_VERSION}:#{explain}"),

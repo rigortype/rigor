@@ -196,7 +196,7 @@ Negative / carry-over:
   valuable one to find and the worst surfaced. `sig-gen` computes it over every exit and discards it;
   `def.return-type-mismatch` reports only the last expression and has false positives. Until #3062
   surfaces the computed verdict, early returns and untyped falsy arms are reading leads, and every
-  candidate needs a witness either way.
+  candidate needs a witness or that version's documentation either way.
 - A witness runs the library's code with the user's privileges. The skill sends third-party gems to a
   container or VM or to the user's go-ahead, but it is still execution that a static checker's workflow
   did not need before.

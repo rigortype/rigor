@@ -1,0 +1,3 @@
+- **[inference]** `line =~ /(a){,3}(b)/` no longer narrows `$1` to `String` on the match edge, since `{,n}` permits zero repetitions and leaves the group `nil` at run time. ([#1475](https://github.com/rigortype/rigor/issues/1475))
+  - `{,n}` joins `?`, `*` and `{0,…}` as a zero-permitting quantifier for numbered groups and `$+`; `{0,n}` and `{0}` were already read that way, and `{1,n}`, `{n}` and `+` still narrow.
+  - `{,}` with no digit after the comma is literal braces, not a quantifier, so a group before it still narrows.

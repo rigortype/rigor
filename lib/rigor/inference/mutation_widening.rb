@@ -445,10 +445,7 @@ module Rigor
           join_added_pairs(widen_hash_shape(type, values: values), method_name, arg_types,
                            ContentJoin.hash_shape_key_values(type))
         when Type::Constant then StringMutation.widen_constant(type, method_name)
-        when Type::Difference
-          widen_difference(type, method_name, arg_types: arg_types)
-        when Type::Refined then StringMutation.widen_refined(type, method_name)
-        when Type::Intersection then widen_string_intersection(type, method_name, arg_types)
+        when Type::Difference, Type::Refined, Type::Intersection then widen_refinement(type, method_name, arg_types)
         when Type::Union
           widen_union(type, method_name, values:, arg_types:, unread_arguments:, rewritten_element:, synthesised:)
         end
@@ -685,20 +682,22 @@ module Rigor
       def widen_string_intersection(intersection, method_name, arg_types)
         return nil unless intersection.members.any? { |m| StringMutation.refined?(m) }
 
-        members = intersection.members.map { |m| widen_carrier_member(m, method_name, arg_types) }
+        members = intersection.members.map { |m| widen_refinement(m, method_name, arg_types) || m }
         base = Type::Combinator.nominal_of("String")
         kept = members.reject { |m| m == base }
         widened = kept.empty? ? base : Type::Combinator.intersection(*kept)
         widened == intersection ? nil : widened
       end
 
-      def widen_carrier_member(member, method_name, arg_types)
-        widened =
-          case member
-          when Type::Refined then StringMutation.widen_refined(member, method_name)
-          when Type::Difference then widen_difference(member, method_name, arg_types:)
-          end
-        widened || member
+      # The refinement carriers {#widen_carrier} hands on: the empty witness ({#widen_difference}), a String predicate
+      # ({StringMutation.widen_refined}) and an intersection of them ({#widen_string_intersection}). `nil` when nothing
+      # widened.
+      def widen_refinement(type, method_name, arg_types)
+        case type
+        when Type::Difference then widen_difference(type, method_name, arg_types:)
+        when Type::Refined then StringMutation.widen_refined(type, method_name)
+        when Type::Intersection then widen_string_intersection(type, method_name, arg_types)
+        end
       end
 
       # `Tuple[A, B, C]` → `Nominal[Array, [union(A, B, C)]]`; under `values: :widen`, each element's

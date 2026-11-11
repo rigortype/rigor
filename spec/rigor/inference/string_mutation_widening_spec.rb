@@ -582,8 +582,6 @@ RSpec.describe "String mutation widening", type: :runner do
           class Digits
             %a{rigor:v1:return: decimal-int-string}
             def text: () -> String
-            %a{rigor:v1:return: decimal-int-string?}
-            def maybe: () -> String?
             %a{rigor:v1:return: non-empty-lowercase-string}
             def word: () -> String
           end
@@ -602,7 +600,8 @@ RSpec.describe "String mutation widening", type: :runner do
     end
 
     it "widens a union member" do
-      expect(dumped_types("s = Digits.new.maybe\ns&.clear\ndump_type(s)", sig: sig)).to eq(["String?"])
+      source = "s = [true, false].sample ? Digits.new.text : nil\ndump_type(s)\ns&.clear\ndump_type(s)"
+      expect(dumped_types(source, sig: sig)).to eq(["decimal-int-string?", "String?"])
     end
 
     it "widens an intersection member by member, keeping the witness only where the mutator cannot empty" do

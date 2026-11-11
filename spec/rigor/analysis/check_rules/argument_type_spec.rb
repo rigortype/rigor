@@ -51,6 +51,10 @@ RSpec.describe "argument-type mismatch (provenance gate, param overrides, accept
         %a{rigor:v1:param: value is non-empty-hash[Symbol, Integer]}
         def take_attrs: (Hash[Symbol, Integer] value) -> void
       end
+
+      class Nums
+        def label: (Integer i) -> String
+      end
     RBS
   end
 
@@ -327,6 +331,33 @@ RSpec.describe "argument-type mismatch (provenance gate, param overrides, accept
         "argument type mismatch at parameter `value' of `take_attrs' on Sink: " \
         "expected non-empty-hash[Symbol, Integer], got {}"
       )
+    end
+  end
+
+  # `Integer#to_s` on the `Nums#label` parameter infers `decimal-int-string`, a predicate refinement
+  # that can never hold `""` — the disjointness proof the `non-empty-string` param override reads off
+  # the carrier (#1264). An argument that may still be `""` keeps firing on the same parameter.
+  describe "empty-witness string override (a predicate refinement proves the witness absent)" do
+    it "stays clean on Integer#to_s" do
+      expect(arg_mismatches(<<~RUBY)).to be_empty
+        class Nums
+          def label(i)
+            Sink.new.take_name(i.to_s)
+            i.to_s
+          end
+        end
+      RUBY
+    end
+
+    it "still fires on an argument that may be empty" do
+      diagnostics = arg_mismatches(<<~RUBY)
+        class Nums
+          def label(i)
+            Sink.new.take_name(i.even? ? i.to_s : "")
+          end
+        end
+      RUBY
+      expect(diagnostics.size).to eq(1)
     end
   end
 

@@ -609,6 +609,7 @@ RSpec.describe "String mutation widening", type: :runner do
       expect(run("ab", 'concat("A")')).to eq("abA")
       expect(dumped_types(%(s = Digits.new.word\ns.concat("A")\ndump_type(s)), sig: sig)).to eq(["non-empty-string"])
       expect(dumped_types("s = Digits.new.word\ns.clear\ndump_type(s)", sig: sig)).to eq(["String"])
+      expect(dumped_types(%(s = Digits.new.word\ns.tr!("a", "_")\ndump_type(s)), sig: sig)).to eq(["non-empty-string"])
       expect(dumped_types("s = Digits.new.word\ns.length\ndump_type(s)", sig: sig))
         .to eq(["non-empty-lowercase-string"])
     end

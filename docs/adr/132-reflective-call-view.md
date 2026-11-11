@@ -1,7 +1,8 @@
 # ADR-132 — One reflective-call view for every analysis
 
-Status: **Proposed, 2026-11-12.** Nothing has landed. The first slice (S0: the seam, its unit spec, the
-spelling matrix and the source ratchet at today's counts) changes no behaviour. Archetype: deliberative.
+Status: **Accepted, 2026-11-12; no slice landed yet.** The maintainer ratified D1–D5 as
+recommended. The first slice (S0: the seam, its unit spec, the spelling matrix and the source
+ratchet at today's counts) changes no behaviour. Archetype: deliberative.
 Stakes: high — the seam is engine-wide and every behaviour slice moves diagnostics on correct code, though
 each slice is reversible on its own.
 
@@ -280,23 +281,23 @@ plus one matrix row.
 | Make the view an event of ADR-116 WD5's declaration walk | Only `ScopeIndexer` uses that walk. The view has to be the primitive; the walk's call event can carry an `Invocation` later. |
 | One migration PR | Against ADR-116's rule that behaviour never rides in a move, and the hot files collide with parallel lanes. |
 
-## Open decisions
+## Decisions ratified with this ADR
 
-Each has a recommendation; the maintainer ratifies them with this ADR.
+The maintainer accepted each recommendation below on 2026-11-12.
 
-- **D1 — Must or may, per consumer.** Recommend *may* for the censuses, floors, frame globals, effects
+- **D1 — Must or may, per consumer.** *May* for the censuses, floors, frame globals, effects
   taint and reachability; *must* for typing, folding, visibility rows, deprecations and sig-gen. The
   matrix records the choice per column.
-- **D2 — `public_send` of a private target in typing.** Recommend keeping ADR-5's optimism (type the
-  success path, as expression_typer.rb ~2733 documents) and adding no diagnostic. Consumers whose target
+- **D2 — `public_send` of a private target in typing.** Keep ADR-5's optimism (type the
+  success path, as expression_typer.rb ~2733 documents) and add no diagnostic. Consumers whose target
   is private (`main.include`, `module_function`, the `ruby2_keywords` deprecation) decline on
   `public_only`. `private_class_method` is public, so its exclusion is an accident S2 removes.
-- **D3 — The `copy` adapter.** Recommend quarantining `literal_send_target` behind the ratchet's allowlist
-  and retiring it only when the floors take `(node, name, receiver, offset)`; it threads through six
+- **D3 — The `copy` adapter.** Quarantine `literal_send_target` behind the ratchet's allowlist
+  and retire it only when the floors take `(node, name, receiver, offset)`; it threads through six
   modules. The `StatementEvaluator` copy passed to `type_of` gets its own issue.
-- **D4 — Plugins.** Recommend no plugin exposure until S7, then reconsider under ADR-128.
-- **D5 — Type-refined names** (`m = :push; a.send(m)`). Recommend leaving room for a typed constructor and
-  not building it until someone measures how many computed names type to a constant.
+- **D4 — Plugins.** No plugin exposure until S7, then reconsider under ADR-128.
+- **D5 — Type-refined names** (`m = :push; a.send(m)`). Leave room for a typed constructor and
+  do not build it until someone measures how many computed names type to a constant.
 
 ## Consequences
 

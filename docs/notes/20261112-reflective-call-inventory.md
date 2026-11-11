@@ -10,27 +10,35 @@ consults' corrections are folded into § "Corrections" rather than edited into t
 
 ## Frequency survey
 
-Fourteen survey checkouts under `~/repo/ruby/rigor-survey/` (22,867 files, 1,660,255 call nodes), counted
-with a Prism walk:
+All 49 checkouts under `~/repo/ruby/rigor-survey/` (the corpus listed in
+[`docs/agents/measurement.md`](../agents/measurement.md); 72,127 files, 7,651,449 call nodes, `vendor/` and
+`node_modules/` skipped), counted with the Prism walk in § "Survey script". To reproduce:
+`ruby survey.rb ~/repo/ruby/rigor-survey/*/`.
 
 | spelling | sites | share of calls |
 |---|---|---|
-| `send` family, all | 2,778 | 0.167% |
-| literal name | 1,538 | 0.093% |
-| ... naming an ordinary method (the private-call idiom) | 1,370 | |
-| ... naming a metaprogramming selector | 168 | 0.010% |
-| ... written as a `StringNode` | 5 | |
-| ... through `public_send` | 18 | |
-| interpolated name | 251 | |
-| computed name | 989 | |
-| `&:sym` | 7,310 | 0.440% |
+| `send` family, all | 9,947 | 0.130% |
+| literal name | 6,355 | 0.083% |
+| ... naming an ordinary method (the private-call idiom) | 6,095 | |
+| ... naming a metaprogramming selector | 260 | 0.003% |
+| ... written as a `StringNode` | 6 | |
+| ... through `public_send` | 20 | |
+| interpolated name | 919 | |
+| computed name (anything else, splats included) | 2,673 | |
+| `&:sym` | 17,601 | 0.230% |
 
-The 168 metaprogramming sends are `remove_const` 85, `include` 23, `define_method` 17, `alias_method` 13,
-`remove_method` 11, `const_set` 7, `private` 5, and 7 more across five selectors. Literal
-`method(:m).call` / `bind_call` chains: 2 in a 2,607-file sample.
+The 260 metaprogramming sends are `remove_const` 107, `include` 47, `define_method` 27, `alias_method` 19,
+`remove_method` 12, `instance_variable_set` 10, `const_set` 9, `undef_method` 9, and 20 more across ten
+selectors. A sibling walk over the same checkouts counted literal handle chains
+(`r.method(:m)` / `instance_method(:m)` read by `call`, `===`, `[]` or `bind_call`): 92, of which 16 are
+`bind_call`; and 25 block-passes of a handle (`&r.method(:m)`).
 
-So the corpus exercises few of the 36 sites. A byte-identical corpus diff is weak evidence that a move
-preserved behaviour, which is why ADR-132 pins a synthetic spelling matrix before anything moves.
+So the corpus exercises few of the 36 sites, and 36% of sends have no literal name. A byte-identical
+corpus diff is weak evidence that a move preserved behaviour, which is why ADR-132 pins a synthetic
+spelling matrix, one column per site, before anything moves.
+
+An earlier pass over a 14-checkout subset (22,867 files) gave the same picture: `send` family 0.167%,
+metaprogramming sends 0.010%, 45% without a literal name.
 
 ## Corrections
 
@@ -39,7 +47,14 @@ preserved behaviour, which is why ADR-132 pins a synthetic spelling matrix befor
   one probe did not reach it.
 - Prism `Node#copy` has three callers, not two: `StatementEvaluator` also passes a copy to `type_of`
   (statement_evaluator.rb ~2083), which can never hit the identity-keyed memo.
-- A line grep finds 39 send-name literals: 27 `%i[]` and 12 `Set[...]`.
+- A line grep finds 39 constants that hold a sender name: 27 `%i[]` and 12 `Set[...]`. A Prism walk finds
+  26 constants exactly equal to `{send, __send__, public_send}` (the inventory's 23 missed three), and about
+  116 sender-name SymbolNodes in all.
+- Thirteen sites drop the selector argument by hand, not eleven (the coverage table lists thirteen rows).
+- Only three `public_send` exclusions are deliberate: `ModuleFunctionState::Spellings` and
+  `toplevel_include_owner` (the target is private), and `RubyDeprecations::SEND_NAMES` (`ruby2_keywords`
+  is private). The `private_class_method` half of `VISIBILITY_SEND_CALLS` is accidental:
+  `Module#private_class_method` is public, so `public_send(:private_class_method, :x)` works.
 - `#1872` produces a wrong type, not only a lost one: `Integer("1", exception: false)` types `Integer?`,
   while `send(:Integer, "1", exception: false)` types `Integer`.
 - `ExpressionTyper#try_literal_send` assumes every `send` is `Kernel#send`. A class that defines its own
@@ -47,6 +62,12 @@ preserved behaviour, which is why ADR-132 pins a synthetic spelling matrix befor
   `Mailer.new.send(:hello, 0).even?` reports `call.undefined-method` for `"0"`, and Ruby prints `false`.
   Only the typer's SymbolNode-only extraction keeps the socket idiom `sock.send("payload", 0)` out of the
   same trap.
+- The same assumption gives a wrong type outside the typer. `ReturnBarrier.block_call?` reads
+  `send(:lambda) { return nil }` as a lambda barrier on any receiver. In a class whose own `send(_name)`
+  yields, `rigor type-of` types the method `Integer` where Ruby returns `nil`. Over-approximating a call is
+  not the safe direction for a consumer whose answer narrows a type or emits a diagnostic.
+- `&:m` and `&r.method(:m)` differ: for `&:m` the first yielded value is `self` and the rest are arguments;
+  for `&r.method(:m)` the receiver is `r` and every yielded value is an argument (Ruby 4.0.5).
 - Of the 27 issues the inventory maps, the view closes three outright (#1872, #2167, #2704). About eleven
   lose one item. About twelve are receiver resolution, closure, or eval-semantics problems the view does not
   touch.
@@ -225,3 +246,59 @@ Best seed: a `Rigor::Source::ReflectiveCall` view built from `ReceiverWriterCall
 | #1920 | rigor-rspec `define_method(:==)` | plugin (out of scope), row 47 |
 | #2356 | `instance_eval { def name }` or `singleton_class.include` silences sibling classes | rows 36 (`singleton_naming_call_names`), 50 |
 | #2048 | singleton rewrites: method-body rewrites, `class << self attr_writer` | rows 36, 47 (`singleton_naming_call_names`, scope_indexer.rb:7155-7170) |
+
+## Survey script
+
+```ruby
+# frozen_string_literal: true
+require "prism"
+SENDS = %i[send __send__ public_send].freeze
+META = %w[include extend prepend private public protected module_function define_method define_singleton_method
+          alias_method attr_reader attr_writer attr_accessor instance_variable_set instance_variable_get const_get
+          const_set class_eval module_eval instance_eval instance_exec class_exec module_exec eval remove_method
+          undef_method private_class_method public_class_method private_constant remove_const binding
+          method instance_method respond_to? send __send__ public_send].freeze
+class V < Prism::Visitor
+  attr_reader :inner, :tot
+  def initialize = (super; @inner = Hash.new(0); @tot = Hash.new(0))
+  def visit_call_node(node)
+    @tot[:calls] += 1
+    if SENDS.include?(node.name)
+      @tot[:send_family] += 1
+      f = node.arguments&.arguments&.first
+      if f.is_a?(Prism::SymbolNode) || f.is_a?(Prism::StringNode)
+        @tot[:literal] += 1
+        @tot[:literal_string] += 1 if f.is_a?(Prism::StringNode)
+        @tot[:literal_public_send] += 1 if node.name == :public_send
+        n = f.unescaped
+        if META.include?(n)
+          @inner[n] += 1; @tot[:literal_meta] += 1
+        else
+          @tot[:literal_plain] += 1
+          @tot[:literal_plain_setter] += 1 if n.end_with?("=")
+        end
+      elsif f.is_a?(Prism::InterpolatedStringNode) || f.is_a?(Prism::InterpolatedSymbolNode)
+        @tot[:interpolated] += 1
+      else
+        @tot[:computed] += 1
+      end
+    end
+    b = node.block
+    @tot[:amp_sym] += 1 if b.is_a?(Prism::BlockArgumentNode) && b.expression.is_a?(Prism::SymbolNode)
+    super
+  end
+end
+v = V.new
+n = 0
+ARGV.each do |dir|
+  Dir.glob(File.join(dir, "**/*.rb")).each do |f|
+    next if f.include?("/vendor/") || f.include?("/node_modules/")
+    n += 1
+    Prism.parse_file(f).value.accept(v) rescue next
+  end
+end
+puts "files=#{n}"
+v.tot.sort_by { |k, _| k.to_s }.each { |k, c| puts format("  %-22s %8d %8.4f%%", k, c, 100.0 * c / v.tot[:calls]) }
+puts "inner meta selectors sent by literal name:"
+v.inner.sort_by { |_, c| -c }.each { |k, c| puts "  #{k}: #{c}" }
+```

@@ -359,6 +359,21 @@ RSpec.describe "argument-type mismatch (provenance gate, param overrides, accept
       RUBY
       expect(diagnostics.size).to eq(1)
     end
+
+    # The refinement is a proof only until the buffer changes: `clear` empties it, so it widens to `String`.
+    it "fires once a mutator may have emptied the refined buffer" do
+      diagnostics = arg_mismatches(<<~RUBY)
+        class Nums
+          def label(i)
+            s = i.to_s
+            s.clear
+            Sink.new.take_name(s)
+            s
+          end
+        end
+      RUBY
+      expect(diagnostics.size).to eq(1)
+    end
   end
 
   describe "interface_admits_nil? (an interface parameter on the nil channel)" do

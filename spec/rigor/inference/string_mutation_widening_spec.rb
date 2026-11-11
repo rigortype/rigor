@@ -572,6 +572,48 @@ RSpec.describe "String mutation widening", type: :runner do
     end
   end
 
+  # A predicate refinement (`Type::Refined`) survived every mutator: `s = i.to_s; s.clear` kept `decimal-int-string`
+  # for an empty buffer, which `non-empty-string` then accepted (#3075 review). Any mutation can falsify a predicate,
+  # so the refinement widens to `String`; an intersection widens member by member, its witness on the terms above.
+  describe "a predicate refinement" do
+    let(:sig) do
+      {
+        "digits.rbs" => <<~RBS
+          class Digits
+            %a{rigor:v1:return: decimal-int-string}
+            def text: () -> String
+            %a{rigor:v1:return: decimal-int-string?}
+            def maybe: () -> String?
+            %a{rigor:v1:return: non-empty-lowercase-string}
+            def word: () -> String
+          end
+        RBS
+      }
+    end
+
+    it "widens to String under a mutator" do
+      expect(run("12", "clear")).to be_empty
+      expect(dumped_types("s = Digits.new.text\ns.clear\ndump_type(s)", sig: sig)).to eq(["String"])
+      expect(dumped_types(%(s = Digits.new.text\ns.sub!(/\\A0+/, "")\ndump_type(s)), sig: sig)).to eq(["String"])
+    end
+
+    it "keeps the refinement under a non-mutating call" do
+      expect(dumped_types("s = Digits.new.text\ns.length\ndump_type(s)", sig: sig)).to eq(["decimal-int-string"])
+    end
+
+    it "widens a union member" do
+      expect(dumped_types("s = Digits.new.maybe\ns&.clear\ndump_type(s)", sig: sig)).to eq(["String?"])
+    end
+
+    it "widens an intersection member by member, keeping the witness only where the mutator cannot empty" do
+      expect(run("ab", 'concat("A")')).to eq("abA")
+      expect(dumped_types(%(s = Digits.new.word\ns.concat("A")\ndump_type(s)), sig: sig)).to eq(["non-empty-string"])
+      expect(dumped_types("s = Digits.new.word\ns.clear\ndump_type(s)", sig: sig)).to eq(["String"])
+      expect(dumped_types("s = Digits.new.word\ns.length\ndump_type(s)", sig: sig))
+        .to eq(["non-empty-lowercase-string"])
+    end
+  end
+
   # The drift guard. The table is hand-written, and every seam above reads it, so a mutator missing from it is missing
   # everywhere at once.
   describe "the mutator table" do

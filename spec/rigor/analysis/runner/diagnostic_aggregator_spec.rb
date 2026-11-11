@@ -282,6 +282,63 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
       end
     end
 
+    # Issue #2962 — the coverage check reads the same resolved library list the environment loads
+    # (`Environment::BaseLibraries.resolve`), not `DEFAULT_LIBRARIES` alone: a gem named under
+    # `libraries:` HAS RBS and must not be reported missing. `auto_detect: false` keeps the real
+    # `stdlib_library_names` read deterministic regardless of the spec's cwd.
+    it "does not report a locked gem covered through `libraries:`" do
+      locked = {
+        "minitest" => Rigor::Environment::LockfileResolver::LockedGem.new(
+          name: "minitest", version: "5.0.0", platform: "ruby"
+        ),
+        "totally-uncovered-gem" => Rigor::Environment::LockfileResolver::LockedGem.new(
+          name: "totally-uncovered-gem", version: "1.0.0", platform: "ruby"
+        )
+      }
+      allow(Rigor::Environment::LockfileResolver).to receive(:locked_gems).and_return(locked)
+      allow(Rigor::Environment::BundleSigDiscovery).to receive(:discover).and_return([])
+      allow(Rigor::Environment::RbsCollectionDiscovery).to receive(:discover).and_return([])
+      configuration = Rigor::Configuration.new(
+        "libraries" => ["minitest"], "rbs_collection" => { "auto_detect" => false }
+      )
+
+      message = build_aggregator(configuration: configuration).rbs_coverage_diagnostics.first.message
+
+      expect(message).to include("1 gem(s)").and include("totally-uncovered-gem")
+      expect(message).not_to include("minitest")
+    end
+
+    # Issue #2962 — same for a lockfile `source: { type: stdlib }` entry: it installs nothing under the
+    # collection root (so `discover` stays real and returns []), but its name loads as an RBS library.
+    it "does not report a locked gem covered through a lockfile stdlib entry" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "rbs_collection.lock.yaml"), <<~YAML)
+          ---
+          path: ".gem_rbs_collection"
+          gems:
+          - { name: ripper, version: '0', source: { type: stdlib } }
+        YAML
+        locked = {
+          "ripper" => Rigor::Environment::LockfileResolver::LockedGem.new(
+            name: "ripper", version: "0.1.0", platform: "ruby"
+          ),
+          "totally-uncovered-gem" => Rigor::Environment::LockfileResolver::LockedGem.new(
+            name: "totally-uncovered-gem", version: "1.0.0", platform: "ruby"
+          )
+        }
+        allow(Rigor::Environment::LockfileResolver).to receive(:locked_gems).and_return(locked)
+        allow(Rigor::Environment::BundleSigDiscovery).to receive(:discover).and_return([])
+        configuration = Rigor::Configuration.new(
+          "rbs_collection" => { "lockfile" => File.join(dir, "rbs_collection.lock.yaml") }
+        )
+
+        message = build_aggregator(configuration: configuration).rbs_coverage_diagnostics.first.message
+
+        expect(message).to include("1 gem(s)").and include("totally-uncovered-gem")
+        expect(message).not_to include("ripper")
+      end
+    end
+
     it "is silent when the project has no lockfile (nothing locked to classify)" do
       allow(Rigor::Environment::LockfileResolver).to receive(:locked_gems).and_return({})
 

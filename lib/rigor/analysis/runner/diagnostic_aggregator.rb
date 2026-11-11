@@ -250,7 +250,8 @@ module Rigor
 
         # O4 Layer 3 slice 3 — graceful-degradation coverage report. When the project has a `Gemfile.lock`
         # (slice 1) and one or more locked gems are not covered by ANY of the four RBS resolution paths
-        # (`DEFAULT_LIBRARIES`, `data/vendored_gem_sigs/`, slice-1 bundle-shipped `sig/`, slice-2
+        # (the resolved library list — `DEFAULT_LIBRARIES` + `libraries:` + the collection lockfile's stdlib
+        # entries, `data/vendored_gem_sigs/`, slice-1 bundle-shipped `sig/`, slice-2
         # `rbs_collection.lock.yaml`), emit a single `:info` diagnostic summarising the uncovered set so the
         # user can act on it (run `rbs collection install`, opt the gem into `dependencies.source_inference:`,
         # or accept the `Dynamic[T]` fallback).
@@ -281,7 +282,7 @@ module Rigor
           )
           rows = Environment::RbsCoverageReport.classify(
             locked_gems: locked,
-            default_libraries: Environment::DEFAULT_LIBRARIES,
+            default_libraries: resolved_default_libraries,
             bundle_sig_paths: bundle_sig_paths,
             rbs_collection_paths: collection_paths
           )
@@ -324,6 +325,19 @@ module Rigor
             source_family: :builtin
           )
         end
+
+        # Issue #2962 — the library list is {Environment::BaseLibraries.resolve}'s, the same merge
+        # `Environment.for_project` loads, so a gem covered through `libraries:` or a lockfile stdlib
+        # entry is not reported missing.
+        def resolved_default_libraries
+          Environment::BaseLibraries.resolve(
+            @configuration.libraries,
+            rbs_collection_lockfile: @configuration.rbs_collection_lockfile,
+            rbs_collection_auto_detect: @configuration.rbs_collection_auto_detect,
+            root: Dir.pwd
+          )
+        end
+        private :resolved_default_libraries
 
         # Issue #2441 — the same project-own set `Environment.for_project` skips the collection copy of.
         def project_own_gem_names(locked)

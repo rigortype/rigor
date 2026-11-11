@@ -1072,14 +1072,19 @@ module Rigor
       # The gate for one `dynamic_return` rule. Method-name gate first — a Symbol-array probe vs the receiver
       # ancestry resolution below (ADR-52 WD1); both are pure predicates, so order only affects cost. A
       # receiver-less rule (ADR-52 WD2) skips the ancestry check entirely and fires on the method name alone.
+      # The engine also offers the nameless nodes of #2717 (the `&:sym` BlockArgumentNode, the compound
+      # write nodes) to a plugin `build_name_gates` left ungated; only `CallNode` answers `name`, so a
+      # name-gated rule declines them (`include?(nil)` is false) rather than raising past the later rules
+      # (#2764).
       def dynamic_return_rule_applies?(rule, call_node, receiver_type, environment, scope)
-        return false if rule[:methods] && !resolved_dynamic_return_methods(rule).include?(call_node.name)
+        name = call_node.respond_to?(:name) ? call_node.name : nil
+        return false if rule[:methods] && !resolved_dynamic_return_methods(rule).include?(name)
 
         if rule[:file_methods]
           # The path is read here, not in `dynamic_return_type`, so a spec-double scope without
           # `source_path` only affects `file_methods:` rules (other gate forms never touch it).
           path = scope.respond_to?(:source_path) ? scope.source_path : nil
-          return false unless resolved_dynamic_return_file_methods(rule, path).include?(call_node.name)
+          return false unless resolved_dynamic_return_file_methods(rule, path).include?(name)
         end
 
         entries = resolved_dynamic_return_receiver_entries(rule)

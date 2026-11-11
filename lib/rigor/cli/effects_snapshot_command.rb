@@ -91,7 +91,14 @@ module Rigor
       # exists" hazard: it records observations, so overwriting it is the whole point of running it.
       def write(configuration, snapshot)
         path = configuration.effects_snapshot_path
-        File.write(path, snapshot.to_yaml)
+        begin
+          File.write(path, snapshot.to_yaml)
+        rescue SystemCallError => e
+          # #2576 — an `effects.snapshot.path:` that cannot be written is a usage error, the same rule
+          # `rigor init --path` follows (#2562): one line on stderr and exit 64, no backtrace.
+          @err.puts("rigor effects: cannot write #{path}: #{e.message.sub(/ @ .*\z/m, '')}")
+          return CLI::EXIT_USAGE
+        end
         @err.puts("rigor: wrote #{path} (#{snapshot.methods.size} method(s), #{snapshot.reach.size} reach entr" \
                   "#{snapshot.reach.size == 1 ? 'y' : 'ies'})")
         # #436 — the note names what to write, not only what is missing: the same per-project preset

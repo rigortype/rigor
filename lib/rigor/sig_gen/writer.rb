@@ -38,6 +38,20 @@ module Rigor
                               :target, keyword_init: true)
       private_constant :MergeState
 
+      # #2576 — a target the writer cannot write (a missing parent, a permission denial, a directory
+      # sitting where the `.rbs` belongs) is a bad `--write` invocation, not a crash: the command
+      # reports it as the same usage error `rigor init --path` gives and exits 64. Carries the target
+      # and the stripped Errno reason so the CLI prints `cannot write PATH: REASON` without
+      # re-parsing the message.
+      class WriteError < StandardError
+        attr_reader :target_path
+
+        def initialize(target_path, error)
+          @target_path = target_path.to_s
+          super("cannot write #{@target_path}: #{error.message.sub(/ @ .*\z/m, '')}")
+        end
+      end
+
       # The target routing this writer applies; the generator maps candidates through it to ask {#accepts_target?}.
       attr_reader :path_mapper
 
@@ -186,6 +200,8 @@ module Rigor
         end
 
         target.exist? ? update_existing(source_path, target, candidates) : create_new(source_path, target, candidates)
+      rescue SystemCallError => e
+        raise WriteError.new(target, e)
       end
 
       # Deliberately NARROWER than {Classification::EMITTABLE}: the write path has never produced a
@@ -222,6 +238,8 @@ module Rigor
         end
         WriteResult.new(source_path: source_path, target_path: target,
                         action: :created, applied: candidates)
+      rescue SystemCallError => e
+        raise WriteError.new(target, e)
       end
 
       # ADR-14 gap-#3 follow-up (c): when one candidate's `class_name` is a strict prefix of another's, emit a
@@ -429,6 +447,8 @@ module Rigor
                         action: :updated, applied: state.applied, skipped: state.skipped,
                         left_unreadable: state.left_unreadable, replaced: state.replaced,
                         repaired_headers: state.repaired_headers)
+      rescue SystemCallError => e
+        raise WriteError.new(target, e)
       end
 
       # Applies every class group, then every requested shell, then normalises the layout the three steps

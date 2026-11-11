@@ -308,6 +308,13 @@ module Rigor
         # user asked for a write and did not get one, so the command must not report success — a green
         # `sig-gen --write` in CI would otherwise mean nothing.
         results.any? { |result| TARGET_REFUSALS.include?(result.action) } || !refused.empty? ? 1 : 0
+      rescue SigGen::Writer::WriteError => e
+        # #2576 — a target that cannot be written at all (missing parent, permission denial, a directory
+        # where the `.rbs` belongs) is a usage error, the same rule `rigor init --path` follows (#2562):
+        # one line on stderr and exit 64. The run stops at the first failure; targets already written
+        # stay written.
+        @err.puts("rigor sig-gen: #{e.message}")
+        CLI::EXIT_USAGE
       end
 
       # ADR-112 WD4 — the methods whose inline and `sig/` declarations disagree, refused because the run did not

@@ -145,6 +145,7 @@ This directory contains the Architecture Decision Records (ADRs) for Rigor. Each
 | ADR-129 | [Remember `type_of` results under a closed typing state](129-type-of-result-memo.md) | Accepted (stages 1–3 landed; stage 4 stopped at its engine-warm re-evaluation trigger; nothing live, the memo is a shadow/audit tool) |
 | ADR-130 | [Plugin-interface values: member dispatch, and `untyped` everywhere else](130-interface-typed-values-dispatch-under-untyped-parity.md) | Accepted (slice 1a landed in #2808; slice 1b landed in #2815; slice 2 landed in #2822) |
 | ADR-131 | [Declarations are contracts: documented intent as an RBS authoring source](131-declarations-are-contracts.md) | Accepted (`rigor-rbs-contract` skill and the ADR-108 amendment to `rigor-type-oracle` landed in #3061; the audit surface is #3062) |
+| ADR-132 | [One reflective-call view for every analysis](132-reflective-call-view.md) | Proposed |
 
 ## Adding a New ADR
 

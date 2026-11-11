@@ -104,9 +104,13 @@ module EngineDiagDiff
     nil
   end
 
-  # The diagnostics of a `--format json` document, as keyed rows in a total order.
+  # The diagnostics of a `--format json` document, as keyed rows in a total order. A `.`-rooted target makes
+  # `rigor check` print `./`-prefixed paths; the prefix is dropped so the rows key like any other
+  # corpus-relative spelling (`app/foo.rb`), which is what floors and adjudication entries name.
   def rows(document)
-    document.fetch("diagnostics").map { |hash| KEY_FIELDS.map { |field| hash[field] } }.sort_by do |path, line, column, rule, message|
+    document.fetch("diagnostics").map do |hash|
+      KEY_FIELDS.map { |field| field == "path" ? hash[field].to_s.delete_prefix("./") : hash[field] }
+    end.sort_by do |path, line, column, rule, message|
       [path.to_s, line.to_i, column.to_i, rule.to_s, message.to_s]
     end
   end

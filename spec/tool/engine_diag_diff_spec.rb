@@ -42,6 +42,19 @@ RSpec.describe "tool/engine_diag_diff.rb" do
     end
   end
 
+  describe ".rows" do
+    it "drops the ./ prefix a . target prints, so floors key like any corpus-relative spelling" do
+      document = { "diagnostics" => [
+        { "path" => "./app/foo.rb", "line" => 1, "column" => 1, "rule" => "call.wrong-arity", "message" => "m" }
+      ] }
+      rows = EngineDiagDiff.rows(document)
+      expect(rows).to eq([["app/foo.rb", 1, 1, "call.wrong-arity", "m"]])
+      result = EngineDiagDiff.report(base_rows: rows, head_rows: rows, rule: "call.wrong-arity", entries: [],
+                                     base_sha: "abc1234def5678", floors: [["app/", 1]])
+      expect(result[:ok]).to be(true)
+    end
+  end
+
   describe ".load_adjudication" do
     it "reads an empty list and no file as nothing adjudicated" do
       expect(adjudication).to eq([])

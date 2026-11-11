@@ -176,6 +176,24 @@ RSpec.describe "tool/engine_diag_diff.rb" do
       end
     end
 
+    it "names the corpus root itself ., so paths: [.] measures the corpus relatively" do
+      with_corpus("paths:\n  - .\n") do |_base, corpus|
+        result = EngineDiagDiff.run_corpus_paths(EngineDiagDiff::ROOT, File.realpath(corpus))
+        expect(result).to eq("config" => ".rigor.yml", "paths" => ["."])
+      end
+    end
+
+    it "names the corpus root ., however the entry spells it through a symlinked ancestor" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "real", "corpus", "lib"))
+        link = File.join(dir, "link")
+        File.symlink(File.join(dir, "real"), link)
+        File.write(File.join(dir, "real", "corpus", ".rigor.yml"), "paths:\n  - #{link}/corpus\n")
+        result = EngineDiagDiff.run_corpus_paths(EngineDiagDiff::ROOT, File.join(link, "corpus"))
+        expect(result.fetch("paths")).to eq(["."])
+      end
+    end
+
     it "names no paths when there is no configuration file, or paths: is null" do
       with_corpus(nil) do |_base, corpus|
         expect(EngineDiagDiff.run_corpus_paths(EngineDiagDiff::ROOT, File.realpath(corpus)))

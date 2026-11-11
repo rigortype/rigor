@@ -2010,7 +2010,7 @@ module Rigor
 
         # Returns the Set of 1-based numbered-capture indices that are UNCONDITIONAL in
         # `source`: present on every successful match because no optional quantifier (`?`,
-        # `*`, `{0,…}`) applies to the group or any ancestor group, and the pattern contains no
+        # `*`, `{0,…}`, `{,…}`) applies to the group or any ancestor group, and the pattern contains no
         # alternation (`|`). Optional and alternation-reachable groups are excluded — at
         # runtime `$N` is `nil` for them even when the overall match succeeds, so narrowing
         # them to non-nil `String` would be unsound. The walker is intentionally light (char
@@ -2094,13 +2094,15 @@ module Rigor
         end
 
         # True when the group whose closing paren is at `source[pos]` is followed by a
-        # quantifier that permits zero repetitions (`?`, `*`, `{0…}`). `+` and `{1,…}` do NOT
-        # make a group optional. A lazy/possessive suffix (`*?`, `*+`) is still zero-permitting
-        # on the base quantifier.
+        # quantifier that permits zero repetitions (`?`, `*`, `{0…}`, `{,…}`). `+` and `{1,…}`
+        # do NOT make a group optional. A lazy/possessive suffix (`*?`, `*+`) is still
+        # zero-permitting on the base quantifier. `{,…}` counts only with a digit after the
+        # comma — `{,}`, `{,x}` and `{, }` are literal braces, not quantifiers.
         def next_quantifier_optional?(source, pos)
           case source[pos]
           when "?", "*" then true
-          when "{" then source[pos + 1] == "0"
+          when "{" then source[pos + 1] == "0" ||
+            (source[pos + 1] == "," && source[pos + 2].to_s.match?(/\d/))
           else false
           end
         end

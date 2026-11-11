@@ -115,8 +115,9 @@ end
 
   `argument_nodes(inv)` returns the tree's own nodes for an Integer offset and nil otherwise, so no
   consumer indexes with a Symbol and `type_of(arg)` keeps hitting the memo.
-- `self_node` is a node, `:implicit`, or `:yielded` (only for `&:m`). For `r.method(:m).call` and
-  `&r.method(:m)` it is `r`, because the capture happens at `method`. `owner_node` is set only for
+- `self_node` is a node, `:implicit`, `:yielded` (only for `&:m`), or `nil` when a splat hides the bound
+  receiver (`bind_call(*xs)`, `.bind(*xs).call`), with the same must/may rule as a `nil` offset. For
+  `r.method(:m).call` and `&r.method(:m)` it is `r`, because the capture happens at `method`. `owner_node` is set only for
   `instance_method` chains: lookup starts at that module's instance side, not at `self`'s class.
 - `via` names the governing spelling. `public_only` is true when Ruby raises unless the target is public:
   `public_send`, `public_method`, `public_instance_method`, and `&:m` (a Ruby 4.0.5 probe raises
@@ -131,7 +132,7 @@ are the four partial views that exist today: `ReceiverWriterCall.called` (receiv
 
 **Cost.** On a non-reflective node `invocation` and `called_name` are one frozen-Set lookup on `node.name`,
 plus a receiver check for the invoker names. Neither allocates. A reflective node allocates one `Data`.
-There is no memo: it would pin trees, add a run-scoped slot (ADR-129), and cost more than the 0.17% it
+There is no memo: it would pin trees, add a run-scoped slot (ADR-129), and cost more than the 0.13% it
 serves.
 
 ### WD2 — Guardrails: what the view must not do
@@ -146,8 +147,9 @@ serves.
    Marshalled; rows store offsets.
 4. **Look like a `CallNode`.** No field shares a name with a `Prism::CallNode` reader. That alone does not
    fail loudly: dispatch tiers guard with `respond_to?` and rescue, so a stray `Invocation` would quietly
-   take a "not a call" branch, the #1872 shape again. `CallContext.build` therefore asserts that
-   `call_node` is a Prism node (WD3). #1872 was a value that half-corresponded.
+   take a "not a call" branch, the #1872 shape again. The call context therefore asserts that
+   `call_node` is a Prism node or `nil`, in its `Data` initializer so that `with` cannot bypass it (WD3).
+   #1872 was a value that half-corresponded.
 5. **Read outside the subtree.** No parent walks, no locals, no code strings, no framework spellings.
 6. **Classify selectors.** It does not know that `define_method` defines or that `instance_eval` rebinds.
    The role names live in a separate table (WD4).
@@ -168,9 +170,11 @@ today and reads the selector as an argument), `InterfaceShape` (~119), `KernelDi
 `HashTransformKeysFolding` (~167), `SetFolding` (~108), `DataFolding` and `StructFolding`'s
 `keyword_new?`, `ShapeDispatch` (~356), `MatchDataFolding` (~71), `ArgumentNodes.keyword_hash_last?`,
 `explicit_non_self_receiver?` (whose outer-node reading makes `o.send(:priv)` public-only today), and the
-plugin contribution gate (which sees `:send` and never applies to `x.send(:find, 1)`). A spec forbids
-`call_node.arguments`, `.receiver` and `.name` under `method_dispatcher/`, so the list cannot go stale.
-`CallContext.build` asserts that `call_node` is a Prism node. `try_literal_send` then dispatches with
+plugin contribution gate (which sees `:send` and never applies to `x.send(:find, 1)`). So the list cannot
+go stale, a spec walks `method_dispatcher.rb` and `method_dispatcher/` with Prism and fails on any
+`arguments`, `receiver`, `name` or `block` read whose receiver is `context.call_node`, a `call_node`
+parameter, or a local bound from either (`node = context.call_node`). The context asserts in its
+initializer that `call_node` is a Prism node or `nil`. `try_literal_send` then dispatches with
 `call_node: inv.node`, the offset and `inv.public_only`. The side tables stay keyed by the node the user
 wrote, and every tier sees what the direct call would give it. The context stays in its 160-byte slot at
 that field count (measured).
@@ -180,14 +184,19 @@ the receiver, so the view cannot know it (WD2.1). Each consumer's answer goes on
 turns out to be an ordinary method named `send`:
 
 - A consumer whose answer **widens** — the censuses, the mutation floors, reachability, the `$~` / `$_`
-  taint — loses only precision by reading it as reflective. It needs no check.
+  taint, and `LastStatus` reading a call as clearing `$?` — loses only precision by reading it as
+  reflective. It needs no check.
 - A consumer whose answer **narrows a type or emits a diagnostic** — the typer, constant folding,
-  `ReturnBarrier`, effects edges, deprecations, visibility rows — produces a wrong type or a false
-  positive. It checks that the receiver's `send` (or, for a handle chain, `method` / `instance_method`)
-  resolves to `Kernel` / `BasicObject` with no project or RBS override, and takes the answer that says
-  less when it cannot: a syntactic consumer with no types does not treat the call as reflective unless the
-  receiver is implicit or `self` and the enclosing class defines no `send`. `__send__` and `public_send`
-  are taken as genuine.
+  `ReturnBarrier`, `DefineMethodBlockSelf` and `Scope#block_self`, effects edges, deprecations,
+  visibility rows — produces a wrong type or a false positive. It checks that the receiver's `send` (or,
+  for a handle chain, `method` / `instance_method`) resolves to `Kernel` / `BasicObject` with no project
+  or RBS override. Where a scope is available it uses the typed check: `ReturnBarrier`'s callers
+  (`DefReturnTyper`, `StatementEvaluator`) have one. Where none is, it takes the answer that says less: it
+  reads the call as reflective only when the receiver is implicit or `self` and the discovery index shows
+  that no project class in the enclosing class's ancestry, and no module it includes or extends, defines
+  `send` on the side the call runs on (the instance side in a `def` body, the singleton side in a class
+  body or a `def self.`). An ancestor known only from RBS or not resolved at all counts as defining it.
+  `__send__` and `public_send` are taken as genuine.
 
 The matrix (WD5) records which way each site goes; a narrowing site without the check is a declared
 exception naming an issue.
@@ -217,17 +226,20 @@ first, at today's answers:
   names an issue or one of the decisions below. A pure slice adds no exception. Paired sites (#2167's
   census and narrowing) assert equal columns.
 - **The source ratchet** (`spec/rigor/source/reflective_spelling_ratchet_spec.rb`). A Prism scan of
-  `lib/**/*.rb`, outside the seam, counts per file the Symbol and String literals that name a sender,
-  handle reader, invoker or binder, and references to `Spellings` role constants, against an exact table
-  generated when S0 lands (about 116 sender SymbolNodes today), in the style of
-  `spec/docs/plugin_io_boundary_spec.rb`. Unrelated uses (`:bind` as an option key, `:method` as a Hash
-  key) are listed by file in the table, with a reason. A count that differs in either direction fails, so
-  a slice lowers its row. The same spec allows node minting — `.copy(` and `Prism::*Node.new` — only at
-  today's callers.
+  `lib/**/*.rb`, outside the seam, counts the Symbol and String literals that name a sender, handle
+  reader or binder, invoker names only where their receiver is a handle-reader call, and references to
+  `Spellings` role constants. Rows are keyed by the enclosing constant or method (`file#method`), not by
+  file, so a row is one site; the table is exact and generated when S0 lands (about 116 sender
+  SymbolNodes today), in the style of `spec/docs/plugin_io_boundary_spec.rb`. Unrelated uses (`:bind` as
+  an option key, `:method` as a Hash key) are rows of their own with a reason, so they cannot hide a real
+  use in the same file. A count that differs in either direction fails, so a slice lowers its row. The
+  same spec allows node minting — `.copy(` and `Prism::*Node.new` — only at today's callers.
 
 The ratchet measures where spellings are written, and the matrix measures what each site answers; neither
 alone shows that extraction moved onto the view. A site counts as ported only when its ratchet row is zero
-and its matrix column has no exception that the view's answer would remove.
+and its matrix column has no exception that the view's answer would remove. A site that is a private
+method is observed through the nearest public entry point that reaches it, so the matrix's cost stays
+proportional to its columns rather than to private surface.
 
 Each slice then flips named matrix cells. A slice that changes what `ScopeIndexer` records bumps the
 DiscoveryIndex `SCHEMA`, or warm and `--incremental` runs serve the old reading.
@@ -243,7 +255,7 @@ with an adjudicated corpus diff.
 | # | Slice | Kind | Closes or reduces |
 |---|---|---|---|
 | S0 | Seam, unit spec, `Spellings`, matrix, ratchet | additive | — |
-| S1 | Re-seat the four partial views and `CalleeWriteCensus.literal_send?`; then port the sites whose extraction already equals the view's, one family per PR (censuses; frame globals and flow; `ScopeIndexer`; rules, reachability, sig-gen, effects) | pure | constants 26 → 0 outside the seam |
+| S1 | Re-seat the four partial views and `CalleeWriteCensus.literal_send?`; then port the sites whose extraction already equals the view's, one family per PR (censuses; frame globals and flow; `ScopeIndexer`; rules, reachability, sig-gen, effects) | pure | constants 26 → 1 (`ConstantFolding`'s type-level set) |
 | S2 | SymbolNode-only sites read String names too (repeated `\|\|=`, `send_extend?`); the narrowing ones (deprecations, return barrier) only with WD3's receiver check; the accidental `public_send` exclusion for `private_class_method` goes | behaviour | divergence 1 outside typing; the `ReturnBarrier` wrong type |
 | S3 | WD3: the offset channel, the genuine-`send` check, then String names in the typer | behaviour | #1872, the user-defined `send` false positive |
 | S4 | Sites that miss `send`: `DefineMethodBlockSelf` with `Scope#block_self_narrowing_unknown?` and `CensusForeignBlock` in one PR; Lens `visibility_call?`; `LexicalMethodSites` | behaviour | #2167; items of #2160, #2087, #2984 |
@@ -260,11 +272,11 @@ plus one matrix row.
 
 | Alternative | Why not |
 |---|---|
-| Desugar the AST before analysis (a Prism rewrite, or an ADR-17-style pre-pass) | Prism nodes are immutable, so a rewrite re-creates every ancestor and invalidates every identity key and location. `a.push` after rewriting is visibility-checked, so `send(:private_m)` becomes a false positive and `public_send` becomes indistinguishable from `send`. `&:m`, `bind_call` and the 45% of computed names have no faithful rewrite, so consumers keep a second path anyway. It imposes one conservatism on every consumer. |
+| Desugar the AST before analysis (a Prism rewrite, or an ADR-17-style pre-pass) | Prism nodes are immutable, so a rewrite re-creates every ancestor and invalidates every identity key and location. `a.push` after rewriting is visibility-checked, so `send(:private_m)` becomes a false positive and `public_send` becomes indistinguishable from `send`. `&:m`, `bind_call` and the 36% of sends with no literal name have no faithful rewrite, so consumers keep a second path anyway. It imposes one conservatism on every consumer. |
 | Keep per-site logic, share one constant | Twenty-six constants are already equal. The divergences are in extraction, the shift, receiver filtering and policy. A shared three-name constant also invites flattening the three deliberate `public_send` exclusions (`module_function` and `main.include`, whose targets are private, and the `ruby2_keywords` deprecation), which would add false positives. |
 | Synthesise `CallNode`s, generalising `literal_send_target` | A copy is a new identity: it misses `TypeOfMemo` and `scope_index` and writes side-table rows nobody reads. It allocates two nodes per use. It looks like a direct call, so visibility fires on `send(:priv)` unless every consumer remembers where it came from. It cannot express `:yielded` or `owner_node`. |
 | Resolve reflection only as a `MethodDispatcher` tier | Typing-only. About 30 of the 36 sites are syntactic passes that run without types. The tier survives as WD3, a consumer of the seam. |
-| A per-file reflective-call index | One more walk and a run-scoped slot for 0.17% of calls. Only cross-site resolution would justify it, and the criterion excludes that. |
+| A per-file reflective-call index | One more walk and a run-scoped slot for 0.13% of calls. Only cross-site resolution would justify it, and the criterion excludes that. |
 | Make the view an event of ADR-116 WD5's declaration walk | Only `ScopeIndexer` uses that walk. The view has to be the primitive; the walk's call event can carry an `Invocation` later. |
 | One migration PR | Against ADR-116's rule that behaviour never rides in a move, and the hot files collide with parallel lanes. |
 

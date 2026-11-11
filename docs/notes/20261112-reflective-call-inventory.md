@@ -10,10 +10,10 @@ consults' corrections are folded into § "Corrections" rather than edited into t
 
 ## Frequency survey
 
-All 49 checkouts under `~/repo/ruby/rigor-survey/` (the corpus listed in
-[`docs/agents/measurement.md`](../agents/measurement.md); 72,127 files, 7,651,449 call nodes, `vendor/` and
-`node_modules/` skipped), counted with the Prism walk in § "Survey script". To reproduce:
-`ruby survey.rb ~/repo/ruby/rigor-survey/*/`.
+All 49 checkouts under `~/repo/ruby/rigor-survey/` (the survey corpus described in
+[`docs/agents/measurement.md`](../agents/measurement.md); 72,127 files, none skipped for a parse error, 7,651,449 call nodes, `vendor/` and
+`node_modules/` skipped), counted with the Prism walks in § "Survey scripts". To reproduce:
+`ruby survey.rb ~/repo/ruby/rigor-survey/*/` and `ruby handles.rb ~/repo/ruby/rigor-survey/*/`.
 
 | spelling | sites | share of calls |
 |---|---|---|
@@ -29,8 +29,9 @@ All 49 checkouts under `~/repo/ruby/rigor-survey/` (the corpus listed in
 
 The 260 metaprogramming sends are `remove_const` 107, `include` 47, `define_method` 27, `alias_method` 19,
 `remove_method` 12, `instance_variable_set` 10, `const_set` 9, `undef_method` 9, and 20 more across ten
-selectors. A sibling walk over the same checkouts counted literal handle chains
-(`r.method(:m)` / `instance_method(:m)` read by `call`, `===`, `[]` or `bind_call`): 92, of which 16 are
+selectors. `handles.rb` counted literal handle chains over the same checkouts (`r.method(:m)` /
+`instance_method(:m)` read by `call`, `yield`, `===`, `[]` or `bind_call`, through any `bind`, `unbind`,
+`to_proc` or `curry` wrapper): 92, of which 16 are
 `bind_call`; and 25 block-passes of a handle (`&r.method(:m)`).
 
 So the corpus exercises few of the 36 sites, and 36% of sends have no literal name. A byte-identical
@@ -247,7 +248,9 @@ Best seed: a `Rigor::Source::ReflectiveCall` view built from `ReceiverWriterCall
 | #2356 | `instance_eval { def name }` or `singleton_class.include` silences sibling classes | rows 36 (`singleton_naming_call_names`), 50 |
 | #2048 | singleton rewrites: method-body rewrites, `class << self attr_writer` | rows 36, 47 (`singleton_naming_call_names`, scope_indexer.rb:7155-7170) |
 
-## Survey script
+## Survey scripts
+
+`survey.rb`:
 
 ```ruby
 # frozen_string_literal: true
@@ -290,15 +293,110 @@ class V < Prism::Visitor
 end
 v = V.new
 n = 0
+skipped = 0
 ARGV.each do |dir|
   Dir.glob(File.join(dir, "**/*.rb")).each do |f|
     next if f.include?("/vendor/") || f.include?("/node_modules/")
     n += 1
-    Prism.parse_file(f).value.accept(v) rescue next
+    begin
+      Prism.parse_file(f).value.accept(v)
+    rescue StandardError
+      skipped += 1
+    end
   end
 end
-puts "files=#{n}"
+puts "files=#{n} skipped=#{skipped}"
 v.tot.sort_by { |k, _| k.to_s }.each { |k, c| puts format("  %-22s %8d %8.4f%%", k, c, 100.0 * c / v.tot[:calls]) }
 puts "inner meta selectors sent by literal name:"
 v.inner.sort_by { |_, c| -c }.each { |k, c| puts "  #{k}: #{c}" }
+```
+
+`handles.rb`:
+
+```ruby
+# frozen_string_literal: true
+
+# Read-only census of reflective call spellings over Ruby trees. Usage: ruby handles.rb DIR...
+require 'prism'
+
+SENDS = %i[send __send__ public_send].freeze
+READERS = %i[method public_method singleton_method instance_method public_instance_method].freeze
+HANDLE_CALLS = %i[call yield === [] bind_call].freeze
+WRAPPERS = %i[bind unbind to_proc curry].freeze
+
+class Census < Prism::Visitor
+  attr_reader :c
+
+  def initialize
+    super
+    @c = Hash.new(0)
+  end
+
+  def visit_call_node(node)
+    @c[:calls] += 1
+    if SENDS.include?(node.name)
+      @c[:send_family] += 1
+      @c[:"via_#{node.name}"] += 1
+      first = node.arguments&.arguments&.first
+      case first
+      when Prism::SymbolNode then @c[:send_symbol] += 1
+      when Prism::StringNode then @c[:send_string] += 1
+      when Prism::InterpolatedStringNode, Prism::InterpolatedSymbolNode then @c[:send_interpolated] += 1
+      when nil then @c[:send_noargs] += 1
+      when Prism::SplatNode then @c[:send_splat_first] += 1
+      else @c[:send_computed] += 1
+      end
+      if first.is_a?(Prism::SymbolNode) || first.is_a?(Prism::StringNode)
+        rest = node.arguments.arguments.drop(1)
+        @c[:send_lit_with_block] += 1 if node.block
+        @c[:send_lit_with_splat_rest] += 1 if rest.any?(Prism::SplatNode)
+        @c[:send_lit_with_kwargs] += 1 if rest.last.is_a?(Prism::KeywordHashNode)
+        @c[:send_lit_recv_implicit_or_self] += 1 if node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)
+        if node.receiver.is_a?(Prism::ConstantReadNode) || node.receiver.is_a?(Prism::ConstantPathNode)
+          @c[:send_lit_recv_constant] += 1
+        end
+        begin
+          @c[:send_lit_nested_send] += 1 if SENDS.include?(first.unescaped.to_sym)
+        rescue StandardError
+          nil
+        end
+      end
+    end
+    @c[:method_reader] += 1 if READERS.include?(node.name) && node.arguments
+    if HANDLE_CALLS.include?(node.name)
+      r = node.receiver
+      r = r.receiver while r.is_a?(Prism::CallNode) && WRAPPERS.include?(r.name)
+      if r.is_a?(Prism::CallNode) && READERS.include?(r.name)
+        @c[:handle_chain_call] += 1
+        @c[:handle_chain_bind_call] += 1 if node.name == :bind_call
+      end
+    end
+    blk = node.block
+    if blk.is_a?(Prism::BlockArgumentNode)
+      @c[:block_pass] += 1
+      e = blk.expression
+      if e.is_a?(Prism::SymbolNode)
+        @c[:block_pass_symbol] += 1
+      elsif e.is_a?(Prism::CallNode) && READERS.include?(e.name)
+        @c[:block_pass_method_reader] += 1
+      end
+    end
+    super
+  end
+end
+
+census = Census.new
+files = ARGV.flat_map { |dir| Dir.glob(File.join(dir, '**/*.rb')) }
+            .reject { |f| f.include?('/vendor/') || f.include?('/node_modules/') }
+skipped = 0
+files.each do |f|
+  Prism.parse_file(f).value.accept(census)
+rescue StandardError
+  skipped += 1
+end
+c = census.c
+puts "files=#{files.size} skipped=#{skipped}"
+c.sort_by { |k, _| k.to_s }.each do |k, v|
+  puts format('  %-34s %8d  %7.3f%% of calls', k, v, 100.0 * v / c[:calls])
+end
 ```

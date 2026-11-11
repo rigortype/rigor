@@ -1,3 +1,3 @@
-- **[plugin]** A `dynamic_return` rule gated on `methods:` or `file_methods:` now declines the nameless nodes an ungated plugin is offered, instead of raising and skipping the plugin's later rules. ([#2764](https://github.com/rigortype/rigor/issues/2764))
+- **[plugin]** A `dynamic_return` rule gated on `methods:` or `file_methods:` now declines the nameless nodes an ungated plugin is offered, instead of raising and skipping the plugin's later rules. ([#2764](https://github.com/rigortype/rigor/issues/2764), [#3078](https://github.com/rigortype/rigor/pull/3078))
   - A plugin the registry cannot name-gate is offered the `&:sym` `BlockArgumentNode` and the compound write nodes (#2717); the gate read `call_node.name`, raised `NoMethodError`, and the rescue nil-ed the plugin's whole answer for that dispatch.
   - Bundled plugins' answers are unchanged; a third-party receivers-only rule declared after a name-gated one now sees those nodes as documented.

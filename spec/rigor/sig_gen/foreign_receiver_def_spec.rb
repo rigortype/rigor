@@ -169,5 +169,14 @@ RSpec.describe "a def whose receiver is not the lexical self (#3155)", type: :ru
       rows = Rigor::Inference::ScopeIndexer.build_deferred_ranges(program)
       expect(rows.map { |row| row.drop(2) }).to eq([[:q, :instance, "L"], [:other, nil, nil]])
     end
+
+    it "claims no owner or side for a foreign def passed to either module_function spelling" do
+      %w[module_function self.module_function].each do |spelling|
+        rows = Rigor::Inference::ScopeIndexer.build_deferred_ranges(
+          Prism.parse("module MF\n  #{spelling} def String.g = 1\nend\n").value
+        )
+        expect(rows.map { |row| row.drop(2) }.uniq).to eq([[:g, nil, nil]])
+      end
+    end
   end
 end

@@ -1869,8 +1869,8 @@ module Rigor
       end
 
       # The scope a compound index write's rvalue runs from: Ruby evaluates the receiver, then the index arguments,
-      # then a block-pass argument, then the rvalue, so a write in any of them is threaded in that order
-      # ({#thread_operand}) before the rvalue. Issue #1272 — `(h ||= {})[k] ||= v`, `(@h ||= {})[k] ||= v` and
+      # then the rvalue, so a write in either is threaded in that order ({#thread_operand}) before the rvalue. An
+      # index write takes no block-pass argument (a syntax error since Ruby 3.4). Issue #1272 — `(h ||= {})[k] ||= v`, `(@h ||= {})[k] ||= v` and
       # `h[(i = 1)] ||= v` left `h`, `@h` and `i` on their pre-write bindings, so a later `h.fetch(k)` on a
       # nil-initialised `h` reported a call on `nil`. A receiver or argument holding no write answers the entry scope
       # unchanged. The read, the stored value and the widening's argument types are still typed from the entry scope,
@@ -1880,10 +1880,7 @@ module Rigor
       def index_write_operand_scope(node)
         walk = OperandWalk.new(walk_recorder)
         after = thread_operand(node.receiver, scope, walk, scope)
-        after = thread_operand(node.arguments, after, walk, scope)
-        block_pass = node.block
-        after = thread_operand(block_pass, after, walk, scope) if block_pass.is_a?(Prism::BlockArgumentNode)
-        after
+        thread_operand(node.arguments, after, walk, scope)
       end
 
       # `[index_type..., stored_value_type]` for an index-write node, shaped exactly like a `[]=`

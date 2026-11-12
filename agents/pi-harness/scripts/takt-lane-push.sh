@@ -11,7 +11,9 @@ set -euo pipefail
 cd "$1"
 [[ -z "$(git status --porcelain)" ]] || { echo "takt-lane-push: commit or discard the worktree's changes first" >&2; exit 1; }
 git ls-files -v -z -- .takt | while IFS= read -r -d '' entry; do
-  [[ "$entry" == S\ * ]] && git update-index --no-skip-worktree -- "${entry#S }"
+  # An `&&` chain here would end the loop false on an unmarked last entry and
+  # stop the script silently under `set -e` + `pipefail`.
+  if [[ "$entry" == S\ * ]]; then git update-index --no-skip-worktree -- "${entry#S }"; fi
 done
 git checkout -- .takt
 exec nix develop --command bin/lane-push </dev/null

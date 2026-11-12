@@ -2734,4 +2734,60 @@ def match_block_string_subclass(raw)
   ms.scan(/(a)/) { m = Regexp.last_match; m.begin(0) }
 end
 
+# Issue #1475 — `{,n}` permits zero repetitions like `?` and `*`, so a group it quantifies, and any group
+# nested inside it, stays `String | nil` on the match edge (Ruby: `"b" =~ /(a){,3}(b)/` leaves
+# `$1 == nil`, `$2 == "b"`; `"b" =~ /((a)){,2}/` leaves both nil).
+def open_lower_bounded_group(line)
+  return unless line =~ /(a){,3}(b)/
+
+  assert_type("String?", $1)
+  assert_type("String", $2)
+end
+
+def nested_in_open_lower_bounded(line)
+  return unless line =~ /((a)){,2}/
+
+  assert_type("String?", $1)
+  assert_type("String?", $2)
+end
+
+# `{0,n}` and `{0}` read optional as before, while `{1,n}`, `{n}` and `+` still require the group
+# (Ruby: `"aab" =~ /(a){1,2}(b)/` leaves `$1 == "a"`, `"aab" =~ /(a){2}(b)/` leaves `$1 == "a"`).
+def zero_lower_bounded_group(line)
+  return unless line =~ /(a){0,2}(b)/
+
+  assert_type("String?", $1)
+  assert_type("String", $2)
+end
+
+def exact_zero_bounded_group(line)
+  return unless line =~ /(a){0}(b)/
+
+  assert_type("String?", $1)
+  assert_type("String", $2)
+end
+
+def nonzero_lower_bounded_group(line)
+  return unless line =~ /(a){1,2}(b)/
+
+  assert_type("String", $1)
+  assert_type("String", $2)
+end
+
+def exact_bounded_group(line)
+  return unless line =~ /(a){2}(b)/
+
+  assert_type("String", $1)
+  assert_type("String", $2)
+end
+
+# `{,}` with no digit after the comma is literal braces, not a quantifier, so the group still
+# participates (Ruby: `"a{,}b" =~ /(a){,}(b)/` leaves `$1 == "a"`, `$2 == "b"`).
+def literal_brace_after_group(line)
+  return unless line =~ /(a){,}(b)/
+
+  assert_type("String", $1)
+  assert_type("String", $2)
+end
+
 # rubocop:enable Style/PerlBackrefs

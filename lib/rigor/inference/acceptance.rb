@@ -868,11 +868,14 @@ module Rigor
         # carrier whose value set is visibly apart from `removed` — a `Constant` (compare values directly),
         # another `Difference` with the same removed value (already exhibits the disjointness), an
         # `IntegerRange` that skips an Integer removed value, a `Tuple` whose fixed arity differs from a
-        # removed `Tuple`, or a `HashShape` with a required key a closed removed `HashShape` cannot hold. The
-        # last three cover the empty witnesses of `non-zero-int`, `non-empty-array[T]` and
-        # `non-empty-hash[K, V]`. Any other carrier — a Nominal above all — is no proof and the difference
-        # rejects it under gradual mode, even where its values happen to exclude `removed`. A Union or
-        # Intersection argument never reaches this rule whole: `accepts` splits it into members first.
+        # removed `Tuple`, a `HashShape` with a required key a closed removed `HashShape` cannot hold, or a
+        # `Refined` whose predicate recogniser rejects the removed `Constant`. The range, tuple and shape
+        # arms cover the empty witnesses of `non-zero-int`, `non-empty-array[T]` and
+        # `non-empty-hash[K, V]`; the `Refined` arm is what lets `non-empty-string` accept
+        # `decimal-int-string`, which can never hold `""`. Any other carrier — a Nominal above all — is no
+        # proof and the difference rejects it under gradual mode, even where its values happen to exclude
+        # `removed`. A Union or Intersection argument never reaches this rule whole: `accepts` splits it
+        # into members first.
         def accepts_difference(self_type, other_type, mode)
           base_result = accepts(self_type.base, other_type, mode: mode)
           return base_result if base_result.no?
@@ -902,14 +905,28 @@ module Rigor
             # `removed`, the meet is too.
             other_type.members.any? { |m| provably_disjoint_from_removed?(m, removed) }
           when Type::IntegerRange
-            removed.is_a?(Type::Constant) && removed.value.is_a?(Integer) && !other_type.covers?(removed.value)
+            integer_range_excludes_removed?(other_type, removed)
           when Type::Tuple
             # A Tuple's arity is fixed, so it shares no inhabitant with a Tuple of another arity — the
             # zero-arity witness `non-empty-array[T]` removes included.
             removed.is_a?(Type::Tuple) && removed.elements.size != other_type.elements.size
           when Type::HashShape
             hash_shape_excludes_removed?(other_type, removed)
+          when Type::Refined
+            refined_excludes_removed?(other_type, removed)
           end
+        end
+
+        def integer_range_excludes_removed?(range, removed)
+          removed.is_a?(Type::Constant) && removed.value.is_a?(Integer) && !range.covers?(removed.value)
+        end
+
+        # A predicate refinement excludes the removed value when its recogniser rejects the removed
+        # constant outright — `decimal-int-string` can never hold `""`. `matches?` answers nil for a
+        # predicate the registry does not know, and nil is no proof, so the comparison is `== false`
+        # rather than `!`.
+        def refined_excludes_removed?(refined, removed)
+          removed.is_a?(Type::Constant) && refined.matches?(removed.value) == false
         end
 
         # Every inhabitant of `shape` holds each of its required keys, and a closed `removed` shape holds no

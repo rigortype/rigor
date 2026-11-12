@@ -80,6 +80,20 @@ module Rigor
         type.is_a?(Type::Constant) && type.value.is_a?(String)
       end
 
+      # A predicate refinement over String (`decimal-int-string`, `lowercase-string`) under a String mutator → its
+      # `String` base. Any in-place mutation can falsify the predicate (`s.clear` leaves a `decimal-int-string`
+      # empty, `s << "A"` a `lowercase-string` mixed-case), so none keeps it. `nil` for every other input.
+      def widen_refined(refined, method_name)
+        return nil unless refined?(refined)
+        return nil unless MUTATORS.include?(method_name)
+
+        refined.base
+      end
+
+      def refined?(type)
+        type.is_a?(Type::Refined) && type.base.is_a?(Type::Nominal) && type.base.class_name == "String"
+      end
+
       # Whether `method_name`, called with `arg_types` (the call's positional argument types, possibly none), can leave
       # a non-empty receiver empty, and so retract a `non-empty-string` refinement. Every mutator outside
       # {EMPTY_PRESERVING} can, except a {TRANSLATORS} call whose replacement is provably non-empty.

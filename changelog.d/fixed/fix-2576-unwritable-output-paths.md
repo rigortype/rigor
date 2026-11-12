@@ -1,0 +1,2 @@
+- **[cli]** `rigor baseline generate`/`regenerate`/`prune`, `rigor effects update` and `rigor sig-gen --write` now report an output path that cannot be written as one `rigor <cmd>: cannot write PATH: REASON` line with exit `64` instead of a Ruby backtrace ([#2576](https://github.com/rigortype/rigor/issues/2576), [#3085](https://github.com/rigortype/rigor/pull/3085)).
+  - For baseline and effects the missing parent directory is not created, matching `rigor init --path`.

@@ -272,6 +272,8 @@ module Rigor
 
       def ivar_name?(name) = variable_kind(name) == :ivar
 
+      def local_name?(name) = variable_kind(name) == :local
+
       # Ruby spells a global with a leading `$`, a class variable with `@@`, an instance variable with a single
       # `@`, and a local with none of them.
       def variable_kind(name)

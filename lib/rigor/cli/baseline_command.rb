@@ -176,7 +176,7 @@ module Rigor
 
         baseline = Analysis::Baseline.from_diagnostics(diagnostics, match_mode: options.fetch(:match_mode),
                                                                     project_root: Dir.pwd)
-        File.write(path, baseline.to_yaml)
+        return EXIT_USAGE unless write_baseline_file(path, baseline.to_yaml)
 
         covered = baseline.buckets.sum(&:count)
         @err.puts(
@@ -415,7 +415,8 @@ module Rigor
         return 0 if options.fetch(:dry_run)
 
         pruned = baseline.without(cleared.map(&:bucket))
-        File.write(options.fetch(:baseline), pruned.to_yaml)
+        return EXIT_USAGE unless write_baseline_file(options.fetch(:baseline), pruned.to_yaml)
+
         @err.puts("rigor: pruned #{cleared.size} bucket(s); baseline now has #{pruned.size} entries.")
         0
       end
@@ -438,6 +439,18 @@ module Rigor
       end
 
       # ---- shared helpers ----------------------------------------
+
+      # #2576 — an output path that cannot be written is a usage error, the same rule `rigor init
+      # --path` follows (#2562): one `rigor baseline: cannot write PATH: REASON` line on stderr and
+      # exit 64, with no backtrace and no directory created on the way. The bare Errno backtrace read
+      # as an internal crash.
+      def write_baseline_file(path, content)
+        File.write(path, content)
+        true
+      rescue SystemCallError => e
+        @err.puts("rigor baseline: cannot write #{path}: #{e.message.sub(/ @ .*\z/m, '')}")
+        false
+      end
 
       def load_baseline_or_exit(path)
         unless File.exist?(path)

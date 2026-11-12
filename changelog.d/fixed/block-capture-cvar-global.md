@@ -1,0 +1,4 @@
+- **[inference]** A class variable or global that a block grows in place (`@@log = [0]; [1, 2].each { |x| @@log << x }`) no longer keeps its pre-block contents, so a later comparison on it no longer reports `flow.always-truthy-condition` on correct code. ([#3120](https://github.com/rigortype/rigor/pull/3120))
+  - A block that runs during the call joins what it stores (`@@log` reads `Array[0 | 1 | 2]`), and a stored callback widens each Array, Hash or String member to its bare collection type.
+  - Unlike an instance variable, it counts even inside a block that runs on another object (`String.instance_eval { @@log << 1 }`), because Ruby resolves a class variable lexically and a global is global.
+  - A global Ruby itself defines (`$;`, `$_`, `$stdout`, …) is still left as it was.

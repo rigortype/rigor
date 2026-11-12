@@ -1,0 +1,2 @@
+- **[engine]** A call with a positional splat (`r.count(*idx)`) no longer types its return from a user method body that bound the splat as one argument, which reported `flow.always-truthy-condition` on correct code. ([#3097](https://github.com/rigortype/rigor/pull/3097))
+  - The body is re-typed with every positional parameter `untyped` and the rest parameter `Array[untyped]`, so a callee that always raises still ends the flow and a return that reads no positional is kept.

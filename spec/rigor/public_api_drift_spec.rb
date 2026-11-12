@@ -210,7 +210,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     user_def_site_for(req:class_name,req:method_name)
     user_def_through_ancestors(req:class_name,req:method_name,key:name_memo)
     user_instance_def_owners(req:method_name)
-    user_method_return(req:def_node,req:receiver,req:arg_types)
+    user_method_return(req:def_node,req:receiver,req:arg_types,key:positionals_unknown)
     user_singleton_def_site_for(req:class_name,req:method_name)
     void_origin(req:node)
     void_origins()

@@ -154,7 +154,7 @@ RSpec.describe "ancestry walkers outside Scope::ResolutionChain" do
   # asks whether the chain was "contested", itself. Before it, eight readers each owned the rule, and each
   # could get the count of skips wrong.
   it "keeps the retro world and the skip decision inside the chain builder" do
-    hits = Dir[File.join(root, "{lib,plugins}/**/*.rb")].flat_map do |path|
+    hits = Dir[File.join(root, "{lib,plugins/*/lib}/**/*.rb")].flat_map do |path|
       relative = path.delete_prefix("#{root}/")
       next [] if AncestryWalkerScan::CHAIN_BUILDERS.include?(relative)
 
@@ -170,7 +170,7 @@ RSpec.describe "ancestry walkers outside Scope::ResolutionChain" do
   # marks, the unpositioned table) stay where it is made: no reader reads them, or passes the option, except the
   # chain's own files and `Inference::DefinerResolution`. `unsettled?` stays the boolean existing readers see.
   it "keeps the fork count, the marks and the unknown option inside the chain and the candidate-set read" do
-    hits = Dir[File.join(root, "{lib,plugins}/**/*.rb")].flat_map do |path|
+    hits = Dir[File.join(root, "{lib,plugins/*/lib}/**/*.rb")].flat_map do |path|
       relative = path.delete_prefix("#{root}/")
       next [] if AncestryWalkerScan::DECISION_READERS.include?(relative)
 

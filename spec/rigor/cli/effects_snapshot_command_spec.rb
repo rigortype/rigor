@@ -100,6 +100,43 @@ RSpec.describe Rigor::CLI::EffectsSnapshotCommand do
       expect(snapshot_text).to eq(plain)
     end
 
+    # Issue #2576 — an `effects.snapshot.path:` that cannot be written is a usage error, the same
+    # rule `rigor init --path` follows (#2562): one `rigor effects: cannot write PATH: REASON` line on
+    # stderr and exit 64. The write used to escape as a raw Errno backtrace.
+    it "reports a snapshot path in a missing directory on one stderr line and exits 64" do
+      File.write(".rigor.yml", <<~YAML)
+        paths:
+          - "."
+        effects:
+          snapshot:
+            path: nodir/x.yml
+            reach: ["*.rb"]
+      YAML
+
+      status, _out, err = run("update")
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to eq("rigor effects: cannot write nodir/x.yml: No such file or directory\n")
+      expect(File.exist?("nodir")).to be(false)
+    end
+
+    it "reports a snapshot path that is a directory on one stderr line and exits 64" do
+      FileUtils.mkdir_p("adir")
+      File.write(".rigor.yml", <<~YAML)
+        paths:
+          - "."
+        effects:
+          snapshot:
+            path: adir
+            reach: ["*.rb"]
+      YAML
+
+      status, _out, err = run("update")
+
+      expect(status).to eq(Rigor::CLI::EXIT_USAGE)
+      expect(err).to eq("rigor effects: cannot write adir: Is a directory\n")
+    end
+
     # #436 — an empty `reach:` is reported with the names that would close it. The list is the loaded
     # plugin set's, so a project with no preset-registering plugin is told how a preset comes to exist
     # instead of being handed names it cannot use.

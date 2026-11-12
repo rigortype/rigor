@@ -990,7 +990,8 @@ member, which quiets later reads of it. #1233 records how to return to
 reading (3) once those gaps close. These shapes stay open:
 
 - A store that reads an instance variable the body writes
-  (`out << @total`) is not covered (#1235).
+  (`out << @total`) was not covered (#1235). *(Closed 2026-11-12, with
+  #1208, on the same conservative terms as a local.)*
 - The index of an Array index write keeps its first-iteration reading,
   as on master. So does a stored value that reads the same name:
   `ids[n] = n; n += 1` still stores `0`, and `ids.last == 1` still
@@ -999,6 +1000,35 @@ reading (3) once those gaps close. These shapes stay open:
 - A local written through a proc defined outside the block is not seen
   as written, as everywhere in the engine.
 - The rebound local itself keeps whatever slice A gives it.
+
+*(Amended 2026-11-12, issues #1208 and #1235.)* An instance variable
+is a capture too, because every block made in a method shares its
+`self`. Slice C's join, the escaping floor and the `shadows` overlay
+now take one on the terms the slice-A rebind write-back already uses
+(#1210). The ivar must be bound at the call site, off its ADR-58
+declaration seed, outside a method or class body the block defines,
+and not under a block that provably runs on another object. A store
+that reads a joined ivar moves as one reading a joined local does. The
+join and the floor take an ivar only when every member of its seed is
+a collection. A guarded mutation would otherwise drop a nil-able seed's
+`nil` (#1219 on the join, #1251 on the floor). Lazily initialised ivars
+are the common spelling of that seed, so they keep their pre-call
+binding until those two issues close. The `block_content_ivar_capture`
+fixture is the gate.
+
+*(Amended 2026-11-12, issue #3096.)* A class variable and a global
+are captures on the same terms, read and bound through the accessor of
+their kind, with three differences. The foreign-self exclusion does not
+apply: Ruby resolves a class variable lexically, and a global is the
+same one whatever `self` is. The scope-body exclusion is narrower.
+Neither kind counts inside a `def` the block defines, which runs only
+when called. A class variable also does not count inside a `class` or
+`module` body, which has class variables of its own, but it does
+count inside `class << self`, which keeps the enclosing class's. A
+global counts inside every class, module and singleton-class body,
+because each one runs at once. A global Ruby's own signatures declare
+(`$;`, `$_`, `$~`, `$stdout`, …) is left out, because the interpreter
+owns it. The `block_content_cvar_global_capture` fixture is the gate.
 
 Gate: the `block_content_self_read` fixture carries the six
 self-reading shapes, the String read and the two `each_with_object`

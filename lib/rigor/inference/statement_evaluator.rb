@@ -1774,7 +1774,8 @@ module Rigor
       # The expression value is the result type, matching Ruby's semantics: `(x = params[:f] ||= []); x` observes the
       # post-`||=` value, not the rvalue alone.
       def eval_index_or_write(node)
-        _rhs_type, post_rhs = sub_eval(node.value, scope)
+        operands = index_write_operand_scope(node)
+        _rhs_type, post_rhs = sub_eval(node.value, operands)
         result_type = index_write_stored_type(node, scope)
 
         # A narrowing is keyed on ONE literal slot — `a[k]` — but a multi-index `||=` reads and
@@ -1792,7 +1793,7 @@ module Rigor
         # the reverse order would trade this feature away for the widening. The two are complementary — the shape
         # forgets that the collection is still empty, the narrowing remembers that THIS slot is now non-nil.
         post = IndexWriteWidening.widen(node: node, current_scope: post,
-                                        arg_types: index_write_arg_types(node, result_type))
+                                        arg_types: index_write_arg_types(node, result_type, join_scope: operands))
         post = post.with_indexed_narrowing(*address, result_type) if address
 
         # The value the expression yields takes the memoizing reading ({#index_compound_write_value}, #1155) for a
@@ -1859,11 +1860,31 @@ module Rigor
       # `eval_index_or_write` does, so they take the same widening; the stored value is the compound result —
       # `falsey(h[k]) | v` for `&&=`, the dispatched `h[k] + v` for `+=` — not the rvalue alone.
       def eval_index_write(node)
-        _rhs_type, post_rhs = sub_eval(node.value, scope)
+        operands = index_write_operand_scope(node)
+        _rhs_type, post_rhs = sub_eval(node.value, operands)
         stored = index_write_stored_type(node, scope)
         widened = IndexWriteWidening.widen(node: node, current_scope: post_rhs,
-                                           arg_types: index_write_arg_types(node, stored))
+                                           arg_types: index_write_arg_types(node, stored, join_scope: operands))
         [stored, forget_rebound_specials(widened, node)]
+      end
+
+      # The scope a compound index write's rvalue runs from: Ruby evaluates the receiver, then the index arguments,
+      # then the rvalue, so a write in either is threaded in that order ({#thread_operand}) before the rvalue. An
+      # index write takes no block-pass argument (a syntax error since Ruby 3.4).
+      #
+      # Issue #1272 — `(h ||= {})[k] ||= v`, `(@h ||= {})[k] ||= v` and `h[(i = 1)] ||= v` left `h`, `@h` and `i`
+      # on their pre-write bindings, so a later `h.fetch(k)` on a nil-initialised `h` reported a call on `nil`. A
+      # receiver or argument holding no write answers the entry scope unchanged.
+      #
+      # The receiver's joinability is read from this scope ({#index_write_arg_types}' `join_scope`), since the
+      # binding the store widens is the one the receiver's write left (`h` is `{}`, not the entry's `nil`). The read,
+      # the stored value and the widening's argument types are still typed from the entry scope (TODO #3100): the
+      # receiver expression's own value (`(h ||= {})` is the hash) answers what its write produced, but an rvalue
+      # reading a variable an index argument writes (`h[(i = 1)] ||= i + 1`) is typed at its pre-write binding.
+      def index_write_operand_scope(node)
+        walk = OperandWalk.new(walk_recorder)
+        after = thread_operand(node.receiver, scope, walk, scope)
+        thread_operand(node.arguments, after, walk, scope)
       end
 
       # `[index_type..., stored_value_type]` for an index-write node, shaped exactly like a `[]=`
@@ -1879,15 +1900,16 @@ module Rigor
       # The index arguments are typed, and the receiver's joinability read, in `type_scope`: the
       # evaluator's entry scope by default; a `for` index passes its post-collection scope and a
       # rescue reference its arm's entry scope, the nearest the engine has to where Ruby evaluates
-      # them (each iteration, the moment of the catch).
+      # them (each iteration, the moment of the catch). A compound index write reads the joinability alone in
+      # `join_scope`, the scope its receiver and index arguments left ({#index_write_operand_scope}).
       # There is deliberately NO `rescue` here. `Scope#type_of` is a total query over well-formed Prism input,
       # so a raise is an engine bug, and swallowing it would silently downgrade a live seam to "no evidence" —
       # the join would quietly stop happening with nothing to show for it. Let it reach the runner's
       # internal-error path, where it is visible.
-      def index_write_arg_types(node, stored_type, type_scope: scope)
+      def index_write_arg_types(node, stored_type, type_scope: scope, join_scope: type_scope)
         args = node.arguments
         return MutationWidening::NO_ARG_TYPES if args.nil? || stored_type.nil?
-        return MutationWidening::NO_ARG_TYPES unless MutationWidening.joinable_receiver?(node.receiver, type_scope)
+        return MutationWidening::NO_ARG_TYPES unless MutationWidening.joinable_receiver?(node.receiver, join_scope)
 
         list = args.respond_to?(:arguments) ? args.arguments : args
         # A splat argument is marked `nil` — its expansion decides the store's arity at
@@ -2257,11 +2279,7 @@ module Rigor
         return [Type::Combinator.union(then_type, else_type), then_scope] \
           if branch_terminates?(node.subsequent, else_type) && node.statements
 
-        [
-          Type::Combinator.union(then_type, else_type),
-          UntypedRejoin.apply(join_with_nil_injection(then_scope, else_scope), post_pred,
-                              [node.statements, node.subsequent])
-        ]
+        if_join(node.statements, node.subsequent, [then_type, then_scope], [else_type, else_scope], post_pred)
       end
 
       # `unless pred; t; else; e; end`. Same shape as `if`, but Prism exposes the else-branch as `else_clause` (no elsif
@@ -2293,11 +2311,22 @@ module Rigor
         return [Type::Combinator.union(then_type, else_type), then_scope] \
           if branch_terminates?(node.else_clause, else_type) && node.statements
 
-        [
-          Type::Combinator.union(then_type, else_type),
-          UntypedRejoin.apply(join_with_nil_injection(then_scope, else_scope), post_pred,
-                              [node.statements, node.else_clause])
-        ]
+        if_join(node.statements, node.else_clause, [then_type, then_scope], [else_type, else_scope], post_pred)
+      end
+
+      # The `[type, post_scope]` an `if` / `unless` with both branches evaluated ends with, once the arms above found no
+      # terminating branch by {#branch_terminates?}.
+      #
+      # Issue #1230 — the then-body (`then_node`) certainly exits beside an else (`else_node`): the only surviving path
+      # is the else that RAN, so the continuation is the else's exit scope, the predicate's other edge PLUS the else's
+      # writes, not a join with the exited body's writes. {#branch_certainly_exits?} is stricter than
+      # {#branch_terminates?}, which the arms above use: a `bot`-typed helper call does not qualify (issue #3110).
+      # Otherwise both exit scopes join with nil-injection.
+      def if_join(then_node, else_node, (then_type, then_scope), (else_type, else_scope), post_pred)
+        type = Type::Combinator.union(then_type, else_type)
+        return [type, else_scope] if else_node && branch_certainly_exits?(then_node)
+
+        [type, UntypedRejoin.apply(join_with_nil_injection(then_scope, else_scope), post_pred, [then_node, else_node])]
       end
 
       # Returns the `[type, post_scope]` of the live branch when the predicate is provably truthy / falsey, else nil so
@@ -7029,7 +7058,7 @@ module Rigor
         while receiver.is_a?(Prism::CallNode)
           if receiver.block.is_a?(Prism::BlockNode) &&
              classify_closure_escape(receiver) != :non_escaping
-            acc = widen_escaping_content_captures(receiver.block, acc)
+            acc = widen_escaping_content_captures(receiver.block, acc, foreign_self: foreign_self_block?(receiver))
           end
           receiver = receiver.receiver
         end
@@ -7047,7 +7076,14 @@ module Rigor
       # `Array[Dynamic[top]]`, Hash -> `Hash[untyped, untyped]`, String -> `String`. The seed's element/key/value
       # precision is forgotten; only the carrier survives. Read-only captures and locals the block merely rebinds
       # (already floored by `drop_captured_narrowing`) are untouched.
-      def widen_escaping_content_captures(block_node, post_scope)
+      #
+      # An instance variable of this scope's `self` the body mutates in place is floored too (issue #1208): a callback
+      # that runs `@opts[:format] = "json"` later left `@opts[:format]` folding to `"text"`, and so are a class variable
+      # and a global (issue #3096). Each floors member by member ({#member_content_floor}, issue #3095), so a lazily
+      # initialised `@buf = flag ? [1] : nil` keeps its `nil`. An instance variable under a block that runs on another
+      # object is that object's, and so is every one when `foreign_self` says the closure itself does; a class
+      # variable resolves lexically and a global is global, so neither depends on `self`.
+      def widen_escaping_content_captures(block_node, post_scope, foreign_self: false)
         body = block_node.body
         return post_scope if body.nil?
 
@@ -7055,13 +7091,45 @@ module Rigor
         # `local[k] = v` write, which `collect_content_mutations` cannot see (see below).
         post_scope = floor_block_body_callee_escaped_args(body, post_scope)
 
-        mutations = collect_content_mutations(body)
-        return post_scope if mutations.empty?
-
-        mutations.keys.reduce(post_scope) do |acc, name|
-          floored = content_floor_for(acc.local(name))
-          floored.nil? ? acc : acc.with_mutated_local(name, floored)
+        post_scope = collect_content_mutations(body).keys.reduce(post_scope) do |acc, name|
+          floored = content_floor_for(CapturedLocals.bound_type(acc, name))
+          floored.nil? ? acc : bind_mutated_capture(acc, name, floored)
         end
+
+        escaping_non_local_content_mutations(body, post_scope, foreign_self).reduce(post_scope) do |acc, name|
+          bound = CapturedLocals.bound_type(acc, name)
+          floored = member_content_floor(bound)
+          floored.equal?(bound) ? acc : CapturedLocals.bind(acc, name, floored)
+        end
+      end
+
+      # `type` with each member {#content_floor_for} recognises floored to its bare carrier and every other member
+      # kept (issue #3095): `Array[1]?` reads `Array[Dynamic[top]]?` and `3 | [1]` reads `3 | Array[Dynamic[top]]`,
+      # so the floor neither drops the `nil` a callback that never runs leaves nor narrows the binding. `type` itself
+      # when no member floors.
+      def member_content_floor(type)
+        members = type.is_a?(Type::Union) ? type.members : [type]
+        floored = members.map { |member| content_floor_for(member) || member }
+        return type if floored.each_with_index.all? { |member, index| member.equal?(members[index]) }
+
+        Type::Combinator.union(*floored)
+      end
+
+      # The instance variables of `scope`'s `self`, the class variables and the globals an escaping body mutates in
+      # place, on the terms {#capturable_non_local?} reads against `scope` — the continuation the floor writes into.
+      def escaping_non_local_content_mutations(body, scope, foreign_self)
+        names = nil
+        Source::NodeWalker.each_with_ancestors(body) do |node, ancestors|
+          is_call_mutator = node.is_a?(Prism::CallNode) && CONTENT_MUTATORS.include?(node.name)
+          next unless is_call_mutator || index_write?(node)
+
+          receiver = node.receiver
+          next unless NON_LOCAL_READ_NODES.include?(receiver.class)
+          next unless capturable_non_local?(receiver.name, ancestors, scope, foreign_self: foreign_self)
+
+          (names ||= []) << receiver.name
+        end
+        names ? names.uniq : NO_REWRITES
       end
 
       # Inside an ESCAPING block body, a captured outer local can be content- mutated transitively: the body is (or
@@ -7324,16 +7392,16 @@ module Rigor
         end
       end
 
-      # Binds a name from `CapturedLocals.writes`. An ivar goes through {CapturedLocals.bind}, which keeps its issue
-      # #286 optimistic mark. A local keeps the plain `with_local` these seams have always used, so a block that
-      # rebinds no ivar leaves the locals exactly as before.
+      # Binds a name from `CapturedLocals.writes`. An ivar (or any other non-local) goes through
+      # {CapturedLocals.bind}, which keeps an ivar's issue #286 optimistic mark. A local keeps the plain `with_local`
+      # these seams have always used, so a block that rebinds no ivar leaves the locals exactly as before.
       #
       # Issue #1402 — `optimistic` is a mark a write-back pass's exit held ({#with_capture_exit_marks}); a name that has
       # one binds through {CapturedLocals.bind} whatever its kind, which adds it.
       def bind_capture(scope, name, type, optimistic: nil)
         return CapturedLocals.bind(scope, name, type, optimistic: optimistic) if optimistic
 
-        CapturedLocals.ivar_name?(name) ? CapturedLocals.bind(scope, name, type) : scope.with_local(name, type)
+        CapturedLocals.local_name?(name) ? scope.with_local(name, type) : CapturedLocals.bind(scope, name, type)
       end
 
       # A block-level `break` ends the CALL, so the binding it leaves with starts no further iteration and is no input
@@ -7426,17 +7494,36 @@ module Rigor
         return post_scope if body.nil?
 
         shadows = {}.compare_by_identity
-        mutations = captured_content_mutations(block, shadows)
+        mutations = captured_content_mutations(block, shadows, call_node)
         return post_scope if mutations.empty?
 
         seeds = mutations.to_h do |name, _calls|
-          [name, lookup_mutated_seed(body, name, seed_scope.local(name)) { |depth, nesting| depth > nesting }]
+          seed = CapturedLocals.bound_type(seed_scope, name)
+          [name, lookup_mutated_seed(body, name, seed) { |depth, nesting| depth > nesting }]
         end
-        shadow_rebound_reads(block, mutations, seeds, shadows)
+        shadow_rebound_reads(block, mutations, seeds, shadows, call_node)
         joined = join_content_to_fixpoint(mutations, seeds, build_block_entry_scope(call_node, block), shadows)
         rewrites = local_rewrites(block.body) { |receiver, ancestors| receiver.depth > scope_nesting(ancestors) }
         joined.reduce(post_scope) do |acc, (name, type)|
-          acc.with_mutated_local(name, rewritten_capture(type, seeds[name], rewrites.fetch(name, NO_REWRITES)))
+          bind_mutated_capture(acc, name, rewritten_capture(type, seeds[name], rewrites.fetch(name, NO_REWRITES)))
+        end
+      end
+
+      # `scope` with a capture the block mutated in place bound to its joined or floored content: a local through
+      # `Scope#with_mutated_local`, which keeps the marks a source-level write drops, and an instance variable, class
+      # variable or global through {CapturedLocals.bind}, which keeps an ivar's optimistic nil-freeness mark. The
+      # binding still names the same object.
+      def bind_mutated_capture(scope, name, type)
+        CapturedLocals.local_name?(name) ? scope.with_mutated_local(name, type) : CapturedLocals.bind(scope, name, type)
+      end
+
+      # `scope` with a content seam's working binding for `name` — its join so far, or `Dynamic[top]` for a read the
+      # body rebinds — whatever kind of variable it is.
+      def bind_capture_slot(scope, name, type)
+        case CapturedLocals.variable_kind(name)
+        when :local then scope.with_local(name, type)
+        when :ivar then scope.with_ivar(name, type)
+        else CapturedLocals.bind(scope, name, type)
         end
       end
 
@@ -7445,17 +7532,27 @@ module Rigor
 
       # The {RewriteMutation} names `root` calls on each local its block admits — `a.map!(&:to_s)` beside an `a << x`.
       # The receiver test is the one the caller's content-mutation walk applies.
-      def local_rewrites(root)
+      def local_rewrites(root, &)
         rewrites = {}
         Source::NodeWalker.each_with_ancestors(root) do |node, ancestors|
           next unless node.is_a?(Prism::CallNode) && RewriteMutation.rewriter?(node.name)
 
           receiver = node.receiver
-          next unless receiver.is_a?(Prism::LocalVariableReadNode) && yield(receiver, ancestors)
+          next unless rewritten_capture_receiver?(receiver, ancestors, &)
 
           (rewrites[receiver.name] ||= []) << node.name
         end
         rewrites
+      end
+
+      # A local the caller's test admits, or an instance variable, class variable or global outside a body that makes
+      # it another variable ({#under_scope_body?}): the names the content walks can collect.
+      def rewritten_capture_receiver?(receiver, ancestors)
+        case receiver
+        when Prism::LocalVariableReadNode then yield(receiver, ancestors)
+        when *NON_LOCAL_READ_NODES then !under_scope_body?(ancestors, CapturedLocals.variable_kind(receiver.name))
+        else false
+        end
       end
 
       # The slice-C join (and the loop seam's) rebuilds a collection from its SEED, so the rewrite the body's own
@@ -7484,10 +7581,14 @@ module Rigor
       # - joined with the block-entry typing, it still stores exit values no store reads;
       # - one more walk of the body to the store inherits every gap in the engine's in-body flow.
       #
+      # An instance variable the body rebinds is one too (issue #1235): `@total += x; out << @total` stored the
+      # pre-call `@total`, and so are a class variable and a global (issue #3096). Each counts on the terms the content
+      # walk takes one ({#capturable_non_local?}).
+      #
       # See ADR-56 WD2.13.
-      def shadow_rebound_reads(block, sites, seeds, shadows)
+      def shadow_rebound_reads(block, sites, seeds, shadows, call_node)
         entry_names = scope.locals.keys | CapturedLocals.introduced_locals(block).to_a
-        written = scope_local_writes(block) & entry_names
+        written = (scope_local_writes(block) & entry_names) | rebound_capturable_non_locals(block, call_node)
         return if written.empty?
 
         sites.each do |name, nodes|
@@ -7499,6 +7600,23 @@ module Rigor
             shadows[site] = shadows.fetch(site, []) | names unless names.empty?
           end
         end
+      end
+
+      # The instance variables, class variables and globals the block body writes that {#capturable_non_local?}
+      # accepts; no instance variable for a block that runs on another object. Every self-rebinding call classifies
+      # `:unknown` today, so neither content seam that calls this meets one; the guard keeps the answer right should
+      # the escape analysis learn to call one non-escaping.
+      def rebound_capturable_non_locals(block, call_node)
+        return NO_REWRITES if block.body.nil?
+
+        foreign = foreign_self_block?(call_node)
+        names = []
+        Source::NodeWalker.each_with_ancestors(block.body) do |node, ancestors|
+          next unless CapturedLocals::NON_LOCAL_WRITE_NODES.include?(node.class)
+
+          names << node.name if capturable_non_local?(node.name, ancestors, scope, foreign_self: foreign)
+        end
+        names.uniq
       end
 
       # The locals a store reads to build what it stores. An Array index write's index arguments are left out, and so
@@ -7539,6 +7657,26 @@ module Rigor
       SCOPE_BODY_NODES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
       private_constant :SCOPE_BODY_NODES
 
+      # The bodies under a block body where a non-local of each kind is no longer the one the block's caller sees, or
+      # does not run while the block does. A `def` body runs only when called. A class or module body is a class of
+      # its own for an instance variable and a class variable, but runs at once and reads the one global. `class <<
+      # self` keeps the enclosing class's class variables, so only an instance variable leaves there.
+      NON_LOCAL_SCOPE_BODY_NODES = {
+        ivar: SCOPE_BODY_NODES,
+        cvar: [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode].freeze,
+        global: [Prism::DefNode].freeze
+      }.freeze
+      private_constant :NON_LOCAL_SCOPE_BODY_NODES
+
+      # True when a non-local of `kind` (`:ivar`, `:cvar` or `:global`) at `ancestors` under a block body sits in a body
+      # the block defines that makes it another variable or does not run during the block
+      # ({NON_LOCAL_SCOPE_BODY_NODES}): for an instance variable, any method, class or module body, where `self` is that
+      # body's own.
+      def under_scope_body?(ancestors, kind = :ivar)
+        bodies = NON_LOCAL_SCOPE_BODY_NODES.fetch(kind)
+        ancestors.any? { |a| bodies.any? { |k| a.is_a?(k) } }
+      end
+
       # True when the local `node` names lives in the scope the walk started in or an outer one.
       def same_scope_local?(node, ancestors)
         return false if ancestors.any? { |ancestor| SCOPE_BODY_NODES.any? { |klass| ancestor.is_a?(klass) } }
@@ -7555,16 +7693,37 @@ module Rigor
       ].freeze
       private_constant :LOCAL_READ_NODES
 
-      # Every local `node` reads from the scope it sits in: a read inside an inner block of a name that block
-      # introduces is a different variable.
+      # The same for an instance variable, a class variable and a global.
+      NON_LOCAL_VALUE_READ_NODES = Set[
+        Prism::InstanceVariableReadNode,
+        Prism::InstanceVariableOperatorWriteNode,
+        Prism::InstanceVariableOrWriteNode,
+        Prism::InstanceVariableAndWriteNode,
+        Prism::ClassVariableReadNode,
+        Prism::ClassVariableOperatorWriteNode,
+        Prism::ClassVariableOrWriteNode,
+        Prism::ClassVariableAndWriteNode,
+        Prism::GlobalVariableReadNode,
+        Prism::GlobalVariableOperatorWriteNode,
+        Prism::GlobalVariableOrWriteNode,
+        Prism::GlobalVariableAndWriteNode
+      ].freeze
+      private_constant :NON_LOCAL_VALUE_READ_NODES
+
+      # Every local `node` reads from the scope it sits in, and every instance variable, class variable or global
+      # outside a nested method or class body: a read inside an inner block of a name that block introduces is a
+      # different variable. The caller intersects the answer with the names the body writes, which
+      # {#rebound_capturable_non_locals} has already filtered.
       def local_reads(node)
         return [] if node.nil?
 
         names = []
         Source::NodeWalker.each_with_ancestors(node) do |n, ancestors|
-          next unless LOCAL_READ_NODES.any? { |klass| n.is_a?(klass) }
-
-          names << n.name if same_scope_local?(n, ancestors)
+          if LOCAL_READ_NODES.any? { |klass| n.is_a?(klass) }
+            names << n.name if same_scope_local?(n, ancestors)
+          elsif NON_LOCAL_VALUE_READ_NODES.include?(n.class)
+            names << n.name unless under_scope_body?(ancestors, CapturedLocals.variable_kind(n.name))
+          end
         end
         names.uniq
       end
@@ -7650,7 +7809,7 @@ module Rigor
 
       def bind_content_joins(scope, kinds, seeds, evidence)
         kinds.reduce(scope) do |acc, (name, kind)|
-          acc.with_local(name, content_entry_binding(seeds[name], kind, name, evidence))
+          bind_capture_slot(acc, name, content_entry_binding(seeds[name], kind, name, evidence))
         end
       end
 
@@ -7683,16 +7842,87 @@ module Rigor
       #
       # Each site nested in an inner block or lambda is recorded in `shadows` with the names those blocks bind
       # themselves (see {#join_content_to_fixpoint}).
-      def captured_content_mutations(block, shadows)
+      #
+      # Issue #1208 — an instance variable is a capture too: every block made in a method shares its `self`, so `@out
+      # << x` in the body grows the method's `@out` exactly as `out << x` grows `out`. It counts on the terms
+      # {CapturedLocals.writes} takes a rebound one: bound at the call site and not on its ADR-58 declaration seed
+      # ({CapturedLocals.rebindable_ivar?}), outside a nested method or class body, and not in a block that runs on
+      # another object ({CapturedLocals.under_foreign_self_block?}, or `call_node`'s own block).
+      #
+      # Issue #3096 — a class variable and a global are captures on the same terms, less the foreign-self one: Ruby
+      # resolves a class variable lexically, and a global is the same one whatever `self` is.
+      def captured_content_mutations(block, shadows, call_node)
         mutations = Hash.new { |h, k| h[k] = [] }
+        # Every self-rebinding call classifies `:unknown` today, so this seam does not meet one; the guard keeps the
+        # ivar arm right should the escape analysis learn to call one non-escaping.
+        foreign = foreign_self_block?(call_node)
         Source::NodeWalker.each_with_ancestors(block.body) do |node, ancestors|
           name, site = content_mutation_target(node) { |receiver| receiver.depth > scope_nesting(ancestors) }
+          name, site = non_local_content_mutation_target(node, ancestors, foreign) if name.nil?
           next if name.nil?
 
           mutations[name] << site
           record_shadows(shadows, site, ancestors)
         end
         mutations
+      end
+
+      # `[name, node]` when `node` mutates the content of an instance variable of this scope's `self`, a class
+      # variable or a global that the content seams may join ({#captured_content_mutations}), else
+      # {NO_CONTENT_MUTATION}. `foreign_self` says the seam's block runs on another object.
+      def non_local_content_mutation_target(node, ancestors, foreign_self)
+        is_call_mutator = node.is_a?(Prism::CallNode) && CONTENT_MUTATORS.include?(node.name)
+        return NO_CONTENT_MUTATION unless is_call_mutator || index_write?(node)
+
+        receiver = node.receiver
+        return NO_CONTENT_MUTATION unless NON_LOCAL_READ_NODES.include?(receiver.class)
+        return NO_CONTENT_MUTATION unless capturable_non_local?(receiver.name, ancestors, scope, foreign_self:)
+        return NO_CONTENT_MUTATION unless collection_only?(CapturedLocals.bound_type(scope, receiver.name))
+
+        [receiver.name, node]
+      end
+
+      # The receiver reads of a variable the content seams take besides a local.
+      NON_LOCAL_READ_NODES = Set[
+        Prism::InstanceVariableReadNode, Prism::ClassVariableReadNode, Prism::GlobalVariableReadNode
+      ].freeze
+      private_constant :NON_LOCAL_READ_NODES
+
+      # True when every member of `type` is an Array, a Hash or a String carrier. The non-escaping join takes an
+      # instance variable only then: it drops a seed's `nil` after a guarded mutation (#1219), so `@buf = flag ? [1] :
+      # nil; [1].each { @buf << 2 if @buf }` would lose the `nil` the runtime keeps when the block never runs it. The
+      # local spelling has the gap; an instance variable, the common lazily-initialised spelling, keeps its pre-call
+      # binding until it closes. The escaping floor takes every instance variable ({#member_content_floor}).
+      def collection_only?(type)
+        return false if type.nil?
+        return type.members.all? { |member| collection_only?(member) } if type.is_a?(Type::Union)
+
+        arrayish?(type) || hashish?(type) || UnknownStoreWidening.carrier_class(type) == "String"
+      end
+
+      # True when the non-local `name`, read or written at `ancestors` under a block body, is one the content seams
+      # take against `in_scope`: bound there ({CapturedLocals.rebindable_non_local?}, which keeps an instance
+      # variable on its declaration seed out) and outside a body the block defines that makes it another variable or
+      # runs later ({#under_scope_body?}).
+      #
+      # - An instance variable must be `self`'s: not under a block that runs on another object, nor in a seam whose
+      #   block does (`foreign_self`), nor in any method, class or module body.
+      # - A class variable resolves lexically and a global is global, so `self` does not matter to either (issue
+      #   #3096). A `def` body runs only when called, so neither counts there. A class or module body runs at once:
+      #   it reads its own class variables but the one global, so a global counts there. `class << self` keeps the
+      #   enclosing class's class variables, so a class variable counts there.
+      # - A global Ruby's own signatures declare (`$stdout`, `$;`, `$0`, the frame-local `$~` and `$_`, …) is left
+      #   alone: the interpreter owns it, and some of them read through a getter (`$0` answers a frozen copy).
+      def capturable_non_local?(name, ancestors, in_scope, foreign_self: false)
+        return false if under_scope_body?(ancestors, CapturedLocals.variable_kind(name))
+
+        case CapturedLocals.variable_kind(name)
+        when :ivar
+          return false if foreign_self || CapturedLocals.under_foreign_self_block?(ancestors, in_scope)
+        when :global
+          return false if in_scope.environment.global_for_name(name, builtin: true)
+        end
+        CapturedLocals.rebindable_non_local?(in_scope, name)
       end
 
       def scope_nesting(ancestors)
@@ -7715,7 +7945,7 @@ module Rigor
         names = shadows[site]
         return scope if names.nil?
 
-        names.reduce(scope) { |acc, name| acc.with_local(name, Type::Combinator.untyped) }
+        names.reduce(scope) { |acc, name| bind_capture_slot(acc, name, Type::Combinator.untyped) }
       end
 
       # `base` binds every fixed name to its join; the moving names are rebound on each pass.
@@ -7727,7 +7957,7 @@ module Rigor
           widen: Type::Combinator.method(:widen_value_pinned),
           evaluate_body: lambda do |assumption|
             pass_entry = kinds.reduce(base) do |acc, (name, kind)|
-              acc.with_local(name, content_carrier_under(seeds[name], kind, name, assumption))
+              bind_capture_slot(acc, name, content_carrier_under(seeds[name], kind, name, assumption))
             end
             content_evidence(sites, kinds, pass_entry, shadows)
           end
@@ -7838,11 +8068,19 @@ module Rigor
         type.nil? || type.is_a?(Type::Bot) ? [] : [type]
       end
 
+      # A joined name is a local, an instance variable (#1208), a class variable or a global (#3096), so a store
+      # reading any of them moves.
+      CAPTURE_READ_NODES = Set[
+        Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode, Prism::ClassVariableReadNode,
+        Prism::GlobalVariableReadNode
+      ].freeze
+      private_constant :CAPTURE_READ_NODES
+
       def store_arguments_read?(node, names)
         arguments = node.arguments
         return false if arguments.nil?
 
-        Source::NodeWalker.each(arguments).any? { |n| n.is_a?(Prism::LocalVariableReadNode) && names.include?(n.name) }
+        Source::NodeWalker.each(arguments).any? { |n| CAPTURE_READ_NODES.include?(n.class) && names.include?(n.name) }
       end
 
       # ADR-56 slice C (B3). For `recv.each_with_object(memo) { |x, acc| … }` the return is the memo object after the
@@ -8101,8 +8339,14 @@ module Rigor
           next if ancestors.any?(Prism::DefNode)
 
           receiver = node.receiver
-          next unless receiver.is_a?(Prism::LocalVariableReadNode) && receiver.name == name
-          next unless yield(receiver.depth, scope_nesting(ancestors))
+          case receiver
+          when Prism::LocalVariableReadNode
+            next unless receiver.name == name && yield(receiver.depth, scope_nesting(ancestors))
+          when Prism::InstanceVariableReadNode, Prism::ClassVariableReadNode, Prism::GlobalVariableReadNode
+            next unless receiver.name == name && capturable_non_local?(name, ancestors, scope)
+          else
+            next
+          end
 
           seed = MutationWidening.widen_for_mutator(seed, node.name) || seed
         end
@@ -8115,11 +8359,11 @@ module Rigor
       # write.
       def join_memo_content(call_node, memo_param, calls, pre_state, shadows)
         block = call_node.block
-        captured = captured_content_mutations(block, shadows)
-        seeds = captured.keys.to_h { |name| [name, scope.local(name)] }
+        captured = captured_content_mutations(block, shadows, call_node)
+        seeds = captured.keys.to_h { |name| [name, CapturedLocals.bound_type(scope, name)] }
         seeds[memo_param] = pre_state
         sites = captured.merge(memo_param => calls)
-        shadow_rebound_reads(block, sites, seeds, shadows)
+        shadow_rebound_reads(block, sites, seeds, shadows, call_node)
         join_content_to_fixpoint(sites, seeds, build_block_entry_scope(call_node, block), shadows)[memo_param]
       end
 
@@ -8676,7 +8920,8 @@ module Rigor
       # ({#record_closure_escape_if_any}) and a lambda literal ({#eval_lambda}) — so they cannot drift.
       def escaping_closure_captures(closure_node, post_scope, foreign_self: false)
         widen_escaping_content_captures(closure_node,
-                                        drop_captured_narrowing(closure_node, post_scope, foreign_self: foreign_self))
+                                        drop_captured_narrowing(closure_node, post_scope, foreign_self: foreign_self),
+                                        foreign_self: foreign_self)
       end
 
       # Issue #1402 — whether `call_node`'s block runs on an object that is provably not `self`
@@ -9328,6 +9573,39 @@ module Rigor
         branch_unconditionally_exits?(branch_node) ||
           branch_type.is_a?(Type::Bot)
       end
+
+      # Issue #1230 — a strict, syntactic-only exit test for the then-exits-beside-an-else arm ({#if_join}). The
+      # branch's last statement is a `return` / `next` / `break`; a receiver-less `raise` / `fail` /
+      # `exit` / `exit!` / `abort` / `throw` whose name no project file defines on any class or module, at the top level
+      # or by `define_method` ({Scope#project_method_name?}); or an if / unless / case with an else whose every arm
+      # certainly exits. A `redo` / `retry` does not: it re-runs a loop body or a `begin` that reads the branch's
+      # writes. Unlike {#branch_terminates?} it reads no type, so a `bot`-typed helper call does not qualify:
+      # the typer types a call to an overridable or Kernel-shadowing project method `bot` (issue #3110).
+      def branch_certainly_exits?(node)
+        case node
+        when Prism::ReturnNode, Prism::NextNode, Prism::BreakNode then true
+        when Prism::CallNode then certain_exit_call?(node)
+        when Prism::StatementsNode then branch_certainly_exits?(node.body.last)
+        when Prism::ParenthesesNode then branch_certainly_exits?(node.body)
+        when Prism::ElseNode then branch_certainly_exits?(node.statements)
+        when Prism::IfNode, Prism::UnlessNode
+          branch_certainly_exits?(node.statements) && branch_certainly_exits?(node_else_branch(node))
+        when Prism::CaseNode, Prism::CaseMatchNode then case_certainly_exits?(node)
+        else false
+        end
+      end
+
+      def certain_exit_call?(node)
+        node.receiver.nil? && CERTAIN_EXIT_NAMES.include?(node.name) && !scope.project_method_name?(node.name)
+      end
+
+      def case_certainly_exits?(node)
+        !node.else_clause.nil? && branch_certainly_exits?(node.else_clause) &&
+          node.conditions.all? { |arm| branch_certainly_exits?(arm.statements) }
+      end
+
+      CERTAIN_EXIT_NAMES = %i[raise fail exit exit! abort throw].freeze
+      private_constant :CERTAIN_EXIT_NAMES
 
       def eval_branch_or_nil(branch_node, branch_scope, on_enter: @on_enter)
         return [Type::Combinator.constant_of(nil), branch_scope] if branch_node.nil?

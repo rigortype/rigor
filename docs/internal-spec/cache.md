@@ -1566,6 +1566,9 @@ Two persisted summaries prove "nothing changed":
   dependents. Any mismatch, a changed signature, a missing def, an
   ineligible def (one that also exposes ivar/cvar writes or `yield` values),
   or a cap overflow keeps the dependents — the conservative direction.
+  A key a splat call observed ([#1237](https://github.com/rigortype/rigor/issues/1237)) is stored as
+  `(receiver, args, true)` and re-evaluated the way that call bound it, with no
+  positional correspondence ([`inference-engine.md`](inference-engine.md)); snapshot SCHEMA 48.
 
 Both gates are premised on a `plugin_fact_digest` match for the run (asserted
 in code, not assumed); `--verify-incremental` is the standing byte-identity

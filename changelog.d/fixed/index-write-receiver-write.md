@@ -1,0 +1,3 @@
+- **[inference]** A variable written in the receiver or an index argument of a compound index write (`(h ||= {})[k] ||= v`, `h[(i = 1)] ||= v`) now holds its new value afterwards, so a later `h.fetch(k)` no longer reports `call.undefined-method` for `nil`. ([#3098](https://github.com/rigortype/rigor/pull/3098))
+  - It covers local, instance, class and global variable receivers, and the `||=`, `&&=` and operator (`+=`) forms; the slot's store is joined into the written variable as it is for a plain receiver.
+  - A write the receiver may skip (`(c ? (h = {}) : g)[k] ||= v`) leaves the variable nil-able.

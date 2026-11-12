@@ -485,7 +485,7 @@ Before declaring a coverage-uplift slice done:
 - [ ] Precision snapshots updated: `UPDATE_SNAPSHOTS=1 bundle exec rspec spec/integration/precision_snapshot_spec.rb`.
       Run this whenever you add or modify a fixture — the golden files in `spec/integration/snapshots/`
       must reflect the new precise types or the CI snapshot gate will fail.
-- [ ] `make verify-changed` clean locally; CI green on the Draft PR (it runs `make coverage` too).
+- [ ] `make verify-changed` clean locally; full CI green after `gh pr ready` (it runs `make coverage` too; a Draft PR's CI is only the light gate).
 - [ ] Changelog fragment under `changelog.d/<section>/` (user-visible description of the new folds).
 - [ ] Implemented 🔲 entries updated to ✅ in the coverage doc.
 

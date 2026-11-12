@@ -533,4 +533,68 @@ RSpec.describe Rigor::CLI::BaselineCommand do
       expect(out).to include("No cleared buckets")
     end
   end
+
+  # Issue #2576 — an output path that cannot be written is a usage error, the same rule `rigor init
+  # --path` follows (#2562): one `rigor baseline: cannot write PATH: REASON` line on stderr and exit
+  # 64. The write used to escape as a raw Errno backtrace, which read as an internal crash.
+  describe "unwritable output" do
+    before { write_demo_project(diagnostic_source: "1.this_method_does_not_exist\n") }
+
+    it "generate reports a missing output directory on one stderr line and exits 64" do
+      status, _out, err = run_cli("baseline", "generate", "--output=nodir/b.yml", cwd: tmpdir)
+
+      expect(status).to eq(described_class::EXIT_USAGE)
+      expect(err).to eq("rigor baseline: cannot write nodir/b.yml: No such file or directory\n")
+      expect(err).not_to match(/Errno|\.rb:\d+|from /)
+      expect(File.exist?(File.join(tmpdir, "nodir"))).to be(false)
+    end
+
+    it "generate --force reports a directory destination on one stderr line and exits 64" do
+      FileUtils.mkdir_p(File.join(tmpdir, "adir"))
+
+      status, _out, err = run_cli("baseline", "generate", "--output=adir", "--force", cwd: tmpdir)
+
+      expect(status).to eq(described_class::EXIT_USAGE)
+      expect(err).to eq("rigor baseline: cannot write adir: Is a directory\n")
+      expect(err).not_to match(/Errno|\.rb:\d+|from /)
+    end
+
+    it "regenerate reports a missing output directory on one stderr line and exits 64" do
+      status, _out, err = run_cli("baseline", "regenerate", "--output=nodir/b.yml", cwd: tmpdir)
+
+      expect(status).to eq(described_class::EXIT_USAGE)
+      expect(err).to eq("rigor baseline: cannot write nodir/b.yml: No such file or directory\n")
+      expect(File.exist?(File.join(tmpdir, "nodir"))).to be(false)
+    end
+
+    it "regenerate reports a directory destination on one stderr line and exits 64" do
+      FileUtils.mkdir_p(File.join(tmpdir, "adir"))
+
+      status, _out, err = run_cli("baseline", "regenerate", "--output=adir", cwd: tmpdir)
+
+      expect(status).to eq(described_class::EXIT_USAGE)
+      expect(err).to eq("rigor baseline: cannot write adir: Is a directory\n")
+    end
+
+    # `prune` reads the baseline back before writing it, so a missing path cannot reach the write;
+    # the remaining failure is a permission denial, which needs no chmod to fake: `File.write` is
+    # stubbed for the baseline path only (the runner's cache writes go through other paths).
+    it "prune reports an unwritable baseline on one stderr line and exits 64, leaving it untouched" do
+      run_cli("baseline", "generate", cwd: tmpdir)
+      File.write(File.join(tmpdir, "lib", "demo.rb"), "x = 1\n")
+      baseline_path = File.join(tmpdir, ".rigor-baseline.yml")
+      before = File.read(baseline_path)
+      allow(File).to receive(:write).and_wrap_original do |original, *args, **kwargs|
+        raise Errno::EACCES if args.first.to_s == ".rigor-baseline.yml"
+
+        original.call(*args, **kwargs)
+      end
+
+      status, _out, err = run_cli("baseline", "prune", cwd: tmpdir)
+
+      expect(status).to eq(described_class::EXIT_USAGE)
+      expect(err).to eq("rigor baseline: cannot write .rigor-baseline.yml: Permission denied\n")
+      expect(File.read(baseline_path)).to eq(before)
+    end
+  end
 end

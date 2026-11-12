@@ -115,8 +115,8 @@ nix develop --command make verify-changed
 ```
 
 `make verify-changed` runs the plugin's integration specs, the two all-plugin conformance specs,
-RuboCop, and `rigor check` on the changed lib files. Then push the Draft PR; CI is the full gate and
-must report:
+RuboCop, and `rigor check` on the changed lib files. Then push the Draft PR. Its CI is only a light
+gate (change detection and lint); the full CI runs at `gh pr ready`, and it must report:
 
 - RSpec passing (the new integration spec adds N examples to the total).
 - RuboCop 0 offenses (the plugin's own source is excluded by `.rubocop.yml`'s `plugins/**/*` and `examples/**/*` rules, but the integration spec under `spec/integration/{plugins,examples}/` IS linted — keep it under the per-example length / multiple-expectations limits, or add inline `# rubocop:disable` with a reason).

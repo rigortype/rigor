@@ -535,6 +535,12 @@ origin/main:.rigor-effects.yml)` in a bot),
 `explain` additionally accepts `--symbol=KEY` to explain one
 specific unit instead of the changed ones.
 
+`update` writes `effects.snapshot.path:` (default
+`.rigor-effects.yml`). A path whose directory does not exist, or
+that cannot be written, is a usage error: one
+`rigor effects: cannot write PATH: REASON` line on stderr and
+exit `64`. The directory is not created.
+
 The file records two tables. `methods:` holds each method's
 **direct** summary — what its own body does, block literals
 and catalogued callees included, but not what the project
@@ -807,6 +813,11 @@ repair through.
 routes to a signature path it does not write to, because it is declared there or its class lives there) on its own `skipped Class#method (reason)` line; the exit status is
 unchanged. See [handbook chapter 11](../handbook/11-sig-gen.md#safety-what---write-will-and-will-not-do).
 
+A `sig/` target `--write` cannot write — a permission denial, a directory sitting where the `.rbs`
+belongs, or a parent path that is a regular file — is a usage error: one `rigor sig-gen: cannot
+write PATH: REASON` line on stderr and exit `64`. A missing parent directory is created as before.
+The run stops at the first failure; targets already written stay written.
+
 A method declared inline with `# @rbs` / `#:` is written as that
 declaration, not as what its body infers; a parameter-only
 annotation keeps its parameters and takes the return from the body,
@@ -908,6 +919,12 @@ rigor baseline <generate|regenerate|dump|drift|prune> [options]
 `--match-mode=rule|message`; `dump`, `drift`, and `prune` accept
 `--baseline=PATH` to read a non-default baseline file. `dump`
 also accepts `--format=text|json` for machine-readable output.
+
+A write target — `generate` and `regenerate`'s `--output`, or the
+`--baseline` file `prune` rewrites — whose directory does not exist,
+or that cannot be written, is a usage error: one
+`rigor baseline: cannot write PATH: REASON` line on stderr and exit
+`64`. The directory is not created.
 
 No subcommand takes a positional path: `generate` and `regenerate`
 analyse the configured `paths:`, `drift` and `prune` audit them, and

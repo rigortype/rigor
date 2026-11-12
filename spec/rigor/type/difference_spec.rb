@@ -105,6 +105,38 @@ RSpec.describe Rigor::Type::Difference do
       # `Nominal[String]` includes `""` so the difference cannot accept the wider base.
       expect(nes.accepts(nominal_of("String")).no?).to be(true)
     end
+
+    # A `Refined` carrier proves the removed `Constant` absent when its predicate recogniser rejects
+    # that value outright — `decimal-int-string` can never hold `""`. A predicate that admits the
+    # removed value (`lowercase-string`: `""` downcases to itself) proves nothing, and neither does a
+    # predicate the registry does not know (`matches?` answers nil, which is no proof).
+    describe "predicate refinements" do
+      it "accepts a string refinement whose predicate rejects the empty string" do
+        expect(nes.accepts(Rigor::Type::Combinator.decimal_int_string).yes?).to be(true)
+        expect(nes.accepts(Rigor::Type::Combinator.numeric_string).yes?).to be(true)
+        expect(nes.accepts(Rigor::Type::Combinator.octal_int_string).yes?).to be(true)
+        expect(nes.accepts(Rigor::Type::Combinator.hex_int_string).yes?).to be(true)
+        expect(nes.accepts(Rigor::Type::Combinator.non_lowercase_string).yes?).to be(true)
+        expect(nes.accepts(Rigor::Type::Combinator.non_uppercase_string).yes?).to be(true)
+      end
+
+      it "rejects a string refinement whose predicate admits the empty string" do
+        expect(nes.accepts(Rigor::Type::Combinator.lowercase_string).no?).to be(true)
+        expect(nes.accepts(Rigor::Type::Combinator.uppercase_string).no?).to be(true)
+        expect(nes.accepts(Rigor::Type::Combinator.literal_string).no?).to be(true)
+        expect(nes.accepts(Rigor::Type::Combinator.non_numeric_string).no?).to be(true)
+      end
+
+      it "proves nothing for a predicate the registry does not know" do
+        unknown = Rigor::Type::Combinator.refined(nominal_of("String"), :unregistered_predicate)
+        expect(nes.accepts(unknown).no?).to be(true)
+      end
+
+      it "proves nothing when the removed value is not a Constant" do
+        minus_shape = Rigor::Type::Combinator.difference(nominal_of("String"), Rigor::Type::Tuple.new([]))
+        expect(minus_shape.accepts(Rigor::Type::Combinator.decimal_int_string).no?).to be(true)
+      end
+    end
   end
 
   # The empty witness of a collection refinement is itself a shape (`Tuple[]`, the closed `{}`), so a

@@ -18,8 +18,11 @@ Load and follow:
 - **No parallel full-suite `make verify` on the host**
 - **Lanes do not own long CI watchers** — you (or external poll + resume) do
 - **Issues remain the backlog** (ADR-98); do not invent a second queue
-- Prefer sparse `gh pr view … --json statusCheckRollup`; at most one poll per
-  minute; never tight-loop `gh pr checks`
+- Read CI as the newest `CI required` check run on the head
+  (`bin/ci-required <head-sha>`), not the `statusCheckRollup`: a Draft PR's
+  light run leaves it SKIPPED, which the rollup counts as passing, and after
+  `gh pr ready` one head carries two runs. At most one poll per minute; never
+  tight-loop `gh pr checks`
 
 ## I/O
 
@@ -34,7 +37,9 @@ CiWatchOutput:
 
 ## Finish phrases
 
-- CI: `CI green` / `CI red` / `CI stalled` (include head SHA)
+- CI: `CI green` / `CI red` / `CI stalled` (include head SHA). `CI green`
+  means the newest `CI required` is SUCCESS, which only a full run (after
+  `gh pr ready`) gives; on a Draft, report the light run's jobs instead
 - Human may still be required for push/PR approval (ADR-115 trial findings)
 - Landing: the orchestrator owning an `Approved` PR lands it via
   `bin/land-pr N <reviewed-head-sha>` per `docs/agents/contribution-flow.md`

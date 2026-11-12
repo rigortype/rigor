@@ -1,0 +1,2 @@
+- **[engine]** Empty-witness refinements such as `non-empty-string` now accept a `Refined` carrier whose predicate rejects the removed value, so `decimal-int-string` and the other never-empty string refinements no longer report `def.return-type-mismatch` or `call.argument-type-mismatch` on correct code. ([#3075](https://github.com/rigortype/rigor/pull/3075))
+  - `lowercase-string`, `uppercase-string`, `literal-string` and `non-numeric-string` stay rejected because their predicates admit `""`.

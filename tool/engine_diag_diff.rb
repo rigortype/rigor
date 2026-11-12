@@ -104,9 +104,13 @@ module EngineDiagDiff
     nil
   end
 
-  # The diagnostics of a `--format json` document, as keyed rows in a total order.
+  # The diagnostics of a `--format json` document, as keyed rows in a total order. A `.`-rooted target makes
+  # `rigor check` print `./`-prefixed paths; the prefix is dropped so the rows key like any other
+  # corpus-relative spelling (`app/foo.rb`), which is what floors and adjudication entries name.
   def rows(document)
-    document.fetch("diagnostics").map { |hash| KEY_FIELDS.map { |field| hash[field] } }.sort_by do |path, line, column, rule, message|
+    document.fetch("diagnostics").map do |hash|
+      KEY_FIELDS.map { |field| field == "path" ? hash[field].to_s.delete_prefix("./") : hash[field] }
+    end.sort_by do |path, line, column, rule, message|
       [path.to_s, line.to_i, column.to_i, rule.to_s, message.to_s]
     end
   end
@@ -281,9 +285,11 @@ module EngineDiagDiff
 
   # An entry inside the corpus, spelled as the entry is written (a symlink inside the corpus keeps its own name, and
   # one pointing outside it is still `app`, as `rigor check` prints it). Inside is decided lexically under `root`, or
-  # by an ancestor of the entry whose realpath is the corpus root, so a corpus reached through a symlink still matches.
-  # The entry itself is never resolved. Anything outside the corpus is its real absolute path.
+  # by realpath matching the corpus root — an ancestor's, or the entry's own, which makes the root itself `.` — so a
+  # corpus reached through a symlink still matches. Otherwise the entry itself is never resolved. Anything outside the corpus
+  # is its real absolute path.
   def corpus_relative(path, root)
+    return "." if path == root
     return path.delete_prefix("#{root}/") if path.start_with?("#{root}/")
 
     real_root = File.realpath(root)
@@ -293,6 +299,8 @@ module EngineDiagDiff
 
       ancestor = File.dirname(ancestor)
     end
+    return "." if File.exist?(path) && File.realpath(path) == real_root
+
     File.exist?(path) ? File.realpath(path) : File.expand_path(path)
   end
 

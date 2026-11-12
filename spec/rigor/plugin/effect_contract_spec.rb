@@ -333,5 +333,60 @@ RSpec.describe "the plugin effect contract" do
       expect(manifest(id: "acme")).not_to be_effects
       expect(Rigor::Effects::PluginFacts.build(nil)).to be_empty
     end
+
+    # #1200 — the empty side of the parity `effects?` keeps with `Contribution#empty?`.
+    it "answers effects? == false exactly when its Contribution is empty" do
+      m = manifest(id: "acme")
+
+      expect(m.effects?).to eq(!contribution(m).empty?)
+    end
+  end
+
+  describe "effects?" do
+    def attribution
+      Rigor::Plugin::EffectAttribution.new(receiver: "A", method: :b, labels: ["io"], why: "spec fixture")
+    end
+
+    def edge
+      Rigor::Plugin::EffectEdge.new(receiver: "A", target: :perform_now, why: "spec fixture")
+    end
+
+    def entry_points
+      Rigor::Plugin::EffectEntryPoints.new(name: "jobs", globs: ["app/jobs/**/*.rb"])
+    end
+
+    def ancestry
+      Rigor::Plugin::EffectAncestry.new(child: "GemBase", parent: "Base", why: "spec fixture")
+    end
+
+    # #1200 — an ancestry claim IS an effect-surface contribution: `rigor-devise` declares only
+    # `effect_ancestry:` rows, and `Contribution#empty?` already counts them.
+    it "answers true for a manifest whose only effect field is effect_ancestry:" do
+      m = manifest(id: "acme", effect_ancestry: [ancestry])
+
+      expect(m).to be_effects
+      expect(contribution(m)).not_to be_empty
+    end
+
+    # `effects?` is the manifest-level spelling of `!Contribution#empty?`: each of the five effect
+    # fields, alone, must flip both answers together.
+    it "agrees with !Contribution#empty? across each effect field" do
+      single_field = {
+        "effect_labels" => { effect_labels: ["acme.a"] },
+        "effect_attributions" => { effect_attributions: [attribution] },
+        "effect_edges" => { effect_edges: [edge] },
+        "effect_entry_points" => { effect_entry_points: [entry_points] },
+        "effect_ancestry" => { effect_ancestry: [ancestry] }
+      }
+
+      single_field.each do |field, kwargs|
+        m = manifest(id: "acme", **kwargs)
+        c = contribution(m)
+
+        expect(m.effects?).to eq(!c.empty?), "#{field} broke the effects?/Contribution#empty? parity"
+        expect(m).to be_effects, "#{field}: expected effects? to be true"
+        expect(c).not_to be_empty, "#{field}: expected a non-empty Contribution"
+      end
+    end
   end
 end

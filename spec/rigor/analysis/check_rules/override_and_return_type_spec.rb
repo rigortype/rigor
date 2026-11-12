@@ -398,6 +398,12 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
 
             %a{rigor:v1:return: non-zero-int}
             def count: (Array[Integer]) -> Integer
+
+            %a{rigor:v1:return: non-empty-string}
+            def label: (Integer) -> String
+
+            %a{rigor:v1:return: non-empty-string}
+            def echo: (String) -> String
           end
         RBS
       end
@@ -422,6 +428,26 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
           end
         RUBY
         expect(return_diags(result).map(&:method_name)).to contain_exactly("ids", "attributes", "count")
+      end
+
+      # `Integer#to_s` infers `decimal-int-string`, a predicate refinement that can never hold `""` —
+      # the disjointness proof `non-empty-string` reads off the carrier (#1264). A body that may still
+      # be `""` — a bare `String`, or a union with the literal — keeps firing.
+      it "stays silent on Integer#to_s for non-empty-string and fires on a body that may be empty" do
+        silent = analyze(<<~RUBY, sig: refinement_sig)
+          class Catalog
+            def label(i) = i.to_s
+          end
+        RUBY
+        expect(return_diags(silent)).to be_empty
+
+        firing = analyze(<<~RUBY, sig: refinement_sig)
+          class Catalog
+            def label(i) = i.even? ? i.to_s : ""
+            def echo(s) = s
+          end
+        RUBY
+        expect(return_diags(firing).map(&:method_name)).to contain_exactly("label", "echo")
       end
     end
   end

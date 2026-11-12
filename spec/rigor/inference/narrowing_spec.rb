@@ -1665,6 +1665,24 @@ RSpec.describe Rigor::Inference::Narrowing do
       expect(truthy.global(:$2)).to be_nil
     end
 
+    it "leaves a `{,n}`-quantified group and its nested groups nilable (#1475)" do
+      truthy, = edges("/((a)){,2}/ =~ x")
+      expect(truthy.global(:$1)).to be_nil
+      expect(truthy.global(:$2)).to be_nil
+    end
+
+    it "promotes only the unconditional sibling of a `{,n}`-quantified group" do
+      truthy, = edges("/(a){,3}(b)/ =~ x")
+      expect(truthy.global(:$1)).to be_nil
+      expect(truthy.global(:$2)).to eq(string_t)
+    end
+
+    it "keeps a group before literal `{,}` braces unconditional (#1475)" do
+      truthy, = edges("/(a){,}(b)/ =~ x")
+      expect(truthy.global(:$1)).to eq(string_t)
+      expect(truthy.global(:$2)).to eq(string_t)
+    end
+
     it "does not narrow on `x.match?(/re/)` (match? sets no globals)" do
       truthy, falsey = edges("x.match?(/(z)/)")
       expect(truthy.global(:$1)).to be_nil
@@ -1812,6 +1830,11 @@ RSpec.describe Rigor::Inference::Narrowing do
 
     it "leaves `$+` unbound (nilable) when every group is optional" do
       truthy, = edges("/(a)?b/ =~ x")
+      expect(truthy.global(:$+)).to be_nil
+    end
+
+    it "leaves `$+` unbound (nilable) when every group carries `{,n}` (#1475)" do
+      truthy, = edges("/(a){,3}/ =~ x")
       expect(truthy.global(:$+)).to be_nil
     end
 

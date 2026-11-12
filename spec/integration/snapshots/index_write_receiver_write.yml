@@ -1,0 +1,12 @@
+---
+locals: {}
+assertions:
+  '1': Hash[Dynamic[top], Dynamic[top] | Integer]
+  '2': Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]
+  '3': Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]
+  '4': Hash[Dynamic[top], Dynamic[top] | Integer]
+  '5': Hash[Dynamic[top], Dynamic[top] | Integer]
+  '6': Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer | nil]
+  '7': Hash[Dynamic[top] | Symbol, Integer]
+  '8': '1'
+  '9': Hash[Dynamic[top] | Integer, Dynamic[top] | Integer]?

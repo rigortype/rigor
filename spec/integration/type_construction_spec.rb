@@ -166,6 +166,18 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #1272 — a compound index write evaluates its receiver and index arguments before the rvalue, so a variable
+  # written in either holds its new value afterwards. The control reads a variable the receiver may leave unbound.
+  describe "fixtures/index_write_receiver_write.rb — a write in a compound index write's receiver binds" do
+    let(:harness) { harness_for("index_write_receiver_write") }
+
+    it "reports nothing but the control" do
+      reported = harness.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
+      expected = marked_lines(harness, "# GENUINE-NIL").map { |line| [line, "call.possible-nil-receiver"] }
+      expect(reported.map { |d| [d.line, d.rule.to_s] }).to match_array(expected)
+    end
+  end
+
   describe "fixtures/multi_write_index_target_widening.rb — a multi-assign `h[k], x = …` widens like `h[k] = v`" do
     let(:harness) { harness_for("multi_write_index_target_widening") }
 
@@ -1184,6 +1196,33 @@ RSpec.describe "Rigor type construction (integration)" do
     it "drops nil from `String | nil` after the early-return guard via assert_type" do
       mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
       expect(mismatches).to be_empty
+    end
+  end
+
+  # Issue #1230 — an `if` / `unless` branch that certainly exits beside an `else` keeps its writes and its predicate
+  # edge out of the scope after it; only the branch that ran carries on. The controls join: one exits only
+  # conditionally, the other ends in a `bot` helper call, which is no proof of an exit (#3110).
+  describe "fixtures/if_branch_exit_join.rb — an exiting branch beside an else stays out of the join" do
+    let(:harness) { harness_for("if_branch_exit_join") }
+
+    it "reports nothing but the joined controls" do
+      reported = harness.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
+      expected = %w[CONDITIONAL-EXIT BOT-HELPER-JOINED].flat_map do |marker|
+        marked_lines(harness, "# #{marker}").map { |line| [line, "call.possible-nil-receiver"] }
+      end
+      expect(reported.map { |d| [d.line, d.rule.to_s] }).to match_array(expected)
+    end
+  end
+
+  # Issue #1230 — the arm accepts a Kernel exit name only where no project file defines it, so a project `fail`,
+  # `exit` or `raise`, and a `bot` helper a subclass overrides, join beside an else as on the base and add nothing.
+  describe "fixtures/if_branch_exit_join_project_exits.rb — a project-defined exit name is no exit beside an else" do
+    let(:harness) { harness_for("if_branch_exit_join_project_exits") }
+
+    it "reports nothing but the joined control" do
+      reported = harness.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
+      expected = marked_lines(harness, "# PROJECT-NAME-JOINED").map { |line| [line, "call.possible-nil-receiver"] }
+      expect(reported.map { |d| [d.line, d.rule.to_s] }).to match_array(expected)
     end
   end
 
@@ -3324,6 +3363,41 @@ RSpec.describe "Rigor type construction (integration)" do
       # folds. The controls read a local the body does not write, and still fold. The harness loads no
       # `Rigor::Testing` signatures, so its toplevel helpers resolve nowhere.
       it "reports nothing but the genuine folds" do
+        reported = harness.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
+        expect(reported.map { |d| [d.line, d.rule.to_s] })
+          .to eq(marked_lines(harness, "# GENUINE-FALSEY").map { |line| [line, "flow.always-truthy-condition"] })
+      end
+    end
+
+    # The same seams read a captured LOCAL only: an instance variable a block mutated in place kept its
+    # pre-call contents on both block paths, and a store reading an instance variable the body rebinds
+    # recorded its first-iteration value (issues #1208, #1235).
+    describe "fixtures/block_content_ivar_capture/ — an instance variable a block mutates in place" do
+      let(:harness) { harness_for("block_content_ivar_capture") }
+
+      it "produces no assert_type mismatches" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+
+      it "reports nothing but the genuine fold" do
+        reported = harness.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
+        expect(reported.map { |d| [d.line, d.rule.to_s] })
+          .to eq(marked_lines(harness, "# GENUINE-FALSEY").map { |line| [line, "flow.always-truthy-condition"] })
+      end
+    end
+
+    # The same seams took a local and an instance variable only: a class variable or a global a block
+    # mutated in place kept its pre-call contents (issue #3096).
+    describe "fixtures/block_content_cvar_global_capture/ — a class variable or global a block mutates in place" do
+      let(:harness) { harness_for("block_content_cvar_global_capture") }
+
+      it "produces no assert_type mismatches" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+
+      it "reports nothing but the genuine fold" do
         reported = harness.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
         expect(reported.map { |d| [d.line, d.rule.to_s] })
           .to eq(marked_lines(harness, "# GENUINE-FALSEY").map { |line| [line, "flow.always-truthy-condition"] })

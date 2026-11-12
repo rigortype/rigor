@@ -1,0 +1,4 @@
+- **[inference]** An `if` or `unless` branch that certainly exits beside an `else` no longer joins its writes into the scope after the conditional, so `if c then x = nil; raise else x = "s" end; x.upcase` no longer reports `call.possible-nil-receiver`. ([#3104](https://github.com/rigortype/rigor/pull/3104))
+  - The else's predicate narrowing survives too: after `if x.nil? then raise else … end`, `x` is non-nil.
+  - "Certainly exits" means the branch ends in `return`, `next`, `break`, a Kernel `raise` / `fail` / `exit` / `exit!` / `abort` / `throw` whose name the project never defines, or a nested `if` / `case` whose every arm, else included, does; a ternary and a middle `elsif` branch are covered the same way.
+  - A branch ending in a call to a helper typed `bot` still joins beside an `else`, as before ([#3110](https://github.com/rigortype/rigor/issues/3110)).

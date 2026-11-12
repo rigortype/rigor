@@ -1,0 +1,3 @@
+- **[inference]** A nil-able or mixed-type instance variable that an escaping block grows in place (`@buf = flag ? [1] : nil; button.on_click { @buf&.push(2) }`) no longer keeps its pre-block contents, so a later comparison on it no longer reports `flow.always-truthy-condition` on correct code. ([#3103](https://github.com/rigortype/rigor/pull/3103))
+  - Each Array, Hash or String member is widened to its bare collection type, and `nil` and every other member stay. `@buf` reads `Array[Dynamic[top]]?`.
+  - A block that runs before the call returns (`[1].each { ... }`) still leaves a nil-able instance variable alone until #1219 is fixed.

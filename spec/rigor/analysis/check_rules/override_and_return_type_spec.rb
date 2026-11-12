@@ -820,6 +820,23 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
     # #3046: the parent is the ancestor whose own RBS declares the method, and a `-> void` override of
     # a parent `-> nil` is exempt. Each row lists the shape and what the rule reports.
     describe "the real owner and the void-over-nil exemption (#3046)" do
+      # An RBS-only module `Mid` includes declares the method nearer than the project `PBase`; the walk
+      # ends there instead of reaching past it to `PBase`.
+      let(:rbs_only_nearer_ruby) do
+        <<~RUBY
+          class PBase; def hook(_x) = 1; end
+          class Mid < PBase; end
+          class Leaf < Mid; def hook(_x) = "s"; end
+        RUBY
+      end
+
+      def rbs_only_nearer_rbs(mod_sig, base_sig, leaf_sig)
+        rbs_decls(
+          "module RMod" => "def hook: #{mod_sig}", "class PBase" => "def hook: #{base_sig}",
+          "class Mid < PBase" => "include RMod", "class Leaf < Mid" => "def hook: #{leaf_sig}"
+        )
+      end
+
       def widen_messages(ruby, rbs)
         widen_diags(analyze(ruby, sig: { "demo.rbs" => rbs })).map { |d| [d.line, d.message] }
       end
@@ -971,23 +988,6 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
           "class AllVoid < PB" => "def hook: () -> void | (Integer) -> void"
         )
         expect(widen_messages(ruby, rbs).map(&:first)).to eq([2])
-      end
-
-      # An RBS-only module `Mid` includes declares the method nearer than the project `PBase`; the walk
-      # ends there instead of reaching past it to `PBase`.
-      let(:rbs_only_nearer_ruby) do
-        <<~RUBY
-          class PBase; def hook(_x) = 1; end
-          class Mid < PBase; end
-          class Leaf < Mid; def hook(_x) = "s"; end
-        RUBY
-      end
-
-      def rbs_only_nearer_rbs(mod_sig, base_sig, leaf_sig)
-        rbs_decls(
-          "module RMod" => "def hook: #{mod_sig}", "class PBase" => "def hook: #{base_sig}",
-          "class Mid < PBase" => "include RMod", "class Leaf < Mid" => "def hook: #{leaf_sig}"
-        )
       end
 
       it "stays silent when an RBS-only module nearer than the project parent declares the return" do

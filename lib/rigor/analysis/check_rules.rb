@@ -4946,10 +4946,10 @@ module Rigor
           )
         end
 
-        # A `-> void` override of a parent return of exactly `nil` (or `NilClass`) is exempt (#3046): both say "no useful
-        # value", and callers cannot use a void return. Keyed on the declared `void` of every arm (the
-        # translator reads `void` as top, so a `-> top` override still fires); any non-nil parent return
-        # still fires.
+        # A `-> void` override of a parent return of exactly `nil` (or `NilClass`) is exempt (#3046): both
+        # say "no useful value", and callers cannot use a void return. Keyed on the declared `void` of every
+        # arm (the translator reads `void` as top, so a `-> top` override still fires); any non-nil parent
+        # return still fires.
         def void_over_nil?(override_method, parent_return)
           return false unless nil_type?(parent_return)
 

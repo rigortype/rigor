@@ -2,6 +2,8 @@
 
 require "prism"
 
+require_relative "../type"
+
 module Rigor
   module Inference
     # Marks a value whose *nil-freeness* rests on Rigor's deliberate choice to ignore core RBS's
@@ -111,13 +113,42 @@ module Rigor
         recorded = scope.optimistic_origin(node)
         return recorded if recorded
 
+        resolve_node(node, scope)
+      end
+
+      # The shape dispatch {.resolve} applies once the node-level mark is ruled out.
+      def resolve_node(node, scope)
         case node
         when Prism::LocalVariableReadNode then scope.optimistic_local(node.name)
         when Prism::InstanceVariableReadNode then scope.optimistic_ivar(node.name)
-        when Prism::LocalVariableWriteNode, Prism::InstanceVariableWriteNode then resolve_write(node, scope)
+        when Prism::LocalVariableWriteNode, Prism::InstanceVariableWriteNode,
+             Prism::GlobalVariableWriteNode, Prism::ClassVariableWriteNode,
+             Prism::MultiWriteNode, Prism::LocalVariableOrWriteNode,
+             Prism::InstanceVariableOrWriteNode, Prism::ClassVariableOrWriteNode,
+             Prism::GlobalVariableOrWriteNode, Prism::LocalVariableAndWriteNode,
+             Prism::InstanceVariableAndWriteNode, Prism::ClassVariableAndWriteNode,
+             Prism::GlobalVariableAndWriteNode
+          resolve_write_form(node, scope)
         when Prism::AndNode, Prism::OrNode then resolve(node.left, scope) || resolve(node.right, scope)
-        when Prism::CallNode then resolve_through_safe_navigation(node, scope) || resolve_through_predicate(node, scope)
+        when Prism::CallNode
+          resolve_attribute_write(node, scope) || resolve_through_safe_navigation(node, scope) ||
+            resolve_through_predicate(node, scope)
         when Prism::ParenthesesNode then resolve_through_parentheses(node, scope)
+        end
+      end
+
+      # The write forms in value position: the plain and multiple writes whose value is the
+      # right-hand side, and the `||=` / `&&=` spellings whose old binding participates.
+      def resolve_write_form(node, scope)
+        case node
+        when Prism::LocalVariableOrWriteNode, Prism::InstanceVariableOrWriteNode,
+             Prism::ClassVariableOrWriteNode, Prism::GlobalVariableOrWriteNode
+          resolve_or_write(node, scope)
+        when Prism::LocalVariableAndWriteNode, Prism::InstanceVariableAndWriteNode,
+             Prism::ClassVariableAndWriteNode, Prism::GlobalVariableAndWriteNode
+          resolve_and_write(node, scope)
+        else
+          resolve_write(node, scope)
         end
       end
 
@@ -131,8 +162,87 @@ module Rigor
         resolve(node.value, scope) || optimistic_write_binding(node, scope)
       end
 
+      # Only locals and ivars carry a binding mark; a global or class-variable write, and a
+      # multiple assignment's slots (marked through {.destructuring_marks} instead), have no
+      # `optimistic_*` table entry to fall back to, so they answer nil here.
       def optimistic_write_binding(node, scope)
-        node.is_a?(Prism::LocalVariableWriteNode) ? scope.optimistic_local(node.name) : scope.optimistic_ivar(node.name)
+        case node
+        when Prism::LocalVariableWriteNode then scope.optimistic_local(node.name)
+        when Prism::InstanceVariableWriteNode then scope.optimistic_ivar(node.name)
+        end
+      end
+
+      # Issue #3054 — `v ||= rhs` yields the OLD binding whenever it is truthy, so the write's
+      # value is the right-hand side's only on the paths where the old value is falsey. When the
+      # old binding is provably always truthy — its type has no falsey inhabitant and it carries
+      # no optimistic mark — the right-hand side is never reached and the expression's verdict is
+      # the old value's own proof, so resolving through `node.value` would silence a correct
+      # always-truthy verdict (`v = "x"; if (v ||= h[k])` still folds to `"x"`). Otherwise the
+      # verdict, when one folds, rests on the right-hand side's bet.
+      def resolve_or_write(node, scope)
+        binding_type, binding_mark = or_write_binding(node, scope)
+        return nil if always_truthy_type?(binding_type) && binding_mark.nil?
+
+        resolve(node.value, scope)
+      end
+
+      # Issue #3054 — `v &&= rhs` yields the right-hand side whenever the old binding is truthy;
+      # the old value itself wins only on its falsey edge, a result no always-truthy verdict can
+      # rest on. So the right-hand side's mark covers every constant verdict the expression folds
+      # to, joined by the old binding's own mark for the case where the miss — not the rvalue — is
+      # what makes the condition live (`v = h[k]; if (v &&= "lit")`).
+      def resolve_and_write(node, scope)
+        resolve(node.value, scope) || and_write_binding_mark(node, scope)
+      end
+
+      # The `[type, mark]` pair an `||=` reads its old value through: the scope binding and the
+      # optimistic mark it carries. Class- and global-variable or-writes have no mark table — the
+      # mark channel covers locals and ivars only — so their mark is always nil.
+      def or_write_binding(node, scope)
+        case node
+        when Prism::LocalVariableOrWriteNode
+          [scope.local(node.name), scope.optimistic_local(node.name)]
+        when Prism::InstanceVariableOrWriteNode
+          [scope.ivar(node.name), scope.optimistic_ivar(node.name)]
+        when Prism::ClassVariableOrWriteNode
+          [scope.cvar(node.name), nil]
+        when Prism::GlobalVariableOrWriteNode
+          [scope.global(node.name), nil]
+        end
+      end
+
+      # The old binding's optimistic mark for an `&&=` — the same two tables {.or_write_binding}
+      # reads, with no type: `&&=` needs the mark alone.
+      def and_write_binding_mark(node, scope)
+        case node
+        when Prism::LocalVariableAndWriteNode then scope.optimistic_local(node.name)
+        when Prism::InstanceVariableAndWriteNode then scope.optimistic_ivar(node.name)
+        end
+      end
+
+      # Issue #3054 — `recv.x = rhs` and `recv[i] = rhs` yield the assigned value, which Prism
+      # spells as the call's last argument (`x=` takes it alone, `[]=` trails the indices). The
+      # compound spellings never reach here: `+=` / `[]=` operators and `||=` / `&&=` on an
+      # attribute or index are `CallOperatorWriteNode` / `IndexOperatorWriteNode` /
+      # `CallOrWriteNode` / `CallAndWriteNode` / `IndexOrWriteNode` / `IndexAndWriteNode`, not
+      # `CallNode`, and their value is the old slot's, not the right-hand side's.
+      def resolve_attribute_write(node, scope)
+        resolve(node.arguments&.arguments&.last, scope) if node.attribute_write?
+      end
+
+      # Whether `type` proves every inhabitant truthy — the empty falsey fragment of
+      # `Narrowing.narrow_falsey`, mirrored carrier for carrier so this leaf module need not
+      # require `Narrowing` (which already requires this file). A `nil` binding (unbound) and
+      # every carrier the falsey fragment cannot empty (`Top`, `Dynamic`, ranges, refinements,
+      # differences) answer false: only a proof counts.
+      def always_truthy_type?(type)
+        case type
+        when Type::Constant then !(type.value.nil? || type.value == false)
+        when Type::Nominal then !%w[NilClass FalseClass].include?(type.class_name)
+        when Type::Union then type.members.all? { |member| always_truthy_type?(member) }
+        when Type::Singleton, Type::Tuple, Type::HashShape then true
+        else type.is_a?(Type::Bot)
+        end
       end
 
       # `recv&.m` is `nil` exactly when `recv` is (or when `m` answers `nil`), so it restates `recv`'s presence

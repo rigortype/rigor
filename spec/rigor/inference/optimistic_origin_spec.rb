@@ -986,7 +986,7 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
   # there yet and `flow.always-truthy-condition` fired on the optimistic read.
   describe ".resolve through a write in value position" do
     def write_of(source)
-      Prism.parse(source, scopes: [%i[v h k]]).value.statements.body.first
+      Prism.parse(source, scopes: [%i[v h k arr obj a b i j]]).value.statements.body.first
     end
 
     it "resolves a local and an ivar write to the right-hand side's recorded mark" do
@@ -1014,6 +1014,93 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
       write = write_of("v = \"lit\"")
 
       expect(described_class.resolve(write, scope)).to be_nil
+    end
+
+    # Issue #3054 — every write form whose value is its right-hand side resolves the same way:
+    # a global or class-variable write, a multiple assignment, and the `||=` / `&&=` pair.
+    it "resolves a global or class-variable write, a multiple assignment, and an or/and write" do
+      {
+        "$g = h[k]" => Prism::GlobalVariableWriteNode,
+        "@@cv = h[k]" => Prism::ClassVariableWriteNode,
+        "a, b = h[k]" => Prism::MultiWriteNode,
+        "v ||= h[k]" => Prism::LocalVariableOrWriteNode,
+        "@v ||= h[k]" => Prism::InstanceVariableOrWriteNode,
+        "$g ||= h[k]" => Prism::GlobalVariableOrWriteNode,
+        "@@cv ||= h[k]" => Prism::ClassVariableOrWriteNode,
+        "v &&= h[k]" => Prism::LocalVariableAndWriteNode,
+        "@v &&= h[k]" => Prism::InstanceVariableAndWriteNode,
+        "$g &&= h[k]" => Prism::GlobalVariableAndWriteNode,
+        "@@cv &&= h[k]" => Prism::ClassVariableAndWriteNode
+      }.each do |source, klass|
+        write = write_of(source)
+        expect(write).to be_a(klass), "for #{source}"
+        scope_with_mark = scope.record_optimistic_origin(write.value, described_class::IMPLICITLY_RETURNS_NIL)
+
+        expect(described_class.resolve(write, scope_with_mark))
+          .to eq(described_class::IMPLICITLY_RETURNS_NIL), "for #{source}"
+      end
+    end
+
+    it "resolves an attribute or index write to its last argument's mark" do
+      ["self.x = h[k]", "obj.x = h[k]", "arr[0] = h[k]", "arr[i, j] = h[k]"].each do |source|
+        write = write_of(source)
+        expect(write).to be_a(Prism::CallNode), "for #{source}"
+        expect(write.attribute_write?).to be(true), "for #{source}"
+        scope_with_mark = scope.record_optimistic_origin(write.arguments.arguments.last,
+                                                         described_class::IMPLICITLY_RETURNS_NIL)
+
+        expect(described_class.resolve(write, scope_with_mark))
+          .to eq(described_class::IMPLICITLY_RETURNS_NIL), "for #{source}"
+      end
+    end
+
+    it "does not resolve a write whose value is not the right-hand side" do
+      # Operator writes yield `old + rhs`, and attribute / index `||=` / `&&=` yield the old slot
+      # on one edge — none of them is the right-hand side's value. Constant writes are out of
+      # the derivation's scope entirely.
+      ["v += h[k]", "self.x += h[k]", "self.x ||= h[k]", "self.x &&= h[k]",
+       "arr[0] += h[k]", "arr[0] ||= h[k]", "arr[0] &&= h[k]", "C = h[k]"].each do |source|
+        write = write_of(source)
+        scope_with_mark = scope.record_optimistic_origin(
+          write.respond_to?(:value) ? write.value : write.arguments&.arguments&.last,
+          described_class::IMPLICITLY_RETURNS_NIL
+        )
+
+        expect(described_class.resolve(write, scope_with_mark)).to be_nil, "for #{source}"
+      end
+    end
+
+    it "does not resolve `v ||= rhs` when the old binding is provably truthy" do
+      # `v = "x"` makes `||=` short-circuit on every path, so the right-hand side's mark is never
+      # the verdict's basis — resolving it would silence a correct always-truthy verdict.
+      write = write_of("v ||= h[k]")
+      call = write.value
+      scope_with_mark = scope.record_optimistic_origin(call, described_class::IMPLICITLY_RETURNS_NIL)
+      proven = scope_with_mark.with_local(:v, Rigor::Type::Combinator.constant_of("x"))
+
+      expect(described_class.resolve(write, proven)).to be_nil
+    end
+
+    it "resolves `v ||= rhs` when the old binding can be falsey, is unbound, or is itself marked" do
+      write = write_of("v ||= h[k]")
+      call = write.value
+      scope_with_mark = scope.record_optimistic_origin(call, described_class::IMPLICITLY_RETURNS_NIL)
+      falsey = scope_with_mark.with_local(:v, Rigor::Type::Combinator.constant_of(nil))
+      marked_old = scope_with_mark.with_local(:v, Rigor::Type::Combinator.constant_of("x"))
+                                  .with_optimistic_local(:v, described_class::IMPLICITLY_RETURNS_NIL)
+
+      [scope_with_mark, falsey, marked_old].each do |candidate|
+        expect(described_class.resolve(write, candidate))
+          .to eq(described_class::IMPLICITLY_RETURNS_NIL)
+      end
+    end
+
+    it "resolves `v &&= rhs` through the old binding's mark when the rvalue carries none" do
+      write = write_of("v &&= \"lit\"")
+      bound = scope.with_local(:v, Rigor::Type::Combinator.nominal_of("String"))
+                   .with_optimistic_local(:v, described_class::IMPLICITLY_RETURNS_NIL)
+
+      expect(described_class.resolve(write, bound)).to eq(described_class::IMPLICITLY_RETURNS_NIL)
     end
   end
 

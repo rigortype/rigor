@@ -1343,6 +1343,184 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
+      # Issue #3054 — the same optimistic read behind the write forms a plain local / ivar `=`
+      # left out: `||=` and `&&=`, a global or class-variable write, a multiple assignment, and
+      # an attribute or index write. Each yields a value the right-hand side's mark describes
+      # closely enough that the bare `if h[k]` silence applies, except where the old binding can
+      # win (`v = "x"; v ||= h[k]` still folds to `"x"`, pinned by the control below).
+      describe "other write forms in the condition over an optimistic read (#3054)" do
+        it "does not fire on `if (v ||= h[k])` — unbound, or bound to a value that can be falsey" do
+          result = analyze(<<~RUBY)
+            def lookup(k, s)
+              h = { s => "x" }
+              if (v ||= h[k])
+                v
+              end
+            end
+
+            def lookup_falsey(k, s)
+              h = { s => "x" }
+              v = nil
+              if (v ||= h[k])
+                v
+              end
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "does not fire on `if (@v ||= h[k])`, `if (@@cv ||= h[k])` or `if ($g ||= h[k])`" do
+          result = analyze(<<~RUBY)
+            class Holder
+              def lookup(k, s)
+                h = { s => "x" }
+                @v = nil
+                if (@v ||= h[k])
+                  @v
+                end
+                @@cv = nil
+                if (@@cv ||= h[k])
+                  @@cv
+                end
+                $g = nil
+                if ($g ||= h[k])
+                  $g
+                end
+              end
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "does not fire on `if (v &&= h[k])` when the old binding is truthy" do
+          result = analyze(<<~RUBY)
+            def lookup(k, s)
+              h = { s => "x" }
+              v = "y"
+              if (v &&= h[k])
+                v
+              end
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "does not fire on `if (v &&= \"lit\")` when the old binding's own mark is the bet" do
+          # `v = h[k]` leaves `v` nil on a miss, and `&&=` then yields that `nil` without reading
+          # the literal — the always-truthy verdict rests on the binding's mark, not the rvalue's.
+          result = analyze(<<~RUBY)
+            def lookup(k, s)
+              h = { s => "x" }
+              v = h[k]
+              if (v &&= "lit")
+                v
+              end
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "does not fire on `if (@v &&= h[k])` or `if ($g &&= h[k])` when the old binding is truthy" do
+          result = analyze(<<~RUBY)
+            class Holder
+              def lookup(k, s)
+                h = { s => "x" }
+                @v = "y"
+                if (@v &&= h[k])
+                  @v
+                end
+                $g = "y"
+                if ($g &&= h[k])
+                  $g
+                end
+              end
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "does not fire on `if ($g = h[k])` or `if (@@cv = h[k])`" do
+          result = analyze(<<~RUBY)
+            def lookup(k, s)
+              h = { s => "x" }
+              if ($g = h[k])
+                $g
+              end
+            end
+
+            class Holder
+              def lookup(k, s)
+                h = { s => "x" }
+                if (@@cv = h[k])
+                  @@cv
+                end
+              end
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "does not fire on `if (a, b = h[k])` — a multiple assignment yields its right-hand side" do
+          result = analyze(<<~RUBY)
+            def lookup(k, s)
+              h = { s => "x" }
+              if (a, b = h[k])
+                a
+              end
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "does not fire on `if (self.x = h[k])` or `if (arr[0] = h[k])`" do
+          result = analyze(<<~RUBY)
+            class Holder
+              def lookup(k, s)
+                h = { s => "x" }
+                arr = [1]
+                if (self.x = h[k])
+                  1
+                end
+                if (arr[0] = h[k])
+                  arr[0]
+                end
+              end
+            end
+          RUBY
+          expect(truthy_diags(result)).to be_empty
+        end
+
+        it "still fires on `if (v ||= h[k])` when the old binding is provably truthy (the control)" do
+          # `v` is `"x"` on every path, so `||=` never reaches the right-hand side and the
+          # always-truthy verdict is proof, not the lookup's bet.
+          result = analyze(<<~RUBY)
+            def lookup(k, s)
+              h = { s => "x" }
+              v = "x"
+              if (v ||= h[k])
+                v
+              end
+            end
+          RUBY
+          expect(truthy_diags(result).map(&:message)).to include(a_string_including("always truthy"))
+        end
+
+        it "still fires on `if ($g = \"lit\")` and `if (arr[0] = \"lit\")` — literal right-hand sides (the control)" do
+          result = analyze(<<~RUBY)
+            def lookup
+              arr = [1]
+              if ($g = "lit")
+                $g
+              end
+              if (arr[0] = "lit")
+                arr[0]
+              end
+            end
+          RUBY
+          expect(truthy_diags(result).map(&:message)).to include(a_string_including("always truthy"))
+        end
+      end
+
       # A literal hash read with a computed key misses for every key it does not declare, and reads nil there.
       # The shape tier used to decline such a key, so the projection answered the nil-free value union and a
       # comparison against the only value folded.

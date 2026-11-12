@@ -3,6 +3,7 @@
 require "prism"
 require_relative "../source/node_walker"
 require_relative "../source/node_children"
+require_relative "../source/literals"
 require_relative "../typing_state"
 require_relative "../memo_audit"
 
@@ -30,7 +31,7 @@ module Rigor
     # body that reaches the frame reflectively: a call of `binding`, `eval`, `local_variable_get`,
     # `local_variable_set`, `instance_variable_set` or a string-form `instance_eval` / `class_eval` /
     # `module_eval`, a `send` / `__send__` / `public_send` dispatch whose first argument is one of those names
-    # as a literal symbol, or a `TOPLEVEL_BINDING` reference.
+    # as a literal Symbol or String, or a `TOPLEVEL_BINDING` reference.
     # The scan is flow insensitive and runs once per body, so an escape anywhere drops the fact for the whole body:
     # the conservative direction, since without the fact the seams answer as before. A nested `def` or class body is
     # scanned too, though its locals are its own; a same-named local there can only over-report an escape.
@@ -64,7 +65,8 @@ module Rigor
       # Calls that read or rebind the frame's locals by name: one anywhere in a body escapes every local in it.
       FRAME_CALLS = %i[binding eval local_variable_get local_variable_set instance_variable_set].to_set.freeze
       STRING_EVAL_CALLS = %i[instance_eval class_eval module_eval].to_set.freeze
-      # The spellings that reach a {FRAME_CALLS} or {STRING_EVAL_CALLS} name through a literal symbol argument.
+      # The spellings that reach a {FRAME_CALLS} or {STRING_EVAL_CALLS} name through a literal Symbol or String
+      # argument (`send(:eval, …)`, `send("eval", …)`).
       SEND_CALLS = %i[send __send__ public_send].to_set.freeze
 
       CLOSURES = [Prism::BlockNode, Prism::LambdaNode].freeze
@@ -168,7 +170,7 @@ module Rigor
       end
 
       # A node that reaches the frame's locals by name: a {FRAME_CALLS} or string-eval call, a `send`-family
-      # dispatch on a literal frame-call symbol (`send(:eval, …)`), or a `TOPLEVEL_BINDING` reference (bare or
+      # dispatch on a literal frame-call name (`send(:eval, …)`), or a `TOPLEVEL_BINDING` reference (bare or
       # top-level `::`), whose `local_variable_get` / `local_variable_set` reads and rebinds the top frame.
       def frame_access?(node)
         case node
@@ -188,10 +190,7 @@ module Rigor
         arguments = node.arguments&.arguments
         return false if arguments.nil? || arguments.empty?
 
-        selector = arguments.first
-        return false unless selector.is_a?(Prism::SymbolNode)
-
-        dispatched = selector.value.to_sym
+        dispatched = Source::Literals.symbol_or_string(arguments.first)
         FRAME_CALLS.include?(dispatched) ||
           (STRING_EVAL_CALLS.include?(dispatched) && arguments.size > 1)
       end

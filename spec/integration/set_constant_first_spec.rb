@@ -56,11 +56,13 @@ RSpec.describe "Set#first on a constant-folded Set", type: :runner do
     "instance_eval" => "s.instance_eval { clear }",
     "a proc called later" => ["pr = proc { s.clear }\npr.call", "Dynamic[top] | String | nil"],
     # Issue #3057 — the same reflective frame access through a `send`-family dispatch on a literal
-    # frame-call symbol, `local_variable_get`-style names, or a `TOPLEVEL_BINDING` reference.
+    # frame-call name (Symbol or String), `local_variable_get`-style names, or a `TOPLEVEL_BINDING` reference.
     "send(:eval)" => "send(:eval, \"s.clear\")",
     "__send__(:eval)" => "__send__(:eval, \"s.clear\")",
     "public_send(:binding)" => "public_send(:binding)",
     "send(:instance_eval)" => "send(:instance_eval, \"s.clear\")",
+    "send(\"eval\")" => "send(\"eval\", \"s.clear\")",
+    "__send__(\"binding\")" => "__send__(\"binding\")",
     "TOPLEVEL_BINDING" => "TOPLEVEL_BINDING.receiver",
     "::TOPLEVEL_BINDING" => "::TOPLEVEL_BINDING.receiver"
   }.each do |label, (emptier, answer)|

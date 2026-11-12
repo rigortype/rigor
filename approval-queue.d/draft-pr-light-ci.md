@@ -1,6 +1,6 @@
 # A Draft PR's CI runs only change detection, lint and docs-check; the full CI starts at gh pr ready
 
-- **PR:** [#0](https://github.com/rigortype/rigor/pull/0)
+- **PR:** [#3152](https://github.com/rigortype/rigor/pull/3152)
 - **Issue:** none
 - **Class:** process
 - **Precedent:** [ADR-123](../docs/adr/123-merge-queue-and-post-hoc-approval.md)

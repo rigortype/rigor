@@ -158,9 +158,8 @@ module Rigor
       # class whose singleton chain holds it (`Kernel.a1` under `class << self; protected :a1` is refused from
       # `main`, an Object, and from another class's singleton method, and answered from Kernel's own and from a
       # `module_function` def of Kernel's, whose self is typed as an instance of Kernel though the copy runs with
-      # self = Kernel). `self_type`
-      # is the caller's `self` (`nil` at the top level, where it is `main`, an Object); a `self` this cannot name
-      # (the default) may be one, so a protected entry answers it.
+      # self = Kernel). `self_type` is the caller's `self` (`nil` at the top level, where it is `main`, an Object);
+      # a `self` this cannot name (the default) may be one, so a protected entry answers it.
       #
       # It never refuses a call some other definer of the name may answer: the walk's order is an approximation
       # (a module two owners mix in is spliced at the nearer one, where Ruby keeps the first include and skips the

@@ -49,11 +49,23 @@ module Rigor
       # A `module_function` singleton copy a `def`-form produced (`module_function def x`, or a `def` under a
       # bare `module_function`): `entry` is the copy to bind and `def_entry` the instance entry it was copied
       # from, so {resolve_aliases} records which def the singleton binding answers — a later named
-      # `module_function :x` re-copies only when that def changed (issue #3056).
+      # `module_function :x` keeps the copy only while that def is proved unchanged (issue #3056).
       SingletonCopy = Data.define(:entry, :def_entry) do
         def source_path = entry.source_path
       end
       private_constant :SingletonCopy
+
+      # A statement the walk does not read that may rebind a method: any call other than a visibility call, a
+      # literal-named `alias_method`, or a receiverless `include` / `extend`, plus an `alias` with a computed
+      # name and an `undef`. `define_method(:x)`, `class_eval "def x"`, `send(:define_method, ...)` and
+      # `attr_reader :x` all make Ruby's next `module_function :x` copy a fresh public body, so after one
+      # {resolve_aliases} no longer assumes a copy is unchanged (issue #3056).
+      Unread = Data.define(:source_path)
+      private_constant :Unread
+
+      # The receiverless calls the walk reads as not rebinding a method of the body's own class.
+      MIXIN_CALLS = %i[include extend].freeze
+      private_constant :MIXIN_CALLS
 
       # ADR-129 WD1 — the two per-file inputs of the walk, each a Frame {.walk_file} installs for the file's walk and
       # restores on the way out: the `def`s on the undefined side of a definedness guard, and each `def`'s visibility.
@@ -157,15 +169,14 @@ module Rigor
                 bind(copy, bound, homes, final)
               end
             end
-            if item.is_a?(SingletonCopy)
-              bind_singleton_copy(item, bound, homes, final, copy_sources)
-              next
-            end
+            next if copy_provenance_item?(item, bound, homes, final, copy_sources)
 
             entry = item.is_a?(PendingAlias) ? alias_entry(item, bound) : item
             entry = entry.entry if entry.is_a?(GuardedDef)
             key = [entry.class_name, entry.method_name, entry.kind]
-            next if item.is_a?(GuardedDef) && bound.key?(key)
+            # A guarded def dropped here may still run (`method_defined?` ignores a private method), so the
+            # copy it would rebind is no longer known to be unchanged.
+            next copy_sources.delete([key[0], key[1], :singleton]) if item.is_a?(GuardedDef) && bound.key?(key)
 
             bind(entry, bound, homes, final)
             record_binding(key, entry, bound_defs, copy_sources)
@@ -187,13 +198,21 @@ module Rigor
       end
       private_class_method :record_binding
 
-      # A {SingletonCopy}: bind the copy and record which instance def entry it was made from, the
-      # provenance {Visibility.apply}'s `module_function` re-copy check compares (issue #3056).
-      def bind_singleton_copy(item, bound, homes, final, copy_sources)
-        bind(item.entry, bound, homes, final)
-        copy_sources[[item.entry.class_name, item.entry.method_name, :singleton]] = item.def_entry
+      # The two items that only move the `module_function` copy provenance {Visibility.apply}'s re-copy
+      # check compares (issue #3056), handled here and answered true: a {SingletonCopy} binds the copy and
+      # records which instance def entry it was made from, and an {Unread} statement forgets every record,
+      # since it may have rebound any name.
+      def copy_provenance_item?(item, bound, homes, final, copy_sources)
+        case item
+        when SingletonCopy
+          bind(item.entry, bound, homes, final)
+          copy_sources[[item.entry.class_name, item.entry.method_name, :singleton]] = item.def_entry
+        when Unread then copy_sources.clear
+        else return false
+        end
+        true
       end
-      private_class_method :bind_singleton_copy
+      private_class_method :copy_provenance_item?
 
       def bind(entry, bound, homes, final)
         key = [entry.class_name, entry.method_name, entry.kind]
@@ -286,23 +305,44 @@ module Rigor
           descend_singleton_class(node, qualified_prefix, source_path, entries)
         when Prism::DefNode
           record_def_node(node, qualified_prefix, in_singleton_class, source_path, entries)
-        when Prism::AliasMethodNode
-          record_alias(node, Source::AliasNames.keyword_names(node), qualified_prefix, in_singleton_class,
-                       source_path, entries)
+        when Prism::AliasMethodNode, Prism::UndefNode
+          record_keyword(node, qualified_prefix, in_singleton_class, source_path, entries)
         when Prism::CallNode
-          record_alias(node, Source::AliasNames.alias_method_call_names(node), qualified_prefix,
-                       in_singleton_class, source_path, entries)
-          if TypingState.current[DEF_VISIBILITIES]&.[](node).equal?(Visibility::STATEMENT)
-            pending = Visibility.pending(node, qualified_prefix, in_singleton_class, source_path)
-            entries << pending if pending
-            entries.concat(Mixins.pending(node, qualified_prefix, in_singleton_class))
-          end
+          record_call(node, qualified_prefix, in_singleton_class, source_path, entries)
           walk_children(node, qualified_prefix, in_singleton_class, source_path, entries)
         else
           walk_children(node, qualified_prefix, in_singleton_class, source_path, entries)
         end
       end
       private_class_method :walk_node
+
+      # An `alias` with literal names binds as {record_alias} reads it; a computed-name `alias` or an `undef`
+      # is {Unread}.
+      def record_keyword(node, qualified_prefix, in_singleton_class, source_path, entries)
+        names = node.is_a?(Prism::AliasMethodNode) ? Source::AliasNames.keyword_names(node) : nil
+        entries << Unread.new(source_path: source_path) if names.nil?
+        record_alias(node, names, qualified_prefix, in_singleton_class, source_path, entries)
+      end
+      private_class_method :record_keyword
+
+      def record_call(node, qualified_prefix, in_singleton_class, source_path, entries)
+        names = Source::AliasNames.alias_method_call_names(node)
+        entries << Unread.new(source_path: source_path) if names.nil? && unread_call?(node)
+        record_alias(node, names, qualified_prefix, in_singleton_class, source_path, entries)
+        return unless TypingState.current[DEF_VISIBILITIES]&.[](node).equal?(Visibility::STATEMENT)
+
+        pending = Visibility.pending(node, qualified_prefix, in_singleton_class, source_path)
+        entries << pending if pending
+        entries.concat(Mixins.pending(node, qualified_prefix, in_singleton_class))
+      end
+      private_class_method :record_call
+
+      def unread_call?(node)
+        return false if Visibility.call(node)
+
+        !(MIXIN_CALLS.include?(node.name) && (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)))
+      end
+      private_class_method :unread_call?
 
       def walk_children(node, qualified_prefix, in_singleton_class, source_path, entries)
         node.rigor_each_child do |child|

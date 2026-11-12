@@ -696,7 +696,35 @@ RSpec.describe "a pre_eval: patch on an ancestor reaches its descendants (#1708)
       expect(rules(result)).to eq([["a.rb", 1, "call.undefined-method"]])
     end
 
-    # The inherited-name spelling records `overrides` rather than a bound singleton entry; the copy
+    # The bound-name rule's only proof is that nothing between the two `module_function :a` calls may
+    # have rebound `a`. Each statement below is one the scan does not read as a def or alias of `a`, so
+    # Ruby's second `module_function :a` copies a fresh, public body and `Kernel.a` runs (Ruby 4.0.5,
+    # => 2 in each); Rigor must not report it.
+    {
+      "define_method" => "define_method(:a) { 2 }",
+      # `method_defined?` ignores a private method, so the guarded def runs.
+      "a guarded def" => "def a = 2 unless method_defined?(:a)",
+      "a class_eval string" => 'class_eval "def a = 2"',
+      "a computed-name define_method" => "define_method(:\"\#{%w[a].first}\") { 2 }"
+    }.each do |label, statement|
+      it "answers Kernel.a when #{label} rebinds `a` before the repeated `module_function :a`" do
+        patch = <<~RUBY
+          module Kernel
+            def a = 1
+            module_function :a
+            private_class_method :a
+            #{statement}
+            module_function :a
+          end
+        RUBY
+        result = run_project("ext/core.rb" => patch, "lib/a.rb" => "Kernel.a\n")
+
+        expect(rules(result)).to eq([])
+      end
+    end
+
+    # Pre-existing coverage kept as a regression guard: this already held before #3056. The
+    # inherited-name spelling records `overrides` rather than a bound singleton entry; the copy
     # `singleton_copy_entry` resolves takes the recorded singleton-side private, so the second
     # `module_function :kx` cannot re-public it either.
     it "keeps Kernel.kx refused on a repeated `module_function` after `private_class_method` (inherited)" do

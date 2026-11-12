@@ -42,6 +42,19 @@ RSpec.describe "tool/engine_diag_diff.rb" do
     end
   end
 
+  describe ".rows" do
+    it "drops the ./ prefix a . target prints, so floors key like any corpus-relative spelling" do
+      document = { "diagnostics" => [
+        { "path" => "./app/foo.rb", "line" => 1, "column" => 1, "rule" => "call.wrong-arity", "message" => "m" }
+      ] }
+      rows = EngineDiagDiff.rows(document)
+      expect(rows).to eq([["app/foo.rb", 1, 1, "call.wrong-arity", "m"]])
+      result = EngineDiagDiff.report(base_rows: rows, head_rows: rows, rule: "call.wrong-arity", entries: [],
+                                     base_sha: "abc1234def5678", floors: [["app/", 1]])
+      expect(result[:ok]).to be(true)
+    end
+  end
+
   describe ".load_adjudication" do
     it "reads an empty list and no file as nothing adjudicated" do
       expect(adjudication).to eq([])
@@ -173,6 +186,24 @@ RSpec.describe "tool/engine_diag_diff.rb" do
         File.write(File.join(dir, "real", "corpus", ".rigor.yml"), "paths:\n  - #{link}/corpus/lib\n")
         result = EngineDiagDiff.run_corpus_paths(EngineDiagDiff::ROOT, File.join(link, "corpus"))
         expect(result.fetch("paths")).to eq(["lib"])
+      end
+    end
+
+    it "names the corpus root itself ., so paths: [.] measures the corpus relatively" do
+      with_corpus("paths:\n  - .\n") do |_base, corpus|
+        result = EngineDiagDiff.run_corpus_paths(EngineDiagDiff::ROOT, File.realpath(corpus))
+        expect(result).to eq("config" => ".rigor.yml", "paths" => ["."])
+      end
+    end
+
+    it "names the corpus root ., however the entry spells it through a symlinked ancestor" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "real", "corpus", "lib"))
+        link = File.join(dir, "link")
+        File.symlink(File.join(dir, "real"), link)
+        File.write(File.join(dir, "real", "corpus", ".rigor.yml"), "paths:\n  - #{link}/corpus\n")
+        result = EngineDiagDiff.run_corpus_paths(EngineDiagDiff::ROOT, File.join(link, "corpus"))
+        expect(result.fetch("paths")).to eq(["."])
       end
     end
 

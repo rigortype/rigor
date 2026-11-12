@@ -1,11 +1,15 @@
 require "rigor/testing"
 include Rigor::Testing
 
-# Issue #1230 — an `if` / `unless` branch that unconditionally exits
-# beside an `else` never reaches the code after it, so its writes and
-# its predicate edge stay out of the scope that follows. Only the
-# branch that ran carries on. Nothing in this file reports unless the
-# line is marked.
+# Issue #1230 — an `if` / `unless` branch that certainly exits beside
+# an `else` never reaches the code after it, so its writes and its
+# predicate edge stay out of the scope that follows. Only the branch
+# that ran carries on. "Certainly" is syntactic: a `return` / `next` /
+# `break` / `redo` / `retry`, a receiver-less Kernel exit call whose
+# name no project file defines (this file defines none), or a nested
+# if / case whose every arm, else included, certainly exits. The
+# project-defined names are in `if_branch_exit_join_project_exits.rb`.
+# Nothing in this file reports unless the line is marked.
 
 def maybe = [nil, "a"].sample
 def die = raise("x")
@@ -23,12 +27,46 @@ def then_raises(c)
   x.upcase
 end
 
-# The then-branch ends in a call to a helper typed `bot`.
+# A then-branch ending in a call to a helper typed `bot` still joins
+# beside an else, as on the base: the typer also types an overridable or
+# Kernel-shadowing project method `bot` (issue #3110), so a `bot` call
+# is no proof of an exit.
 def then_calls_bot_helper(c)
   x = maybe
   if c
     x = nil
     die
+  else
+    x = "s"
+  end
+  x.upcase # BOT-HELPER-JOINED
+end
+
+# A nested if whose every arm exits, else included, exits.
+def then_nested_exits(c, d)
+  x = maybe
+  if c
+    x = nil
+    if d
+      raise "a"
+    else
+      return
+    end
+  else
+    x = "s"
+  end
+  x.upcase
+end
+
+# So does a case whose every arm, else included, exits.
+def then_case_exits(c, k)
+  x = maybe
+  if c
+    x = nil
+    case k
+    when 1 then raise "a"
+    else return
+    end
   else
     x = "s"
   end
@@ -139,74 +177,6 @@ def both_exit(c)
     return
   end
   assert_type('"s"', x)
-end
-
-# A project method named like an exit call is an ordinary call unless its
-# own body exits: `fail` and `exit` here return, so the then-branch's nil
-# reaches the code after the if and `x ? … : 0` is a real test.
-class Collector
-  def initialize = @errors = []
-  def fail(msg) = @errors << msg
-  def exit = @done = true
-
-  def then_fails(c)
-    x = maybe
-    if c
-      x = nil
-      fail("bad")
-    else
-      x = "s"
-    end
-    x ? x.size : 0
-  end
-
-  def then_exits(c)
-    x = maybe
-    if c
-      x = nil
-      exit
-    else
-      x = "s"
-    end
-    x ? x.size : 0
-  end
-end
-
-# A project `fail` that raises still ends the branch.
-class Strict
-  def fail(msg) = raise(ArgumentError, msg)
-
-  def then_fails(c)
-    x = maybe
-    if c
-      x = nil
-      fail("bad")
-    else
-      x = "s"
-    end
-    x.upcase
-  end
-end
-
-# A `bot` helper a project subclass overrides may return on the subclass, so
-# the then-branch's nil reaches the code after the if.
-class Base
-  def handle = raise(NotImplementedError)
-
-  def run(c)
-    x = maybe
-    if c
-      x = nil
-      handle
-    else
-      x = "s"
-    end
-    x ? x.size : 0
-  end
-end
-
-class Sub < Base
-  def handle = 1
 end
 
 # Control: a branch that exits only conditionally still joins.

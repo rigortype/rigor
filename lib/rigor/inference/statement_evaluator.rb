@@ -55,9 +55,7 @@ require_relative "operand_effects"
 require_relative "operand_walk"
 require_relative "optimistic_origin"
 require_relative "loop_value_record"
-require_relative "project_method_ownership"
 require_relative "project_yielder"
-require_relative "refined_dispatch/own_method"
 require_relative "return_barrier"
 require_relative "repeated_or_writes"
 require_relative "rewrite_mutation"
@@ -2265,7 +2263,13 @@ module Rigor
 
         then_type, then_scope = eval_branch_or_nil(node.statements, truthy_scope)
         else_type, else_scope = eval_branch_or_nil(node.subsequent, falsey_scope)
-        # When the else / elsif-chain (`node.subsequent`) unconditionally exits, the only surviving path
+        # Slice 7 phase 14 — early-return narrowing. When the then-branch unconditionally exits (return / next / break /
+        # raise) and there is no else, the post-scope is the falsey edge of the predicate (subsequent statements observe
+        # the predicate-was-false world). The then-body is the *skipped* path, so the bare narrowing (no body
+        # assignments) is the correct continuation.
+        return [Type::Combinator.union(then_type, else_type), falsey_scope] \
+          if branch_terminates?(node.statements, then_type) && node.subsequent.nil?
+        # Symmetric case: the else / elsif-chain (`node.subsequent`) unconditionally exits, so the only surviving path
         # is the then-branch that RAN. The continuation must therefore carry `then_scope` — the predicate-truthy
         # narrowing PLUS the then-body's assignments — not the bare `truthy_scope`. Returning `truthy_scope` drops every
         # local the then-body bound, leaving it unbound for any enclosing merge to spuriously nil-inject: e.g. the inner
@@ -2274,20 +2278,8 @@ module Rigor
         # Event 3).
         return [Type::Combinator.union(then_type, else_type), then_scope] \
           if branch_terminates?(node.subsequent, else_type) && node.statements
-        # The then-branch unconditionally exits (return / next / break / raise, or a `bot`-typed body): the only
-        # surviving path is the else that RAN, so the continuation is `else_scope`. With no else that is the bare
-        # falsey edge (Slice 7 phase 14's early-return narrowing; `eval_branch_or_nil` hands a missing branch its entry
-        # scope); beside an else or elsif chain it is that branch's exit scope, the falsey narrowing PLUS its writes
-        # (issue #1230). Joining the exited then-branch's writes would leak them past a path that never reaches the code
-        # after the if. Checked after the else-exits arm so a both-branches-exit if keeps its continuation.
-        return [Type::Combinator.union(then_type, else_type), else_scope] \
-          if branch_terminates?(node.statements, then_type)
 
-        [
-          Type::Combinator.union(then_type, else_type),
-          UntypedRejoin.apply(join_with_nil_injection(then_scope, else_scope), post_pred,
-                              [node.statements, node.subsequent])
-        ]
+        if_join(node.statements, node.subsequent, [then_type, then_scope], [else_type, else_scope], post_pred)
       end
 
       # `unless pred; t; else; e; end`. Same shape as `if`, but Prism exposes the else-branch as `else_clause` (no elsif
@@ -2309,22 +2301,32 @@ module Rigor
 
         then_type, then_scope = eval_branch_or_nil(node.statements, falsey_scope)
         else_type, else_scope = eval_branch_or_nil(node.else_clause, truthy_scope)
+        # Slice 7 phase 14 — same early-return narrowing as `if`: when the body unconditionally exits and there is no
+        # else, the post-scope is the truthy edge (the body is the skipped path, so the bare narrowing is correct).
+        return [Type::Combinator.union(then_type, else_type), truthy_scope] \
+          if branch_terminates?(node.statements, then_type) && node.else_clause.nil?
         # Symmetric to the `if` else-exits fix: when the else-clause exits, the surviving path is the unless-body that
         # RAN, so the continuation carries `then_scope` (the predicate-falsey narrowing PLUS the body's assignments),
         # not the bare `falsey_scope` — otherwise body-bound locals are dropped and an enclosing merge nil-injects them.
         return [Type::Combinator.union(then_type, else_type), then_scope] \
           if branch_terminates?(node.else_clause, else_type) && node.statements
-        # Mirror of the `if` then-exits arm: when the unless-body exits, the continuation is the else-clause's exit
-        # scope, which is the bare truthy edge when there is no else (Slice 7 phase 14) and the else's writes beside one
-        # (issue #1230), never a join with the exited body's writes.
-        return [Type::Combinator.union(then_type, else_type), else_scope] \
-          if branch_terminates?(node.statements, then_type)
 
-        [
-          Type::Combinator.union(then_type, else_type),
-          UntypedRejoin.apply(join_with_nil_injection(then_scope, else_scope), post_pred,
-                              [node.statements, node.else_clause])
-        ]
+        if_join(node.statements, node.else_clause, [then_type, then_scope], [else_type, else_scope], post_pred)
+      end
+
+      # The `[type, post_scope]` an `if` / `unless` with both branches evaluated ends with, once the arms above found no
+      # terminating branch by {#branch_terminates?}.
+      #
+      # Issue #1230 — the then-body (`then_node`) certainly exits beside an else (`else_node`): the only surviving path
+      # is the else that RAN, so the continuation is the else's exit scope, the predicate's other edge PLUS the else's
+      # writes, not a join with the exited body's writes. {#branch_certainly_exits?} is stricter than
+      # {#branch_terminates?}, which the arms above use: a `bot`-typed helper call does not qualify (issue #3110).
+      # Otherwise both exit scopes join with nil-injection.
+      def if_join(then_node, else_node, (then_type, then_scope), (else_type, else_scope), post_pred)
+        type = Type::Combinator.union(then_type, else_type)
+        return [type, else_scope] if else_node && branch_certainly_exits?(then_node)
+
+        [type, UntypedRejoin.apply(join_with_nil_injection(then_scope, else_scope), post_pred, [then_node, else_node])]
       end
 
       # Returns the `[type, post_scope]` of the live branch when the predicate is provably truthy / falsey, else nil so
@@ -9453,8 +9455,7 @@ module Rigor
       #
       # The detection is intentionally conservative — it recognises only the most common patterns:
       # - A `Prism::ReturnNode`, `NextNode`, `BreakNode`.
-      # - A receiver-less `Prism::CallNode` named `raise` / `throw` / `exit` / `abort` / `fail` that the project does
-      #   not answer itself ({#project_answers_exit_name?}).
+      # - A `Prism::CallNode` whose name is `:raise` or `:throw`.
       # - A `Prism::StatementsNode`, `Prism::ParenthesesNode`, or
       #   `Prism::IfNode`/`UnlessNode` whose final / both
       #   branches recursively exit.
@@ -9468,7 +9469,7 @@ module Rigor
         when Prism::ReturnNode, Prism::NextNode, Prism::BreakNode
           true
         when Prism::CallNode
-          node.receiver.nil? && EXIT_CALL_NAMES.include?(node.name) && !project_answers_exit_name?(node.name)
+          node.receiver.nil? && EXIT_CALL_NAMES.include?(node.name)
         when Prism::StatementsNode
           last = node.body.last
           branch_unconditionally_exits?(last)
@@ -9495,100 +9496,42 @@ module Rigor
       # regardless of how it is spelled. The canonical case is a resolved guard helper (`fail_with_message(...)`) whose
       # body always raises: ADR-24 slice 1 types the call `bot`, and this OR-test makes `helper(...) if x.nil?` narrow
       # exactly like `raise ... if x.nil?`. The branch type is already computed by `eval_if` / `eval_unless`.
-      #
-      # Issue #1230 review — a `bot` branch that ends in an implicit-self call is checked against the project:
-      # - a call to an exit name the project defines itself ({#project_answers_exit_name?}) terminates only when that
-      #   def's own inferred return is `bot`. The call's type does not say: the typer keeps `Kernel#fail`'s bundled
-      #   `bot` over a project `def fail` (ADR-110's ancestor-declaration gate, ADR-17), so `class Collector;
-      #   def fail(msg) = @errors << msg` would otherwise end the branch;
-      # - a call whose method a project subclass of `self`'s class overrides does not terminate
-      #   ({#self_call_overridden_below?}): `Base#handle = raise(…)` with `Sub#handle = 1` returns on a `Sub`.
       def branch_terminates?(branch_node, branch_type)
-        return true if branch_unconditionally_exits?(branch_node)
-        return false unless branch_type.is_a?(Type::Bot)
-
-        tail = branch_tail(branch_node)
-        return false if self_call_overridden_below?(tail)
-        return true unless project_exit_call?(tail)
-
-        project_exit_def_terminates?(tail)
+        branch_unconditionally_exits?(branch_node) ||
+          branch_type.is_a?(Type::Bot)
       end
 
-      def project_exit_call?(node)
-        node.is_a?(Prism::CallNode) && node.receiver.nil? && EXIT_CALL_NAMES.include?(node.name) &&
-          project_answers_exit_name?(node.name)
-      end
-
-      # Whether the project def a receiver-less exit-named call reaches infers `bot`, every argument `Dynamic[top]`.
-      # A definition with no readable `def` (`define_method`, `attr_*`) does not. Outside any class `self` is `main`, an
-      # `Object`.
-      def project_exit_def_terminates?(node)
-        def_node = project_exit_def(node.name)
-        return false unless def_node.is_a?(Prism::DefNode)
-
-        args = Array.new(node.arguments&.arguments&.size || 0) { Type::Combinator.untyped }
-        receiver = scope.self_type || Type::Combinator.nominal_of("Object")
-        scope.user_method_return(def_node, receiver, args).is_a?(Type::Bot)
-      rescue StandardError
-        false
-      end
-
-      def project_exit_def(name)
-        self_type = scope.self_type
-        class_name = enclosing_class_name_for(self_type)
-        if class_name
-          walk = self_type.is_a?(Type::Singleton) ? :singleton_def_through_ancestors : :user_def_through_ancestors
-          found = scope.public_send(walk, class_name, name)
-          return found.first if found.is_a?(Array) && found.first
-        end
-        scope.top_level_def_for(name)
-      end
-
-      # Issue #1230 review — whether a receiver-less call named `name` reaches a method the project defines on `self`'s
-      # class or an ancestor (a `def`, `define_method`, `attr_*`), or a top-level def, rather than `Kernel`'s exit
-      # method. `class Collector; def fail(msg) = @errors << msg` makes `fail("bad")` an ordinary call.
-      def project_answers_exit_name?(name)
-        self_type = scope.self_type
-        class_name = enclosing_class_name_for(self_type)
-        kind = self_type.is_a?(Type::Singleton) ? :singleton : :instance
-        return true if class_name && ProjectMethodOwnership.defines?(class_name, name, kind, scope)
-
-        !scope.top_level_def_for(name).nil?
-      end
-
-      # The last expression a branch body evaluates, through statements, parentheses and an `else` clause.
-      def branch_tail(node)
+      # Issue #1230 — a strict, syntactic-only exit test for the then-exits-beside-an-else arm ({#if_join}). The
+      # branch's last statement is a `return` / `next` / `break` / `redo` / `retry`; a receiver-less `raise` / `fail` /
+      # `exit` / `exit!` / `abort` / `throw` whose name no project file defines on any class or module, at the top level
+      # or by `define_method` ({Scope#project_method_name?}); or an if / unless / case with an else whose every arm
+      # certainly exits. Unlike {#branch_terminates?} it reads no type, so a `bot`-typed helper call does not qualify:
+      # the typer types a call to an overridable or Kernel-shadowing project method `bot` (issue #3110).
+      def branch_certainly_exits?(node)
         case node
-        when Prism::StatementsNode then branch_tail(node.body.last)
-        when Prism::ParenthesesNode then branch_tail(node.body)
-        when Prism::ElseNode then branch_tail(node.statements)
-        else node
+        when Prism::ReturnNode, Prism::NextNode, Prism::BreakNode, Prism::RedoNode, Prism::RetryNode then true
+        when Prism::CallNode then certain_exit_call?(node)
+        when Prism::StatementsNode then branch_certainly_exits?(node.body.last)
+        when Prism::ParenthesesNode then branch_certainly_exits?(node.body)
+        when Prism::ElseNode then branch_certainly_exits?(node.statements)
+        when Prism::IfNode, Prism::UnlessNode
+          branch_certainly_exits?(node.statements) && branch_certainly_exits?(node_else_branch(node))
+        when Prism::CaseNode, Prism::CaseMatchNode then case_certainly_exits?(node)
+        else false
         end
       end
 
-      # Whether `tail` is an implicit-self call (no receiver, or `self.`) whose method a project subclass of `self`'s
-      # class defines on itself, so the call may run that override instead of the `bot` method it typed against.
-      def self_call_overridden_below?(tail)
-        return false unless tail.is_a?(Prism::CallNode) && (tail.receiver.nil? || tail.receiver.is_a?(Prism::SelfNode))
-
-        self_type = scope.self_type
-        class_name = enclosing_class_name_for(self_type)
-        return false if class_name.nil?
-
-        singleton = self_type.is_a?(Type::Singleton)
-        RefinedDispatch::OwnMethod.each_subclass(scope, class_name, possible_only: true) do |subclass|
-          return true if defined_on_class_itself?(subclass, tail.name, singleton)
-        end
-        false
+      def certain_exit_call?(node)
+        node.receiver.nil? && CERTAIN_EXIT_NAMES.include?(node.name) && !scope.project_method_name?(node.name)
       end
 
-      def defined_on_class_itself?(class_name, name, singleton)
-        if singleton
-          !scope.singleton_def_for(class_name, name).nil? || scope.discovered_method?(class_name, name, :singleton)
-        else
-          !scope.user_def_for(class_name, name).nil? || scope.discovered_method?(class_name, name, :instance)
-        end
+      def case_certainly_exits?(node)
+        !node.else_clause.nil? && branch_certainly_exits?(node.else_clause) &&
+          node.conditions.all? { |arm| branch_certainly_exits?(arm.statements) }
       end
+
+      CERTAIN_EXIT_NAMES = %i[raise fail exit exit! abort throw].freeze
+      private_constant :CERTAIN_EXIT_NAMES
 
       def eval_branch_or_nil(branch_node, branch_scope, on_enter: @on_enter)
         return [Type::Combinator.constant_of(nil), branch_scope] if branch_node.nil?

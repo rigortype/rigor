@@ -1,4 +1,4 @@
-# A call with a positional splat declines user-body return inference instead of expanding a Tuple splat
+# A call with a positional splat re-types a user method body with no positional correspondence instead of expanding a Tuple splat
 
 - **PR:** [#3097](https://github.com/rigortype/rigor/pull/3097)
 - **Issue:** [#1237](https://github.com/rigortype/rigor/issues/1237)
@@ -9,22 +9,26 @@
 ## Background
 
 The tiers that re-type a user `def` body for a call's return bound a call-site `*splat` as one positional
-argument, so `def count(*keys) = keys.size` folded `r.count(*idx)` to `1`. The lane brief left open whether a
-splat whose length is known (`m(*[1, 2])`, a `Tuple`-typed local) should be expanded into positionals or declined
-like the unknown-length case.
+argument, so `def count(*keys) = keys.size` folded `r.count(*idx)` to `1`. Under a splat the body is now re-typed
+with no positional correspondence: every positional parameter is `Dynamic[top]`, the rest parameter is
+`Array[untyped]`, and the keywords come from a keyword hash the call writes. The coordinator ruled on that shape
+after review. The lane brief left open whether a splat of known length (`m(*[1, 2])`, a `Tuple`-typed local)
+should instead be expanded into positionals.
 
 ## Options and trade-offs
 
-- Expand a `Tuple` splat into its element types. This keeps precision for literal and tuple splats, but it needs a
-  second argument path in `call_arg_types`, and every dispatch tier and the ADR-84 return memo read that list.
-- Decline every positional splat. This is one guard per body tier and matches `try_literal_send` and #1236's
-  compound index read. It costs precision on tuple splats, which used to fold (wrongly).
+- Expand a `Tuple` splat into its element types. This keeps per-parameter precision for literal and tuple
+  splats, but it needs a second argument path in `call_arg_types`, which every dispatch tier and the ADR-84
+  return memo read.
+- Treat a Tuple splat like any other splat: no positional correspondence. This is the smaller change. It costs
+  the element types: `def first(*xs) = xs.first` called `first(*[1, 2])` answers `untyped`, not `1`.
 
 ## Decision
 
-Decline every positional splat. It is the smaller sound change, and #1236 set the same rule for the index read.
+Treat every positional splat alike. It is the smaller sound change, and #1236 set the same rule (no positional
+binding under a splat) for the compound index read.
 
 ## To undo
 
-Teach `call_arg_types` to expand a `Tuple` splat and narrow `ExpressionTyper#splat_arguments?` to splats it did not
-expand. `spec/integration/call_site_splat_return_spec.rb`'s literal-array example then needs a new expectation.
+Teach `call_arg_types` to expand a `Tuple` splat, and narrow `ExpressionTyper#splat_arguments?` to the splats it
+did not expand.

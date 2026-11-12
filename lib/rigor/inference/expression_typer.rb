@@ -1613,9 +1613,8 @@ module Rigor
         return declined_top_level_def_answer(node) if local_def.nil?
         return nil if self_type_answers?(node.name)
         return nil if plugin_member_answers?(node, receiver)
-        return dynamic_top if splat_arguments?(node)
 
-        local_inference = infer_top_level_user_method(local_def, receiver, arg_types, block_type)
+        local_inference = infer_top_level_user_method(local_def, receiver, node, arg_types, block_type)
         return local_inference if local_inference
 
         # The local def matches by name but the inference was disqualified — the parameter shape is too
@@ -2362,9 +2361,8 @@ module Rigor
         winner = RefinedDispatch.winner(scope, class_name, node.name, list)
         return nil if winner.nil?
         return dynamic_top if winner == RefinedDispatch::UNKNOWN
-        return dynamic_top if splat_arguments?(node)
 
-        refined_body_return(winner, node.name, Type::Combinator.nominal_of(class_name), arg_types, block_type) ||
+        refined_body_return(winner, node, Type::Combinator.nominal_of(class_name), arg_types, block_type) ||
           dynamic_top
       end
 
@@ -2383,15 +2381,17 @@ module Rigor
       #
       # A body another file wrote is re-typed with that file's in-effect refinements at the `def` (its own module
       # among them), so a sibling override it calls answers from its refine body too.
-      def refined_body_return(winner, method_name, self_type, arg_types, block_type)
+      def refined_body_return(winner, call_node, self_type, arg_types, block_type)
         def_node, foreign =
-          InEffectRefinements.refinement_def_with_query(scope, winner.module_name, winner.refined_class, method_name)
+          InEffectRefinements.refinement_def_with_query(scope, winner.module_name, winner.refined_class, call_node.name)
         return nil if def_node.nil?
 
         refinements = foreign&.at(def_node.location.start_offset) do |name|
           InEffectRefinements.activated_modules(scope, name)
         end
-        infer_user_method_return(def_node, self_type, arg_types, yield_type: block_type, refinements: refinements)
+        arg_types, positionals_unknown = positional_correspondence(call_node, arg_types)
+        infer_user_method_return(def_node, self_type, arg_types, yield_type: block_type, refinements: refinements,
+                                                                 positionals_unknown: positionals_unknown)
       rescue StandardError
         nil
       end
@@ -2411,17 +2411,36 @@ module Rigor
         end
       end
 
-      # Issue #1237 — whether the call's argument list holds a `*splat`. The splat's expansion decides how many
-      # positional arguments the callee receives, and `call_arg_types` carries it as one untyped argument, so a
-      # body re-typed from that list binds it to one parameter: `def count(*keys) = keys.size` called as
-      # `r.count(*[0, 1])` folded to `1` and drew an always-falsey `== 2`. Every tier that re-types a user `def`
-      # body from the call's arguments declines under a splat, as {#try_literal_send} does; a tier that would
-      # otherwise let a declaration the `def` shadows speak answers `Dynamic[top]` instead. A Tuple splat of
-      # known arity is declined too rather than expanded. A `**h` keyword splat is not a positional and keeps
-      # its {#double_splat_hash_shape} binding.
+      # Issue #1237 — whether the call's argument list leaves the positional correspondence unknown: it holds a
+      # `*splat`, or a `...` with no forwarding frame to expand it from. `call_arg_types` carries either as ONE
+      # argument, so a body re-typed from that list bound it to one parameter: `def count(*keys) = keys.size`
+      # called as `r.count(*[0, 1])` folded to `1` and drew an always-falsey `== 2`. A Tuple splat of known
+      # arity is not expanded either.
       def splat_arguments?(node)
-        node.arguments&.arguments&.any?(Prism::SplatNode) || false
+        arguments = node.arguments&.arguments
+        return false if arguments.nil?
+
+        arguments.any?(Prism::SplatNode) ||
+          (forwards_arguments?(arguments) && ExpressionTyper.current_forwarded_arg_types.nil?)
       end
+
+      # The argument list and the `positionals_unknown:` flag a body tier re-types a user `def` with. Under
+      # {#splat_arguments?} the body is still re-typed, so a body that always raises still answers `bot` and a
+      # return that does not read its arguments is kept, but with no positional correspondence
+      # ({#bind_params_without_correspondence}): the list is the call's keyword shape alone. Only a trailing
+      # keyword-hash argument the call writes and {#call_arg_type} types as a `HashShape` supplies one. Any
+      # other call leaves the keywords unknown (an open empty shape), because a splatted array's last element
+      # is passed as keywords when it is a `ruby2_keywords` hash.
+      def positional_correspondence(call_node, arg_types)
+        return [arg_types, false] unless splat_arguments?(call_node)
+
+        last = call_node.arguments.arguments.last
+        keywords = arg_types.last if last.is_a?(Prism::KeywordHashNode) && arg_types.last.is_a?(Type::HashShape)
+        [[keywords || UNKNOWN_KEYWORDS], true]
+      end
+
+      UNKNOWN_KEYWORDS = Type::HashShape.new({}, extra_keys: :open)
+      private_constant :UNKNOWN_KEYWORDS
 
       # The post-dispatch tiers for a call `MethodDispatcher` could not answer, in their historical
       # order; extracted from {#call_dispatch_type_for} whole.
@@ -2638,8 +2657,10 @@ module Rigor
       # `scope.self_type` (or implicit `Object`) as the receiver carrier so the body's own self is
       # consistent with the call site's. Returns nil when the parameter shape disqualifies the def, when the
       # body is empty, or when the inference raises.
-      def infer_top_level_user_method(def_node, receiver, arg_types, block_type = nil)
-        infer_user_method_return(def_node, receiver, arg_types, yield_type: block_type)
+      def infer_top_level_user_method(def_node, receiver, call_node, arg_types, block_type = nil)
+        arg_types, positionals_unknown = positional_correspondence(call_node, arg_types)
+        infer_user_method_return(def_node, receiver, arg_types, yield_type: block_type,
+                                                                positionals_unknown: positionals_unknown)
       rescue StandardError
         nil
       end
@@ -2773,14 +2794,14 @@ module Rigor
 
       def try_user_method_inference(receiver, call_node, arg_types, method_name: call_node.name, block_type: nil)
         return nil unless user_inference_receiver?(receiver)
-        return nil if splat_arguments?(call_node)
 
         def_node, owner, raising = resolve_typing_def_with_owner(receiver.class_name, method_name)
         return every_definer_raises_type(raising, receiver, call_node, arg_types, block_type) if def_node.nil?
 
+        arg_types, positionals_unknown = positional_correspondence(call_node, arg_types)
         result = infer_user_method_return(def_node, receiver, arg_types,
                                           self_fold_safe: fold_safe_call_receiver?(call_node),
-                                          yield_type: block_type)
+                                          yield_type: block_type, positionals_unknown: positionals_unknown)
         return result if result.nil?
 
         degrade_if_overridable(result, owner, method_name, :instance)
@@ -2862,7 +2883,9 @@ module Rigor
         # proven to be the method Ruby calls, so the call falls through to `Dynamic`.
         return nil if scope.discovery.contested?(:discovered_singleton_def_nodes, [owner, method_name.to_sym])
 
-        result = infer_user_method_return(def_node, receiver, arg_types, yield_type: block_type)
+        arg_types, positionals_unknown = positional_correspondence(call_node, arg_types)
+        result = infer_user_method_return(def_node, receiver, arg_types, yield_type: block_type,
+                                                                         positionals_unknown: positionals_unknown)
         return result if result.nil?
 
         degrade_if_overridable(result, owner, method_name, :singleton)
@@ -3111,8 +3134,6 @@ module Rigor
       # object (#320) — so the two are mutually exclusive and consulting both is one resolution attempt.
       def try_project_singleton_inference(receiver, call_node, arg_types, method_name: call_node.name,
                                           block_type: nil)
-        return nil if splat_arguments?(call_node)
-
         kwargs = { method_name: method_name, block_type: block_type }
         try_singleton_method_inference(receiver, call_node, arg_types, **kwargs) ||
           try_singleton_object_constant_inference(receiver, call_node, arg_types, **kwargs)
@@ -3130,7 +3151,9 @@ module Rigor
         def_node = SingletonObjectConstant.def_node_for(call_node, receiver, method_name, scope)
         return nil if def_node.nil?
 
-        infer_user_method_return(def_node, receiver, arg_types, yield_type: block_type)
+        arg_types, positionals_unknown = positional_correspondence(call_node, arg_types)
+        infer_user_method_return(def_node, receiver, arg_types, yield_type: block_type,
+                                                                positionals_unknown: positionals_unknown)
       rescue StandardError
         nil
       end
@@ -3251,9 +3274,11 @@ module Rigor
         return nil if defs.nil?
 
         self_fold_safe = fold_safe_call_receiver?(call_node)
+        arg_types, positionals_unknown = positional_correspondence(call_node, arg_types)
         defs.each do |def_node|
           result = infer_user_method_return(def_node, receiver, arg_types,
-                                            self_fold_safe: self_fold_safe, yield_type: block_type)
+                                            self_fold_safe: self_fold_safe, yield_type: block_type,
+                                            positionals_unknown: positionals_unknown)
           return nil unless result.is_a?(Type::Bot)
         end
         Type::Combinator.bot
@@ -3800,7 +3825,7 @@ module Rigor
       # carried separately (it is the body owner, not call context).
       RecursionContext = Data.define(
         :receiver, :arg_types, :plain_signature, :summaries, :would_have_been_guarded,
-        :self_fold_safe
+        :self_fold_safe, :positionals_unknown
       )
       private_constant :RecursionContext
 
@@ -3840,24 +3865,27 @@ module Rigor
       # The return memo and the recursion guard do not key on them, which holds because such a node comes only from
       # `DefNodeResolver.refinement_query`'s own parse and always carries that file's one list; a caller that types
       # the same node under another list must add it to the key.
+      #
+      # Issue #1237 — `positionals_unknown:` re-types the body with no positional correspondence
+      # ({#positional_correspondence}): `arg_types` is then the call's keyword shape alone. Such a frame neither
+      # reads nor stores the return memo, whose entries the incremental session re-drives through the ordinary
+      # binder ({#return_type_for}), and installs no `...` forwarding list.
       def infer_user_method_return(def_node, receiver, arg_types, self_fold_safe: false, yield_type: nil,
-                                   refinements: nil)
+                                   refinements: nil, positionals_unknown: false)
         return nil if def_node.body.nil?
-        unless KeyPresenceGuard.forcing_off?
-          return infer_user_method_return_unguarded(def_node, receiver, arg_types, self_fold_safe, yield_type,
-                                                    refinements)
-        end
 
-        KeyPresenceGuard.without_guards do
-          infer_user_method_return_unguarded(def_node, receiver, arg_types, self_fold_safe, yield_type, refinements)
-        end
+        call = [def_node, receiver, arg_types, self_fold_safe, yield_type, refinements, positionals_unknown]
+        return infer_user_method_return_unguarded(*call) unless KeyPresenceGuard.forcing_off?
+
+        KeyPresenceGuard.without_guards { infer_user_method_return_unguarded(*call) }
       end
 
       def infer_user_method_return_unguarded(def_node, receiver, arg_types, self_fold_safe, yield_type,
-                                             refinements = nil)
+                                             refinements, positionals_unknown)
         yield_type = nil unless yield_type && body_yields?(def_node)
         body_scope = build_user_method_body_scope(def_node, receiver, arg_types,
-                                                  self_fold_safe: self_fold_safe)
+                                                  self_fold_safe: self_fold_safe,
+                                                  positionals_unknown: positionals_unknown)
         return nil if body_scope.nil?
 
         body_scope = body_scope.with_declared_refinements(refinements) if refinements
@@ -3893,7 +3921,12 @@ module Rigor
         # below reads it back from here rather than taking a second parameter, so key and frame cannot
         # disagree). It is installed even when nil, which is what stops a blockless callee reached from
         # inside a yielding body from inheriting the outer caller's block.
-        ExpressionTyper.with_call_site_frame(yield_type, forwarded_frame_types(def_node, arg_types)) do
+        forwarded = positionals_unknown ? nil : forwarded_frame_types(def_node, arg_types)
+        ExpressionTyper.with_call_site_frame(yield_type, forwarded) do
+          if positionals_unknown
+            next compute_user_method_return(def_node, body_scope, stack, receiver, arg_types, plain_signature,
+                                            positionals_unknown: true)
+          end
           unless memo_candidate?(stack, plain_signature)
             trace_memo_refusal(stack, plain_signature)
             next compute_user_method_return(def_node, body_scope, stack, receiver, arg_types, plain_signature)
@@ -4124,7 +4157,8 @@ module Rigor
       # The ADR-55 recursion-guard + value-unroll + fixpoint body of user-method return inference, factored
       # out so `infer_user_method_return` is a thin memo wrapper (the memo is the ADR-57 follow-up; this is
       # unchanged from pre-memo behaviour).
-      def compute_user_method_return(def_node, body_scope, stack, receiver, arg_types, plain_signature)
+      def compute_user_method_return(def_node, body_scope, stack, receiver, arg_types, plain_signature,
+                                     positionals_unknown: false)
         trace_body_eval(plain_signature)
         summaries = return_summaries
         # ADR-55 slice 1: when every bound argument is value-pinned, extend the guard key with a stable
@@ -4133,7 +4167,7 @@ module Rigor
         # outermost entry; exhaustion or value blow-up falls back to the plain `(receiver, method)` guard —
         # today's behaviour. Non-constant args never reach this path.
         signature = plain_signature
-        value_key = constant_argument_value_key(arg_types)
+        value_key = positionals_unknown ? nil : constant_argument_value_key(arg_types)
         extended = value_key && unroll_fuel_remaining(stack).positive?
         signature = [plain_signature, value_key] if extended
 
@@ -4166,7 +4200,8 @@ module Rigor
           # Issue #525 — read off the built scope so the bot-collapse retry rebuilds a widened scope with
           # the SAME `:self` polarity the first attempt used; a retry that silently dropped the grant would
           # return a different type for the same call.
-          self_fold_safe: body_scope.struct_fold_safe?(:self)
+          self_fold_safe: body_scope.struct_fold_safe?(:self),
+          positionals_unknown: positionals_unknown
         )
         evaluate_guarded_user_method_body(def_node, body_scope, stack, signature, context)
       end
@@ -4453,9 +4488,11 @@ module Rigor
       # `fixpoint_user_method_return`: call-site argument narrowing can prune a recursive method's base
       # case, and widening restores the declared-type view under which the base case is reachable. Returns
       # `nil` when the parameter shape is not inferable (mirrors `build_user_method_body_scope`).
-      def widened_user_method_body_scope(def_node, receiver, arg_types, self_fold_safe: false)
+      def widened_user_method_body_scope(def_node, receiver, arg_types, self_fold_safe: false,
+                                         positionals_unknown: false)
         widened_args = arg_types.map { |arg_type| widen_value_pinned(arg_type) }
-        build_user_method_body_scope(def_node, receiver, widened_args, self_fold_safe: self_fold_safe)
+        build_user_method_body_scope(def_node, receiver, widened_args, self_fold_safe: self_fold_safe,
+                                                                       positionals_unknown: positionals_unknown)
       end
 
       # ADR-55 slice 2 bot-collapse resolution (2026-06-11). Called when a fixpoint iteration computed `bot`
@@ -4476,7 +4513,8 @@ module Rigor
       def resolve_bot_collapse(def_node, context, widened:)
         unless widened
           widened_scope = widened_user_method_body_scope(def_node, context.receiver, context.arg_types,
-                                                         self_fold_safe: context.self_fold_safe)
+                                                         self_fold_safe: context.self_fold_safe,
+                                                         positionals_unknown: context.positionals_unknown)
           return fixpoint_user_method_return(def_node, widened_scope, context, widened: true) unless widened_scope.nil?
         end
 
@@ -4634,9 +4672,14 @@ module Rigor
       # through it. Record a per-file write kind in the census instead, as {ScopeIndexer::CONSTANT_MEMO} does
       # (#1276). Setting `source_path` here was rejected: plugins read it, and the return memo would become
       # caller-dependent.
-      def build_user_method_body_scope(def_node, receiver, arg_types, self_fold_safe: false)
+      def build_user_method_body_scope(def_node, receiver, arg_types, self_fold_safe: false, positionals_unknown: false)
         params = def_node.parameters
-        locals = bind_params_from_call_types(params, arg_types)
+        locals =
+          if positionals_unknown
+            bind_params_without_correspondence(params, arg_types.last)
+          else
+            bind_params_from_call_types(params, arg_types)
+          end
         return nil if locals.nil?
 
         # Construct the body scope in a SINGLE Scope allocation (plus the issue #1358 frame it carries, whose
@@ -4746,11 +4789,35 @@ module Rigor
         locals = bind_positional_params(params, positional)
         return nil if locals.nil?
 
+        bind_keyword_and_block_params(params, kw_shape, locals)
+      end
+
+      # The keyword, `**rest` and block parameters' bindings, added to `locals`, which it returns.
+      def bind_keyword_and_block_params(params, kw_shape, locals)
         bind_keyword_params(params, kw_shape, locals)
         rest_name = keyword_rest_name(params)
         locals[rest_name.to_sym] = keyword_rest_type(params, kw_shape) if rest_name
         locals[params.block.name.to_sym] = dynamic_top if params.block&.name
         locals
+      end
+
+      # Issue #1237 — the locals table for a call whose positional correspondence is unknown (a `*splat` at the
+      # call site). Every positional parameter (required, optional, trailing) binds `Dynamic[top]` and the rest
+      # parameter an `Array[untyped]`; the keyword parameters bind from `keywords` as {#bind_keyword_params} does
+      # for any call, so an open shape leaves them `Dynamic[top]`. An optional's default is not used: the splat
+      # may supply the slot.
+      def bind_params_without_correspondence(params, keywords)
+        return {} if params.nil?
+        return nil unless params.is_a?(Prism::ParametersNode)
+
+        locals = {}
+        (params.requireds + params.posts).each { |param| bind_positional_param(locals, param, dynamic_top) }
+        params.optionals.each { |param| locals[param.name.to_sym] = dynamic_top }
+        rest = params.rest
+        if rest.respond_to?(:name) && rest.name
+          locals[rest.name.to_sym] = Type::Combinator.nominal_of("Array", type_args: [dynamic_top])
+        end
+        bind_keyword_and_block_params(params, keywords, locals)
       end
 
       # Trailing required positionals after a rest (`def f(a, *m, z)`) shift the correspondence and stay

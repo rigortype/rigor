@@ -2,27 +2,46 @@
 locals:
   subject: Dynamic[top]
 assertions:
-  '1': Integer
-  '2': Integer
-  '3': '1'
-  '4': '1'
-  '5': ":done"
-  '6': ":done"
+  '1': bot
+  '2': bot
+  '3': Integer
+  '4': Integer
+  '5': '1'
+  '6': '1'
   '7': ":done"
   '8': ":done"
   '9': ":done"
   '10': ":done"
-  '11': '1'
-  '12': '1'
+  '11': ":done"
+  '12': ":done"
   '13': '1'
   '14': '1'
-  '15': Integer
-  '16': Integer
-  '17': ":base"
-  '18': ":base"
-  '19': ":blk"
-  '20': ":blk"
+  '15': '1'
+  '16': '1'
+  '17': Integer
+  '18': Integer
+  '19': ":base"
+  '20': ":base"
   '21': ":blk"
   '22': ":blk"
-  '23': bot
-  '24': bot
+  '23': ":blk"
+  '24': ":blk"
+  '25': Dynamic[top]
+  '26': Dynamic[top]
+  '27': 'false'
+  '28': 'false'
+  '29': Dynamic[top]
+  '30': Dynamic[top]
+  '31': "[2, 1]"
+  '32': "[2, 1]"
+  '33': Integer
+  '34': Integer
+  '35': "{ x: 1 }"
+  '36': "{ x: 1 }"
+  '37': "{ x: 1 }"
+  '38': "{}"
+  '39': "[1, 2]"
+  '40': ":base"
+  '41': ":base"
+  '42': ":base"
+  '43': Integer

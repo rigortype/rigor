@@ -2703,6 +2703,9 @@ module Rigor
         case type
         when Type::Constant then true
         when Type::Tuple then type.elements.all? { |element| fully_value_pinned?(element) }
+        when Type::HashShape
+          # Issue #3115 — the shape {#pinned_shape_descriptor} keys an unroll on is as pinned as a result.
+          type.closed? && type.optional_keys.empty? && type.pairs.each_value.all? { |value| fully_value_pinned?(value) }
         else false
         end
       end
@@ -4493,22 +4496,30 @@ module Rigor
                                          positionals_unknown: false)
         widened_args = arg_types.map { |arg_type| widen_bound_argument(arg_type) }
         build_user_method_body_scope(def_node, receiver, widened_args, self_fold_safe: self_fold_safe,
-                                                                       positionals_unknown: positionals_unknown)
+                                                                       positionals_unknown: positionals_unknown,
+                                                                       defaults_unknown: true)
       end
 
       # Issue #3115 — one argument of the widened retry. A keyword argument reaches the binder inside the call's
       # trailing `HashShape`, which {#widen_value_pinned} leaves as it is (a shape is not a value pin), so a
       # keyword parameter kept its call-site pin through the retry and the base case stayed pruned: the body
-      # then converged on the `bot` seed. The shape keeps its keys and policy and each entry's value widens as
-      # a positional argument does.
+      # then converged on the `bot` seed. A shape carrier keeps its keys, policy and arity, and the values it
+      # holds widen at every depth: a `HashShape`'s values, a `Tuple`'s elements and a `Union`'s members.
       def widen_bound_argument(arg_type)
-        return widen_value_pinned(arg_type) unless arg_type.is_a?(Type::HashShape)
-
-        Type::HashShape.new(
-          arg_type.pairs.transform_values { |value| widen_value_pinned(value) },
-          required_keys: arg_type.required_keys, optional_keys: arg_type.optional_keys,
-          read_only_keys: arg_type.read_only_keys, extra_keys: arg_type.extra_keys
-        )
+        case arg_type
+        when Type::HashShape
+          Type::HashShape.new(
+            arg_type.pairs.transform_values { |value| widen_bound_argument(value) },
+            required_keys: arg_type.required_keys, optional_keys: arg_type.optional_keys,
+            read_only_keys: arg_type.read_only_keys, extra_keys: arg_type.extra_keys
+          )
+        when Type::Tuple
+          Type::Combinator.tuple_of(*arg_type.elements.map { |element| widen_bound_argument(element) })
+        when Type::Union
+          Type::Combinator.union(*arg_type.members.map { |member| widen_bound_argument(member) })
+        else
+          widen_value_pinned(arg_type)
+        end
       end
 
       # ADR-55 slice 2 bot-collapse resolution (2026-06-11). Called when a fixpoint iteration computed `bot`
@@ -4707,13 +4718,19 @@ module Rigor
       # through it. Record a per-file write kind in the census instead, as {ScopeIndexer::CONSTANT_MEMO} does
       # (#1276). Setting `source_path` here was rejected: plugins read it, and the return memo would become
       # caller-dependent.
-      def build_user_method_body_scope(def_node, receiver, arg_types, self_fold_safe: false, positionals_unknown: false)
+      #
+      # Issue #3115 — `defaults_unknown:` is the widened retry's binding ({#widened_user_method_body_scope}): a
+      # parameter the call leaves to its default binds `Dynamic[top]`, not the default's literal. The retry
+      # types the body for every call the recursion makes, and a recursive call may pass that slot anything
+      # (`tog(n: n - 1, f: !f)` against `f: false`), so the literal there is one call's value only.
+      def build_user_method_body_scope(def_node, receiver, arg_types, self_fold_safe: false,
+                                       positionals_unknown: false, defaults_unknown: false)
         params = def_node.parameters
         locals =
           if positionals_unknown
-            bind_params_without_correspondence(params, arg_types.last)
+            bind_params_without_correspondence(params, arg_types.last, defaults_unknown)
           else
-            bind_params_from_call_types(params, arg_types)
+            bind_params_from_call_types(params, arg_types, defaults_unknown)
           end
         return nil if locals.nil?
 
@@ -4815,21 +4832,21 @@ module Rigor
       # The locals table for the body scope, or nil to decline. Keys match `with_local`'s `name.to_sym`.
       # The body scope starts from an empty fact store and narrowing set, so `with_local`'s fact /
       # narrowing invalidations would be no-ops here — the table is built directly.
-      def bind_params_from_call_types(params, arg_types)
+      def bind_params_from_call_types(params, arg_types, defaults_unknown = false)
         return arg_types.empty? ? {} : nil if params.nil?
         return nil unless bindable_param_shape?(params)
 
         positional = arg_types.dup
         kw_shape = positional.pop if takes_keywords?(params) && positional.last.is_a?(Type::HashShape)
-        locals = bind_positional_params(params, positional)
+        locals = bind_positional_params(params, positional, defaults_unknown)
         return nil if locals.nil?
 
-        bind_keyword_and_block_params(params, kw_shape, locals)
+        bind_keyword_and_block_params(params, kw_shape, locals, defaults_unknown)
       end
 
       # The keyword, `**rest` and block parameters' bindings, added to `locals`, which it returns.
-      def bind_keyword_and_block_params(params, kw_shape, locals)
-        bind_keyword_params(params, kw_shape, locals)
+      def bind_keyword_and_block_params(params, kw_shape, locals, defaults_unknown = false)
+        bind_keyword_params(params, kw_shape, locals, defaults_unknown)
         rest_name = keyword_rest_name(params)
         locals[rest_name.to_sym] = keyword_rest_type(params, kw_shape) if rest_name
         locals[params.block.name.to_sym] = dynamic_top if params.block&.name
@@ -4841,7 +4858,7 @@ module Rigor
       # parameter an `Array[untyped]`; the keyword parameters bind from `keywords` as {#bind_keyword_params} does
       # for any call, so an open shape leaves them `Dynamic[top]`. An optional's default is not used: the splat
       # may supply the slot.
-      def bind_params_without_correspondence(params, keywords)
+      def bind_params_without_correspondence(params, keywords, defaults_unknown = false)
         return {} if params.nil?
         return nil unless params.is_a?(Prism::ParametersNode)
 
@@ -4852,7 +4869,7 @@ module Rigor
         if rest.respond_to?(:name) && rest.name
           locals[rest.name.to_sym] = Type::Combinator.nominal_of("Array", type_args: [dynamic_top])
         end
-        bind_keyword_and_block_params(params, keywords, locals)
+        bind_keyword_and_block_params(params, keywords, locals, defaults_unknown)
       end
 
       # Trailing required positionals after a rest (`def f(a, *m, z)`) shift the correspondence and stay
@@ -4884,7 +4901,7 @@ module Rigor
         params.keywords.any? || !params.keyword_rest.nil?
       end
 
-      def bind_positional_params(params, positional)
+      def bind_positional_params(params, positional, defaults_unknown = false)
         requireds = params.requireds
         optionals = params.optionals
         return nil if positional.size < requireds.size
@@ -4896,7 +4913,7 @@ module Rigor
         requireds.each_with_index { |param, index| bind_positional_param(locals, param, positional[index]) }
         optionals.each_with_index do |param, index|
           supplied = positional[requireds.size + index]
-          locals[param.name.to_sym] = supplied || literal_default_type(param.value)
+          locals[param.name.to_sym] = supplied || (defaults_unknown ? dynamic_top : literal_default_type(param.value))
         end
         bind_rest_param(params, positional, locals)
         locals
@@ -4920,8 +4937,8 @@ module Rigor
         end
       end
 
-      def bind_keyword_params(params, kw_shape, locals)
-        open_shape = kw_shape && kw_shape.extra_keys == :open
+      def bind_keyword_params(params, kw_shape, locals, defaults_unknown = false)
+        open_shape = (kw_shape && kw_shape.extra_keys == :open) || defaults_unknown
         params.keywords.each do |param|
           name = param.name.to_s.delete_suffix(":").to_sym
           supplied = kw_shape&.pairs&.[](name)

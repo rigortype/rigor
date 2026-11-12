@@ -8,6 +8,7 @@ include Rigor::Testing
 # all-constant positional call does (the `n: 2` rows). A call with an unpinned keyword takes the widened
 # retry, which widens the keyword's value as it widens a positional's (the `some_int` rows).
 def some_int = [1, 2].sample
+def coin = [true, false].sample
 
 class KeywordRecursion
   def keyword(a, n:) = n > 0 ? keyword(a, n: n - 1) : a
@@ -32,6 +33,28 @@ class KeywordRecursion
 
   def keyword_block(n:, &blk) = n > 0 ? keyword_block(n: n - 1, &blk) : yield
   def positional_block(n, &blk) = n > 0 ? positional_block(n - 1, &blk) : yield
+
+  def keyword_toggle(n:, f: false) = n > 0 ? keyword_toggle(n: n - 1, f: !f) : f
+  def positional_toggle(n, f = false) = n > 0 ? positional_toggle(n - 1, !f) : f
+
+  def keyword_build(depth:, acc: []) = depth.zero? ? acc : keyword_build(depth: depth - 1, acc: acc + [depth])
+  def positional_build(depth, acc = []) = depth.zero? ? acc : positional_build(depth - 1, acc + [depth])
+
+  def keyword_rest_returned(a, **kw) = a > 0 ? keyword_rest_returned(a - 1, **kw) : kw
+  def positional_hash_returned(a, kw) = a > 0 ? positional_hash_returned(a - 1, kw) : kw
+  def keyword_hash_returned(a, opts: {}) = a > 0 ? keyword_hash_returned(a - 1, opts: opts) : opts
+  def positional_tuple_returned(a, t) = a > 0 ? positional_tuple_returned(a - 1, t) : t
+
+  def keyword_nested(opts:) = opts[:n] > 0 ? keyword_nested(opts: { n: opts[:n] - 1 }) : :base
+  def keyword_tuple(xs:) = xs[0] > 0 ? keyword_tuple(xs: [xs[0] - 1]) : :base
+  def positional_tuple(xs) = xs[0] > 0 ? positional_tuple([xs[0] - 1]) : :base
+
+  # Ruby: neither call returns (SystemStackError). No base case, so `bot` is the answer in both forms. The
+  # rows sit in a method body: the code after a `bot` call is unreachable.
+  def diverging_rows
+    assert_type("bot", keyword_forever(n: 1))
+    assert_type("bot", positional_forever(1))
+  end
 end
 
 subject = KeywordRecursion.new
@@ -72,7 +95,36 @@ assert_type(":blk", subject.positional_block(2) { :blk })
 assert_type(":blk", subject.keyword_block(n: some_int) { :blk })
 assert_type(":blk", subject.positional_block(some_int) { :blk })
 
-# Ruby: never returns (SystemStackError). No base case, so `bot` is the answer in both forms. These rows are last:
-# the code after a `bot` call is unreachable.
-assert_type("bot", subject.keyword_forever(n: 1))
-assert_type("bot", subject.positional_forever(1))
+# A default the call leaves unfilled, with an unpinned counter. The widened retry types the body for every
+# call the recursion makes, and a recursive call passes the defaulted slot something else, so the default's
+# literal is not the answer.
+# Ruby: true for 1, false for 2.
+assert_type("Dynamic[top]", subject.keyword_toggle(n: some_int))
+assert_type("Dynamic[top]", subject.positional_toggle(some_int))
+# Ruby: false. A pinned counter unrolls, default included.
+assert_type("false", subject.keyword_toggle(n: 2))
+assert_type("false", subject.positional_toggle(2))
+# Ruby: [1] for 1, [2, 1] for 2.
+assert_type("Dynamic[top]", subject.keyword_build(depth: some_int))
+assert_type("Dynamic[top]", subject.positional_build(some_int))
+# Ruby: [2, 1].
+assert_type("[2, 1]", subject.keyword_build(depth: 2))
+assert_type("[2, 1]", subject.positional_build(2))
+# Ruby: 1 or 2, the argument.
+assert_type("Integer", subject.keyword_default(some_int))
+assert_type("Integer", subject.positional_default(some_int))
+
+# A pinned shape the recursion hands back: the unroll keeps it, as it keeps a tuple.
+# Ruby: { x: 1 }, { x: 1 }, { x: 1 }, {}, [1, 2].
+assert_type("{ x: 1 }", subject.keyword_rest_returned(2, x: 1))
+assert_type("{ x: 1 }", subject.positional_hash_returned(2, { x: 1 }))
+assert_type("{ x: 1 }", subject.keyword_hash_returned(2, opts: { x: 1 }))
+assert_type("{}", subject.keyword_hash_returned(2))
+assert_type("[1, 2]", subject.positional_tuple_returned(2, [1, 2]))
+
+# A pin below the first level: a shape in a keyword, a tuple in a keyword, a tuple, a union of shapes.
+# Ruby: :base for the first three, 1 for the last.
+assert_type(":base", subject.keyword_nested(opts: { n: some_int }))
+assert_type(":base", subject.keyword_tuple(xs: [some_int]))
+assert_type(":base", subject.positional_tuple([some_int]))
+assert_type("Integer", subject.positional_hash(1, coin ? { n: 2 } : { n: 2, m: 1 }))

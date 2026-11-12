@@ -170,6 +170,18 @@ class CvarGlobalContentCapture
     puts "one" if @@sc.last == 1
   end
 
+  # The same under `class << self`: the rewriter is re-applied there too.
+  def cvar_singleton_rewritten
+    @@i = [1]
+    [1].each do
+      class << self
+        @@i.map!(&:to_s)
+        @@i << "x"
+      end
+    end
+    puts "i" if @@i.first == "1"
+  end
+
   # --- Paired controls. ---
 
   # A class variable the block only reads still folds.
@@ -236,3 +248,13 @@ $cg_tm = [0]
   end
 end
 puts "one" if $cg_tm.last == 1
+
+# A rewriter beside an append under a module body is re-applied too.
+$cg_mr = [1]
+[1].each do
+  module GlobalModuleRewritten
+    $cg_mr.map!(&:to_s)
+    $cg_mr << "x"
+  end
+end
+puts "m" if $cg_mr.first == "1"

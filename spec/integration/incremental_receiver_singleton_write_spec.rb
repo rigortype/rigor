@@ -5,10 +5,14 @@
 # declaring files, so a warm `--incremental` run kept the `call.wrong-arity` a cold run declines. Each example runs
 # cold, adds the writer file, then removes it, and expects the warm rows to equal a cold run's at both steps.
 #
-# These are labelled guards. Two mechanisms re-check the reader, and either alone keeps the examples green: the
-# writer file joins `Base`'s per-file class-declaration set (`ScopeIndexer#record_singleton_class_sources`, #1752
-# and #1941), and the moved class mark or unpositioned mixin fires the `mark:` / `mixin:` table diff
-# (`IncrementalSession#mark_affected`, #1833 and #1661). They fail only with both removed.
+# These are labelled guards. Four mechanisms re-check the reader, and the examples fail only with all of them removed:
+# - the writer file joins `Base`'s per-file class-declaration set (`ScopeIndexer#record_singleton_class_sources`,
+#   #1752 and #1941), so the declaration diff fires `class:Base`;
+# - the moved class mark or unpositioned mixin fires `mark:` / `mixin:` (`IncrementalSession#mark_affected`, #1833
+#   and #1661);
+# - the file starts or stops defining `bar`, firing `defines:bar` (`#defined_name_affected`, #1459);
+# - for `Base.extend(X)` only, `X#bar`'s visibility slot moves (`#visibility_name_affected`, #2134).
+# Any one of the first three alone keeps every example green.
 require "spec_helper"
 require "fileutils"
 require "tmpdir"

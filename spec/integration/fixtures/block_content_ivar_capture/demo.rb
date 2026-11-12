@@ -124,28 +124,31 @@ class IvarContentCapture
   # member by member (#3095): each collection member reads its bare
   # carrier, and the `nil` a callback that never runs leaves, like any
   # member no mutation can fill, stays. ---
+  # Each comparison sits before its `assert_type`, an unresolved self-call
+  # that would reset the narrowing it reads; each folds without the fix.
   def guarded_escaping(button, flag)
     @later = flag ? [1] : nil
     button.on_click { @later&.push(2) }
-    assert_type("Array[Dynamic[top]]?", @later)
     puts "two" if @later&.last == 2
+    assert_type("Array[Dynamic[top]]?", @later)
     y = @later.nil? ? 1 : 2
     puts "one" if y == 1
   end
 
   def guarded_escaping_hash(button, flag)
     @lazy = flag ? { a: 1 } : nil
-    button.on_click { @lazy[:b] = 2 if @lazy }
+    button.on_click { @lazy[:a] = 2 if @lazy }
+    puts "two" if @lazy&.fetch(:a) == 2
     assert_type("Hash[Dynamic[top], Dynamic[top]]?", @lazy)
-    puts "two" if @lazy && @lazy[:b] == 2
-    puts "none" if @lazy.nil?
   end
 
   def mixed_escaping(button, flag)
     @mixed = flag ? [1] : 3
-    button.on_click { @mixed << 1 }
+    button.on_click { @mixed << 2 if @mixed.is_a?(Array) }
+    case @mixed
+    when Array then puts "two" if @mixed.last == 2
+    end
     assert_type("3 | Array[Dynamic[top]]", @mixed)
-    puts "two" if @mixed.is_a?(Array) && @mixed.size == 2
   end
 
   # --- A rewriter beside an append is re-applied to the join. ---

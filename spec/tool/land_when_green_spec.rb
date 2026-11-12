@@ -86,6 +86,14 @@ RSpec.describe "agents/pi-harness/scripts/land-when-green.sh" do
     expect([code, enqueued?]).to eq([0, true])
   end
 
+  # Run 43285398874: a draft run cancelled by a newer push concluded its CI required CANCELLED.
+  it "keeps waiting through a cancelled draft run's CANCELLED, then lands on SUCCESS" do
+    replies = start + poll("7 cancelled 1") + poll("7 cancelled 1", "12 success 2") + [["", 0]] +
+              land("7 cancelled 1\n12 success 2")
+    _, code = run_script(replies: replies)
+    expect([code, enqueued?]).to eq([0, true])
+  end
+
   it "stops with exit 4 when the newest CI required failed" do
     out, code = run_script(replies: start + poll("7 skipped 1", "12 failure 2"))
     expect([code, enqueued?]).to eq([4, false])

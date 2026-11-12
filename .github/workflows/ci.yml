@@ -1204,8 +1204,9 @@ jobs:
   # than each individual job. New jobs added above are automatically
   # gated without touching protection rules.
   #
-  # Skipped on a draft's light run, so it concludes SKIPPED there, never
-  # SUCCESS or FAILURE: bin/land-pr reads the newest such check on the head
+  # Skipped on a draft's light run, so it concludes SKIPPED there (CANCELLED
+  # when a newer push or `gh pr ready` cancels the run), never SUCCESS or
+  # FAILURE: bin/land-pr reads the newest such check on the head
   # (bin/ci-required), and tested-tree attests only after it succeeded. It
   # keys on the event itself, not on changes' `full` output: `gh pr ready`
   # cancels a draft run whose change detection may not have finished, and an

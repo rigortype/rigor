@@ -328,14 +328,16 @@ module Rigor
 
         # Issue #2962 — the library list is {Environment::BaseLibraries.resolve}'s, the same merge
         # `Environment.for_project` loads, so a gem covered through `libraries:` or a lockfile stdlib
-        # entry is not reported missing.
+        # entry is not reported missing. Only the names the environment loads count ({LibraryProbe.loadable}): a
+        # locked gem named there that RBS has no library for is still missing.
         def resolved_default_libraries
-          Environment::BaseLibraries.resolve(
+          resolved = Environment::BaseLibraries.resolve(
             @configuration.libraries,
             rbs_collection_lockfile: @configuration.rbs_collection_lockfile,
             rbs_collection_auto_detect: @configuration.rbs_collection_auto_detect,
             root: Dir.pwd
           )
+          LibraryProbe.loadable(resolved)
         end
         private :resolved_default_libraries
 

@@ -339,6 +339,53 @@ RSpec.describe Rigor::Analysis::Runner::DiagnosticAggregator do
       end
     end
 
+    # Issue #2962 review — a name RBS has no library for is dropped by the loader, so it covers nothing. The probe
+    # is stubbed to know no library, so the rows do not depend on what the spec process can resolve.
+    it "still reports a locked gem named under `libraries:` that RBS has no library for" do
+      locked = {
+        "foogem" => Rigor::Environment::LockfileResolver::LockedGem.new(
+          name: "foogem", version: "1.0.0", platform: "ruby"
+        )
+      }
+      allow(Rigor::Environment::LockfileResolver).to receive(:locked_gems).and_return(locked)
+      allow(Rigor::Environment::BundleSigDiscovery).to receive(:discover).and_return([])
+      allow(Rigor::Environment::RbsCollectionDiscovery).to receive(:discover).and_return([])
+      allow(Rigor::LibraryProbe).to receive(:predicate).and_return(->(_lib) { false })
+      configuration = Rigor::Configuration.new(
+        "libraries" => ["foogem"], "rbs_collection" => { "auto_detect" => false }
+      )
+
+      message = build_aggregator(configuration: configuration).rbs_coverage_diagnostics.first&.message
+
+      expect(message).to include("1 gem(s)").and include("foogem")
+    end
+
+    it "still reports a locked gem named by a lockfile stdlib entry that RBS has no library for" do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, "rbs_collection.lock.yaml"), <<~YAML)
+          ---
+          path: ".gem_rbs_collection"
+          gems:
+          - { name: foogem, version: '0', source: { type: stdlib } }
+        YAML
+        locked = {
+          "foogem" => Rigor::Environment::LockfileResolver::LockedGem.new(
+            name: "foogem", version: "1.0.0", platform: "ruby"
+          )
+        }
+        allow(Rigor::Environment::LockfileResolver).to receive(:locked_gems).and_return(locked)
+        allow(Rigor::Environment::BundleSigDiscovery).to receive(:discover).and_return([])
+        allow(Rigor::LibraryProbe).to receive(:predicate).and_return(->(_lib) { false })
+        configuration = Rigor::Configuration.new(
+          "rbs_collection" => { "lockfile" => File.join(dir, "rbs_collection.lock.yaml") }
+        )
+
+        message = build_aggregator(configuration: configuration).rbs_coverage_diagnostics.first&.message
+
+        expect(message).to include("1 gem(s)").and include("foogem")
+      end
+    end
+
     it "is silent when the project has no lockfile (nothing locked to classify)" do
       allow(Rigor::Environment::LockfileResolver).to receive(:locked_gems).and_return({})
 

@@ -1185,6 +1185,86 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
   end
 
+  describe "the block form of `select` (#1408)" do
+    # With a block, `select` is `Enumerable#select` over the loaded records and returns an Array; without one it
+    # is the query builder. The bundled signature typed every form as the relation.
+
+    def dumped(source)
+      find_diagnostics(source).select { |d| d.qualified_rule == "dump.type" }.map(&:message)
+    end
+
+    it "types the block form as an Array of the element, on either side of the model" do
+      source = <<~RUBY
+        user = User.find(1)
+        Rigor.dump_type(Post.where(title: "x").select { |post| post.title == "x" })
+        Rigor.dump_type(Post.all.select(&:title))
+        Rigor.dump_type(user.posts.select { |post| post.title == "x" })
+        Rigor.dump_type(Post.select { |post| post.title == "x" })
+        Rigor.dump_type(Post.select(&:title))
+        class Post
+          def self.titled = Rigor.dump_type(select { |post| post.title == "x" })
+        end
+      RUBY
+      expect(dumped(source)).to eq(["dump_type: Array[Post]"] * 6)
+    end
+
+    it "keeps the builder form as the relation" do
+      source = <<~RUBY
+        user = User.find(1)
+        Rigor.dump_type(Post.where(title: "x").select(:title))
+        Rigor.dump_type(user.posts.select(:title, :body))
+        Rigor.dump_type(Post.select(:title))
+        class Post
+          def self.titles = Rigor.dump_type(select(:title))
+        end
+      RUBY
+      expect(dumped(source)).to eq(["dump_type: ActiveRecord::Relation[Post]"] * 4)
+    end
+
+    it "yields the element to a relation's block" do
+      source = "Post.all.select { |post| Rigor.dump_type(post) }\n"
+      expect(dumped(source)).to eq(["dump_type: Post"])
+    end
+
+    it "types fields next to a block as the Array" do
+      # activerecord 8.1.3.1 raises `ArgumentError` here and Rails 4 returned the Array, so the Array holds on both.
+      source = <<~RUBY
+        Rigor.dump_type(Post.all.select(:title) { |post| post.title == "x" })
+        Rigor.dump_type(Post.select(:title) { |post| post.title == "x" })
+      RUBY
+      expect(dumped(source)).to eq(["dump_type: Array[Post]"] * 2)
+    end
+
+    it "leaves the block forms to a model's own `self.select`" do
+      # As with `find`, the veto covers the forms the plugin answers as Enumerable's; the builder form stays the
+      # relation, as `find`'s one-id form stays the model.
+      source = <<~RUBY
+        class Post
+          def self.select(*) = :own
+        end
+        Rigor.dump_type(Post.select(:title) { |post| post.title == "x" })
+        Rigor.dump_type(Post.select { |post| post.title == "x" })
+      RUBY
+      expect(dumped(source)).to eq(["dump_type: :own"] * 2)
+    end
+
+    it "draws no ivar-write mismatch between a block `select` and `to_a`" do
+      # The redmine `WorkflowsController#find_roles` shape.
+      source = <<~RUBY
+        class RolesFinder
+          def run(ids)
+            if ids.empty?
+              @roles = Post.where(title: "x").select(&:title)
+            else
+              @roles = Post.where(id: ids).to_a
+            end
+          end
+        end
+      RUBY
+      expect(find_diagnostics(source).select { |d| d.rule == "def.ivar-write-mismatch" }).to be_empty
+    end
+  end
+
   describe "the block form of `find`" do
     # With a block, `Model.find` and `Relation#find` are `Enumerable#find` over the loaded records: no id, and
     # the element or `nil` back. The class-side form drew `wrong-arity`, and, where the model has an RBS

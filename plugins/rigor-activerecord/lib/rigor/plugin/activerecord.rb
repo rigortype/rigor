@@ -565,8 +565,13 @@ module Rigor
       # A project `self.find` on the model or an ancestor, or a walk that ran out of budget before ruling one out
       # (`maybe`): the veto fails toward declining, as the discovery walk always has.
       def project_find_defined?(entry, scope)
-        !Rigor::Reflection.project_method_defined(entry.class_name, :find, kind: :singleton, source: :discovered,
-                                                                           scope: scope).no?
+        project_singleton_defined?(entry, :find, scope)
+      end
+
+      # The same veto for any class-side selector the plugin answers in Rails' name (`find`, `select`).
+      def project_singleton_defined?(entry, name, scope)
+        !Rigor::Reflection.project_method_defined(entry.class_name, name, kind: :singleton, source: :discovered,
+                                                                          scope: scope).no?
       end
 
       # Class-side finders + the class-side relation entry points. `find` returns the model, or an Array of
@@ -601,13 +606,10 @@ module Rigor
             Rigor::Type::Combinator.nominal_of(entry.class_name),
             Rigor::Type::Combinator.constant_of(nil)
           )
-        when :where, :all, :order, :limit, :none, :select
-          # `:select` was added to close Mastodon's
-          # `scope :duplicate_uris, -> { select(:uri).group(:uri).having(...) }` shape: the implicit-self
-          # `select(:uri)` inside the scope lambda body had been resolving to `Kernel#select` (IO
-          # multiplexer, return `Array[String]`), masking the AR class-side relation entry point. The rest
-          # of the query DSL chains through the bundled `ActiveRecord::Relation` RBS once a relation is
-          # open.
+        when :select then class_select_return_type(call_node, entry, scope)
+        when :where, :all, :order, :limit, :none
+          # The rest of the query DSL chains through the bundled `ActiveRecord::Relation` RBS once a
+          # relation is open.
           relation_of(entry.class_name)
         when :table_name
           table_name_return_type(entry)
@@ -616,6 +618,23 @@ module Rigor
           # `table_name` the exact string is not derivable from project source even when the bare name is.
           Rigor::Type::Combinator.nominal_of("String")
         end
+      end
+
+      # `:select` was added to close Mastodon's `scope :duplicate_uris, -> { select(:uri).group(:uri).having(...) }`
+      # shape: the implicit-self `select(:uri)` inside the scope lambda body had been resolving to `Kernel#select`
+      # (IO multiplexer, return `Array[String]`), masking the AR class-side relation entry point.
+      #
+      # `Model.select` is `all.select`, so a block makes it `Enumerable#select` over the loaded records, as the
+      # bundled `Relation#select` overload says (#1408), and the answer is an Array of the model. Fields next to a
+      # block answer the Array too, for the reason given on that overload. A model that defines its own
+      # `self.select` keeps its own answer for the block forms, as it does for `find`'s block and multi-id
+      # forms (`project_find_defined?`); the builder form stays the relation, as `find`'s one-id form stays the
+      # model.
+      def class_select_return_type(call_node, entry, scope)
+        return relation_of(entry.class_name) if call_node.block.nil?
+        return nil if project_singleton_defined?(entry, :select, scope)
+
+        Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of(entry.class_name)])
       end
 
       # `Model.find { |m| … }` / `Model.find(&:pred?)` never reaches the id lookup: `Core.find` passes a

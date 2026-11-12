@@ -64,8 +64,9 @@ module Rigor
 
       # ADR-89 WD2 — bounds on the persisted return summaries (per-def observed call keys, and total defs
       # summarised) so the incremental snapshot stays small. A def observed under more keys than the per-def
-      # cap keeps only the first; a def past the total cap is dropped (its symbol dependents then always
-      # re-check — the conservative direction).
+      # cap keeps none of them and is marked `overflow: true` (issue #3116): the keys past the cap are unknown, so
+      # equal returns at the first eight prove nothing about the ninth key's reader. A def past the total cap is
+      # dropped. Either way its symbol dependents always re-check — the conservative direction.
       RETURN_SUMMARY_KEYS_PER_DEF = 8
       RETURN_SUMMARY_TOTAL_CAP = 4000
 
@@ -794,7 +795,8 @@ module Rigor
       # For each project method with live memo entries, a bounded `{ keys:, returns:, effects: }` summary the
       # incremental session persists: `keys` the observed `[receiver, arg_types]` type tuples, `returns` their
       # `describe(:short)` descriptors, `effects` the content-mutated parameter positions (a caller-visible
-      # arg-flooring surface). Only meaningful right after a run populated the memo (baseline / recheck),
+      # arg-flooring surface), and `overflow: true` in place of the keys when there were too many to keep.
+      # Only meaningful right after a run populated the memo (baseline / recheck),
       # before the bucket rolls. Keys are held live here; the session Marshals them for the snapshot.
       #
       # @return the summaries keyed by `[path, "Class#method"]` (or `"Class.method"`), each holding `keys:`,
@@ -832,14 +834,21 @@ module Rigor
 
             break if result.size >= RETURN_SUMMARY_TOTAL_CAP
 
-            capped = entries.first(RETURN_SUMMARY_KEYS_PER_DEF)
-            result[[path_line.split(":", 2).first, "#{class_name}#{separator}#{method_name}"]] = {
-              keys: capped.map { |entry| return_summary_key(entry) },
-              returns: capped.map { |entry| entry.result.describe(:short) },
-              effects: content_effects(effects_evaluator, node)
-            }
+            result[[path_line.split(":", 2).first, "#{class_name}#{separator}#{method_name}"]] =
+              return_summary(entries, content_effects(effects_evaluator, node))
           end
         end
+      end
+
+      # One def's summary. Issue #3116 — a def observed under more keys than {RETURN_SUMMARY_KEYS_PER_DEF} records
+      # no key and `overflow: true` instead, which the session's gate reads as "not provably return-stable". A
+      # splat call's key (issue #1237) is an entry like any other and counts toward the cap.
+      def return_summary(entries, effects)
+        return { keys: [], returns: [], effects: effects, overflow: true } if entries.size > RETURN_SUMMARY_KEYS_PER_DEF
+
+        { keys: entries.map { |entry| return_summary_key(entry) },
+          returns: entries.map { |entry| entry.result.describe(:short) },
+          effects: effects }
       end
 
       # One observed call key: `[receiver, arg_types]`, or, for an entry a splat call stored (issue #1237),

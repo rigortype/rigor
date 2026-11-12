@@ -205,7 +205,10 @@ module Rigor
       # 48: issue #1237 — a `return_summaries` key may carry a third element, `true`, for a call key a splat call
       # observed, which the gate re-drives with no positional correspondence. A pre-48 summary holds such a call under a
       # positional key the engine bound as one argument, so a warm run would re-drive it the old way.
-      SCHEMA = 48
+      # 49: issue #3116 — a `return_summaries` entry for a def observed under more keys than the per-def cap is
+      # `{ keys: [], returns: [], effects:, overflow: true }`. A pre-49 summary holds the first eight keys of such a
+      # def with no marker, so a warm run would skip the reader of a key it never recorded.
+      SCHEMA = 49
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.
@@ -240,7 +243,9 @@ module Rigor
       # #1237: `[receiver, arg_types, true]` for a key a splat call observed)
       # (Marshal-clean type tuples), their `describe(:short)` return descriptors, and the content-mutated
       # parameter positions. A recheck re-evaluates a declaration-stable changed callee at these keys and,
-      # when every return + the effects are unchanged, skips its symbol dependents.
+      # when every return + the effects are unchanged, skips its symbol dependents. Issue #3116 — a def observed
+      # under more keys than the per-def cap carries `overflow: true` and no key; the recheck never skips its
+      # dependents.
       # ADR-67 WD6c lift:
       # `param_table` is the `parameter_inference:` seed table (`[class, method, kind] => {param => Type}`)
       # the run that wrote the snapshot seeded its analysis from — `{}` when the gate is off. A recheck

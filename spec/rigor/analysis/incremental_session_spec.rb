@@ -2733,6 +2733,119 @@ end
       end
     end
 
+    # Issue #3116 — the summary holds at most `RETURN_SUMMARY_KEYS_PER_DEF` (8) keys per def. A def observed under
+    # more used to keep the first eight and pass the gate on them, so an edit that moved the return only at the
+    # ninth key left that key's reader on its cached rows. Such a def now records `overflow: true` and no key, and
+    # the gate keeps every symbol dependent.
+    describe "a def observed under more keys than the per-def cap" do
+      let(:callee_a) { "def v(k) = k == 99 ? :a : :b\n" }
+      let(:callee_z) { "def v(k) = k == 99 ? :z : :b\n" }
+      let(:callee_same) { "def v(k) = k == 99 ? :a : (:b)\n" } # the same return at every key
+
+      # A tree whose callee `a.rb` is read under `plain` literal keys by `r1.rb`.. and under `99` by `z.rb`, the
+      # last file analysed, so `99` is the last key observed.
+      def write_capped_tree(dir, callee, plain:)
+        File.write(File.join(dir, "a.rb"), callee)
+        plain.times { |i| File.write(File.join(dir, "r#{i + 1}.rb"), "v(#{i + 1})\n") }
+        File.write(File.join(dir, "z.rb"), "puts 'hit' if v(99) == :a\n")
+      end
+
+      # Baselines `plain` readers plus `z.rb`, rewrites the callee to `edited` and rechecks.
+      def recheck_capped(callee, edited, plain:, workers: 0)
+        Dir.mktmpdir do |dir|
+          write_capped_tree(dir, callee, plain: plain)
+          session = described_class.new(configuration: configuration(dir), environment: shared_environment,
+                                        workers: workers)
+          guarded_baseline(session)
+          baseline_summary = session.instance_variable_get(:@return_summaries)[[File.join(dir, "a.rb"), "<toplevel>#v"]]
+          File.write(File.join(dir, "a.rb"), edited)
+          recheck = guarded_recheck(session)
+          yield recheck, baseline_summary, dir
+        end
+      end
+
+      def basenames(paths) = paths.map { |path| File.basename(path) }.sort
+
+      it "records every key of a def observed under exactly the cap, and still skips its readers" do
+        recheck_capped(callee_a, callee_same, plain: 7) do |recheck, summary, dir|
+          expect(summary[:keys].size).to eq(Rigor::Analysis::Runner::RETURN_SUMMARY_KEYS_PER_DEF)
+          expect(summary[:overflow]).to be_nil
+          expect(basenames(recheck.affected)).to eq(["a.rb"])
+          expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+        end
+      end
+
+      it "re-checks the reader when the edit moves the return at a kept key" do
+        recheck_capped(callee_a, callee_z, plain: 7) do |recheck, _summary, dir|
+          expect(basenames(recheck.affected)).to include("z.rb")
+          expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+        end
+      end
+
+      it "records the overflow instead of the first eight keys" do
+        recheck_capped(callee_a, callee_a, plain: 8) do |_recheck, summary, _dir|
+          expect(summary).to include(keys: [], returns: [], overflow: true)
+        end
+      end
+
+      it "re-checks the reader of the ninth key when the edit moves the return only there" do
+        recheck_capped(callee_a, callee_z, plain: 8) do |recheck, _summary, dir|
+          expect(basenames(recheck.affected)).to include("z.rb")
+          expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+          expect(recheck.diagnostics.map(&:message)).to include(a_string_matching(/always falsey/))
+        end
+      end
+
+      it "keeps every reader when the edit moves no return (the accepted cost)" do
+        recheck_capped(callee_a, callee_same, plain: 8) do |recheck, _summary, dir|
+          expect(basenames(recheck.affected)).to eq(basenames(Dir[File.join(dir, "*.rb")]))
+          expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+        end
+      end
+
+      it "counts a splat call's key toward the cap" do
+        splat_callee = "def v(*k) = k.size > 5 ? :a : :b\n"
+        splat_reader = "class S\n  def go(idx)\n    puts 'hit' if v(*idx) == :a\n  end\nend\n"
+        Dir.mktmpdir do |dir|
+          write_capped_tree(dir, splat_callee, plain: 7) # eight positional keys: 1..7 and 99
+          key = [File.join(dir, "a.rb"), "<toplevel>#v"]
+          session = session_for(configuration(dir))
+          guarded_baseline(session)
+          expect(session.instance_variable_get(:@return_summaries)[key][:keys].size).to eq(8)
+
+          File.write(File.join(dir, "spl.rb"), splat_reader)
+          session = session_for(configuration(dir))
+          guarded_baseline(session)
+          expect(session.instance_variable_get(:@return_summaries)[key]).to include(keys: [], overflow: true)
+        end
+      end
+
+      # A guard, not a pin of #3116's fix: a pooled run types the callee in its workers, so this process harvests
+      # no summary for it and there is no per-worker key set to merge. Ten keys split across two workers therefore
+      # keep every reader. A change that starts merging worker harvests has to make this hold on its own.
+      it "keeps every reader in pool mode, where no summary is harvested" do
+        recheck_capped(callee_a, callee_z, plain: 9, workers: 2) do |recheck, summary, dir|
+          expect(summary.nil? || summary[:overflow]).to be(true)
+          expect(basenames(recheck.affected)).to eq(basenames(Dir[File.join(dir, "*.rb")]))
+          expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+        end
+      end
+
+      # A guard: the marker costs a def under the cap nothing when nothing was edited.
+      it "re-analyses nothing on two rechecks with no edit" do
+        Dir.mktmpdir do |dir|
+          write_capped_tree(dir, callee_a, plain: 3)
+          session = session_for(configuration(dir))
+          guarded_baseline(session)
+          2.times do
+            recheck = guarded_recheck(session)
+            expect(recheck.affected).to be_empty
+            expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+          end
+        end
+      end
+    end
+
     it "propagates a return-visible body edit to symbol dependents (return moved at observed key)" do
       Dir.mktmpdir do |dir|
         user = File.join(dir, "user.rb")

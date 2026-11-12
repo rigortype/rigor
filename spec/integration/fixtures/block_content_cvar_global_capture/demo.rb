@@ -127,6 +127,49 @@ class CvarGlobalContentCapture
     puts "one" if @@nf.last == 1
   end
 
+  # --- A lookup mutator (`default=`) beside a store answers a missing
+  # key with the default, not the seed's known values. ---
+  def cvar_lookup_seed
+    @@b = { a: 1 }
+    [1].each do
+      @@b.default = 0
+      @@b[:c] = 2
+    end
+    puts "a" if @@b[:zz] == 0
+  end
+
+  def global_lookup_seed
+    $cg_b = { a: 1 }
+    [1].each do
+      $cg_b.default = 0
+      $cg_b[:c] = 2
+    end
+    puts "a" if $cg_b[:zz] == 0
+  end
+
+  # --- A rewriter beside an append is re-applied to the join. ---
+  def cvar_rewritten
+    @@rw = [1]
+    [0].each do |_x|
+      @@rw.map!(&:to_s)
+      @@rw << "x"
+    end
+    assert_type("Array[Dynamic[top]]", @@rw)
+    puts "one" if @@rw.first == "1"
+  end
+
+  # --- `class << self` keeps the enclosing class's class variables, and
+  # its body runs at once. ---
+  def cvar_singleton_body
+    @@sc = [0]
+    [1].each do
+      class << self
+        @@sc << 1
+      end
+    end
+    puts "one" if @@sc.last == 1
+  end
+
   # --- Paired controls. ---
 
   # A class variable the block only reads still folds.
@@ -146,7 +189,7 @@ class CvarGlobalContentCapture
 
   # Guard, not a fix: a global Ruby's own signatures declare is left to
   # the interpreter's handling, so `$;` keeps its pre-call contents
-  # although the runtime appends: a known limit of #3096's fix.
+  # although the runtime appends (#3126).
   def special_global
     $; = +","
     [1].each { $; << "y" }
@@ -163,4 +206,33 @@ class CvarGlobalContentCapture
     end
     assert_type("[0]", @@nd)
   end
+
+  def global_nested_def
+    $cg_nd = [0]
+    [1].each do
+      def global_nested_helper
+        $cg_nd << 1
+      end
+    end
+    assert_type("[0]", $cg_nd)
+  end
+
+  # A class body in the block has class variables of its own.
+  @@ck = [0]
+  [1].each do
+    class CvarClassBody
+      @@ck = [9]
+      @@ck << 1
+    end
+  end
+  assert_type("[0]", @@ck)
 end
+
+# A module body in the block runs at once, and reads the one global.
+$cg_tm = [0]
+[1].each do
+  module GlobalModuleBody
+    $cg_tm << 1
+  end
+end
+puts "one" if $cg_tm.last == 1

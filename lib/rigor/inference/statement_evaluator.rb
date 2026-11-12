@@ -7545,12 +7545,12 @@ module Rigor
         rewrites
       end
 
-      # A local the caller's test admits, or an instance variable outside a nested method or class body: the names
-      # the content walks can collect.
+      # A local the caller's test admits, or an instance variable, class variable or global outside a body that makes
+      # it another variable ({#non_local_under_scope_body?}): the names the content walks can collect.
       def rewritten_capture_receiver?(receiver, ancestors)
         case receiver
         when Prism::LocalVariableReadNode then yield(receiver, ancestors)
-        when Prism::InstanceVariableReadNode then !under_scope_body?(ancestors)
+        when *NON_LOCAL_READ_NODES then !non_local_under_scope_body?(receiver.name, ancestors)
         else false
         end
       end
@@ -7663,6 +7663,24 @@ module Rigor
         ancestors.any? { |a| SCOPE_BODY_NODES.any? { |k| a.is_a?(k) } }
       end
 
+      # The bodies under a block body where a non-local of each kind is no longer the one the block's caller sees, or
+      # does not run while the block does. A `def` body runs only when called. A class or module body is a class of
+      # its own for an instance variable and a class variable, but runs at once and reads the one global. `class <<
+      # self` keeps the enclosing class's class variables, so only an instance variable leaves there.
+      NON_LOCAL_SCOPE_BODY_NODES = {
+        ivar: SCOPE_BODY_NODES,
+        cvar: [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode].freeze,
+        global: [Prism::DefNode].freeze
+      }.freeze
+      private_constant :NON_LOCAL_SCOPE_BODY_NODES
+
+      # True when the non-local `name`, at `ancestors` under a block body, sits in a body that makes it another
+      # variable or one that does not run during the block ({NON_LOCAL_SCOPE_BODY_NODES}).
+      def non_local_under_scope_body?(name, ancestors)
+        bodies = NON_LOCAL_SCOPE_BODY_NODES.fetch(CapturedLocals.variable_kind(name))
+        ancestors.any? { |a| bodies.any? { |k| a.is_a?(k) } }
+      end
+
       # True when the local `node` names lives in the scope the walk started in or an outer one.
       def same_scope_local?(node, ancestors)
         return false if ancestors.any? { |ancestor| SCOPE_BODY_NODES.any? { |klass| ancestor.is_a?(klass) } }
@@ -7708,7 +7726,7 @@ module Rigor
           if LOCAL_READ_NODES.any? { |klass| n.is_a?(klass) }
             names << n.name if same_scope_local?(n, ancestors)
           elsif NON_LOCAL_VALUE_READ_NODES.include?(n.class)
-            names << n.name unless under_scope_body?(ancestors)
+            names << n.name unless non_local_under_scope_body?(n.name, ancestors)
           end
         end
         names.uniq
@@ -7888,17 +7906,19 @@ module Rigor
 
       # True when the non-local `name`, read or written at `ancestors` under a block body, is one the content seams
       # take against `in_scope`: bound there ({CapturedLocals.rebindable_non_local?}, which keeps an instance
-      # variable on its declaration seed out) and outside a method or class body the block defines.
+      # variable on its declaration seed out) and outside a body the block defines that makes it another variable or
+      # runs later ({#non_local_under_scope_body?}).
       #
       # - An instance variable must be `self`'s: not under a block that runs on another object, nor in a seam whose
-      #   block does (`foreign_self`).
+      #   block does (`foreign_self`), nor in any method, class or module body.
       # - A class variable resolves lexically and a global is global, so `self` does not matter to either (issue
-      #   #3096). The scope-body exclusion still holds for both: a class body in the block reads that class's class
-      #   variables, and a `def` body runs only when called.
+      #   #3096). A `def` body runs only when called, so neither counts there. A class or module body runs at once:
+      #   it reads its own class variables but the one global, so a global counts there. `class << self` keeps the
+      #   enclosing class's class variables, so a class variable counts there.
       # - A global Ruby's own signatures declare (`$stdout`, `$;`, `$0`, the frame-local `$~` and `$_`, …) is left
       #   alone: the interpreter owns it, and some of them read through a getter (`$0` answers a frozen copy).
       def capturable_non_local?(name, ancestors, in_scope, foreign_self: false)
-        return false if under_scope_body?(ancestors)
+        return false if non_local_under_scope_body?(name, ancestors)
 
         case CapturedLocals.variable_kind(name)
         when :ivar

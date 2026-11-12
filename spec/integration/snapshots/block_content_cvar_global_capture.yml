@@ -9,6 +9,9 @@ assertions:
   '6': Hash[Dynamic[top], Dynamic[top]]?
   '7': Array[Dynamic[top]]
   '8': Array[Dynamic[top]]
-  '9': "[1]?"
-  '10': '","'
-  '11': "[0]"
+  '9': Array[Dynamic[top]]
+  '10': "[1]?"
+  '11': '","'
+  '12': "[0]"
+  '13': "[0]"
+  '14': "[0]"

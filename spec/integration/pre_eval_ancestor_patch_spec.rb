@@ -547,4 +547,202 @@ RSpec.describe "a pre_eval: patch on an ancestor reaches its descendants (#1708)
       expect(rules(result)).to eq([["a.rb", 3, "call.undefined-method"]])
     end
   end
+
+  # Issue #3056 — two `module_function` singleton-copy shapes Ruby refuses with an explicit receiver
+  # that the registry answered: a copy `class << self; protected :x` makes protected, and a copy a
+  # repeated `module_function :x` leaves non-public after `private_class_method :x`. Each Ruby 4.0.5
+  # witness is the comment beside its call.
+  describe "a module_function singleton copy's visibility (#3056)" do
+    it "reports Kernel.a1, whose copy `class << self; protected :a1` makes protected" do
+      patch = <<~RUBY
+        module Kernel
+          def a1 = 1
+          module_function :a1
+          class << self
+            protected :a1
+          end
+        end
+      RUBY
+      # Kernel.a1: NoMethodError (protected method 'a1' called for module Kernel).
+      result = run_project("ext/core.rb" => patch, "lib/a.rb" => "Kernel.a1\n")
+
+      expect(rules(result)).to eq([["a.rb", 1, "call.undefined-method"]])
+    end
+
+    # A protected singleton copy answers like a protected singleton method: Ruby lets a call reach it
+    # from the owner's own singleton (`Kernel.a1` inside `def self.go` of `module Kernel` => 1) and
+    # refuses it from `main` and from another class's singleton — not merely "an instance of the
+    # owner", which `main` is not but an instance-side ancestor walk would suggest.
+    it "answers the protected copy only from the owner's own singleton chain" do
+      patch = <<~RUBY
+        module Kernel
+          def a1 = 1
+          module_function :a1
+          class << self
+            protected :a1
+          end
+        end
+      RUBY
+      calls = <<~RUBY
+        Kernel.a1                   # NoMethodError (protected method 'a1' called for module Kernel)
+        module Kernel
+          def self.go = Kernel.a1   # => 1
+        end
+        class String
+          def self.bar = Kernel.a1  # NoMethodError (protected method 'a1' called)
+        end
+      RUBY
+      result = run_project("ext/core.rb" => patch, "lib/a.rb" => calls)
+
+      expect(rules(result)).to eq([["a.rb", 1, "call.undefined-method"], ["a.rb", 6, "call.undefined-method"]])
+    end
+
+    # The same protected copy on an inherited name: `singleton_copy_entry` re-attributes the copy to
+    # the owner (`class_name: owner`), so the protected check must see the OWNER's singleton side —
+    # dropping that attribution leaves the body module's name and the own-singleton call wrongly
+    # refused. `prepend` is the spelling that needs it: a prepended module is spliced ahead of the
+    # owner's instance row, so the instance walk finds the body before recording the owner's
+    # `:module_function` override that re-attributes an `include`d body's entry. The prepend example
+    # fails if `class_name: owner` is removed from `singleton_copy_entry`.
+    it "answers an inherited protected copy from the owner's own singleton only" do
+      patch = <<~RUBY
+        module KHelp
+          def kx = 1
+        end
+        module Kernel
+          include KHelp
+          module_function :kx
+          class << self
+            protected :kx
+          end
+        end
+      RUBY
+      calls = <<~RUBY
+        Kernel.kx                  # NoMethodError (protected method 'kx' called for module Kernel)
+        module Kernel
+          def self.go = Kernel.kx  # => 1
+        end
+      RUBY
+      result = run_project("ext/core.rb" => patch, "lib/a.rb" => calls)
+
+      expect(rules(result)).to eq([["a.rb", 1, "call.undefined-method"]])
+    end
+
+    it "answers a prepended inherited protected copy from the owner's own singleton only" do
+      patch = <<~RUBY
+        module KPre
+          def kp = 1
+        end
+        module Kernel
+          prepend KPre
+          module_function :kp
+          class << self
+            protected :kp
+          end
+        end
+      RUBY
+      calls = <<~RUBY
+        Kernel.kp                  # NoMethodError (protected method 'kp' called for module Kernel)
+        module Kernel
+          def self.go = Kernel.kp  # => 1
+        end
+      RUBY
+      result = run_project("ext/core.rb" => patch, "lib/a.rb" => calls)
+
+      expect(rules(result)).to eq([["a.rb", 1, "call.undefined-method"]])
+    end
+
+    # A `module_function` def's singleton copy runs with self = the owner, but the analysed def is typed
+    # `Nominal[owner]`: `Kernel.a1` inside `def go` must not report — Ruby reads `Kernel.go` as 1. The
+    # `include KHelp` keeps Kernel's instance ancestors from collapsing to itself, which would take the
+    # permissive escape and hide the check.
+    it "does not report the protected copy inside the owner's own module_function def" do
+      patch = <<~RUBY
+        module KHelp; end
+        module Kernel
+          include KHelp
+          def a1 = 1
+          module_function :a1
+          class << self
+            protected :a1
+          end
+        end
+      RUBY
+      calls = <<~RUBY
+        module Kernel
+          module_function
+          def go = Kernel.a1  # Kernel.go => 1
+        end
+        Kernel.go
+      RUBY
+      result = run_project("ext/core.rb" => patch, "lib/a.rb" => calls)
+
+      expect(rules(result)).to eq([])
+    end
+
+    it "reports Kernel.a3, whose copy a repeated `module_function :a3` leaves private" do
+      patch = <<~RUBY
+        module Kernel
+          def a3 = 1
+          module_function :a3
+          private_class_method :a3
+          module_function :a3
+        end
+      RUBY
+      # Kernel.a3: NoMethodError (private method 'a3' called for module Kernel); the second
+      # `module_function` does not re-public the copy while the def is unchanged.
+      result = run_project("ext/core.rb" => patch, "lib/a.rb" => "Kernel.a3\n")
+
+      expect(rules(result)).to eq([["a.rb", 1, "call.undefined-method"]])
+    end
+
+    # The bound-name rule's only proof is that nothing between the two `module_function :a` calls may
+    # have rebound `a`. Each statement below is one the scan does not read as a def or alias of `a`, so
+    # Ruby's second `module_function :a` copies a fresh, public body and `Kernel.a` runs (Ruby 4.0.5,
+    # => 2 in each); Rigor must not report it.
+    {
+      "define_method" => "define_method(:a) { 2 }",
+      # `method_defined?` ignores a private method, so the guarded def runs.
+      "a guarded def" => "def a = 2 unless method_defined?(:a)",
+      "a class_eval string" => 'class_eval "def a = 2"',
+      "a computed-name define_method" => "define_method(:\"\#{%w[a].first}\") { 2 }"
+    }.each do |label, statement|
+      it "answers Kernel.a when #{label} rebinds `a` before the repeated `module_function :a`" do
+        patch = <<~RUBY
+          module Kernel
+            def a = 1
+            module_function :a
+            private_class_method :a
+            #{statement}
+            module_function :a
+          end
+        RUBY
+        result = run_project("ext/core.rb" => patch, "lib/a.rb" => "Kernel.a\n")
+
+        expect(rules(result)).to eq([])
+      end
+    end
+
+    # Pre-existing coverage kept as a regression guard: this already held before #3056. The
+    # inherited-name spelling records `overrides` rather than a bound singleton entry; the copy
+    # `singleton_copy_entry` resolves takes the recorded singleton-side private, so the second
+    # `module_function :kx` cannot re-public it either.
+    it "keeps Kernel.kx refused on a repeated `module_function` after `private_class_method` (inherited)" do
+      patch = <<~RUBY
+        module KHelp
+          def kx = 1
+        end
+        module Kernel
+          include KHelp
+          module_function :kx
+          private_class_method :kx
+          module_function :kx
+        end
+      RUBY
+      # Kernel.kx: NoMethodError (private method 'kx' called for module Kernel).
+      result = run_project("ext/core.rb" => patch, "lib/a.rb" => "Kernel.kx\n")
+
+      expect(rules(result)).to eq([["a.rb", 1, "call.undefined-method"]])
+    end
+  end
 end

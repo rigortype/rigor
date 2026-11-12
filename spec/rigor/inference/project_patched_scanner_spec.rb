@@ -514,6 +514,59 @@ end
       end
     end
 
+    # Issue #3056 — Ruby copies the instance method onto the singleton only when the def changed since
+    # the last copy: a `private_class_method` between two `module_function :x` calls keeps the copy
+    # private, while a `def x` redefinition makes the next copy public again. Each witness is the
+    # Ruby 4.0.5 reading beside it.
+    it "keeps a module_function copy's singleton visibility while the def is unchanged" do
+      # `Mf.y`, `Mg.z`, `Mh.w`, `Mi.v`, `Mk.t`: NoMethodError (private method) in Ruby — the second
+      # `module_function` does not re-public the copy. `Mj.u` => 2: the redefined def copies public.
+      scan_sources([<<~RUBY]) do |outcome|
+        module Mf; def y = 1; module_function :y; private_class_method :y; module_function :y; end
+        module Mg; module_function def z = 1; private_class_method :z; module_function :z; end
+        module Mh; module_function; def w = 1; private_class_method :w; module_function :w; end
+        module Mi; def v = 1; module_function :v; private_class_method :v; private :v; module_function :v; end
+        module Mj; def u = 1; module_function :u; private_class_method :u; def u = 2; module_function :u; end
+        module Mk; def t = 1; module_function :t; class << self; private :t; end; module_function :t; end
+      RUBY
+        registry = outcome.registry
+        expect(visibility(registry, "Mf", :y, :singleton)).to eq(:private)
+        expect(visibility(registry, "Mg", :z, :singleton)).to eq(:private)
+        expect(visibility(registry, "Mh", :w, :singleton)).to eq(:private)
+        expect(visibility(registry, "Mi", :v, :singleton)).to eq(:private)
+        expect(visibility(registry, "Mk", :t, :singleton)).to eq(:private)
+        expect(visibility(registry, "Mj", :u, :singleton)).to eq(:public)
+      end
+    end
+
+    # A `def self.x` binding between two `module_function :x` calls replaces the singleton side
+    # outright, so the next `module_function` copies the instance def afresh: Ruby reads `Mn.q` and
+    # `Mo.p` as 1 (public) even though the singleton def between them was private or public.
+    it "re-copies when a singleton-side def rebinds the name between module_function calls" do
+      scan_sources([<<~RUBY]) do |outcome|
+        module Mn
+          def q = 1
+          module_function :q
+          private_class_method def self.q = 2
+          module_function :q
+        end
+        module Mo
+          def p = 1
+          module_function :p
+          def self.p = 2
+          module_function :p
+        end
+      RUBY
+        registry = outcome.registry
+        expect(visibility(registry, "Mn", :q, :singleton)).to eq(:public)
+        expect(visibility(registry, "Mo", :p, :singleton)).to eq(:public)
+        # The re-copied singleton entries carry the second `module_function` call's line (5 and 11),
+        # not the intervening `def self.` line (4 and 10).
+        expect(registry.lookup(class_name: "Mn", method_name: :q, kind: :singleton)&.source_line).to eq(5)
+        expect(registry.lookup(class_name: "Mo", method_name: :p, kind: :singleton)&.source_line).to eq(11)
+      end
+    end
+
     # Ruby: `maybe` is public when the `public` runs and private when it does not. The scanner cannot tell, so it reads
     # the def as public, the reading that answers more calls.
     it "reads a def after a toggle that may not run as public" do

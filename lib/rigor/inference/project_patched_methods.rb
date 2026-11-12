@@ -154,9 +154,12 @@ module Rigor
 
       # Issue #1708 — whether Ruby lets a call reach `entry`. A public method answers any call; a private one only a
       # call with no receiver or with `self` as it (`explicit` is false for those); a protected one also a call from
-      # a method whose `self` is an instance of the entry's owner. `self_type` is the caller's `self` (`nil` at the
-      # top level, where it is `main`, an Object); a `self` this cannot name (the default) may be one, so a
-      # protected entry answers it.
+      # a method whose `self` is an instance of the entry's owner — for a `:singleton` entry, the owner itself or a
+      # class whose singleton chain holds it (`Kernel.a1` under `class << self; protected :a1` is refused from
+      # `main`, an Object, and from another class's singleton method, and answered from Kernel's own and from a
+      # `module_function` def of Kernel's, whose self is typed as an instance of Kernel though the copy runs with
+      # self = Kernel). `self_type` is the caller's `self` (`nil` at the top level, where it is `main`, an Object);
+      # a `self` this cannot name (the default) may be one, so a protected entry answers it.
       #
       # It never refuses a call some other definer of the name may answer: the walk's order is an approximation
       # (a module two owners mix in is spliced at the nearer one, where Ruby keeps the first include and skips the
@@ -169,7 +172,7 @@ module Rigor
         allowed =
           case entry.visibility
           when :private, :module_function then false
-          when :protected then self_kind_of?(self_type, entry.class_name, rbs_loader)
+          when :protected then self_kind_of?(self_type, entry.class_name, entry.kind, rbs_loader)
           else true
           end
         return true if allowed
@@ -188,18 +191,23 @@ module Rigor
 
       private
 
-      # Whether `self_type` may be an instance of `owner`: false only when the ancestors of a class RBS knows,
-      # with the patches' mixins, do not hold it.
-      def self_kind_of?(self_type, owner, rbs_loader)
-        name, kind =
+      # Whether `self_type` may reach `owner`'s `entry_kind` method: false only when the ancestors of a class RBS
+      # knows, with the patches' mixins, do not hold `[owner, entry_kind]` — an instance of the owner for an
+      # instance method, the owner itself or a class whose singleton chain holds it for a singleton one. For a
+      # singleton entry a self whose class IS the owner answers too: a `module_function` / `extend self` def is
+      # typed `Nominal[owner]` though its singleton copy runs with self = owner, so `name == owner` may be the
+      # owner object itself (issue #3056).
+      def self_kind_of?(self_type, owner, entry_kind, rbs_loader)
+        name, side =
           if self_type.nil? then ["Object", :instance]
           elsif self_type.respond_to?(:class_name) && self_type.class_name
             [self_type.class_name.to_s, self_type.is_a?(Type::Singleton) ? :singleton : :instance]
           end
         return true if name.nil? || rbs_loader.nil?
 
-        keys = ancestor_keys(name, kind, rbs_loader)
-        keys == [[name, kind]] || keys.include?([owner, :instance])
+        keys = ancestor_keys(name, side, rbs_loader)
+        keys == [[name, side]] || keys.include?([owner, entry_kind]) ||
+          (entry_kind == :singleton && side == :instance && name == owner)
       end
 
       # `entry` as the walk's recorded `override` ([owner, visibility], from a nearer row's named

@@ -105,23 +105,48 @@ module Rigor
         # — the copy's body is whichever method the name reaches there, which the scan cannot name.
         # Yields each copy that binds (`module_function :x`'s singleton), at the call's line, for the caller to
         # bind.
-        def apply(pending, bound, homes, overrides, singleton_copies)
+        #
+        # `bound_defs` maps each bound key to the entry a `def` / `alias` last produced for it — the def
+        # identity a visibility change (`private :x`) does not move — and `copy_sources` maps a singleton key
+        # to the instance def entry its `module_function` copy was made from. Ruby re-copies the instance
+        # method onto the singleton only when that def changed since the last copy (issue #3056): a
+        # `private_class_method :x` between two `module_function :x` calls keeps the copy private, while a
+        # `def x` redefinition, or any statement the scan does not read, makes the next copy public again.
+        def apply(pending, bound, homes, overrides, singleton_copies, bound_defs, copy_sources)
           pending.names.each do |name|
             key = [pending.class_name, name, pending.kind]
             entry = bound[key]
             if entry.nil?
               overrides[key] = pending.visibility
-              if pending.visibility == :module_function && pending.kind == :instance
-                singleton_copies << [pending.class_name, name]
-              end
+              singleton_copies << [pending.class_name, name] if pending.visibility == :module_function
               next
             end
 
             changed, *copies = applied(entry, pending.visibility)
+            copies = [] if unchanged_module_function_copy?(pending, key, bound_defs, copy_sources)
             bound[key] = homes[key][key] = changed
             copies.each { |copy| yield copy.with(source_path: pending.source_path, source_line: pending.source_line) }
           end
         end
+
+        # Issue #3056 — true only when `pending` is a `module_function` named call whose singleton copy is
+        # proved to answer the same instance def: the copy's recorded source is still the def / alias
+        # binding `key` has. `resolve_aliases` drops that record whenever something may have rebound the
+        # name (a singleton-side `def`, a guarded def it dropped, or any statement the walk does not read),
+        # and then Ruby's re-copy is public, the reading that refuses no call Ruby runs. `bound_defs[key]` is
+        # the def entry `key` binds — a visibility change does not move it — and `copy_sources[skey]` the
+        # instance def entry the singleton's current copy was made from; either way the source is
+        # (re)recorded for the next call.
+        def unchanged_module_function_copy?(pending, key, bound_defs, copy_sources)
+          return false unless pending.visibility == :module_function
+
+          skey = [key[0], key[1], :singleton]
+          def_entry = bound_defs[key]
+          source = copy_sources[skey]
+          copy_sources[skey] = def_entry
+          !source.nil? && source.equal?(def_entry)
+        end
+        private_class_method :unchanged_module_function_copy?
 
         # `entry` as `visibility` leaves it, then any copy that binds: `module_function` makes an instance method
         # private and binds a public singleton copy, as Ruby does.

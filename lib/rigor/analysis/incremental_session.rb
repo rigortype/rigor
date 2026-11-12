@@ -578,13 +578,14 @@ module Rigor
       # `yield`, no implicit-self call whose transitive effect a caller could observe). For a candidate the
       # session compares its content-mutation effects (pure AST) then re-evaluates its return at every
       # persisted key (a runner probe); a pair passes only when BOTH are unchanged. Any missing summary,
-      # ineligible def, changed effect, changed return, or uncomputable key keeps the pair — the conservative
+      # summary that overflowed the per-def key cap, ineligible def, changed effect, changed return, or
+      # uncomputable key keeps the pair — the conservative
       # direction the `--verify-incremental` and byte-identical recheck specs backstop.
       def behaviourally_unstable_pairs(changed_pairs, unstable, scan_index)
         return changed_pairs if @return_summaries.empty? || scan_index.nil?
 
         candidates = changed_pairs.select do |pair|
-          !unstable.include?(pair.first) && @return_summaries.key?(pair) &&
+          !unstable.include?(pair.first) && complete_return_summary?(pair) &&
             gate_eligible_def?(scan_def_node(pair.last, scan_index))
         end
         return changed_pairs if candidates.empty?
@@ -594,6 +595,14 @@ module Rigor
 
         stable = return_stable_pairs(effect_stable, scan_index)
         stable.empty? ? changed_pairs : (changed_pairs - stable)
+      end
+
+      # Issue #3116 — true when `pair` carries a summary that holds every key its def was observed under. A summary
+      # marked `overflow` holds none of them (`Runner#return_summary`), so nothing can be proven from it and the
+      # pair keeps its dependents, exactly as a pair with no summary does.
+      def complete_return_summary?(pair)
+        summary = @return_summaries[pair]
+        !summary.nil? && !summary[:overflow]
       end
 
       # ADR-89 WD1 — the changed files whose ancestry / file-level dependents must STILL be re-checked: those

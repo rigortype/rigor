@@ -1566,6 +1566,11 @@ Two persisted summaries prove "nothing changed":
   dependents. Any mismatch, a changed signature, a missing def, an
   ineligible def (one that also exposes ivar/cvar writes or `yield` values),
   or a cap overflow keeps the dependents — the conservative direction.
+  A def observed under more than `RETURN_SUMMARY_KEYS_PER_DEF` (8) keys MUST
+  be stored with `overflow: true` and no key, and the recheck MUST keep its
+  symbol dependents: equal returns at the keys that fit prove nothing about a
+  key that did not ([#3116](https://github.com/rigortype/rigor/issues/3116));
+  snapshot SCHEMA 49. A def at exactly the cap keeps all of its keys.
   A key a splat call observed ([#1237](https://github.com/rigortype/rigor/issues/1237)) is stored as
   `(receiver, args, true)` and re-evaluated the way that call bound it, with no
   positional correspondence ([`inference-engine.md`](inference-engine.md)); snapshot SCHEMA 48.

@@ -1872,9 +1872,9 @@ module Rigor
       # then the rvalue, so a write in either is threaded in that order ({#thread_operand}) before the rvalue. An
       # index write takes no block-pass argument (a syntax error since Ruby 3.4). Issue #1272 — `(h ||= {})[k] ||= v`,
       # `(@h ||= {})[k] ||= v` and `h[(i = 1)] ||= v` left `h`, `@h` and `i` on their pre-write bindings, so a later
-      # `h.fetch(k)` on a nil-initialised `h` reported a call on `nil`. A receiver or argument holding no write answers the entry scope
-      # unchanged. The read, the stored value and the widening's argument types are still typed from the entry scope,
-      # where the receiver expression's own value (`(h ||= {})` is the hash) already answers what the write produced;
+      # `h.fetch(k)` on a nil-initialised `h` reported a call on `nil`. A receiver or argument holding no write answers
+      # the entry scope unchanged. The read, the stored value and the widening's argument types are still typed from
+      # the entry scope, where the receiver expression's own value (`(h ||= {})` is the hash) already answers what the write produced;
       # only the receiver's joinability is read from this scope ({#index_write_arg_types}' `join_scope`), since the
       # binding the store widens is the one the receiver's write left (`h` is `{}`, not the entry's `nil`).
       def index_write_operand_scope(node)

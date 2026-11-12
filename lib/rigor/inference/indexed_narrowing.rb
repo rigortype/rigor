@@ -33,8 +33,10 @@ module Rigor
     #
     # **Invalidation.** Three conditions drop a recorded narrowing:
     # - The receiver variable is rebound (handled inside `Scope#with_local` / `Scope#with_ivar`).
-    # - An intervening `receiver[key] = value` writes the same slot — `:[]=` could rebind the
-    #   slot to nil; conservative drop.
+    # - An intervening store writes the same slot — `receiver[key] = value`, an index target, or a
+    #   compound `receiver[key] op= value` / `&&=` (issue #1218) — since it could rebind the slot to
+    #   nil; conservative drop. A store whose index is not one literal key drops every narrowing
+    #   on the receiver.
     # - An intervening mutator from {MutationWidening::SHAPE_MUTATORS} runs against the receiver
     #   (e.g. `params.delete(:f)`, `params.clear`, `params.default = 0`, `buf.delete_prefix!("x")`).
     #
@@ -138,14 +140,29 @@ module Rigor
         MutationWidening::SHAPE_MUTATORS.include?(method_name)
       end
 
-      def invalidate_indexed_write(call_node, current_scope)
-        args = call_node.arguments&.arguments
-        return current_scope if args.nil? || args.empty?
+      # Drops the narrowing on the slot a store through `[]=` overwrote. `node` is the `[]=` call, an index target
+      # (a multi-assign slot, a `for` index, a rescue reference) or a compound index write (`h[k] += v`,
+      # `h[k] &&= v`, `h[k] ||= v`); every form reads only `receiver` and `arguments`, and only a `[]=` call's last
+      # argument is the stored value rather than an index.
+      #
+      # Issue #1218 — a literal single index drops that one slot and leaves the others. Any other index list on a
+      # stable receiver — a key that is not a literal (`h[k] = 1` may be `h[:e] = 1`), a multi-index splice
+      # (`s[0, 1] = [1, 2]` shifts every later slot), a splat — may write any slot, so it drops every narrowing on
+      # the receiver, as {.invalidate_mutator} does. An unstable receiver records no narrowing to drop.
+      def invalidate_indexed_write(node, current_scope)
+        receiver = stable_receiver(node.receiver)
+        return current_scope if receiver.nil?
 
-        address = stable_address(call_node.receiver, args.first)
-        return current_scope if address.nil?
+        indexes = index_arguments(node)
+        address = indexes.size == 1 ? stable_address(node.receiver, indexes.first) : nil
+        return current_scope.without_indexed_narrowing(*address) if address
 
-        current_scope.without_indexed_narrowing(*address)
+        current_scope.without_indexed_narrowings_for(*receiver)
+      end
+
+      def index_arguments(node)
+        args = node.arguments&.arguments || []
+        node.is_a?(Prism::CallNode) ? args[0...-1] : args
       end
 
       def invalidate_mutator(call_node, current_scope)

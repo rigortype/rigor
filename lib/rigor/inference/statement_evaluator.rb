@@ -1794,6 +1794,8 @@ module Rigor
         # forgets that the collection is still empty, the narrowing remembers that THIS slot is now non-nil.
         post = IndexWriteWidening.widen(node: node, current_scope: post,
                                         arg_types: index_write_arg_types(node, result_type, join_scope: operands))
+        # Issue #1218 — a key that is not a literal (`h[k] ||= v`) may name a slot another `||=` narrowed.
+        post = IndexedNarrowing.invalidate_indexed_write(node, post)
         post = post.with_indexed_narrowing(*address, result_type) if address
 
         # The value the expression yields takes the memoizing reading ({#index_compound_write_value}, #1155) for a
@@ -1859,13 +1861,30 @@ module Rigor
       # expression, scope untouched — and the receiver never widened. They store through `[]=` exactly as
       # `eval_index_or_write` does, so they take the same widening; the stored value is the compound result —
       # `falsey(h[k]) | v` for `&&=`, the dispatched `h[k] + v` for `+=` — not the rvalue alone.
+      #
+      # Issue #1218 — the widening carries the receiver's slot narrowings across its rebind
+      # ({MutationRejoin.carry_slot_narrowings}), so a `h[:e] ||= 0` narrowing outlived `h[:e] += 1` and the slot
+      # kept reading `0`. The store drops the narrowing on the slot it overwrote, as a `[]=` call does
+      # ({IndexedNarrowing.invalidate_indexed_write}: every narrowing on the receiver when the index is not one
+      # literal key). A slot that held a narrowing then records the value the write stored, which the read it
+      # performed took from that narrowing; a slot with none records nothing new.
       def eval_index_write(node)
         operands = index_write_operand_scope(node)
         _rhs_type, post_rhs = sub_eval(node.value, operands)
         stored = index_write_stored_type(node, scope)
         widened = IndexWriteWidening.widen(node: node, current_scope: post_rhs,
                                            arg_types: index_write_arg_types(node, stored, join_scope: operands))
+        widened = IndexedNarrowing.invalidate_indexed_write(node, widened)
+        address = narrowed_index_write_address(node)
+        widened = widened.with_indexed_narrowing(*address, stored) if address
         [stored, forget_rebound_specials(widened, node)]
+      end
+
+      # The single literal slot `node` writes when the entry scope holds a narrowing on it, else nil.
+      def narrowed_index_write_address(node)
+        key_node = single_index_argument(node)
+        address = key_node && IndexedNarrowing.stable_address(node.receiver, key_node)
+        address if address && scope.indexed_narrowing(*address)
       end
 
       # The scope a compound index write's rvalue runs from: Ruby evaluates the receiver, then the index arguments,

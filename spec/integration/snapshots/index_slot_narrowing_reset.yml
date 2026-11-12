@@ -1,0 +1,15 @@
+---
+locals: {}
+assertions:
+  '1': '1'
+  '2': '5'
+  '3': nil
+  '4': '1'
+  '5': '0'
+  '6': '0'
+  '7': Dynamic[top] | Integer
+  '8': Dynamic[top]?
+  '9': Dynamic[top]?
+  '10': Dynamic[top]?
+  '11': Dynamic[top] | Integer | nil
+  '12': '1'

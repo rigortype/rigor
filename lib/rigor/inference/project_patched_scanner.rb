@@ -46,6 +46,15 @@ module Rigor
       end
       private_constant :GuardedDef
 
+      # A `module_function` singleton copy a `def`-form produced (`module_function def x`, or a `def` under a
+      # bare `module_function`): `entry` is the copy to bind and `def_entry` the instance entry it was copied
+      # from, so {resolve_aliases} records which def the singleton binding answers — a later named
+      # `module_function :x` re-copies only when that def changed (issue #3056).
+      SingletonCopy = Data.define(:entry, :def_entry) do
+        def source_path = entry.source_path
+      end
+      private_constant :SingletonCopy
+
       # ADR-129 WD1 — the two per-file inputs of the walk, each a Frame {.walk_file} installs for the file's walk and
       # restores on the way out: the `def`s on the undefined side of a definedness guard, and each `def`'s visibility.
       # Both are frozen once built and read only by {.walk_node}'s callees.
@@ -130,16 +139,27 @@ module Rigor
       # inherits, recorded in `overrides` ({Visibility.apply}). `module_function :x` also binds the public singleton
       # copy: an entry {.applied} yields for a bound name, or a `[class_name, name]` pair in `singleton_copies`
       # (issue #2108) for an inherited one, whose body the scan cannot name.
+      #
+      # `bound_defs` holds each key's def / alias-produced entry — the def identity a visibility change does not
+      # move — and `copy_sources` each singleton key's `module_function` copy source, the pair
+      # {Visibility.apply} reads to keep a repeated `module_function :x` from re-publicing a copy
+      # `private_class_method` made private (issue #3056).
       def resolve_aliases(collected, overrides = {}, singleton_copies = Set.new)
         bound = {}
         homes = {}
+        bound_defs = {}
+        copy_sources = {}
         per_file = collected.group_by(&:source_path).values.map do |items|
           final = {}
           items.each do |item|
             if item.is_a?(Visibility::Pending)
-              next Visibility.apply(item, bound, homes, overrides, singleton_copies) do |copy|
+              next Visibility.apply(item, bound, homes, overrides, singleton_copies, bound_defs, copy_sources) do |copy|
                 bind(copy, bound, homes, final)
               end
+            end
+            if item.is_a?(SingletonCopy)
+              bind_singleton_copy(item, bound, homes, final, copy_sources)
+              next
             end
 
             entry = item.is_a?(PendingAlias) ? alias_entry(item, bound) : item
@@ -148,12 +168,32 @@ module Rigor
             next if item.is_a?(GuardedDef) && bound.key?(key)
 
             bind(entry, bound, homes, final)
+            record_binding(key, entry, bound_defs, copy_sources)
           end
           final
         end
         per_file.flat_map(&:values)
       end
       private_class_method :resolve_aliases
+
+      # The bookkeeping {resolve_aliases} keeps beside `bound`: `bound_defs` holds the def / alias
+      # entry `key` binds — the def identity a visibility change does not move, which
+      # {Visibility.apply}'s `module_function` re-copy check compares — and a singleton-side binding
+      # clears the copy provenance, since a `def self.x` between two `module_function :x` calls makes
+      # the next copy fresh (issue #3056).
+      def record_binding(key, entry, bound_defs, copy_sources)
+        bound_defs[key] = entry
+        copy_sources.delete([entry.class_name, entry.method_name, :singleton]) if entry.kind == :singleton
+      end
+      private_class_method :record_binding
+
+      # A {SingletonCopy}: bind the copy and record which instance def entry it was made from, the
+      # provenance {Visibility.apply}'s `module_function` re-copy check compares (issue #3056).
+      def bind_singleton_copy(item, bound, homes, final, copy_sources)
+        bind(item.entry, bound, homes, final)
+        copy_sources[[item.entry.class_name, item.entry.method_name, :singleton]] = item.def_entry
+      end
+      private_class_method :bind_singleton_copy
 
       def bind(entry, bound, homes, final)
         key = [entry.class_name, entry.method_name, entry.kind]
@@ -305,7 +345,7 @@ module Rigor
         )
         entry, *copies = Visibility.applied(entry, TypingState.current[DEF_VISIBILITIES]&.[](node) || :public)
         entries << (TypingState.current[GUARDED_DEFS]&.key?(node) ? GuardedDef.new(entry: entry) : entry)
-        entries.concat(copies)
+        entries.concat(copies.map { |copy| SingletonCopy.new(entry: copy, def_entry: entry) })
       end
       private_class_method :record_def_node
 

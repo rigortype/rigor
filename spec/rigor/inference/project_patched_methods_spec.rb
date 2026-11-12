@@ -220,4 +220,63 @@ RSpec.describe Rigor::Inference::ProjectPatchedMethods do
       expect(registry.callable?(found, explicit: true)).to be(false)
     end
   end
+
+  # Issue #3056 — `module_function :a1` under `class << self; protected :a1` leaves a `:protected`
+  # singleton entry on the owner. Ruby refuses `Kernel.a1` from `main` (an Object whose INSTANCE
+  # ancestors include Kernel) and answers it from Kernel's own singleton — the check is the entry's
+  # `kind` side, not always `:instance`.
+  describe "#callable? on a protected singleton copy (#3056)" do
+    let(:registry) do
+      described_class.new(
+        entries: [entry_klass.new(class_name: "Kernel", method_name: :a1, kind: :singleton,
+                                  source_path: "k.rb", source_line: 1, visibility: :protected)]
+      )
+    end
+    let(:found) do
+      registry.lookup_through_ancestors(class_name: "Kernel", method_name: :a1, kind: :singleton,
+                                        rbs_loader: loader)
+    end
+    let(:loader) do
+      loader = Object.new
+      def loader.singleton_ancestors_for(name)
+        case name
+        when "Kernel"
+          [[:singleton, "Kernel"], [:instance, "Module"], [:instance, "Object"],
+           [:instance, "Kernel"], [:instance, "BasicObject"]]
+        when "Foo"
+          [[:singleton, "Foo"], [:singleton, "Object"], [:instance, "Class"], [:instance, "Module"],
+           [:instance, "Object"], [:instance, "Kernel"], [:instance, "BasicObject"]]
+        else
+          []
+        end
+      end
+
+      def loader.ancestor_names_for(name)
+        case name
+        when "Object" then %w[Object Kernel BasicObject]
+        when "Kernel" then %w[Kernel BasicObject]
+        else []
+        end
+      end
+      loader
+    end
+
+    it "refuses an explicit call from the top level, whose self is an Object instance" do
+      # Kernel.a1: NoMethodError (protected method 'a1' called for module Kernel) in Ruby.
+      expect(found&.visibility).to eq(:protected)
+      expect(registry.callable?(found, explicit: true, self_type: nil, rbs_loader: loader)).to be(false)
+    end
+
+    it "answers an explicit call from the owner's own singleton" do
+      # `Kernel.a1` inside `def self.go` of `module Kernel` => 1 in Ruby.
+      self_type = Rigor::Type::Singleton.new("Kernel")
+      expect(registry.callable?(found, explicit: true, self_type: self_type, rbs_loader: loader)).to be(true)
+    end
+
+    it "refuses an explicit call from another class's singleton" do
+      # `class Foo; def self.bar = Kernel.a1; end` raises NoMethodError in Ruby.
+      self_type = Rigor::Type::Singleton.new("Foo")
+      expect(registry.callable?(found, explicit: true, self_type: self_type, rbs_loader: loader)).to be(false)
+    end
+  end
 end

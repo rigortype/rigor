@@ -7168,17 +7168,29 @@ module Rigor
       def escaping_non_local_content_mutations(body, scope, foreign_self)
         names = nil
         Source::NodeWalker.each_with_ancestors(body) do |node, ancestors|
-          is_call_mutator = node.is_a?(Prism::CallNode) && CONTENT_MUTATORS.include?(node.name)
-          next unless is_call_mutator || index_write?(node)
+          name, content = non_local_shape_mutation(node)
+          next if name.nil?
+          next unless (content && capturable_non_local?(name, ancestors, scope, foreign_self: foreign_self)) ||
+                      block_defined_method_capture?(name, ancestors, scope, foreign_self)
 
-          receiver = node.receiver
-          next unless NON_LOCAL_READ_NODES.include?(receiver.class)
-          next unless capturable_non_local?(receiver.name, ancestors, scope, foreign_self: foreign_self) ||
-                      block_defined_method_capture?(receiver.name, ancestors, scope, foreign_self)
-
-          (names ||= []) << receiver.name
+          (names ||= []) << name
         end
         names ? names.uniq : NO_REWRITES
+      end
+
+      # `[name, content]` when `node` mutates an instance variable, class variable or global in place, else nil.
+      # `content` says a content scan counts the mutation ({CONTENT_MUTATORS}, or an index write). A method the block
+      # defines counts every name the straight-line widening responds to as well ({CALLEE_WRITE_MUTATORS}: `merge!`,
+      # `map!`, `clear`, …), because its floor reads no evidence from the call (issue #3163).
+      def non_local_shape_mutation(node)
+        content = index_write?(node)
+        unless content
+          return nil unless node.is_a?(Prism::CallNode) && CALLEE_WRITE_MUTATORS.include?(node.name)
+
+          content = CONTENT_MUTATORS.include?(node.name)
+        end
+        receiver = node.receiver
+        NON_LOCAL_READ_NODES.include?(receiver.class) ? [receiver.name, content] : nil
       end
 
       # Issue #3163 — `post_scope` with every instance variable, class variable and global floored member by member
@@ -7192,14 +7204,11 @@ module Rigor
         foreign = foreign_self_block?(call_node)
         names = nil
         Source::NodeWalker.each_with_ancestors(block.body) do |node, ancestors|
-          is_call_mutator = node.is_a?(Prism::CallNode) && CONTENT_MUTATORS.include?(node.name)
-          next unless is_call_mutator || index_write?(node)
+          name, = non_local_shape_mutation(node)
+          # Read against the continuation: a variable the block itself first binds has no pre-call binding.
+          next if name.nil? || !block_defined_method_capture?(name, ancestors, post_scope, foreign)
 
-          receiver = node.receiver
-          next unless NON_LOCAL_READ_NODES.include?(receiver.class)
-          next unless block_defined_method_capture?(receiver.name, ancestors, scope, foreign)
-
-          (names ||= []) << receiver.name
+          (names ||= []) << name
         end
         names.nil? ? post_scope : floor_non_local_contents(names.uniq, post_scope)
       end

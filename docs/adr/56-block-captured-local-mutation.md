@@ -1036,12 +1036,21 @@ only when called, but the block may call it:
 `[1]`. The join reads no evidence from a method body, so an instance
 variable, class variable or global that such a method mutates in place
 is floored member by member instead, after a non-escaping block and an
-escaping one alike. No call is followed. The floor applies whenever the
+escaping one alike. A mutation is a call on a read of the variable
+whose name the straight-line widening or a content scan responds to
+(`<<`, `push`, `[]=`, `merge!`, `map!`, `clear`, …), or an index
+`||=` / `&&=` / `op=`. That is wider than the names the joins read,
+because a floor needs no evidence. A mutation through an alias, an
+element read or an argument is not seen. No call is followed. The
+variable is read against the continuation, so one the block itself
+first binds floors too. The floor applies whenever the
 block defines the method, so a method nothing calls, or one called only
 after the read, costs the variable its contents too. A method inside a
 `class`, `module` or `class << self` body the block opens stays out for
 every kind, and so does an instance variable in a method defined on a
 receiver other than `self` (`def other.m`), which is that object's.
+A plain `def` in a `Class.new` block counts although its instance
+variables are the new class's instances'.
 Only in-place mutations count: a rebinding inside the method is #3122
 and #3123. The `block_defined_method_mutation` fixture is the gate.
 

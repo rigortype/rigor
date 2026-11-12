@@ -140,6 +140,71 @@ class BlockDefinedMethodMutation
     puts "one" if @@rcv[:b] == 1
   end
 
+  # --- The block itself first binds the variable, so the call site has
+  # no binding for it. ---
+  def ivar_seeded_in_block
+    [1].each do
+      @sb = [0]
+      def ivar_seeded_helper
+        @sb << 1
+      end
+      ivar_seeded_helper
+    end
+    assert_type("Array[Dynamic[top]] | [0]", @sb)
+    puts "one" if @sb.last == 1
+  end
+
+  def cvar_seeded_in_block
+    [1].each do
+      @@sb = [0]
+      def cvar_seeded_helper
+        @@sb << 1
+      end
+      cvar_seeded_helper
+    end
+    assert_type("Dynamic[Array[Dynamic[top]]]", @@sb)
+    puts "one" if @@sb.last == 1
+  end
+
+  # --- A mutator the content joins read no evidence from (`merge!`,
+  # `map!`) floors too: the floor needs none. ---
+  def cvar_merged
+    @@mg = { a: 1 }
+    [1].each do
+      def cvar_merge_helper
+        @@mg.merge!(b: 2)
+      end
+      cvar_merge_helper
+    end
+    assert_type("Hash[Dynamic[top], Dynamic[top]]", @@mg)
+    puts "two" if @@mg[:b] == 2
+  end
+
+  def cvar_mapped
+    @@mp = [1]
+    [1].each do
+      def cvar_map_helper
+        @@mp.map!(&:to_s)
+      end
+      cvar_map_helper
+    end
+    assert_type("Array[Dynamic[top]]", @@mp)
+    puts "one" if @@mp.first == "1"
+  end
+
+  def cvar_mapped_escaping
+    @@me = [1]
+    definer = lambda do
+      def cvar_map_escaping_helper
+        @@me.map!(&:to_s)
+      end
+      cvar_map_escaping_helper
+    end
+    assert_type("Array[Dynamic[top]]", @@me)
+    definer.call
+    puts "one" if @@me.first == "1"
+  end
+
   # --- A nil-able seed keeps its `nil` on the floor. ---
   def cvar_kept_nil(flag)
     @@kn = flag ? [1] : nil
@@ -203,6 +268,20 @@ class BlockDefinedMethodMutation
     cvar_late_helper
   end
 
+  # Known limit: a plain `def` counts wherever it is written, so one in
+  # a `Class.new` block, whose instance variables are the new class's
+  # instances', floors this object's too. Ruby holds `[0]`.
+  def ivar_class_new_block
+    @cn = [0]
+    klass = Class.new do
+      def m
+        @cn << 1 if @cn
+      end
+    end
+    assert_type("Array[Dynamic[top]]", @cn)
+    klass
+  end
+
   # --- Paired controls. ---
 
   # A method that only reads the class variable leaves it folding.
@@ -228,6 +307,18 @@ class BlockDefinedMethodMutation
       other.ivar_other_helper
     end
     assert_type("Array[0]", @or)
+  end
+
+  # A method defined in a block that runs on another object mutates that
+  # object's instance variable.
+  def ivar_foreign_self_block
+    @fsb = [0]
+    String.instance_eval do
+      def ivar_foreign_helper
+        @fsb << 1 if @fsb
+      end
+    end
+    assert_type("Array[0]", @fsb)
   end
 
   # A class body in the block has class variables of its own, and its
@@ -266,3 +357,14 @@ $bdm_cls = [0]
   end
 end
 assert_type("[0]", $bdm_cls)
+
+# --- A global the block itself first binds. ---
+[1].each do
+  $bdm_seeded = [0]
+  def bdm_seeded_helper
+    $bdm_seeded << 1
+  end
+  bdm_seeded_helper
+end
+assert_type("Array[Dynamic[top]]", $bdm_seeded)
+puts "one" if $bdm_seeded.last == 1

@@ -1,3 +1,4 @@
 - **[inference]** An instance variable, class variable or global that a method defined inside a block changes in place (`@@log = [0]; [1].each { def add; @@log << 1; end; add }`) no longer keeps its pre-block contents, so a later comparison on it no longer reports `flow.always-truthy-condition` on correct code. ([#3169](https://github.com/rigortype/rigor/pull/3169))
   - Each Array, Hash or String member widens to its bare collection type whenever the block defines such a method, whether or not the block calls it.
+  - The changes that count are a mutating call made directly on the variable (`<<`, `push`, `[]=`, `merge!`, `map!`, `clear`, …) and an index `||=`, `&&=` or `+=`.
   - A method inside a `class` or `module` body the block opens is still not read.

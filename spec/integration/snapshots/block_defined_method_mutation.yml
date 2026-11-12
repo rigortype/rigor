@@ -10,12 +10,20 @@ assertions:
   '7': Array[Dynamic[top]] | [0]
   '8': Array[Dynamic[top]]
   '9': Hash[Dynamic[top], Dynamic[top]]
-  '10': Array[Dynamic[top]]?
-  '11': Array[Dynamic[top]]
+  '10': Array[Dynamic[top]] | [0]
+  '11': Dynamic[Array[Dynamic[top]]]
   '12': Hash[Dynamic[top], Dynamic[top]]
   '13': Array[Dynamic[top]]
   '14': Array[Dynamic[top]]
-  '15': Array[0]
-  '16': "[0]"
-  '17': Array[Dynamic[top]]
-  '18': "[0]"
+  '15': Array[Dynamic[top]]?
+  '16': Array[Dynamic[top]]
+  '17': Hash[Dynamic[top], Dynamic[top]]
+  '18': Array[Dynamic[top]]
+  '19': Array[Dynamic[top]]
+  '20': Array[Dynamic[top]]
+  '21': Array[0]
+  '22': Array[0]
+  '23': "[0]"
+  '24': Array[Dynamic[top]]
+  '25': "[0]"
+  '26': Array[Dynamic[top]]

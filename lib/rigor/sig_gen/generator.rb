@@ -1335,7 +1335,8 @@ module Rigor
           return
         end
 
-        kind = node.receiver.is_a?(Prism::SelfNode) || in_singleton_class ? :singleton : :instance
+        # `def Foo.x` inside `module Foo` is `def self.x` (#2950); the rule is the one check indexes defs by.
+        kind = Inference::ScopeIndexer.def_singleton?(node, prefix, in_singleton_class) ? :singleton : :instance
         return if kind == :singleton && @hook_block_prefixes.last == prefix
 
         class_name = prefix.join("::")

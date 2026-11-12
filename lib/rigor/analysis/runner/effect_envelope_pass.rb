@@ -52,11 +52,6 @@ module Rigor
         LISKOV_RULE = CheckRules::RULE_EFFECT_LISKOV_WIDENED
         UNKNOWN_LABEL_RULE = CheckRules::RULE_EFFECT_UNKNOWN_LABEL
 
-        # Where a diagnostic about a configuration value is positioned when the loader cannot say
-        # which line the key was written on — the `rbs.coverage.quarantined-signature` precedent.
-        CONFIG_PATH = ".rigor.yml"
-        private_constant :CONFIG_PATH
-
         RUBY_EXTENSION = ".rb"
         private_constant :RUBY_EXTENSION
 
@@ -222,7 +217,7 @@ module Rigor
         end
 
         def position_of(finding)
-          DeclarationPosition.of(finding)
+          DeclarationPosition.of(finding, @configuration.config_display_path)
         end
 
         # The vocabulary an unknown label is judged against: the shipped registry plus whatever
@@ -299,7 +294,7 @@ module Rigor
 
         def build_diagnostic(finding)
           Diagnostic.new(
-            path: finding.path || unit_source_path(finding.key) || ".rigor.yml",
+            path: finding.path || unit_source_path(finding.key) || @configuration.config_display_path,
             line: finding.line,
             column: 1,
             message: message_for(finding),
@@ -323,7 +318,7 @@ module Rigor
 
         def build_liskov_diagnostic(finding)
           Diagnostic.new(
-            path: finding.path || CONFIG_PATH,
+            path: finding.path || @configuration.config_display_path,
             line: finding.line,
             column: 1,
             message: EnvelopeMessages.liskov(finding),

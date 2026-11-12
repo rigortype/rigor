@@ -117,7 +117,7 @@ module Rigor
             next if File.file?(path)
 
             Diagnostic.new(
-              path: ".rigor.yml", line: 1, column: 1,
+              path: @configuration.config_display_path, line: 1, column: 1,
               message: "pre_eval entry not found: #{path.inspect}. " \
                        "Pre-evaluation requires the file to exist on disk; remove the entry " \
                        "or create the file before re-running analysis.",
@@ -165,7 +165,7 @@ module Rigor
         def plugin_load_diagnostics
           plugin_registry.load_errors.map do |error|
             Diagnostic.new(
-              path: ".rigor.yml",
+              path: @configuration.config_display_path,
               line: 1,
               column: 1,
               message: plugin_load_error_message(error),
@@ -194,7 +194,7 @@ module Rigor
         def dependency_source_diagnostics
           dependency_source_index.unresolvable.map do |entry|
             Diagnostic.new(
-              path: ".rigor.yml",
+              path: @configuration.config_display_path,
               line: 1,
               column: 1,
               message: "dependencies.source_inference[].gem #{entry.gem_name.inspect} could not be " \
@@ -219,7 +219,7 @@ module Rigor
         def dependency_source_config_conflict_diagnostics
           @configuration.dependencies.warnings.map do |message|
             Diagnostic.new(
-              path: ".rigor.yml",
+              path: @configuration.config_display_path,
               line: 1,
               column: 1,
               message: message,
@@ -234,7 +234,7 @@ module Rigor
           budget = @configuration.dependencies.budget_per_gem
           dependency_source_index.budget_exceeded.map do |gem_name|
             Diagnostic.new(
-              path: ".rigor.yml",
+              path: @configuration.config_display_path,
               line: 1,
               column: 1,
               message: "dependencies.source_inference[].gem #{gem_name.inspect} exceeded the per-gem " \
@@ -314,7 +314,7 @@ module Rigor
 
         def build_rbs_collection_setup_hint_diagnostic(hint)
           Diagnostic.new(
-            path: ".rigor.yml",
+            path: @configuration.config_display_path,
             line: 1,
             column: 1,
             message: "No `rbs_collection.lock.yaml` was found, so no `rbs collection` RBS was loaded: the signatures " \
@@ -397,7 +397,7 @@ module Rigor
 
         def build_rbs_inline_unsynthesized_diagnostic(sample_path)
           Diagnostic.new(
-            path: ".rigor.yml",
+            path: @configuration.config_display_path,
             line: 1,
             column: 1,
             message: "Inline rbs-inline annotations (`# @rbs …`, `#: <type>`) are present in your project " \
@@ -627,7 +627,7 @@ module Rigor
           sample = quarantined.first(sample_size).map { |path, _first_line| relative_signature_path(path) }
           suffix = quarantined.size > sample_size ? ", and #{quarantined.size - sample_size} more" : ""
           Diagnostic.new(
-            path: ".rigor.yml",
+            path: @configuration.config_display_path,
             line: 1,
             column: 1,
             message: "#{quarantined.size} RBS file(s) under `signature_paths:` were SKIPPED " \
@@ -650,7 +650,7 @@ module Rigor
           suffix = files.size > sample_size ? ", and #{files.size - sample_size} more" : ""
           conflicts = sample.empty? ? "" : " Conflicting signature file(s): #{sample.join(', ')}#{suffix}."
           Diagnostic.new(
-            path: ".rigor.yml",
+            path: @configuration.config_display_path,
             line: 1,
             column: 1,
             message: "The RBS environment failed to build (#{error_class}): #{first_line}.#{conflicts} " \
@@ -689,7 +689,7 @@ module Rigor
           files = failures.flat_map { |failure| Array(failure[3]) }
                           .map { |name| signature_source_label(name.to_s) }.uniq.sort
           Diagnostic.new(
-            path: ".rigor.yml",
+            path: @configuration.config_display_path,
             line: 1,
             column: 1,
             message: "#{failures.size} RBS class definition(s) failed to build: " \
@@ -886,7 +886,7 @@ module Rigor
           frame_clause = relative_frame ? " at #{relative_frame}" : ""
           raised = "(#{error_class}): #{first_line}#{frame_clause}."
           Diagnostic.new(
-            path: ".rigor.yml",
+            path: @configuration.config_display_path,
             line: 1,
             column: 1,
             message: stage == :overlay ? hkt_overlay_failed_message(raised) : hkt_scan_failed_message(raised),
@@ -941,7 +941,7 @@ module Rigor
           sample = synthesized.first(sample_size)
           suffix = synthesized.size > sample_size ? ", and #{synthesized.size - sample_size} more" : ""
           Diagnostic.new(
-            path: ".rigor.yml",
+            path: @configuration.config_display_path,
             line: 1,
             column: 1,
             message: "#{synthesized.size} RBS namespace(s) under `signature_paths:` are " \
@@ -960,7 +960,7 @@ module Rigor
           path, class_name, existing_arity, incoming_arity, existing_file = entry
           displaced_by = displacing_source_phrase(existing_file)
           Diagnostic.new(
-            path: ".rigor.yml",
+            path: @configuration.config_display_path,
             line: 1,
             column: 1,
             message: "`#{relative_signature_path(path.to_s)}` (a signature file a plugin contributes) declares " \
@@ -989,7 +989,7 @@ module Rigor
             "`#{declaration}`#{cause}"
           end
           Diagnostic.new(
-            path: ".rigor.yml",
+            path: @configuration.config_display_path,
             line: 1,
             column: 1,
             message: "`#{relative_signature_path(path.to_s)}` (a signature file a plugin contributes) loaded without " \
@@ -1008,7 +1008,7 @@ module Rigor
         def build_rbs_vendored_signature_stood_down_diagnostic(entry)
           dir, declarations, whole = entry
           Diagnostic.new(
-            path: ".rigor.yml",
+            path: @configuration.config_display_path,
             line: 1,
             column: 1,
             message: vendored_standdown_message(dir, declarations, whole),
@@ -1087,7 +1087,7 @@ module Rigor
           sample = missing.first(sample_size).map(&:gem_name)
           suffix = missing.size > sample_size ? ", and #{missing.size - sample_size} more" : ""
           Diagnostic.new(
-            path: ".rigor.yml",
+            path: @configuration.config_display_path,
             line: 1,
             column: 1,
             message: "#{missing.size} gem(s) in Gemfile.lock have no RBS available: " \
@@ -1253,7 +1253,7 @@ module Rigor
 
           @boundary_cross_reporter.entries.map do |entry|
             Diagnostic.new(
-              path: ".rigor.yml", line: 1, column: 1,
+              path: @configuration.config_display_path, line: 1, column: 1,
               message: "`#{entry.class_name}##{entry.method_name}` is contributed by both " \
                        "RBS (#{entry.rbs_display}) and the `mode: :full` opt-in gem " \
                        "`#{entry.gem_name}`. RBS wins on dispatch; verify the gem source " \
@@ -1380,7 +1380,7 @@ module Rigor
 
         def run_disclosure_diagnostic(record)
           Diagnostic.new(
-            path: ".rigor.yml", line: 1, column: 1,
+            path: @configuration.config_display_path, line: 1, column: 1,
             message: record.fetch(:message),
             severity: record.fetch(:severity),
             rule: record.fetch(:rule),
@@ -1423,7 +1423,7 @@ module Rigor
         def plugin_trust_refusal_diagnostic(plugin, summary)
           plugin_id = plugin.manifest.id
           Diagnostic.new(
-            path: ".rigor.yml", line: 1, column: 1,
+            path: @configuration.config_display_path, line: 1, column: 1,
             message: "plugin #{plugin_id.inspect} had #{summary[:count]} read(s) refused by the trust " \
                      "policy; first refused path: #{summary[:first_path].inspect}, outside read root " \
                      "#{summary[:nearest_root].inspect}. Spell the path the way that read root spells it " \

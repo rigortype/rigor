@@ -866,7 +866,8 @@ module Rigor
         return Configuration.load(options.fetch(:config)) unless options.fetch(:treat_all_as_inline_rbs)
 
         path = options.fetch(:config) || Configuration.discover
-        data = path && File.exist?(path) ? Configuration.load_with_includes(path) : {}
+        config_file = path && File.exist?(path) ? path : nil
+        data = config_file ? Configuration.load_with_includes(config_file) : {}
         # ADR-103 WD15 — captured before `DEFAULTS.merge` below folds "no `effects:` key" and "`effects:
         # false`" into the same value; see `Configuration.load`'s identical capture.
         effects_key_present = data.key?("effects")
@@ -874,7 +875,8 @@ module Rigor
         data = data.dup
         data["plugins"] = inject_treat_all_as_inline_rbs(Array(data["plugins"]))
         Configuration.new(Configuration::DEFAULTS.merge(data), effects_key_present, target_ruby_key_present)
-                     .with_exclude_base(path && File.exist?(path) ? File.dirname(path) : nil)
+                     .with_exclude_base(config_file && File.dirname(config_file))
+                     .with_config_path(config_file)
       end
 
       # ADR-50 § WD2 — applies the `--bleeding-edge[=ids]` / `--no-bleeding-edge` CLI selection over the configured

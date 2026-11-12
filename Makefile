@@ -293,7 +293,7 @@ verify-sequential: test test-ractor-pool test-integration-plugins lint check che
 # its merge base with origin/master (override with VERIFY_BASE=<ref>). 20-40s
 # for a small branch, where `verify` runs the whole suite and contends for the
 # host with every parallel session running it. It cannot see a regression in an untouched file, so the
-# full gate stays CI on the Draft PR; see bin/verify-changed.
+# full gate stays the PR's full CI run (at gh pr ready); see bin/verify-changed.
 verify-changed:
 	@bin/verify-changed
 

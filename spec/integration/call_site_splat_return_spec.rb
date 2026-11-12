@@ -181,6 +181,13 @@ def fwd(...) = count(...)"
     end
   end
 
+  # A splat call keyed only by its keyword shape would read the same memo key as a positional call that passes that
+  # shape alone, and serve that call's answer: here `a` is empty, so `a.size` is `0`.
+  it "does not share a return-memo entry with a positional call of the same keyword shape" do
+    defs = "class Row\n  def kw(*a, k: 1) = a.size\nend\nRow.new.kw(k: 2)"
+    expect(rules(program(defs, "Row.new.kw(*idx, k: 2)"))).to eq([])
+  end
+
   describe "an optional parameter's default is not read" do
     it "does not take the bot of a body that raises only for the default" do
       source = raising("def maybe6(a = 1) = a == 1 ? raise(ArgumentError) : nil", "maybe6(*msgs)")

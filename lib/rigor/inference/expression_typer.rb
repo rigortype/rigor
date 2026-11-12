@@ -2278,7 +2278,7 @@ module Rigor
         return dynamic_top if name && refined_name_for?(receiver, name, list)
 
         block_name = symbol_block_argument(node)
-        dynamic_top if block_name && refined_anywhere?(block_name, list)
+        dynamic_top if block_name && RefinedDispatch.refined_anywhere?(scope, block_name, list)
       end
 
       REFINED_NAMING_CALLS = Set[:send, :__send__, :public_send, :respond_to?, :method, :public_method].freeze
@@ -2312,17 +2312,6 @@ module Rigor
           class_name = refined_receiver_class_name(member)
           !class_name.nil? && !RefinedDispatch.winner(scope, class_name, name, list).nil?
         end
-      end
-
-      # ADR-121 WD7 — a names-wildcard row counts as a refinement of every name.
-      def refined_anywhere?(name, list)
-        refinements = scope.discovered_refinements
-        wildcard = Scope::DiscoveryIndex::REFINEMENT_WILDCARD
-        return true if list.include?(InEffectRefinements::UNKNOWN) &&
-                       refinements.any? { |_refined, methods| methods.key?(name) || methods.key?(wildcard) }
-
-        !RefinedDispatch.targets(refinements, name, list).nil? ||
-          !RefinedDispatch.targets(refinements, wildcard, list).nil?
       end
 
       # ADR-121 WD7 — does the call's lexical list (a plugin-declared module is the plugin's declaration and never

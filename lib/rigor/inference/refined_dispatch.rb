@@ -126,6 +126,19 @@ module Rigor
         out
       end
 
+      # ADR-121 WD7 — a names-wildcard row counts as a refinement of every name. True when a row `list` puts in
+      # effect names `method_name` (or the wildcard) for ANY refined class — which class the row refines is not
+      # decided here — or `list` carries {InEffectRefinements::UNKNOWN} and any row names it. {ExpressionTyper}
+      # asks it for a `&:name` block, whose receiver is not known; {SelfPreservingBlock} for the yielding method
+      # (issue #2909).
+      def refined_anywhere?(scope, method_name, list)
+        refinements = scope.discovered_refinements
+        return true if list.include?(InEffectRefinements::UNKNOWN) &&
+                       refinements.any? { |_refined, methods| methods.key?(method_name) || methods.key?(wildcard) }
+
+        !targets(refinements, method_name, list).nil? || !targets(refinements, wildcard, list).nil?
+      end
+
       # The refinement table records every name a `refine` argument's spelling can denote (`refine String` inside
       # `module M` records `M::String` and `String`), which only withholds a check. To type, a key must be the class
       # Ruby's lexical lookup resolves: one the project or RBS knows, with no longer spelling of the same last segment

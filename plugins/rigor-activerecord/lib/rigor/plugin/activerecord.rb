@@ -597,13 +597,10 @@ module Rigor
             Rigor::Type::Combinator.nominal_of(entry.class_name),
             Rigor::Type::Combinator.constant_of(nil)
           )
-        when :where, :all, :order, :limit, :none, :select
-          # `:select` was added to close Mastodon's
-          # `scope :duplicate_uris, -> { select(:uri).group(:uri).having(...) }` shape: the implicit-self
-          # `select(:uri)` inside the scope lambda body had been resolving to `Kernel#select` (IO
-          # multiplexer, return `Array[String]`), masking the AR class-side relation entry point. The rest
-          # of the query DSL chains through the bundled `ActiveRecord::Relation` RBS once a relation is
-          # open.
+        when :select then class_select_return_type(call_node, entry)
+        when :where, :all, :order, :limit, :none
+          # The rest of the query DSL chains through the bundled `ActiveRecord::Relation` RBS once a
+          # relation is open.
           relation_of(entry.class_name)
         when :table_name
           table_name_return_type(entry)
@@ -612,6 +609,19 @@ module Rigor
           # `table_name` the exact string is not derivable from project source even when the bare name is.
           Rigor::Type::Combinator.nominal_of("String")
         end
+      end
+
+      # `:select` was added to close Mastodon's `scope :duplicate_uris, -> { select(:uri).group(:uri).having(...) }`
+      # shape: the implicit-self `select(:uri)` inside the scope lambda body had been resolving to `Kernel#select`
+      # (IO multiplexer, return `Array[String]`), masking the AR class-side relation entry point.
+      #
+      # `Model.select` is `all.select`, so a block makes it `Enumerable#select` over the loaded records, as the
+      # bundled `Relation#select` overload says (#1408), and the answer is an Array of the model. Fields next to a
+      # block answer the Array too, for the reason given on that overload.
+      def class_select_return_type(call_node, entry)
+        return relation_of(entry.class_name) if call_node.block.nil?
+
+        Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of(entry.class_name)])
       end
 
       # `Model.find { |m| … }` / `Model.find(&:pred?)` never reaches the id lookup: `Core.find` passes a

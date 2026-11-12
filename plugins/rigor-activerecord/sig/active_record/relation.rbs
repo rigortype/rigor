@@ -231,12 +231,20 @@ module ActiveRecord
     def left_outer_joins: (*untyped) -> self
     %a{pure}
     def references: (*untyped) -> self
-    # With a block, `select` is Enumerable's and returns an Array. It
-    # stays `self`: on this open receiver a method the file does not
-    # declare is not reported, while on `Array[Elem]` any ActiveSupport
-    # method the bundled overlay leaves out would be.
+    # With a block, `select` is `Enumerable#select` over the loaded
+    # records and returns an Array (`return super()` when a block is
+    # given, `relation/query_methods.rb:413` in activerecord 8.1.3.1).
+    # Fields and a block together raise `ArgumentError` there; Rails 4
+    # ignored the fields and returned the Array, so that form answers
+    # the Array too, which holds on either version. Without a block it
+    # is the query builder.
+    #
+    # The `%a{pure}` is the builder form's. The block form's
+    # `io.db.read` comes from the plugin's `RELATION_MATERIALIZERS` row,
+    # which labels both forms today (#1318).
     %a{pure}
-    def select: (*untyped) -> self
+    def select: (*untyped) { (Elem) -> boolish } -> Array[Elem]
+              | (*untyped) -> self
     %a{pure}
     def reselect: (*untyped) -> self
     %a{pure}

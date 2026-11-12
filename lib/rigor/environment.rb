@@ -464,8 +464,18 @@ module Rigor
       # The project-owned `sig/` roots a run reads: the explicit `signature_paths:` when given, else the
       # auto-detected `<root>/sig` (or none). Public so {Cache::IncrementalSnapshot} digests exactly the
       # directories the environment loads, including the auto-detected one a `nil` `signature_paths:` hides.
+      # The default branch is {project_signature_root_candidates} narrowed to the directories that exist.
       def project_signature_roots(signature_paths, root: Dir.pwd)
         signature_paths || default_signature_paths(root)
+      end
+
+      # Issue #1619 — the single spelling of "the configured `signature_paths:`, else the conventional `sig`
+      # directory", as the CANDIDATES a run watches whether or not they exist yet. {project_signature_roots}
+      # narrows this to what the loader reads (a default only once it is a directory); the run slot's presence
+      # rows and the incremental write guard take it whole, because a `sig/` appearing mid-run must move the
+      # fingerprint and refuse the slot write — a question only a row for a path that need not exist can ask.
+      def project_signature_root_candidates(signature_paths)
+        signature_paths || [DEFAULT_PROJECT_SIG_DIR]
       end
 
       private
@@ -504,8 +514,10 @@ module Rigor
       end
 
       def default_signature_paths(root)
-        sig = Pathname(root) / DEFAULT_PROJECT_SIG_DIR
-        sig.directory? ? [sig] : []
+        project_signature_root_candidates(nil).filter_map do |candidate|
+          path = Pathname(root) / candidate.to_s
+          path if path.directory?
+        end
       end
 
       # ADR-82 WD9 — the resolved bundle root for the missing-gem constant index, doubling (ADR-90) as the

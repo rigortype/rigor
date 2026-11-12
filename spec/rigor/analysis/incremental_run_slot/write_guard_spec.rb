@@ -255,6 +255,42 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot::WriteGuard do
     end
   end
 
+  # Issue #1619 — the signature roots the mark watches are the same candidates the runner's kind rows name
+  # ({Environment.project_signature_root_candidates}): the configured `signature_paths:` or the
+  # auto-detected `sig`, whether or not it exists yet. A churn inside the root leaves its kind alone, so the
+  # write is admitted only when the mark recorded the root itself rather than falling back to change times.
+  context "with a signature root's kind row" do
+    def signature_kind_rows(path)
+      Rigor::Cache::Descriptor.new(
+        files: [Rigor::Cache::Descriptor::FileEntry.kind(path: File.absolute_path(path))]
+      )
+    end
+
+    it "admits the write when a file comes and goes inside the auto-detected sig/ after the mark" do
+      write("sig/widget.rbs", "class Widget\nend\n")
+      guard = start
+      write("sig/.#widget.rbs", "")
+      FileUtils.rm_f("sig/.#widget.rbs")
+      expect(guard.admits?(signature_kind_rows("sig"))).to be(true)
+    end
+
+    context "with configured signature_paths" do
+      let(:configuration) do
+        Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge(
+                                   { "paths" => ["lib"], "signature_paths" => ["types"] }
+                                 ))
+      end
+
+      it "admits the write when a file comes and goes inside the configured root after the mark" do
+        write("types/widget.rbs", "class Widget\nend\n")
+        guard = start
+        write("types/.#widget.rbs", "")
+        FileUtils.rm_f("types/.#widget.rbs")
+        expect(guard.admits?(signature_kind_rows("types"))).to be(true)
+      end
+    end
+  end
+
   # A row recorded as the run read carries the instant the run began. On a coarse clock a same-size save after the
   # read keeps the stat tuple, so the row must turn racy for every mtime at or after the mark.
   describe "#mark_racy" do

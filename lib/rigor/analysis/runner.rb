@@ -1631,12 +1631,12 @@ module Rigor
         roots.any? { |root| directory.start_with?(root) }
       end
 
-      # The project's own signature roots, whether or not they exist: the configured `signature_paths:`, or the
-      # `sig` directory `Environment.default_signature_paths` auto-detects when none are configured. The
-      # signature rows' listing rows cover a file appearing under a root that existed; only a row for the root
-      # itself covers it appearing.
+      # The project's own signature roots, whether or not they exist:
+      # {Environment.project_signature_root_candidates} — the configured `signature_paths:`, or the `sig`
+      # directory it defaults to when none are configured (issue #1619). The signature rows' listing rows
+      # cover a file appearing under a root that existed; only a row for the root itself covers it appearing.
       def signature_root_candidates
-        @configuration.signature_paths || ["sig"]
+        Environment.project_signature_root_candidates(@configuration.signature_paths)
       end
 
       # One names-mode listing row per directory the discovery widening globbed, so a file appearing there is seen

@@ -303,5 +303,19 @@ RSpec.describe "mutator widening in operand position", type: :runner do
       expect(effect?("puts([[2]].map { it << 1 }.size)")).to be(false)
       expect(effect?("puts([1].map { |x| y = [x]; y << 1 }.size)")).to be(false)
     end
+
+    # Issue #3163 — the block may call the method it defines.
+    it "counts a def under a block that mutates a non-local in place" do
+      expect(effect?("puts([1].each { def h; $b << 1; end })")).to be(true)
+      expect(effect?("puts([1].each { def h; @b[:k] ||= 1; end })")).to be(true)
+      expect(effect?("puts(-> { def h; def i; @@b << 1; end; end })")).to be(true)
+    end
+
+    it "does not count a def outside a block, one that mutates nothing, or a class body inside one" do
+      expect(effect?("private def h; $b << 1; end")).to be(false)
+      expect(effect?("puts([1].each { def h; $b.size; end })")).to be(false)
+      expect(effect?("puts([1].each { def h; b = [1]; b << 1; end })")).to be(false)
+      expect(effect?("puts([1].each { def h; class K; $b << 1; end; end })")).to be(false)
+    end
   end
 end

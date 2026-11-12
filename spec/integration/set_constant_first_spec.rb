@@ -62,13 +62,32 @@ RSpec.describe "Set#first on a constant-folded Set", type: :runner do
     "public_send(:binding)" => "public_send(:binding)",
     "send(:instance_eval)" => "send(:instance_eval, \"s.clear\")",
     "send(\"eval\")" => "send(\"eval\", \"s.clear\")",
-    "__send__(\"binding\")" => "__send__(\"binding\")",
-    "TOPLEVEL_BINDING" => "TOPLEVEL_BINDING.receiver",
-    "::TOPLEVEL_BINDING" => "::TOPLEVEL_BINDING.receiver"
+    "__send__(\"binding\")" => "__send__(\"binding\")"
   }.each do |label, (emptier, answer)|
     it "declines when the local escapes through #{label}" do
       expect(dumped(%(s = Set["r"]\n#{emptier}\ndump_type(s.first)))).to eq([answer || "Dynamic[top]?"])
     end
+  end
+
+  # The helper empties the top-level `s` through the binding it is handed, so Ruby's `s.first` is nil. It goes
+  # through `method(:local_variable_get)` to stand in for a helper in another file: the scan also covers a nested
+  # `def`, so a direct `local_variable_get` there would escape `s` without the reference under test.
+  ["TOPLEVEL_BINDING", "::TOPLEVEL_BINDING", "Object::TOPLEVEL_BINDING"].each do |reference|
+    it "declines when the local escapes through #{reference} handed to a helper" do
+      source = <<~RUBY
+        module Helper
+          def self.h(b) = b.method(:local_variable_get).call(:s).clear
+        end
+        s = Set["r"]
+        Helper.h(#{reference})
+        dump_type(s.first)
+      RUBY
+      expect(dumped(source)).to eq(["Dynamic[top]?"])
+    end
+  end
+
+  it "still folds first after a block-only send(:instance_eval) that leaves the set alone" do
+    expect(dumped(%(s = Set["r"]\nsend(:instance_eval) { 1 }\ndump_type(s.first)))).to eq([%("r")])
   end
 
   it "declines when local_variable_get reaches the local through another binding" do

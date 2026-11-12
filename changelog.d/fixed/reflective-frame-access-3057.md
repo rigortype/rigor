@@ -1,2 +1,2 @@
-- **[inference]** Collection reads no longer constant-fold past reflective frame access such as `send(:eval, ...)`. ([#3057](https://github.com/rigortype/rigor/issues/3057))
+- **[inference]** Collection reads no longer constant-fold past reflective frame access such as `send(:eval, ...)`. ([#3057](https://github.com/rigortype/rigor/issues/3057), [#3119](https://github.com/rigortype/rigor/pull/3119))
   - `send`/`__send__`/`public_send` dispatches on a literal frame-call name (Symbol or String), `local_variable_get` on any receiver, and `TOPLEVEL_BINDING` references now escape every local of the body, so `s = Set["r"]; send(:eval, "s.clear"); s.first` reads `Dynamic[top]?` instead of `"r"`.

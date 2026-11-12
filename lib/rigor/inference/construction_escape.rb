@@ -170,13 +170,13 @@ module Rigor
       end
 
       # A node that reaches the frame's locals by name: a {FRAME_CALLS} or string-eval call, a `send`-family
-      # dispatch on a literal frame-call name (`send(:eval, …)`), or a `TOPLEVEL_BINDING` reference (bare or
-      # top-level `::`), whose `local_variable_get` / `local_variable_set` reads and rebinds the top frame.
+      # dispatch on a literal frame-call name (`send(:eval, …)`), or a `TOPLEVEL_BINDING` reference under any
+      # qualification (a project's own `X::TOPLEVEL_BINDING` escapes too, costing only precision), whose
+      # `local_variable_get` / `local_variable_set` reads and rebinds the top frame.
       def frame_access?(node)
         case node
         when Prism::CallNode then frame_call_name?(node)
-        when Prism::ConstantReadNode then node.name == :TOPLEVEL_BINDING
-        when Prism::ConstantPathNode then node.parent.nil? && node.name == :TOPLEVEL_BINDING
+        when Prism::ConstantReadNode, Prism::ConstantPathNode then node.name == :TOPLEVEL_BINDING
         else false
         end
       end

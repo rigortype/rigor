@@ -4937,12 +4937,23 @@ module Rigor
           parent_return = declared_return_union(parent_method, scope.environment, type_vars: parent_type_vars)
           return nil if override_return.nil? || parent_return.nil?
           return nil if dynamic_top?(parent_return) # untyped / unbound-generic parent contract
+          return nil if void_over_nil?(override_method, parent_return)
 
           return nil unless parent_return.accepts(override_return).no?
 
           build_override_return_widened_diagnostic(
             path, def_node, parent_class, parent_return, override_return
           )
+        end
+
+        # A `-> void` override of a parent return of exactly `nil` is exempt (#3046): both say "no useful
+        # value", and callers cannot use a void return. Keyed on the declared `void` of every arm (the
+        # translator reads `void` as top, so a `-> top` override still fires); any non-nil parent return
+        # still fires.
+        def void_over_nil?(override_method, parent_return)
+          return false unless parent_return.is_a?(Type::Constant) && parent_return.value.nil?
+
+          override_method.method_types.all? { |mt| mt.type.return_type.is_a?(::RBS::Types::Bases::Void) }
         end
 
         # `[defining_class, RBS::Definition::Method]` for the nearest project-discovered ancestor whose
@@ -4955,8 +4966,10 @@ module Rigor
                                                     question: :override, from: from) do |ancestor|
                  method_def = safe_instance_method_definition(ancestor, method_name, scope)
                  # The signature text is the answer two worlds compare: an `RBS::Definition::Method` has no
-                 # structural equality of its own.
-                 method_def.method_types.map(&:to_s) if method_def && !defined_on?(method_def, class_name)
+                 # structural equality of its own. Only an ancestor whose own RBS declares the method answers:
+                 # a project class that merely inherits it from an RBS-only ancestor is asked past, so the
+                 # owner named is the real one and an RBS-only owner stays silent (#3046, #130).
+                 method_def.method_types.map(&:to_s) if method_def && declared_by?(method_def, ancestor)
                end
           in Inference::DefinerResolution::Known(owner:)
             method_def = safe_instance_method_definition(owner, method_name, scope)
@@ -4966,6 +4979,15 @@ module Rigor
           in Inference::DefinerResolution::ABSENT # rubocop:disable Lint/DuplicateBranch -- see above
             nil
           end
+        end
+
+        # True when `ancestor`'s own RBS declares `method_def`: on its body, or through an interface it
+        # includes itself (RBS records the including class as `implemented_in`).
+        def declared_by?(method_def, ancestor)
+          return true if defined_on?(method_def, ancestor)
+          return false unless method_def.defined_in&.interface?
+
+          normalize_class_name(method_def.implemented_in) == normalize_class_name(ancestor)
         end
 
         def safe_instance_method_definition(class_name, method_name, scope)

@@ -816,6 +816,208 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
         expect(widen_diags(result)).to be_empty
       end
     end
+
+    # #3046: the parent is the ancestor whose own RBS declares the method, and a `-> void` override of
+    # a parent `-> nil` is exempt. Each row lists the shape and what the rule reports.
+    describe "the real owner and the void-over-nil exemption (#3046)" do
+      def widen_messages(ruby, rbs)
+        widen_diags(analyze(ruby, sig: { "demo.rbs" => rbs })).map { |d| [d.line, d.message] }
+      end
+
+      it "stays silent when the owner is RBS-only, reached through a project class that defines nothing" do
+        ruby = <<~RUBY
+          class Mid < Base; end
+          class Leaf < Mid; def hook = "s"; end
+          class Direct < Base; def hook = "s"; end
+        RUBY
+        rbs = <<~RBS
+          class Base
+            def hook: () -> Integer
+          end
+          class Mid < Base
+          end
+          class Leaf < Mid
+            def hook: () -> String
+          end
+          class Direct < Base
+            def hook: () -> String
+          end
+        RBS
+        expect(widen_messages(ruby, rbs)).to be_empty
+      end
+
+      it "stays silent on the issue's `-> void` rows over an RBS-only `-> nil`" do
+        ruby = <<~RUBY
+          class Mid < Base; end
+          class Leaf < Mid; def hook; end; end
+          class Direct < Base; def hook; end; end
+        RUBY
+        rbs = <<~RBS
+          class Base
+            def hook: () -> nil
+          end
+          class Mid < Base
+          end
+          class Leaf < Mid
+            def hook: () -> void
+          end
+          class Direct < Base
+            def hook: () -> void
+          end
+        RBS
+        expect(widen_messages(ruby, rbs)).to be_empty
+      end
+
+      it "names the intermediate project class when it declares the method itself, not the RBS-only root" do
+        ruby = <<~RUBY
+          class Mid < Base; def hook = 1; end
+          class Leaf < Mid; def hook = "s"; end
+        RUBY
+        rbs = <<~RBS
+          class Base
+            def hook: () -> Integer
+          end
+          class Mid < Base
+            def hook: () -> Integer
+          end
+          class Leaf < Mid
+            def hook: () -> String
+          end
+        RBS
+        expect(widen_messages(ruby, rbs)).to eq(
+          [[2, "return type of `hook' widened from Integer to String (overrides Mid#hook); breaks substitutability"]]
+        )
+      end
+
+      it "names a project module the hook comes through, and stays silent for an RBS-only module" do
+        ruby = <<~RUBY
+          module PMod; def hook = 1; end
+          class PMid; include PMod; end
+          class PLeaf < PMid; def hook = "s"; end
+          class RMid; include RMod; end
+          class RLeaf < RMid; def hook = "s"; end
+        RUBY
+        rbs = <<~RBS
+          module PMod
+            def hook: () -> Integer
+          end
+          class PMid
+            include PMod
+          end
+          class PLeaf < PMid
+            def hook: () -> String
+          end
+          module RMod
+            def hook: () -> Integer
+          end
+          class RMid
+            include RMod
+          end
+          class RLeaf < RMid
+            def hook: () -> String
+          end
+        RBS
+        expect(widen_messages(ruby, rbs)).to eq(
+          [[3, "return type of `hook' widened from Integer to String (overrides PMod#hook); breaks substitutability"]]
+        )
+      end
+
+      it "keeps an interface the project class includes as that class's own declaration" do
+        ruby = <<~RUBY
+          class IMid; def hook = 1; end
+          class ILeaf < IMid; def hook = "s"; end
+          class XMid < XBase; end
+          class XLeaf < XMid; def hook = "s"; end
+        RUBY
+        rbs = <<~RBS
+          interface _Hookable
+            def hook: () -> Integer
+          end
+          class IMid
+            include _Hookable
+          end
+          class ILeaf < IMid
+            def hook: () -> String
+          end
+          class XBase
+            include _Hookable
+          end
+          class XMid < XBase
+          end
+          class XLeaf < XMid
+            def hook: () -> String
+          end
+        RBS
+        expect(widen_messages(ruby, rbs)).to eq(
+          [[2, "return type of `hook' widened from Integer to String (overrides IMid#hook); breaks substitutability"]]
+        )
+      end
+
+      it "exempts `-> void` over a project parent's `-> nil`, also when the parent sits under an RBS-only root" do
+        ruby = <<~RUBY
+          class PBase; def hook = nil; end
+          class PLeaf < PBase; def hook; end; end
+          class Mid < Base; def hook = nil; end
+          class Leaf < Mid; def hook; end; end
+        RUBY
+        rbs = <<~RBS
+          class PBase
+            def hook: () -> nil
+          end
+          class PLeaf < PBase
+            def hook: () -> void
+          end
+          class Base
+            def hook: () -> nil
+          end
+          class Mid < Base
+            def hook: () -> nil
+          end
+          class Leaf < Mid
+            def hook: () -> void
+          end
+        RBS
+        expect(widen_messages(ruby, rbs)).to be_empty
+      end
+
+      it "still fires on `-> void` over a non-nil parent, on `-> top` over `-> nil`, and on `-> String` over `-> nil`" do
+        ruby = <<~RUBY
+          class IB; def hook = 1; end
+          class IL < IB; def hook; end; end
+          class TB; def hook = nil; end
+          class TL < TB; def hook = nil; end
+          class SB; def hook = nil; end
+          class SL < SB; def hook = "s"; end
+        RUBY
+        rbs = <<~RBS
+          class IB
+            def hook: () -> Integer
+          end
+          class IL < IB
+            def hook: () -> void
+          end
+          class TB
+            def hook: () -> nil
+          end
+          class TL < TB
+            def hook: () -> top
+          end
+          class SB
+            def hook: () -> nil
+          end
+          class SL < SB
+            def hook: () -> String
+          end
+        RBS
+        expect(widen_messages(ruby, rbs)).to eq(
+          [
+            [2, "return type of `hook' widened from Integer to top (overrides IB#hook); breaks substitutability"],
+            [4, "return type of `hook' widened from nil to top (overrides TB#hook); breaks substitutability"],
+            [6, "return type of `hook' widened from nil to String (overrides SB#hook); breaks substitutability"]
+          ]
+        )
+      end
+    end
   end
 
   describe "def.override-param-narrowed" do

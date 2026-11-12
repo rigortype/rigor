@@ -9520,13 +9520,15 @@ module Rigor
       end
 
       # Whether the project def a receiver-less exit-named call reaches infers `bot`, every argument `Dynamic[top]`.
-      # A definition with no readable `def` (`define_method`, `attr_*`) does not.
+      # A definition with no readable `def` (`define_method`, `attr_*`) does not. Outside any class `self` is `main`, an
+      # `Object`.
       def project_exit_def_terminates?(node)
         def_node = project_exit_def(node.name)
         return false unless def_node.is_a?(Prism::DefNode)
 
         args = Array.new(node.arguments&.arguments&.size || 0) { Type::Combinator.untyped }
-        scope.user_method_return(def_node, scope.self_type, args).is_a?(Type::Bot)
+        receiver = scope.self_type || Type::Combinator.nominal_of("Object")
+        scope.user_method_return(def_node, receiver, args).is_a?(Type::Bot)
       rescue StandardError
         false
       end

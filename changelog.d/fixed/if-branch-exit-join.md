@@ -1,3 +1,4 @@
 - **[inference]** An `if` or `unless` branch that unconditionally exits beside an `else` no longer joins its writes into the scope after the conditional, so `if c then x = nil; raise else x = "s" end; x.upcase` no longer reports `call.possible-nil-receiver`. ([#3104](https://github.com/rigortype/rigor/pull/3104))
   - The else's predicate narrowing survives too: after `if x.nil? then raise else … end`, `x` is non-nil.
   - A then-branch ending in a call to a method typed `bot`, a ternary, and a middle `elsif` branch that exits are covered the same way.
+  - A receiver-less `raise`, `throw`, `exit`, `abort` or `fail` that the project defines itself no longer ends a branch unless that method's body always exits, and neither does a `bot` helper that a project subclass overrides.

@@ -71,8 +71,8 @@ RSpec.describe Rigor::CLI::SigGenCommand do
     end
   end
 
-  # `sig` itself being a regular file is the chmod-free stand-in for EACCES: the create path cannot
-  # make a directory over it, so the `.rbs` write fails before a byte lands.
+  # `sig` itself being a regular file is the chmod-free stand-in for an unwritable parent: the
+  # sig-root check's `realpath` fails ENOTDIR before a byte lands.
   context "when the sig root is a regular file" do
     before { write("sig", "not a directory\n") }
 

@@ -309,8 +309,9 @@ module Rigor
         # `sig-gen --write` in CI would otherwise mean nothing.
         results.any? { |result| TARGET_REFUSALS.include?(result.action) } || !refused.empty? ? 1 : 0
       rescue SigGen::Writer::WriteError => e
-        # #2576 — a target that cannot be written at all (missing parent, permission denial, a directory
-        # where the `.rbs` belongs) is a usage error, the same rule `rigor init --path` follows (#2562):
+        # #2576 — a target that cannot be written at all (permission denial, a directory where the
+        # `.rbs` belongs, a parent path that is a regular file) is a usage error, the same rule
+        # `rigor init --path` follows (#2562):
         # one line on stderr and exit 64. The run stops at the first failure; targets already written
         # stay written.
         @err.puts("rigor sig-gen: #{e.message}")

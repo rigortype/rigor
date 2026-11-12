@@ -38,8 +38,9 @@ module Rigor
                               :target, keyword_init: true)
       private_constant :MergeState
 
-      # #2576 — a target the writer cannot write (a missing parent, a permission denial, a directory
-      # sitting where the `.rbs` belongs) is a bad `--write` invocation, not a crash: the command
+      # #2576 — a target the writer cannot write (a permission denial, a directory sitting where the
+      # `.rbs` belongs, a parent path that is a regular file) is a bad `--write` invocation, not a
+      # crash: the command
       # reports it as the same usage error `rigor init --path` gives and exits 64. Carries the target
       # and the stripped Errno reason so the CLI prints `cannot write PATH: REASON` without
       # re-parsing the message.

@@ -813,10 +813,10 @@ repair through.
 routes to a signature path it does not write to, because it is declared there or its class lives there) on its own `skipped Class#method (reason)` line; the exit status is
 unchanged. See [handbook chapter 11](../handbook/11-sig-gen.md#safety-what---write-will-and-will-not-do).
 
-A `sig/` target `--write` cannot write — a missing parent directory, a permission denial, or a
-directory sitting where the `.rbs` belongs — is a usage error: one `rigor sig-gen: cannot write
-PATH: REASON` line on stderr and exit `64`. The run stops at the first failure; targets already
-written stay written.
+A `sig/` target `--write` cannot write — a permission denial, a directory sitting where the `.rbs`
+belongs, or a parent path that is a regular file — is a usage error: one `rigor sig-gen: cannot
+write PATH: REASON` line on stderr and exit `64`. A missing parent directory is created as before.
+The run stops at the first failure; targets already written stay written.
 
 A method declared inline with `# @rbs` / `#:` is written as that
 declaration, not as what its body infers; a parameter-only

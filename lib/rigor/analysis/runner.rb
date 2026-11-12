@@ -818,7 +818,7 @@ module Rigor
       # `separator`. A live def node (a cold / re-walked file) is the identity every cross-file caller
       # resolved through, so `memo[node]` holds those callers' observed keys; a {DefHandle} (an unchanged
       # file on the warm path) never keyed a memo entry, so it is skipped (its summary is carried over from
-      # the snapshot). Bounded per def and in total so the snapshot stays small: a def observed at more
+      # the snapshot). Bounded per def and in total so the snapshot stays small: a def this run observes at more
       # than `RETURN_SUMMARY_KEYS_PER_DEF` keys persists NO summary — a truncated one could prove the def
       # stable on keys whose answers did not move while a dropped key's did (ADR-89 WD2's "cap overflow →
       # keep the dependents"), and a missing summary already keeps them.

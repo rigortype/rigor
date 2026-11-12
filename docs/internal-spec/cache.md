@@ -1566,7 +1566,9 @@ Two persisted summaries prove "nothing changed":
   dependents. Any mismatch, a changed signature, a missing def, an
   ineligible def (one that also exposes ivar/cvar writes or `yield` values),
   or a cap overflow keeps the dependents — the conservative direction: a def
-  observed at more call keys than the per-def cap persists no summary, since
+  the run that analyses its file observes at more call keys than the per-def
+  cap persists no summary (a summary carried over from an earlier run is not
+  recounted when only the callers change), since
   a truncated one could prove it stable on the keys it kept while a dropped
   key's answer moved
   ([#2783](https://github.com/rigortype/rigor/issues/2783)).

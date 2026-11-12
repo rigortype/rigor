@@ -28,6 +28,18 @@ should instead be expanded into positionals.
 Treat every positional splat alike. It is the smaller sound change, and #1236 set the same rule (no positional
 binding under a splat) for the compound index read.
 
+### Also decided
+
+- A `f(...)` call with no forwarding frame to expand it from counts as a splat (`ExpressionTyper#splat_arguments?`),
+  so it also gets the binding with no positional correspondence. This covers a `def m(...)` body re-typed for a
+  splat call, and the main walk of a `def m(...)` body. Without it, `def fwd(...) = count(...)` re-typed for
+  `fwd(*idx)` binds the inner `...` as one argument again.
+- The #1125 RECORDED DECISION pin "declines a bare *args forwarding" in
+  `spec/rigor/inference/keyword_splat_forwarding_binding_spec.rb` (now titled "does not expand a bare *args
+  forwarding") moves. Before: `forward(1, 2)` through `def forward(*args) = target(*args)` answered
+  `Dynamic[top]`. After: it answers `[Dynamic[top], Dynamic[top]]`. The new answer is more precise, and the Tuple
+  is still not expanded.
+
 ## To undo
 
 Teach `call_arg_types` to expand a `Tuple` splat, and narrow `ExpressionTyper#splat_arguments?` to the splats it

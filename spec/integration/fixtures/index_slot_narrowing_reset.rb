@@ -212,3 +212,48 @@ def block_operator_write
   3.times { h[:k] += 1 }
   assert_type("Dynamic[top] | Integer", h[:k])
 end
+
+class IvarRebind
+  def rvalue_writes_receiver
+    @h = { k: nil }
+    @h[:k] ||= 0
+    @h[:k] += (@h = { x: 1 }; 1)
+    assert_type("Dynamic[top] | Integer", @h[:k])
+  end
+
+  def reset
+    @h = { x: 1 }
+  end
+
+  # `reset` writes `@h`, so the store went to the hash `@h` named before the call.
+  def rvalue_calls_a_resetting_method
+    @h = { k: nil }
+    @h[:k] ||= 0
+    @h[:k] += (reset; 1)
+    assert_type("Dynamic[top] | Integer | nil", @h[:k])
+  end
+
+  def compute(_x) = "1"
+
+  # `compute` is proven to write no instance variable, so `@t` is the same hash and the slot records. A callee the
+  # proof cannot read (`def compute(x) = x.to_s` calls a method on a parameter) may write `@t`, and records nothing.
+  def rvalue_calls_a_non_writing_method
+    @t = { k: nil }
+    @t[:k] ||= compute(1)
+    assert_type("\"1\"", @t[:k])
+  end
+end
+
+# A store into another slot of the receiver is no rebind.
+def rvalue_writes_another_slot
+  h = {}
+  h[:a] ||= (h[:b] ||= [])
+  assert_type("[]", h[:a])
+end
+
+# Every member of the receiver must store verbatim; a `String` member splices.
+def hash_or_string_receiver(cond)
+  x = cond ? {} : +""
+  x[0] ||= "a"
+  assert_type("Dynamic[top] | String | nil", x[0])
+end

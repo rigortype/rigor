@@ -157,7 +157,7 @@ module Rigor
 
         indexes = index_arguments(node)
         address = indexes.size == 1 ? stable_address(node.receiver, indexes.first) : nil
-        if address && !aliasing_index?(address.last, current_scope.type_of(node.receiver))
+        if address && !(negative_index?(address.last) && !hash_receiver?(current_scope.type_of(node.receiver)))
           return current_scope.without_indexed_narrowing(*address)
         end
 
@@ -167,8 +167,12 @@ module Rigor
       # Whether the literal `key` may name the same slot as another literal key: a negative Integer, unless the
       # receiver is a `Hash`, which tells `-1` from every other key.
       def aliasing_index?(key, receiver_type)
-        key.is_a?(Integer) && key.negative? && !carrier_receiver_type?(receiver_type, HASH_CARRIER)
+        negative_index?(key) && !hash_receiver?(receiver_type)
       end
+
+      def negative_index?(key) = key.is_a?(Integer) && key.negative?
+
+      def hash_receiver?(receiver_type) = carrier_receiver_type?(receiver_type, HASH_CARRIER)
 
       VERBATIM_STORE_CARRIERS = %w[Hash Array].freeze
       HASH_CARRIER = %w[Hash].freeze
@@ -186,18 +190,6 @@ module Rigor
       def carrier_receiver_type?(type, classes)
         members = type.is_a?(Type::Union) ? type.members : [type]
         members.all? { |member| classes.include?(UnknownStoreWidening.carrier_class(member)) }
-      end
-
-      # Whether evaluating a compound write's rvalue rebound its stable receiver variable: `h[k] += (h = {}; 1)` stores
-      # into the hash `h` named before the rvalue ran, so the slot of the hash `h` names afterwards is not the one
-      # written. A binding the rvalue left alone is the same object in both scopes.
-      def receiver_rebound?(receiver_node, before, after)
-        name = receiver_node.name if receiver_node.respond_to?(:name)
-        case receiver_node
-        when Prism::LocalVariableReadNode then !before.local(name).equal?(after.local(name))
-        when Prism::InstanceVariableReadNode then !before.ivar(name).equal?(after.ivar(name))
-        else false
-        end
       end
 
       def index_arguments(node)

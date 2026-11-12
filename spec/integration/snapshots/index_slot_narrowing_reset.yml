@@ -29,3 +29,8 @@ assertions:
   '26': Dynamic[top] | Integer
   '27': Dynamic[top] | Integer
   '28': Dynamic[top] | Integer
+  '29': Dynamic[top] | Integer
+  '30': Dynamic[top] | Integer | nil
+  '31': '"1"'
+  '32': "[]"
+  '33': Dynamic[top] | String | nil

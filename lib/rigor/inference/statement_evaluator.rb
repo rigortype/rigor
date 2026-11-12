@@ -1783,7 +1783,7 @@ module Rigor
         # record `a[0]`'s type as the region answer: `a[0, 1] ||= []` would claim `a[0]` non-nil
         # where the store splices nothing and `a[0]` stays nil at runtime. Decline the record for
         # any form but the single-index one.
-        address = recordable_slot_address(node, post_rhs)
+        address = recordable_slot_address(node)
         # Issue #544 — a receiver with an untracked (Dynamic / Top) constituent can hold a caller-supplied
         # slot value the `||=` keeps, so the recorded default would invent a fact; decline the record.
         address = nil if address && !IndexedNarrowing.fully_tracked_receiver_type?(scope.type_of(node.receiver))
@@ -1874,7 +1874,7 @@ module Rigor
         widened = IndexWriteWidening.widen(node: node, current_scope: post_rhs,
                                            arg_types: index_write_arg_types(node, stored, join_scope: operands))
         widened = IndexedNarrowing.invalidate_indexed_write(node, widened)
-        address = recordable_slot_address(node, post_rhs)
+        address = recordable_slot_address(node)
         widened = widened.with_indexed_narrowing(*address, stored) if address && scope.indexed_narrowing(*address)
         [stored, forget_rebound_specials(widened, node)]
       end
@@ -1882,16 +1882,33 @@ module Rigor
       # The `(receiver, key)` slot a compound index write may record its stored value on, or nil. A narrowing is
       # keyed on ONE literal slot, so a multi-index form, which reads and stores a splice region, records none. The
       # receiver's `[]=` must leave the stored value at that slot ({IndexedNarrowing.verbatim_slot?}: a `Hash` or
-      # `Array`, and no negative index on an `Array`), and the rvalue must not have rebound the receiver variable
-      # ({IndexedNarrowing.receiver_rebound?}), since the store went to the object it named before (issue #1218).
-      def recordable_slot_address(node, post_rhs)
+      # `Array`, and no negative index on an `Array`), and the rvalue must not rebind the receiver variable
+      # ({#rvalue_rebinds_receiver?}), since the store went to the object it named before (issue #1218).
+      def recordable_slot_address(node)
         key_node = single_index_argument(node)
         address = key_node && IndexedNarrowing.stable_address(node.receiver, key_node)
         return nil if address.nil?
         return nil unless IndexedNarrowing.verbatim_slot?(scope.type_of(node.receiver, tracer: tracer), address.last)
-        return nil if IndexedNarrowing.receiver_rebound?(node.receiver, scope, post_rhs)
+        return nil if rvalue_rebinds_receiver?(node)
 
         address
+      end
+
+      # Whether a compound index write's rvalue may rebind its stable receiver variable: it writes the variable
+      # (`h[k] += (h = {}; 1)`, `@h ||= …`, a multiple-assignment target, in a block too:
+      # {OperandEffects.written_variables}), or, for an instance variable, the intervening-call reset past the
+      # rvalue's self calls rebinds it ({InterveningIvarReset.after_operand}). That reset widens only a binding
+      # narrower than the class-ivar seed, and only for a call not proven to leave it alone, so
+      # `@h = { k: nil }; @h[:k] += (reset; 1)` with a `reset` that assigns `@h` is a rebind, and `@t[:k] ||=
+      # compute(1)` on a `@t` the class binds to one shape is not. A store into another slot of the receiver
+      # (`h[:a] ||= (h[:b] ||= [])`) is no rebind either.
+      def rvalue_rebinds_receiver?(node)
+        receiver = node.receiver
+        name = receiver.name
+        return true if OperandEffects.written_variables(node.value).include?(name)
+        return false unless receiver.is_a?(Prism::InstanceVariableReadNode)
+
+        !InterveningIvarReset.after_operand(node.value, scope).ivar(name).equal?(scope.ivar(name))
       end
 
       # The scope a compound index write's rvalue runs from: Ruby evaluates the receiver, then the index arguments,

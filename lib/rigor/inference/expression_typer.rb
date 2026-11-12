@@ -4832,7 +4832,7 @@ module Rigor
       # The locals table for the body scope, or nil to decline. Keys match `with_local`'s `name.to_sym`.
       # The body scope starts from an empty fact store and narrowing set, so `with_local`'s fact /
       # narrowing invalidations would be no-ops here — the table is built directly.
-      def bind_params_from_call_types(params, arg_types, defaults_unknown = false)
+      def bind_params_from_call_types(params, arg_types, defaults_unknown)
         return arg_types.empty? ? {} : nil if params.nil?
         return nil unless bindable_param_shape?(params)
 
@@ -4845,7 +4845,7 @@ module Rigor
       end
 
       # The keyword, `**rest` and block parameters' bindings, added to `locals`, which it returns.
-      def bind_keyword_and_block_params(params, kw_shape, locals, defaults_unknown = false)
+      def bind_keyword_and_block_params(params, kw_shape, locals, defaults_unknown)
         bind_keyword_params(params, kw_shape, locals, defaults_unknown)
         rest_name = keyword_rest_name(params)
         locals[rest_name.to_sym] = keyword_rest_type(params, kw_shape) if rest_name
@@ -4858,7 +4858,7 @@ module Rigor
       # parameter an `Array[untyped]`; the keyword parameters bind from `keywords` as {#bind_keyword_params} does
       # for any call, so an open shape leaves them `Dynamic[top]`. An optional's default is not used: the splat
       # may supply the slot.
-      def bind_params_without_correspondence(params, keywords, defaults_unknown = false)
+      def bind_params_without_correspondence(params, keywords, defaults_unknown)
         return {} if params.nil?
         return nil unless params.is_a?(Prism::ParametersNode)
 
@@ -4901,7 +4901,7 @@ module Rigor
         params.keywords.any? || !params.keyword_rest.nil?
       end
 
-      def bind_positional_params(params, positional, defaults_unknown = false)
+      def bind_positional_params(params, positional, defaults_unknown)
         requireds = params.requireds
         optionals = params.optionals
         return nil if positional.size < requireds.size
@@ -4912,8 +4912,7 @@ module Rigor
         locals = {}
         requireds.each_with_index { |param, index| bind_positional_param(locals, param, positional[index]) }
         optionals.each_with_index do |param, index|
-          supplied = positional[requireds.size + index]
-          locals[param.name.to_sym] = supplied || (defaults_unknown ? dynamic_top : literal_default_type(param.value))
+          locals[param.name.to_sym] = positional[requireds.size + index] || default_binding(param, defaults_unknown)
         end
         bind_rest_param(params, positional, locals)
         locals
@@ -4937,17 +4936,20 @@ module Rigor
         end
       end
 
-      def bind_keyword_params(params, kw_shape, locals, defaults_unknown = false)
-        open_shape = (kw_shape && kw_shape.extra_keys == :open) || defaults_unknown
+      def bind_keyword_params(params, kw_shape, locals, defaults_unknown)
+        open_shape = defaults_unknown || (kw_shape && kw_shape.extra_keys == :open)
         params.keywords.each do |param|
           name = param.name.to_s.delete_suffix(":").to_sym
           supplied = kw_shape&.pairs&.[](name)
-          locals[name] = supplied ||
-                         (open_shape ? dynamic_top : keyword_default_type(param))
+          locals[name] = supplied || default_binding(param, open_shape)
         end
       end
 
-      def keyword_default_type(param)
+      # What a parameter the call does not fill binds: its literal default's type, or `Dynamic[top]` for a
+      # required keyword, and for any parameter when the default is not to be read (`unknown`).
+      def default_binding(param, unknown)
+        return dynamic_top if unknown
+
         param.respond_to?(:value) && param.value ? literal_default_type(param.value) : dynamic_top
       end
 

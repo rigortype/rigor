@@ -846,6 +846,8 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
         expect(widen_messages(ruby, rbs)).to be_empty
       end
 
+      # The issue's repro. Either half of the fix silences it alone (the owner walk passes `Mid`, the
+      # void exemption covers `nil`), so it fails only with both removed.
       it "stays silent on the issue's `-> void` rows over an RBS-only `-> nil`" do
         ruby = <<~RUBY
           class Mid < Base; end
@@ -868,6 +870,8 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
         expect(widen_messages(ruby, rbs)).to be_empty
       end
 
+      # Guard: master named `Mid` here too. It pins that the owner walk still stops at a project class
+      # whose own RBS declares the method.
       it "names the intermediate project class when it declares the method itself, not the RBS-only root" do
         ruby = <<~RUBY
           class Mid < Base; def hook = 1; end

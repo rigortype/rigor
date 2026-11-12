@@ -126,6 +126,34 @@ RSpec.describe "bin/lane-push" do
     expect(git(work, "merge-base", "--is-ancestor", new_master, pushed)).to eq("")
   end
 
+  # Issue #2067: refs/remotes/origin/* is shared by every worktree of a clone, so a parallel
+  # session's fetch can move it while the gate runs. The closing message must still name the
+  # base the branch was actually rebased onto.
+  it "prints the base it rebased onto when another fetch moves origin/master during the gate" do
+    set_up
+    base = git(work, "rev-parse", "refs/remotes/origin/master")
+
+    other = File.join(root, "master-mover")
+    git(root, "clone", "--quiet", remote, other)
+    configure(other)
+    File.write(File.join(work, ".verify-hook"), <<~SH)
+      set -e
+      git -C #{other} commit --quiet --allow-empty -m "Master moves mid-run"
+      git -C #{other} push --quiet origin HEAD:refs/heads/master
+      git -C #{work} fetch --quiet origin
+    SH
+
+    out, status = lane_push
+    expect(status).to eq(0), out
+    moved = git(work, "rev-parse", "refs/remotes/origin/master")
+    expect(moved).not_to eq(base)
+
+    printed = out[%r{onto origin/master ([0-9a-f]+)}, 1]
+    expect(printed).to eq(git(work, "rev-parse", "--short", base))
+    expect(printed).not_to eq(git(work, "rev-parse", "--short", moved))
+    expect(remote_ref("feature")).to eq(git(work, "rev-parse", "HEAD"))
+  end
+
   it "pushes nothing when the gate fails, and pushes with the reason printed under --no-verify" do
     set_up
     gate_exit(1)

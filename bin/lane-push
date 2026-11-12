@@ -21,6 +21,11 @@
 #      away), so a rebase may rewrite the branch but never drop a commit this
 #      branch did not hold.
 #
+# refs/remotes/origin/* is shared by every worktree of the clone, so another
+# worktree's fetch can move it mid-run: the base is read once, right after this
+# script's own fetch, and the rebase, the ancestor check and the closing
+# message all use that SHA.
+#
 # A gate failure that predates the branch (an issue already filed for it) is the
 # one case for --no-verify=<reason>; the reason is printed so the hand-back can
 # quote it. Run inside the Flake: `nix develop --command bin/lane-push`.
@@ -68,6 +73,7 @@ esac
   die "the tree has uncommitted or untracked files; commit them (or ignore them) first, so the gate checks what is pushed"
 
 git fetch --quiet origin || die "git fetch origin failed"
+base="$(git rev-parse refs/remotes/origin/master)" || die "cannot resolve refs/remotes/origin/master after fetch"
 remote_sha="$(git ls-remote origin "refs/heads/$branch" | cut -f1)"
 # The lease alone would let a rebased push drop a commit someone else added to
 # the remote branch (a coordinator's fix-up). The remote head is ours when this
@@ -83,7 +89,7 @@ if [[ -n "$remote_sha" ]] && ! pushed_by_us; then
   die "origin/$branch holds $remote_sha, which this branch never had; fetch it, look at it, and merge it before pushing"
 fi
 
-if ! git rebase --quiet refs/remotes/origin/master; then
+if ! git rebase --quiet "$base"; then
   die "rebase onto origin/master stopped on a conflict; resolve it, \`git rebase --continue\`, then run lane-push again"
 fi
 
@@ -93,10 +99,13 @@ else
   bin/verify-changed </dev/null || die "bin/verify-changed failed on the rebased tree; nothing was pushed"
 fi
 
+git merge-base --is-ancestor "$base" HEAD ||
+  die "the fetched origin/master tip $base is not an ancestor of HEAD; refusing to push a branch that was not rebased onto it"
+
 if [[ -z "$remote_sha" ]]; then
   git push origin "HEAD:refs/heads/$branch" || die "push failed"
 else
   git push --force-with-lease="refs/heads/$branch:$remote_sha" origin "HEAD:refs/heads/$branch" ||
     die "push refused: origin/$branch moved since $remote_sha; fetch and look before pushing again"
 fi
-echo "lane-push: pushed $branch at $(git rev-parse HEAD) onto origin/master $(git rev-parse --short refs/remotes/origin/master)"
+echo "lane-push: pushed $branch at $(git rev-parse HEAD) onto origin/master $(git rev-parse --short "$base")"

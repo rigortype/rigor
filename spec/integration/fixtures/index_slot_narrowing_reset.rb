@@ -161,7 +161,9 @@ def negative_hash_key
   assert_type("0", h[-1])
 end
 
-# The rvalue rebinds the receiver, so the store went to the hash `h` named before it ran.
+# The rvalue rebinds the receiver, so the store went to the hash `h` named before it ran, and nothing is recorded.
+# Ruby reads `nil` from the new hash; the widening still joins the store into it, a reading typed from the entry
+# scope (#3100), which reports nothing here.
 def rvalue_rebinds_receiver_operator_write
   h = { k: nil }
   h[:k] ||= 0

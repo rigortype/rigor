@@ -2441,7 +2441,7 @@ module Rigor
         [[keywords || UNKNOWN_KEYWORDS], true]
       end
 
-      UNKNOWN_KEYWORDS = Type::HashShape.new({}, extra_keys: :open)
+      UNKNOWN_KEYWORDS = Type::Combinator.hash_shape_of({}, extra_keys: :open)
       private_constant :UNKNOWN_KEYWORDS
 
       # The post-dispatch tiers for a call `MethodDispatcher` could not answer, in their historical

@@ -26,16 +26,21 @@ require "yaml"
 CI_NO_CODE_REPO_ROOT = File.expand_path("../..", __dir__)
 CI_NO_CODE_WORKFLOW = File.join(CI_NO_CODE_REPO_ROOT, ".github", "workflows", "ci.yml")
 
+# A spec run from inside a git hook inherits GIT_DIR & friends, which would point the child `git` at the hook's
+# repository — and `git add` in a temporary repo would write to the real index. Unset them for every call.
+CI_NO_CODE_GIT_ENV = { "GIT_DIR" => nil, "GIT_WORK_TREE" => nil, "GIT_INDEX_FILE" => nil }.freeze
+
 # `.sh` files under these directories can be fixtures a spec reads; anywhere else a shell script is run by a
 # workflow or a developer and never opened by the suite.
 CI_NO_CODE_SH_SOURCE_DIRS = %w[spec/ lib/ sig/ exe/ plugins/ examples/ bin/ schemas/ data/].freeze
 
-# The tracked paths `skip_re` may skip because nothing the always-on jobs read opens them; each entry carries
-# its reason. Anything else tracked — `docs/`, `skills/`, `agents/`, `.claude/`, `tool/` and whatever comes
-# next — counts as read.
+# The tracked paths `skip_re` may skip: nothing the code suite, `make lint` or the packaged gem opens them.
+# `spec/docs/` does read a few of them, but the docs-check job runs `spec/docs/` even when the code suite is
+# skipped, so the read is still covered. Each entry carries its reason. Anything else tracked — `docs/`,
+# `skills/`, `agents/`, `.claude/`, `tool/` and whatever comes next — counts as read.
 CI_NO_CODE_UNREAD = [
-  # vscode-extension.yml builds and tests the extension; `spec/docs/` reads one `runtime.ts` value from it and
-  # runs even when the code suite is skipped.
+  # vscode-extension.yml builds and tests the extension; `spec/docs/` reads `editors/` files and still runs
+  # through the docs-check job on no-code PRs.
   %r{\Aeditors/},
   # Only oss-sweep.yml reads the sweep corpus.
   %r{\Adata/oss-sweep/},
@@ -46,9 +51,12 @@ CI_NO_CODE_UNREAD = [
   # playground-wasm.yml builds the frontend and wasm pages that fly.io deploys.
   %r{\Aapps/rigor-playground/(?:frontend/[^/]*\.html|frontend/_(?:headers|redirects)|fly\.toml|Dockerfile)\z},
   %r{\Aapps/rigor-playground/wasm/.*\.(?:html|mjs|json)\z},
-  # Every workflow but ci.yml has its own trigger and nothing in the suite reads it; ci.yml itself is read by
-  # this spec.
-  %r{\A\.github/workflows/(?!ci\.yml\z)[^/]*\.yml\z}
+  # Each of these workflows has its own trigger; `spec/docs/`'s link check reads `.github/workflows/*.yml` and
+  # still runs through the docs-check job on no-code PRs. The list mirrors `skip_re`'s workflow term exactly, so
+  # a workflow added there fails this guard until it is exempted here on purpose. ci.yml is absent on purpose:
+  # this spec and the link check read it, and changing it must run the suite.
+  %r{\A\.github/workflows/(?:vscode-extension|playground-wasm|container|oss-sweep)\.yml\z},
+  %r{\A\.github/workflows/(?:ruby-next|engine-warm|engine-wall|release-gate)\.yml\z}
 ].freeze
 
 RSpec.describe "CI no-code path list (ci.yml `skip_re`)" do
@@ -57,7 +65,7 @@ RSpec.describe "CI no-code path list (ci.yml `skip_re`)" do
   # byte-exact names safe to match: a name that is not valid UTF-8 would make a UTF-8-tagged string raise on
   # `match?`.
   def tracked_files(root = CI_NO_CODE_REPO_ROOT)
-    out, err, status = Open3.capture3("git", "ls-files", "-z", chdir: root)
+    out, err, status = Open3.capture3(CI_NO_CODE_GIT_ENV, "git", "ls-files", "-z", chdir: root)
     raise "`git ls-files -z` failed in #{root} (exit #{status.exitstatus}): #{err.strip}" unless status.success?
 
     out.b.split("\0")
@@ -68,7 +76,7 @@ RSpec.describe "CI no-code path list (ci.yml `skip_re`)" do
   end
 
   def git!(dir, *args)
-    _out, err, status = Open3.capture3("git", *args, chdir: dir)
+    _out, err, status = Open3.capture3(CI_NO_CODE_GIT_ENV, "git", *args, chdir: dir)
     raise "git #{args.join(' ')} failed in #{dir} (exit #{status.exitstatus}): #{err.strip}" unless status.success?
   end
 

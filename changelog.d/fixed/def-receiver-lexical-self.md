@@ -1,0 +1,4 @@
+- **[sig-gen, engine]** A `def` whose receiver is not the enclosing class (`def String.q` in `class L`, `def A.z` in `A::B`, `def obj.q`) no longer replaces the class's own method of that name in `rigor sig-gen` proposals or in call-site types. ([#3168](https://github.com/rigortype/rigor/pull/3168))
+  - `def self.x` in a `class << self` body, a method of the singleton class's own singleton, is left out the same way, and `def.return-type-mismatch` no longer checks it against the class's `def self.x` signature.
+  - `def.return-type-mismatch` no longer checks a singleton def that a later def of the same name replaces, and `def.ivar-write-mismatch` no longer counts the ivar writes of a def with a receiver.
+  - `rigor sig-gen` reads `class << M` inside `module M` as `class << self`.

@@ -466,6 +466,41 @@ RSpec.describe Rigor::Environment do
     end
   end
 
+  # Issue #1619 — the single spelling of "the configured `signature_paths:`, else the conventional `sig`",
+  # shared by the loader's roots, the run slot's presence rows and the write guard. The candidates answer
+  # whether or not the directory exists; `project_signature_roots` narrows the same rule to what loads.
+  describe ".project_signature_root_candidates" do
+    it "returns the configured signature_paths verbatim, including an empty list" do
+      expect(described_class.project_signature_root_candidates(%w[types vendor/sig]))
+        .to eq(%w[types vendor/sig])
+      expect(described_class.project_signature_root_candidates([])).to eq([])
+    end
+
+    it "defaults to the relative sig directory whether or not it exists" do
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          expect(described_class.project_signature_root_candidates(nil)).to eq(["sig"])
+          FileUtils.mkdir("sig")
+          expect(described_class.project_signature_root_candidates(nil)).to eq(["sig"])
+        end
+      end
+    end
+  end
+
+  describe ".project_signature_roots" do
+    it "returns the configured signature_paths verbatim" do
+      expect(described_class.project_signature_roots(%w[types])).to eq(%w[types])
+    end
+
+    it "auto-detects <root>/sig only while it is a directory" do
+      Dir.mktmpdir do |dir|
+        expect(described_class.project_signature_roots(nil, root: dir)).to eq([])
+        FileUtils.mkdir(File.join(dir, "sig"))
+        expect(described_class.project_signature_roots(nil, root: dir)).to eq([Pathname(dir) / "sig"])
+      end
+    end
+  end
+
   describe "bundler-discovered gem sig (issue #611)" do
     # Bundler installs a RubyGems-sourced gem under `<bundle>/ruby/X.Y.Z/gems/<name>-<version>/`, and a
     # `git:`-sourced gem under `<bundle>/ruby/X.Y.Z/bundler/gems/<repo>-<12-hex-revision>/` (see

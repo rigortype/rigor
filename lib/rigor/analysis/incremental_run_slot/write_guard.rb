@@ -78,7 +78,8 @@ module Rigor
                             fingerprint
 
           lockfiles = lockfile_paths(configuration)
-          named = Array(roots) + configuration.pre_eval + (configuration.signature_paths || ["sig"])
+          named = Array(roots) + configuration.pre_eval +
+                  Environment.project_signature_root_candidates(configuration.signature_paths)
           presence = (lockfiles + named.map { |path| File.absolute_path(path.to_s) }).to_h do |path|
             [path, Cache::Descriptor::FileEntry.kind_of(path)]
           end

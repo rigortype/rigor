@@ -3,3 +3,4 @@ locals: {}
 assertions:
   '1': '"s"'
   '2': '"a"'
+  '3': '"s"'

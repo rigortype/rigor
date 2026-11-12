@@ -104,6 +104,111 @@ def then_nexts(items)
   end
 end
 
+# `return` and `exit` end the branch as `raise` does.
+def then_returns(c)
+  x = maybe
+  if c
+    x = nil
+    return
+  else
+    x = "s"
+  end
+  x.upcase
+end
+
+def then_exits(c)
+  x = maybe
+  if c
+    x = nil
+    exit
+  else
+    x = "s"
+  end
+  x.upcase
+end
+
+# Both branches exit: the code after is unreachable, and the then-branch's
+# exit scope stands, as before.
+def both_exit(c)
+  x = maybe
+  if c
+    x = "s"
+    raise "e"
+  else
+    x = nil
+    return
+  end
+  assert_type('"s"', x)
+end
+
+# A project method named like an exit call is an ordinary call unless its
+# own body exits: `fail` and `exit` here return, so the then-branch's nil
+# reaches the code after the if and `x ? … : 0` is a real test.
+class Collector
+  def initialize = @errors = []
+  def fail(msg) = @errors << msg
+  def exit = @done = true
+
+  def then_fails(c)
+    x = maybe
+    if c
+      x = nil
+      fail("bad")
+    else
+      x = "s"
+    end
+    x ? x.size : 0
+  end
+
+  def then_exits(c)
+    x = maybe
+    if c
+      x = nil
+      exit
+    else
+      x = "s"
+    end
+    x ? x.size : 0
+  end
+end
+
+# A project `fail` that raises still ends the branch.
+class Strict
+  def fail(msg) = raise(ArgumentError, msg)
+
+  def then_fails(c)
+    x = maybe
+    if c
+      x = nil
+      fail("bad")
+    else
+      x = "s"
+    end
+    x.upcase
+  end
+end
+
+# A `bot` helper a project subclass overrides may return on the subclass, so
+# the then-branch's nil reaches the code after the if.
+class Base
+  def handle = raise(NotImplementedError)
+
+  def run(c)
+    x = maybe
+    if c
+      x = nil
+      handle
+    else
+      x = "s"
+    end
+    x ? x.size : 0
+  end
+end
+
+class Sub < Base
+  def handle = 1
+end
+
 # Control: a branch that exits only conditionally still joins.
 def then_raises_conditionally(c, d)
   x = maybe

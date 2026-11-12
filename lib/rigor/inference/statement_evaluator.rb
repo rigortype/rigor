@@ -55,7 +55,9 @@ require_relative "operand_effects"
 require_relative "operand_walk"
 require_relative "optimistic_origin"
 require_relative "loop_value_record"
+require_relative "project_method_ownership"
 require_relative "project_yielder"
+require_relative "refined_dispatch/own_method"
 require_relative "return_barrier"
 require_relative "repeated_or_writes"
 require_relative "rewrite_mutation"
@@ -9451,7 +9453,8 @@ module Rigor
       #
       # The detection is intentionally conservative — it recognises only the most common patterns:
       # - A `Prism::ReturnNode`, `NextNode`, `BreakNode`.
-      # - A `Prism::CallNode` whose name is `:raise` or `:throw`.
+      # - A receiver-less `Prism::CallNode` named `raise` / `throw` / `exit` / `abort` / `fail` that the project does
+      #   not answer itself ({#project_answers_exit_name?}).
       # - A `Prism::StatementsNode`, `Prism::ParenthesesNode`, or
       #   `Prism::IfNode`/`UnlessNode` whose final / both
       #   branches recursively exit.
@@ -9465,7 +9468,7 @@ module Rigor
         when Prism::ReturnNode, Prism::NextNode, Prism::BreakNode
           true
         when Prism::CallNode
-          node.receiver.nil? && EXIT_CALL_NAMES.include?(node.name)
+          node.receiver.nil? && EXIT_CALL_NAMES.include?(node.name) && !project_answers_exit_name?(node.name)
         when Prism::StatementsNode
           last = node.body.last
           branch_unconditionally_exits?(last)
@@ -9492,9 +9495,97 @@ module Rigor
       # regardless of how it is spelled. The canonical case is a resolved guard helper (`fail_with_message(...)`) whose
       # body always raises: ADR-24 slice 1 types the call `bot`, and this OR-test makes `helper(...) if x.nil?` narrow
       # exactly like `raise ... if x.nil?`. The branch type is already computed by `eval_if` / `eval_unless`.
+      #
+      # Issue #1230 review — a `bot` branch that ends in an implicit-self call is checked against the project:
+      # - a call to an exit name the project defines itself ({#project_answers_exit_name?}) terminates only when that
+      #   def's own inferred return is `bot`. The call's type does not say: the typer keeps `Kernel#fail`'s bundled
+      #   `bot` over a project `def fail` (ADR-110's ancestor-declaration gate, ADR-17), so `class Collector;
+      #   def fail(msg) = @errors << msg` would otherwise end the branch;
+      # - a call whose method a project subclass of `self`'s class overrides does not terminate
+      #   ({#self_call_overridden_below?}): `Base#handle = raise(…)` with `Sub#handle = 1` returns on a `Sub`.
       def branch_terminates?(branch_node, branch_type)
-        branch_unconditionally_exits?(branch_node) ||
-          branch_type.is_a?(Type::Bot)
+        return true if branch_unconditionally_exits?(branch_node)
+        return false unless branch_type.is_a?(Type::Bot)
+
+        tail = branch_tail(branch_node)
+        return false if self_call_overridden_below?(tail)
+        return true unless project_exit_call?(tail)
+
+        project_exit_def_terminates?(tail)
+      end
+
+      def project_exit_call?(node)
+        node.is_a?(Prism::CallNode) && node.receiver.nil? && EXIT_CALL_NAMES.include?(node.name) &&
+          project_answers_exit_name?(node.name)
+      end
+
+      # Whether the project def a receiver-less exit-named call reaches infers `bot`, every argument `Dynamic[top]`.
+      # A definition with no readable `def` (`define_method`, `attr_*`) does not.
+      def project_exit_def_terminates?(node)
+        def_node = project_exit_def(node.name)
+        return false unless def_node.is_a?(Prism::DefNode)
+
+        args = Array.new(node.arguments&.arguments&.size || 0) { Type::Combinator.untyped }
+        scope.user_method_return(def_node, scope.self_type, args).is_a?(Type::Bot)
+      rescue StandardError
+        false
+      end
+
+      def project_exit_def(name)
+        self_type = scope.self_type
+        class_name = enclosing_class_name_for(self_type)
+        if class_name
+          walk = self_type.is_a?(Type::Singleton) ? :singleton_def_through_ancestors : :user_def_through_ancestors
+          found = scope.public_send(walk, class_name, name)
+          return found.first if found.is_a?(Array) && found.first
+        end
+        scope.top_level_def_for(name)
+      end
+
+      # Issue #1230 review — whether a receiver-less call named `name` reaches a method the project defines on `self`'s
+      # class or an ancestor (a `def`, `define_method`, `attr_*`), or a top-level def, rather than `Kernel`'s exit
+      # method. `class Collector; def fail(msg) = @errors << msg` makes `fail("bad")` an ordinary call.
+      def project_answers_exit_name?(name)
+        self_type = scope.self_type
+        class_name = enclosing_class_name_for(self_type)
+        kind = self_type.is_a?(Type::Singleton) ? :singleton : :instance
+        return true if class_name && ProjectMethodOwnership.defines?(class_name, name, kind, scope)
+
+        !scope.top_level_def_for(name).nil?
+      end
+
+      # The last expression a branch body evaluates, through statements, parentheses and an `else` clause.
+      def branch_tail(node)
+        case node
+        when Prism::StatementsNode then branch_tail(node.body.last)
+        when Prism::ParenthesesNode then branch_tail(node.body)
+        when Prism::ElseNode then branch_tail(node.statements)
+        else node
+        end
+      end
+
+      # Whether `tail` is an implicit-self call (no receiver, or `self.`) whose method a project subclass of `self`'s
+      # class defines on itself, so the call may run that override instead of the `bot` method it typed against.
+      def self_call_overridden_below?(tail)
+        return false unless tail.is_a?(Prism::CallNode) && (tail.receiver.nil? || tail.receiver.is_a?(Prism::SelfNode))
+
+        self_type = scope.self_type
+        class_name = enclosing_class_name_for(self_type)
+        return false if class_name.nil?
+
+        singleton = self_type.is_a?(Type::Singleton)
+        RefinedDispatch::OwnMethod.each_subclass(scope, class_name, possible_only: true) do |subclass|
+          return true if defined_on_class_itself?(subclass, tail.name, singleton)
+        end
+        false
+      end
+
+      def defined_on_class_itself?(class_name, name, singleton)
+        if singleton
+          !scope.singleton_def_for(class_name, name).nil? || scope.discovered_method?(class_name, name, :singleton)
+        else
+          !scope.user_def_for(class_name, name).nil? || scope.discovered_method?(class_name, name, :instance)
+        end
       end
 
       def eval_branch_or_nil(branch_node, branch_scope, on_enter: @on_enter)

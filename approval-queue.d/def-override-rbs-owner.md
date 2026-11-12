@@ -17,7 +17,7 @@
 
 ## Decision
 
-The walk asks only an ancestor whose own RBS declares the method, in its body or through an interface it includes itself; an RBS-only owner leaves the rules silent, as for a direct RBS-only parent. This applies ADR-35's existing restriction and keeps an interface a project class includes answering as that class, as before. `-> void` over a parent return of exactly `nil` is exempt, keyed on the declared `void` of every override arm; `-> top` over `nil` and `void` over any non-nil return still fire. False positives outrank the worst-case reading (AGENTS.md, ADR-5). Both rules are stated in `docs/type-specification/diagnostic-policy.md`.
+The walk asks only an ancestor whose own RBS declares the method, in its body or through an interface it includes itself; an RBS-only owner leaves the rules silent, as for a direct RBS-only parent. This applies ADR-35's existing restriction and keeps an interface a project class includes answering as that class, as before. `-> void` over a parent return of exactly `nil` is exempt (a parent `-> NilClass` counts as `nil`), keyed on the declared `void` of every override arm; an ancestor that inherits the declaration from an RBS-only owner the project chain cannot see ends the walk silent rather than letting a farther project ancestor answer; `-> top` over `nil` and `void` over any non-nil return still fire. False positives outrank the worst-case reading (AGENTS.md, ADR-5). Both rules are stated in `docs/type-specification/diagnostic-policy.md`.
 
 ## To undo
 

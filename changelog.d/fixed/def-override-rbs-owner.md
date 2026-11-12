@@ -1,2 +1,2 @@
 - **[engine]** `def.override-return-widened` and `def.override-param-narrowed` no longer name a project class that only inherits a method from an RBS-only ancestor as the overridden owner, and stay silent there as they do for a direct RBS-only parent. ([#3154](https://github.com/rigortype/rigor/pull/3154))
-  - An override declared `-> void` over a parent return of exactly `nil` is no longer reported as widening; `void` over any other return still is.
+  - An override declared `-> void` over a parent return of exactly `nil` or `NilClass` is no longer reported as widening; `void` over any other return still is.

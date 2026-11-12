@@ -202,7 +202,10 @@ module Rigor
       # 47: issues #2079 / #2170 — each seed bundle's `global_write_census` also records each instance-side ivar
       # write's coarse value (`[:own_write_type, class, name, value, path]`), which the class-ivar census joins across
       # files and along the chain; a pre-47 bundle carries none, so a warm run would keep a seed a cold run widens.
-      SCHEMA = 47
+      # 48: issue #1237 — a `return_summaries` key may carry a third element, `true`, for a call key a splat call
+      # observed, which the gate re-drives with no positional correspondence. A pre-48 summary holds such a call under a
+      # positional key the engine bound as one argument, so a warm run would re-drive it the old way.
+      SCHEMA = 48
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.
@@ -233,7 +236,8 @@ module Rigor
       # fingerprint cannot see.
       # ADR-89 WD2:
       # `return_summaries` maps a `[path, "Class#method" | "Class.method"]` to the callee's persisted
-      # behavioural surface `{ keys:, returns:, effects: }` — the observed `[receiver, arg_types]` call keys
+      # behavioural surface `{ keys:, returns:, effects: }` — the observed `[receiver, arg_types]` call keys (issue
+      # #1237: `[receiver, arg_types, true]` for a key a splat call observed)
       # (Marshal-clean type tuples), their `describe(:short)` return descriptors, and the content-mutated
       # parameter positions. A recheck re-evaluates a declaration-stable changed callee at these keys and,
       # when every return + the effects are unchanged, skips its symbol dependents.

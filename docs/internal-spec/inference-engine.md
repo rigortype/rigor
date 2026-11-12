@@ -955,9 +955,10 @@ binding cannot manufacture a diagnostic inside the callee's body.
     is passed as keywords when it is a `ruby2_keywords` hash.
 
   The body still answers, so a callee that always raises keeps `bot` and a return that reads no positional is
-  kept. Such a frame neither reads nor stores the ADR-84 return memo, whose entries the incremental session
-  re-drives through the ordinary binder, and it installs no `...` forwarding list. A `Tuple` splat is not
-  expanded into positionals.
+  kept. Such a frame MUST read and store the ADR-84 return memo under a key of its own, distinct from every
+  positional key, so a splat call is memoized, recorded and bounded like any other frame; its ADR-89 return
+  summary key carries the same mark, and the incremental session MUST re-drive that key with no positional
+  correspondence too. It installs no `...` forwarding list. A `Tuple` splat is not expanded into positionals.
 - `def m(...)` MUST NOT be declined by the call-site binder. Its NAMED parameters (a leading `def m(a, ...)`
   required) bind as before, and nothing is bound for the forwarding slot, which is not a binding at all.
 - A `f(...)` call inside a `def m(...)` body MUST expand to the argument types of the call that entered the frame, so

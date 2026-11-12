@@ -2680,6 +2680,58 @@ end
       end
     end
 
+    # Issue #1237 — a call with a positional splat re-types the callee with no positional correspondence and stores
+    # it under a key of its own, which the summary carries as `[receiver, arg_types, true]` and the gate re-drives
+    # the same way. Without it the gate re-drove only the positional keys, saw no change there, and skipped the
+    # splat reader, which kept a warning a cold run no longer reports.
+    describe "a splat reader of an edited callee" do
+      let(:row_b) { "class Row\n  def v(*k) = k.size > 5 ? :b : :b\nend\n" }
+      let(:row_a) { "class Row\n  def v(*k) = k.size > 5 ? :a : :b\nend\n" }
+      let(:top_b) { "def v(*k) = k.size > 5 ? :b : :b\n" }
+      let(:top_a) { "def v(*k) = k.size > 5 ? :a : :b\n" }
+
+      # `row` is the callee file's first content and `edited` its second; `call` is how the readers reach it.
+      def recheck_after_edit(row, edited, call)
+        Dir.mktmpdir do |dir|
+          callee = File.join(dir, "row.rb")
+          File.write(callee, row)
+          File.write(File.join(dir, "spl.rb"), "class S\n  def go(idx)\n    puts 'hit' if #{call}(*idx) == :a\n  end\nend\n")
+          File.write(File.join(dir, "pos.rb"), "class P\n  def go = Rigor.dump_type(#{call}(1))\nend\n")
+          session = session_for(configuration(dir))
+          guarded_baseline(session)
+
+          File.write(callee, edited)
+          recheck = guarded_recheck(session)
+          yield session, callee if block_given?
+          [sorted(recheck.diagnostics), sorted(full_run(dir))]
+        end
+      end
+
+      it "observes the splat call's key" do
+        recheck_after_edit(row_b, row_b, "Row.new.v") do |session, callee|
+          keys = session.instance_variable_get(:@return_summaries).fetch([callee, "Row#v"])[:keys]
+          expect(keys.map { |key| key.size == 3 && key.last }).to include(true)
+        end
+      end
+
+      it "matches a full run when the edit makes the splat reader's branch reachable" do
+        warm, cold = recheck_after_edit(row_b, row_a, "Row.new.v")
+        expect(warm).to eq(cold)
+      end
+
+      it "matches a full run when the edit makes the splat reader's branch unreachable" do
+        warm, cold = recheck_after_edit(row_a, row_b, "Row.new.v")
+        expect(warm).to eq(cold)
+      end
+
+      it "matches a full run for a top-level def" do
+        warm, cold = recheck_after_edit(top_b, top_a, "v")
+        expect(warm).to eq(cold)
+        warm, cold = recheck_after_edit(top_a, top_b, "v")
+        expect(warm).to eq(cold)
+      end
+    end
+
     # Issue #1237 — a call with a positional splat re-types the callee with no positional correspondence, which the
     # re-drive's ordinary binder cannot reproduce from the call key, so that frame keeps no return-memo entry and no
     # return summary is observed for it.

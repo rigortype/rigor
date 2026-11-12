@@ -137,6 +137,10 @@ def fwd(...) = count(...)"
       expect(rules(raising(defs, "1.die(*msgs)"))).to eq([])
     end
 
+    it "through a def with trailing positionals" do
+      expect(rules(raising("def pdie(a, *r, z) = raise(ArgumentError)", "pdie(*msgs)"))).to eq([])
+    end
+
     it "through an index read" do
       defs = "class Row\n  def [](*k) = raise(KeyError)\nend"
       expect(rules(raising(defs, "Row.new[*msgs]"))).to eq([])
@@ -174,6 +178,17 @@ def fwd(...) = count(...)"
     it "a keyword the call writes beside the splat" do
       defs = "class Row\n  def kw(*a, k: 1) = k\nend"
       expect(rules(program(defs, "Row.new.kw(*idx, k: 2)", expected: 3))).to eq(always)
+    end
+  end
+
+  describe "an optional parameter's default is not read" do
+    it "does not take the bot of a body that raises only for the default" do
+      source = raising("def maybe6(a = 1) = a == 1 ? raise(ArgumentError) : nil", "maybe6(*msgs)")
+      expect(rules(source)).to eq(["call.possible-nil-receiver"])
+    end
+
+    it "does not fold to the default" do
+      expect(rules(program("def opt(a = 5) = a", "opt(*[7])", expected: 7))).to eq([])
     end
   end
 

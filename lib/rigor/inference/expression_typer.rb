@@ -321,8 +321,10 @@ module Rigor
       # unchanged before skipping the callee's symbol dependents. nil for an abstract / bodyless def, or when
       # the memo refuses a transient result — the caller treats either as "not provably stable" (keeps the
       # dependents), the conservative direction.
-      def return_type_for(def_node, receiver, arg_types)
-        infer_user_method_return(def_node, receiver, arg_types)
+      #
+      # Issue #1237 — `positionals_unknown:` re-drives a key a splat call observed, binding it the way that call did.
+      def return_type_for(def_node, receiver, arg_types, positionals_unknown: false)
+        infer_user_method_return(def_node, receiver, arg_types, positionals_unknown: positionals_unknown)
       end
 
       # The `receiver[args]` read a compound index write performs before it stores (`c[k] += v` reads `c[k]`),
@@ -3757,7 +3759,10 @@ module Rigor
       # when every return is unchanged, skips its symbol dependents. Carrying two frozen type refs is
       # negligible on the memo-store path (already in scope) and never enters memo equality (entries are
       # keyed by `memo_key`, retrieved by `.result` / `.read_set`).
-      MemoEntry = Data.define(:result, :read_set, :receiver, :arg_types)
+      #
+      # Issue #1237 — `positionals_unknown` marks an entry a splat call stored ({#positional_correspondence}): the
+      # session re-drives its key the same way ({#return_type_for}).
+      MemoEntry = Data.define(:result, :read_set, :receiver, :arg_types, :positionals_unknown)
       private_constant :MemoEntry
 
       # ADR-84 WD3 — thread-local transient-machinery event log, appended by `note_transient_fallback` at
@@ -3867,9 +3872,9 @@ module Rigor
       # the same node under another list must add it to the key.
       #
       # Issue #1237 — `positionals_unknown:` re-types the body with no positional correspondence
-      # ({#positional_correspondence}): `arg_types` is then the call's keyword shape alone. Such a frame neither
-      # reads nor stores the return memo, whose entries the incremental session re-drives through the ordinary
-      # binder ({#return_type_for}), and installs no `...` forwarding list.
+      # ({#positional_correspondence}): `arg_types` is then the call's keyword shape alone. Such a frame reads and
+      # stores the return memo under a key of its own ({#return_memo_key}), which the incremental session re-drives
+      # with the same flag ({#return_type_for}), and installs no `...` forwarding list.
       def infer_user_method_return(def_node, receiver, arg_types, self_fold_safe: false, yield_type: nil,
                                    refinements: nil, positionals_unknown: false)
         return nil if def_node.body.nil?
@@ -3923,13 +3928,10 @@ module Rigor
         # inside a yielding body from inheriting the outer caller's block.
         forwarded = positionals_unknown ? nil : forwarded_frame_types(def_node, arg_types)
         ExpressionTyper.with_call_site_frame(yield_type, forwarded) do
-          if positionals_unknown
-            next compute_user_method_return(def_node, body_scope, stack, receiver, arg_types, plain_signature,
-                                            positionals_unknown: true)
-          end
           unless memo_candidate?(stack, plain_signature)
             trace_memo_refusal(stack, plain_signature)
-            next compute_user_method_return(def_node, body_scope, stack, receiver, arg_types, plain_signature)
+            next compute_user_method_return(def_node, body_scope, stack, receiver, arg_types, plain_signature,
+                                            positionals_unknown: positionals_unknown)
           end
 
           # INVARIANT (ADR-46 recording soundness, ADR-84 WD2) — the deep cross-file dependency edges (the
@@ -3946,7 +3948,8 @@ module Rigor
           # (ActiveStorage video_analyzer.rb's subtree, 0.43s -> >90s; PR #79) and stays rejected. Pinned by
           # spec/rigor/inference/return_memo_recording_spec.rb (cross-file replay completeness) and
           # dependency_recorder_spec.rb's transitive deep-edge example.
-          consult_and_store_return_memo(def_node, body_scope, stack, receiver, arg_types, plain_signature)
+          consult_and_store_return_memo(def_node, body_scope, stack, receiver, arg_types, plain_signature,
+                                        positionals_unknown: positionals_unknown)
         end
       end
 
@@ -4023,7 +4026,8 @@ module Rigor
       #
       # ADR-129 WD3 — the ADR-55 summaries are not read here: a hit neither reads nor writes them, and a miss's
       # compute takes them ({#return_summaries}).
-      def consult_and_store_return_memo(def_node, body_scope, stack, receiver, arg_types, plain_signature)
+      def consult_and_store_return_memo(def_node, body_scope, stack, receiver, arg_types, plain_signature,
+                                        positionals_unknown: false)
         per_def = (return_memo_bucket[def_node] ||= {})
         # Issue #525 — the `:self` fold-safety grant is a THIRD call-site-varying dimension: the same
         # `(receiver, arg_types)` body returns a folded member type when the caller's receiver expression
@@ -4034,7 +4038,7 @@ module Rigor
         # passed in for the same reason: a yielding callee's return depends on the block THIS call site
         # hands it, so two call sites passing differently-typed blocks must not share an entry. It is nil
         # for every def that cannot reach a `yield`, which is where the memo's mass is.
-        memo_key = return_memo_key(body_scope, receiver, arg_types)
+        memo_key = return_memo_key(body_scope, receiver, arg_types, positionals_unknown: positionals_unknown)
         if (entry = recall_return_memo(per_def, def_node, memo_key))
           BudgetTrace.hit(BudgetTrace::MEMO_HITS)
           Analysis::DependencyRecorder.replay(entry.read_set) if Analysis::DependencyRecorder.active?
@@ -4046,28 +4050,36 @@ module Rigor
         entry_depth = stack.size
         event_mark = transient_event_mark
         result, read_set = MemoAudit.key_audit("return memo", RETURN_MEMO_KEY_AUDIT, memo_key) do
-          compute_with_read_capture(def_node, body_scope, stack, receiver, arg_types, plain_signature)
+          compute_with_read_capture(def_node, body_scope, stack, receiver, arg_types, plain_signature,
+                                    positionals_unknown)
         end
 
         if context_tainted?(event_mark, entry_depth) && !top_result?(result)
           BudgetTrace.hit(BudgetTrace::MEMO_REFUSE_TRANSIENT)
         else
           store_return_memo(per_def, def_node, memo_key,
-                            MemoEntry.new(result: result, read_set: read_set, receiver: receiver, arg_types: arg_types))
+                            MemoEntry.new(result: result, read_set: read_set, receiver: receiver, arg_types: arg_types,
+                                          positionals_unknown: positionals_unknown))
         end
         result
       end
 
       # The return memo's key: the call descriptor, the body scope's `:self` grant, and the yield-value Frame, read as a
-      # key term (ADR-129 WD1's key audit).
-      def return_memo_key(body_scope, receiver, arg_types)
+      # key term (ADR-129 WD1's key audit). Issue #1237 — a frame with no positional correspondence keys one term more,
+      # {POSITIONALS_UNKNOWN_KEY}, so it never shares an entry with a positional call whose list reads the same; every
+      # other key is as it was.
+      def return_memo_key(body_scope, receiver, arg_types, positionals_unknown: false)
         MemoAudit.key do
-          [receiver.describe(:short),
-           arg_types.map { |type| type.describe(:short) },
-           body_scope.struct_fold_safe?(:self),
-           typing_state.key_frame(YIELD_VALUE)&.describe(:short)]
+          key = [receiver.describe(:short),
+                 arg_types.map { |type| type.describe(:short) },
+                 body_scope.struct_fold_safe?(:self),
+                 typing_state.key_frame(YIELD_VALUE)&.describe(:short)]
+          positionals_unknown ? key << POSITIONALS_UNKNOWN_KEY : key
         end
       end
+
+      POSITIONALS_UNKNOWN_KEY = :positionals_unknown
+      private_constant :POSITIONALS_UNKNOWN_KEY
 
       # The entry `per_def` holds for `memo_key`, or nil, journaled as a Table read (ADR-129 WD3).
       def recall_return_memo(per_def, def_node, memo_key)
@@ -4144,14 +4156,14 @@ module Rigor
       # ADR-84 WD2 — the memo-miss compute, wrapped in a `DependencyRecorder.capture` window when ADR-46
       # recording is active so the entry can carry its replayable read-set. Returns `[result, read_set]`
       # (`read_set` nil when not recording).
-      def compute_with_read_capture(def_node, body_scope, stack, receiver, arg_types, plain_signature)
+      def compute_with_read_capture(def_node, body_scope, stack, receiver, arg_types, plain_signature,
+                                    positionals_unknown)
+        call = [def_node, body_scope, stack, receiver, arg_types, plain_signature]
         unless Analysis::DependencyRecorder.active?
-          return [compute_user_method_return(def_node, body_scope, stack, receiver, arg_types, plain_signature), nil]
+          return [compute_user_method_return(*call, positionals_unknown: positionals_unknown), nil]
         end
 
-        Analysis::DependencyRecorder.capture do
-          compute_user_method_return(def_node, body_scope, stack, receiver, arg_types, plain_signature)
-        end
+        Analysis::DependencyRecorder.capture { compute_user_method_return(*call, positionals_unknown: positionals_unknown) }
       end
 
       # The ADR-55 recursion-guard + value-unroll + fixpoint body of user-method return inference, factored
@@ -4167,7 +4179,7 @@ module Rigor
         # outermost entry; exhaustion or value blow-up falls back to the plain `(receiver, method)` guard —
         # today's behaviour. Non-constant args never reach this path.
         signature = plain_signature
-        value_key = positionals_unknown ? nil : constant_argument_value_key(arg_types)
+        value_key = constant_argument_value_key(arg_types)
         extended = value_key && unroll_fuel_remaining(stack).positive?
         signature = [plain_signature, value_key] if extended
 

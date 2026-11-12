@@ -39,6 +39,11 @@ binding under a splat) for the compound index read.
   forwarding") moves. Before: `forward(1, 2)` through `def forward(*args) = target(*args)` answered
   `Dynamic[top]`. After: it answers `[Dynamic[top], Dynamic[top]]`. The new answer is more precise, and the Tuple
   is still not expanded.
+- A splat call stores its return-memo entry under a key of its own (the coordinator ruled this in review). The
+  ADR-89 return summary carries such a key as `[receiver, arg_types, true]`, and the incremental gate re-drives it
+  with no positional correspondence. Because of that new key shape, the incremental snapshot SCHEMA moves from 47 to
+  48: a pre-48 summary holds a splat call under a positional key that was bound as one argument. The cost is one
+  cold rebuild of every incremental snapshot.
 
 ## To undo
 

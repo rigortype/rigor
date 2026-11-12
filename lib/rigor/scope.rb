@@ -2615,8 +2615,9 @@ module Rigor
     # against THIS scope's discovery index (so cross-file dispatches in the body resolve). The incremental
     # session re-drives a declaration-stable changed callee at each previously-observed call key to prove its
     # return is unchanged before skipping its symbol dependents.
-    def user_method_return(def_node, receiver, arg_types)
-      Inference::ExpressionTyper.new(scope: self).return_type_for(def_node, receiver, arg_types)
+    def user_method_return(def_node, receiver, arg_types, positionals_unknown: false)
+      typer = Inference::ExpressionTyper.new(scope: self)
+      typer.return_type_for(def_node, receiver, arg_types, positionals_unknown: positionals_unknown)
     end
 
     # Statement-level evaluation: returns the pair `[type, scope']` where `type` is what the node produces and

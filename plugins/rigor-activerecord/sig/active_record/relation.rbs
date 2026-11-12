@@ -239,6 +239,12 @@ module ActiveRecord
     # the Array too, which holds on either version. Without a block it
     # is the query builder.
     #
+    # `Array[Elem]` is a closed receiver, unlike this one: an
+    # ActiveSupport Array method on the result (`pluck`, `second`,
+    # `to_sentence`, `blank?`) resolves only with the
+    # `rigor-activesupport-core-ext` plugin enabled, and reports
+    # `call.undefined-method` without it, as it does after `to_a`.
+    #
     # The `%a{pure}` is the builder form's. The block form's
     # `io.db.read` comes from the plugin's `RELATION_MATERIALIZERS` row,
     # which labels both forms today (#1318).

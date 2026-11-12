@@ -561,8 +561,13 @@ module Rigor
       # A project `self.find` on the model or an ancestor, or a walk that ran out of budget before ruling one out
       # (`maybe`): the veto fails toward declining, as the discovery walk always has.
       def project_find_defined?(entry, scope)
-        !Rigor::Reflection.project_method_defined(entry.class_name, :find, kind: :singleton, source: :discovered,
-                                                                           scope: scope).no?
+        project_singleton_defined?(entry, :find, scope)
+      end
+
+      # The same veto for any class-side selector the plugin answers in Rails' name (`find`, `select`).
+      def project_singleton_defined?(entry, name, scope)
+        !Rigor::Reflection.project_method_defined(entry.class_name, name, kind: :singleton, source: :discovered,
+                                                                          scope: scope).no?
       end
 
       # Class-side finders + the class-side relation entry points. `find` returns the model, or an Array of
@@ -597,7 +602,7 @@ module Rigor
             Rigor::Type::Combinator.nominal_of(entry.class_name),
             Rigor::Type::Combinator.constant_of(nil)
           )
-        when :select then class_select_return_type(call_node, entry)
+        when :select then class_select_return_type(call_node, entry, scope)
         when :where, :all, :order, :limit, :none
           # The rest of the query DSL chains through the bundled `ActiveRecord::Relation` RBS once a
           # relation is open.
@@ -617,8 +622,10 @@ module Rigor
       #
       # `Model.select` is `all.select`, so a block makes it `Enumerable#select` over the loaded records, as the
       # bundled `Relation#select` overload says (#1408), and the answer is an Array of the model. Fields next to a
-      # block answer the Array too, for the reason given on that overload.
-      def class_select_return_type(call_node, entry)
+      # block answer the Array too, for the reason given on that overload. A model that defines its own
+      # `self.select` keeps its own answer in every form, as `find` does (`project_find_defined?`).
+      def class_select_return_type(call_node, entry, scope)
+        return nil if project_singleton_defined?(entry, :select, scope)
         return relation_of(entry.class_name) if call_node.block.nil?
 
         Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of(entry.class_name)])

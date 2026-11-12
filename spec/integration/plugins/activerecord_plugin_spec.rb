@@ -1224,6 +1224,18 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(dumped(source)).to eq(["dump_type: Array[Post]"] * 2)
     end
 
+    it "leaves a model's own `self.select` to the model, in every form" do
+      source = <<~RUBY
+        class Post
+          def self.select(*) = :own
+        end
+        Rigor.dump_type(Post.select(:title) { |post| post.title == "x" })
+        Rigor.dump_type(Post.select { |post| post.title == "x" })
+        Rigor.dump_type(Post.select(:title))
+      RUBY
+      expect(dumped(source)).to eq(["dump_type: :own"] * 3)
+    end
+
     it "draws no ivar-write mismatch between a block `select` and `to_a`" do
       # The redmine `WorkflowsController#find_roles` shape.
       source = <<~RUBY

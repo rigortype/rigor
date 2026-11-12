@@ -7,7 +7,9 @@ require "prism"
 # slot. Read by Prism, not by text, it flags:
 #
 # - per-thread, per-fiber and per-Ractor storage: `Thread.current`, `Fiber.current`, `Ractor.current`,
-#   `thread_variable_get` / `_set`, `Fiber[]`, `Ractor[]`, `Ractor.store_if_absent`;
+#   `thread_variable_get` / `_set`, `Fiber[]`, `Ractor[]`, `Ractor.store_if_absent`; the reflective spellings
+#   (`Thread.send(:current)`, `Thread.method(:current).call[:k]`, `instance_method(...).bind_call`) reach the
+#   same state, so they are flagged at the reflective call, before a `Method` is invoked;
 # - `ObjectSpace::WeakMap` and `WeakKeyMap`;
 # - a module-level write: an instance variable written in a class or module body, at the top level, or in a singleton
 #   method (`def self.x`, `class << self`, `module_function`, `extend self`), and any class-variable or global write;
@@ -499,6 +501,7 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     note_identity_reads(node, file)
     check_thread_state(node, file)
     check_reflective_send(node, context, file)
+    check_reflective_method(node, file)
     check_module_state_call(node, context, file)
     found(file, node, :table_access, name) if table_readers.include?(name)
     if %i[instance_variable_set instance_variable_get class_variable_set const_set].include?(name)
@@ -556,19 +559,54 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     receiver.nil? ? module_level?(context) : module_state_receiver?(receiver, context)
   end
 
+  # The method names that read or write per-thread / per-fiber / per-Ractor storage on any receiver, called
+  # directly or vendored into a `Method` object ({#check_reflective_method}).
+  def thread_storage_names = %i[thread_variable_get thread_variable_set thread_variable? storage store_if_absent]
+
   def check_thread_state(node, file)
     name = node.name
     receiver = node.receiver
     if local_storage_call?(node) && !file[:identity_reads].include?(node.object_id)
       found(file, node, :thread_state, "#{receiver.name}.#{name}")
     end
-    if %i[thread_variable_get thread_variable_set thread_variable? storage store_if_absent].include?(name)
+    if thread_storage_names.include?(name)
       found(file, node, :thread_state, name)
       file[:chained] += 1 if name.start_with?("thread_variable") && local_storage_call?(receiver)
     end
     return unless %i[[] []=].include?(name) && (named_constant?(receiver, :Fiber) || named_constant?(receiver, :Ractor))
 
     found(file, node, :thread_state, "#{receiver.name}#{name}")
+  end
+
+  # `method` / `public_method` / `singleton_method` / `instance_method` / `public_instance_method` vend a
+  # `Method` / `UnboundMethod` that runs the named method wherever it is later invoked — `.call`, `.()`,
+  # `.to_proc.call`, `bind_call` — so the name is checked here, at the reflective call, not at the
+  # invocation. The names {#check_thread_state} flags are flagged again: `current` / `main` on `Thread`,
+  # `Fiber` or `Ractor` or their `singleton_class` (`Thread.singleton_class.instance_method(:current)` is how
+  # an `UnboundMethod` reaches `Thread.current`), the storage names on any receiver, and `[]` / `[]=` on
+  # `Fiber` or `Ractor`.
+  def check_reflective_method(node, file)
+    return unless %i[method public_method singleton_method instance_method public_instance_method].include?(node.name)
+
+    first = node.arguments&.arguments&.first
+    return unless first.is_a?(Prism::SymbolNode) || first.is_a?(Prism::StringNode)
+
+    sent = first.unescaped.to_sym
+    owner = method_state_owner(node.receiver)
+    if %i[current main].include?(sent) && owner
+      found(file, node, :thread_state, "#{owner}.#{sent}")
+    elsif thread_storage_names.include?(sent)
+      found(file, node, :thread_state, sent)
+    elsif %i[[] []=].include?(sent) && %i[Fiber Ractor].include?(owner)
+      found(file, node, :thread_state, "#{owner}#{sent}")
+    end
+  end
+
+  # The `Thread` / `Fiber` / `Ractor` a `X.method(...)` receiver names, directly or through `singleton_class`;
+  # nil for any other receiver.
+  def method_state_owner(receiver)
+    constant = singleton_class_call?(receiver) ? receiver.receiver : receiver
+    %i[Thread Fiber Ractor].find { |name| named_constant?(constant, name) }
   end
 
   def ivar_read?(node) = node.is_a?(Prism::InstanceVariableReadNode)
@@ -735,7 +773,9 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
   end
 
   # G3's own thread-state rule, so every spelling it flags counts (`::Thread.current`, `Thread.send(:current)`,
-  # `Fiber[]`, `Ractor.current[]`, `thread_variable_*`, ...), with a `thread_variable_*` on a `Thread.current` one site.
+  # `Thread.method(:current)`, `Fiber[]`, `Ractor.current[]`, `thread_variable_*`, ...), with a
+  # `thread_variable_*` on a `Thread.current` one site; a `Method`-object spelling never joins `:chained`, so it
+  # can only overcount.
   # A `:thread_state` finding that an allow-list row accounts for is not a site; a file whose findings all are has none.
   def thread_site_count(source, path)
     file = scan(source, path)
@@ -897,6 +937,49 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
         def c = Ractor.store_if_absent(:k) { 1 }
       RUBY
         [1, :thread_state, "Ractor.current"], [2, :thread_state, "Ractor[]"], [3, :thread_state, "store_if_absent"]
+      )
+    end
+
+    # Issue #2812: a `Method` / `UnboundMethod` runs the named method wherever it is later invoked —
+    # `.call`, `.()`, `.to_proc.call`, `bind_call` — so G3 flags the `method`-family call with a literal
+    # name, and not how the object is invoked.
+    it "flags thread state reached through a Method object" do
+      expect(rules_in(<<~RUBY)).to contain_exactly(
+        def a = Thread.method(:current).call[:k]
+        def b = Thread.method(:current).()[:k]
+        def c = Thread.method(:current).to_proc.call[:k]
+        def d = Fiber.method(:current)
+        def e = Ractor.method(:current)
+        def f = Thread.singleton_class.instance_method(:current).bind_call(Thread)[:k]
+        def g = Thread.method("main")
+        def h = Fiber.method(:[])
+        def i = Ractor.method(:[]=)
+        def j = Ractor.method(:store_if_absent)
+      RUBY
+        [1, :thread_state, "Thread.current"], [2, :thread_state, "Thread.current"],
+        [3, :thread_state, "Thread.current"], [4, :thread_state, "Fiber.current"],
+        [5, :thread_state, "Ractor.current"], [6, :thread_state, "Thread.current"],
+        [7, :thread_state, "Thread.main"], [8, :thread_state, "Fiber[]"],
+        [9, :thread_state, "Ractor[]="], [10, :thread_state, "store_if_absent"]
+      )
+    end
+
+    it "flags the storage names through every method-family spelling, and leaves other names alone" do
+      expect(rules_in(<<~RUBY)).to contain_exactly(
+        def a = Thread.instance_method(:thread_variable_get)
+        def b(t) = t.method(:thread_variable_set)
+        def c = Fiber.current.method(:storage)
+        def d = Thread.public_method(:current)
+        def e = Thread.singleton_method(:main)
+        def f = Thread.public_instance_method(:thread_variable_get)
+        def g = Thread.method(:new)
+        def h(plugin) = plugin.method(:x)
+        def i = method(:current)
+      RUBY
+        [1, :thread_state, "thread_variable_get"], [2, :thread_state, "thread_variable_set"],
+        [3, :thread_state, "storage"], [3, :thread_state, "Fiber.current"],
+        [4, :thread_state, "Thread.current"], [5, :thread_state, "Thread.main"],
+        [6, :thread_state, "thread_variable_get"]
       )
     end
 

@@ -950,6 +950,69 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
         expect(widen_messages(ruby, rbs)).to be_empty
       end
 
+      it "exempts `-> void` over a parent `-> NilClass` as over `-> nil`" do
+        ruby = <<~RUBY
+          class PB; def hook = nil; end
+          class PL < PB; def hook; end; end
+        RUBY
+        rbs = rbs_decls("class PB" => "def hook: () -> NilClass", "class PL < PB" => "def hook: () -> void")
+        expect(widen_messages(ruby, rbs)).to be_empty
+      end
+
+      it "exempts an overloaded override only when every arm returns `void`" do
+        ruby = <<~RUBY
+          class PB; def hook(_x = nil) = nil; end
+          class Mixed < PB; def hook(x = nil) = x; end
+          class AllVoid < PB; def hook(_x = nil); end; end
+        RUBY
+        rbs = rbs_decls(
+          "class PB" => "def hook: () -> nil | (Integer) -> nil",
+          "class Mixed < PB" => "def hook: () -> void | (Integer) -> Integer",
+          "class AllVoid < PB" => "def hook: () -> void | (Integer) -> void"
+        )
+        expect(widen_messages(ruby, rbs).map(&:first)).to eq([2])
+      end
+
+      # An RBS-only module `Mid` includes declares the method nearer than the project `PBase`; the walk
+      # ends there instead of reaching past it to `PBase`.
+      let(:rbs_only_nearer_ruby) do
+        <<~RUBY
+          class PBase; def hook(_x) = 1; end
+          class Mid < PBase; end
+          class Leaf < Mid; def hook(_x) = "s"; end
+        RUBY
+      end
+
+      def rbs_only_nearer_rbs(mod_sig, base_sig, leaf_sig)
+        rbs_decls(
+          "module RMod" => "def hook: #{mod_sig}", "class PBase" => "def hook: #{base_sig}",
+          "class Mid < PBase" => "include RMod", "class Leaf < Mid" => "def hook: #{leaf_sig}"
+        )
+      end
+
+      it "stays silent when an RBS-only module nearer than the project parent declares the return" do
+        rbs = rbs_only_nearer_rbs("(Integer) -> Object", "(Integer) -> Integer", "(Integer) -> String")
+        expect(widen_messages(rbs_only_nearer_ruby, rbs)).to be_empty
+      end
+
+      it "stays silent when an RBS-only module nearer than the project parent declares the parameter" do
+        rbs = rbs_only_nearer_rbs("(String) -> Integer", "(Object) -> Integer", "(String) -> Integer")
+        result = analyze(rbs_only_nearer_ruby, sig: { "demo.rbs" => rbs })
+        expect(diags_for(result, "def.override-param-narrowed")).to be_empty
+      end
+
+      it "keeps `def.override-param-narrowed` silent through a project class over an RBS-only owner" do
+        ruby = <<~RUBY
+          class Mid < Base; end
+          class Leaf < Mid; def hook(_x) = nil; end
+        RUBY
+        rbs = rbs_decls(
+          "class Base" => "def hook: (Object) -> nil", "class Mid < Base" => nil,
+          "class Leaf < Mid" => "def hook: (String) -> nil"
+        )
+        expect(diags_for(analyze(ruby, sig: { "demo.rbs" => rbs }), "def.override-param-narrowed")).to be_empty
+      end
+
       {
         "`-> void` over a non-nil parent" => ["Integer", "void", "1", "Integer to top"],
         "`-> top` over `-> nil`" => ["nil", "top", "nil", "nil to top"],

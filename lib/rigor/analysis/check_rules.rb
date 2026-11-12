@@ -4946,14 +4946,21 @@ module Rigor
           )
         end
 
-        # A `-> void` override of a parent return of exactly `nil` is exempt (#3046): both say "no useful
+        # A `-> void` override of a parent return of exactly `nil` (or `NilClass`) is exempt (#3046): both say "no useful
         # value", and callers cannot use a void return. Keyed on the declared `void` of every arm (the
         # translator reads `void` as top, so a `-> top` override still fires); any non-nil parent return
         # still fires.
         def void_over_nil?(override_method, parent_return)
-          return false unless parent_return.is_a?(Type::Constant) && parent_return.value.nil?
+          return false unless nil_type?(parent_return)
 
           override_method.method_types.all? { |mt| mt.type.return_type.is_a?(::RBS::Types::Bases::Void) }
+        end
+
+        # `nil`, or the nominal `NilClass`, whose only value it is.
+        def nil_type?(type)
+          return type.value.nil? if type.is_a?(Type::Constant)
+
+          type.is_a?(Type::Nominal) && type.class_name == "NilClass" && type.type_args.empty?
         end
 
         # `[defining_class, RBS::Definition::Method]` for the nearest project-discovered ancestor whose
@@ -4964,21 +4971,39 @@ module Rigor
 
           case Inference::DefinerResolution.resolve(scope, class_name, method_name, :instance,
                                                     question: :override, from: from) do |ancestor|
-                 method_def = safe_instance_method_definition(ancestor, method_name, scope)
-                 # The signature text is the answer two worlds compare: an `RBS::Definition::Method` has no
-                 # structural equality of its own. Only an ancestor whose own RBS declares the method answers:
-                 # a project class that merely inherits it from an RBS-only ancestor is asked past, so the
-                 # owner named is the real one and an RBS-only owner stays silent (#3046, #130).
-                 method_def.method_types.map(&:to_s) if method_def && declared_by?(method_def, ancestor)
+                 override_parent_answer(scope, ancestor, method_name)
                end
-          in Inference::DefinerResolution::Known(owner:)
-            method_def = safe_instance_method_definition(owner, method_name, scope)
-            method_def && [owner, method_def]
+          in Inference::DefinerResolution::Known(owner:, answer:)
+            unless answer.last == RBS_ONLY_OWNER
+              method_def = safe_instance_method_definition(owner, method_name, scope)
+              method_def && [owner, method_def]
+            end
           in Inference::DefinerResolution::UNKNOWN # the case/in contract needs one arm per answer
             nil
           in Inference::DefinerResolution::ABSENT # rubocop:disable Lint/DuplicateBranch -- see above
             nil
           end
+        end
+
+        # The answer an RBS-only owner gives the override walk: it ends the walk, and the rule stays silent.
+        RBS_ONLY_OWNER = :rbs_only_owner
+        private_constant :RBS_ONLY_OWNER
+
+        # One project ancestor's answer to the override walk. The signature text is the answer two worlds
+        # compare: an `RBS::Definition::Method` has no structural equality of its own. Only an ancestor whose
+        # own RBS declares the method answers with it (#3046). One that inherits the declaration from another
+        # project class or module is asked past, so that owner answers at its own entry. One that inherits it
+        # from an RBS-only owner the project chain cannot see ends the walk silent ({RBS_ONLY_OWNER}): that
+        # owner is the nearest declaration, and RBS-only ancestors are #130's.
+        def override_parent_answer(scope, ancestor, method_name)
+          method_def = safe_instance_method_definition(ancestor, method_name, scope)
+          return nil if method_def.nil?
+          return method_def.method_types.map(&:to_s) if declared_by?(method_def, ancestor)
+
+          owner = method_def.implemented_in || method_def.defined_in
+          return nil if owner && scope.discovered_classes.key?(normalize_class_name(owner))
+
+          RBS_ONLY_OWNER
         end
 
         # True when `ancestor`'s own RBS declares `method_def`: on its body, or through an interface it

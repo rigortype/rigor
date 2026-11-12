@@ -1,4 +1,5 @@
 - **[plugin]** `rigor-activerecord` types `relation.select { … }` and `Model.select { … }` as an Array of the model instead of the relation. ([#1408](https://github.com/rigortype/rigor/issues/1408), [#3165](https://github.com/rigortype/rigor/pull/3165))
-  - With a block, `select` is `Enumerable#select` over the loaded records, and the block parameter is now the model.
-  - `select(:col)` without a block still returns the relation.
-  - An Array assigned from a block `select` no longer draws `def.ivar-write-mismatch` against a later `.to_a` write.
+  - With a block, `select` is `Enumerable#select` over the loaded records. On a relation the block parameter is now the model; on the class-side `Model.select { … }` it is still untyped.
+  - `select(:col)` without a block still returns the relation, and a model that defines its own `self.select` keeps its own answer.
+  - An Array assigned from a block `select` no longer draws `def.ivar-write-mismatch` against a later `.to_a` write, and now draws it against a relation written to the same instance variable elsewhere, which matches what runs.
+  - An ActiveSupport Array method on the result (`pluck`, `second`, `to_sentence`, `blank?`) needs the `rigor-activesupport-core-ext` plugin, as it does after `to_a`; without it, it reports `call.undefined-method`.

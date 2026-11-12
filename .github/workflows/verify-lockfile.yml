@@ -9,6 +9,12 @@ on:
     branches:
       - master
 
+# A new push to a PR head supersedes the previous head's run, so cancel it instead of leaving it
+# to hold a runner. master push runs keep a per-commit group and run to completion, like ci.yml's.
+concurrency:
+  group: ${{ github.ref == 'refs/heads/master' && format('{0}-{1}-{2}', github.workflow, github.ref, github.sha) || format('{0}-{1}', github.workflow, github.ref) }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
 permissions:
   contents: read
 

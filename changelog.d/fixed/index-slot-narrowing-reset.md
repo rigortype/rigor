@@ -1,0 +1,2 @@
+- **[inference]** A compound index write into a slot an earlier `h[k] ||= default` narrowed (`h[:e] += 1`, `h[:e] &&= 5`) now replaces the narrowing with the value it stored, so the slot no longer reads the stale default and `h[:e] == 0` no longer folds to always truthy. ([#3105](https://github.com/rigortype/rigor/pull/3105))
+  - A store whose index is not one literal key (`h[k] = v` with a variable `k`, `h[k] += v`, `h[k] ||= v`, or a splice such as `s[0, 1] = [1, 2]`) now drops every slot narrowing on the receiver, since it may overwrite any slot.

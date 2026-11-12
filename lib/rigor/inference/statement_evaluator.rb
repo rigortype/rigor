@@ -1783,8 +1783,7 @@ module Rigor
         # record `a[0]`'s type as the region answer: `a[0, 1] ||= []` would claim `a[0]` non-nil
         # where the store splices nothing and `a[0]` stays nil at runtime. Decline the record for
         # any form but the single-index one.
-        key_node = single_index_argument(node)
-        address = key_node && IndexedNarrowing.stable_address(node.receiver, key_node)
+        address = recordable_slot_address(node, post_rhs)
         # Issue #544 — a receiver with an untracked (Dynamic / Top) constituent can hold a caller-supplied
         # slot value the `||=` keeps, so the recorded default would invent a fact; decline the record.
         address = nil if address && !IndexedNarrowing.fully_tracked_receiver_type?(scope.type_of(node.receiver))
@@ -1875,16 +1874,24 @@ module Rigor
         widened = IndexWriteWidening.widen(node: node, current_scope: post_rhs,
                                            arg_types: index_write_arg_types(node, stored, join_scope: operands))
         widened = IndexedNarrowing.invalidate_indexed_write(node, widened)
-        address = narrowed_index_write_address(node)
-        widened = widened.with_indexed_narrowing(*address, stored) if address
+        address = recordable_slot_address(node, post_rhs)
+        widened = widened.with_indexed_narrowing(*address, stored) if address && scope.indexed_narrowing(*address)
         [stored, forget_rebound_specials(widened, node)]
       end
 
-      # The single literal slot `node` writes when the entry scope holds a narrowing on it, else nil.
-      def narrowed_index_write_address(node)
+      # The `(receiver, key)` slot a compound index write may record its stored value on, or nil. A narrowing is
+      # keyed on ONE literal slot, so a multi-index form, which reads and stores a splice region, records none. The
+      # receiver's `[]=` must leave the stored value at that slot ({IndexedNarrowing.verbatim_slot?}: a `Hash` or
+      # `Array`, and no negative index on an `Array`), and the rvalue must not have rebound the receiver variable
+      # ({IndexedNarrowing.receiver_rebound?}), since the store went to the object it named before (issue #1218).
+      def recordable_slot_address(node, post_rhs)
         key_node = single_index_argument(node)
         address = key_node && IndexedNarrowing.stable_address(node.receiver, key_node)
-        address if address && scope.indexed_narrowing(*address)
+        return nil if address.nil?
+        return nil unless IndexedNarrowing.verbatim_slot?(scope.type_of(node.receiver, tracer: tracer), address.last)
+        return nil if IndexedNarrowing.receiver_rebound?(node.receiver, scope, post_rhs)
+
+        address
       end
 
       # The scope a compound index write's rvalue runs from: Ruby evaluates the receiver, then the index arguments,

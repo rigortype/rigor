@@ -148,16 +148,55 @@ module Rigor
       # Issue #1218 — a literal single index drops that one slot and leaves the others. Any other index list on a
       # stable receiver — a key that is not a literal (`h[k] = 1` may be `h[:e] = 1`), a multi-index splice
       # (`s[0, 1] = [1, 2]` shifts every later slot), a splat — may write any slot, so it drops every narrowing on
-      # the receiver, as {.invalidate_mutator} does. An unstable receiver records no narrowing to drop.
+      # the receiver, as {.invalidate_mutator} does. So does a negative Integer index on a receiver not shown to be a
+      # `Hash`: on an `Array` `a[-1]` is the slot some non-negative index also names. An unstable receiver records
+      # no narrowing to drop.
       def invalidate_indexed_write(node, current_scope)
         receiver = stable_receiver(node.receiver)
         return current_scope if receiver.nil?
 
         indexes = index_arguments(node)
         address = indexes.size == 1 ? stable_address(node.receiver, indexes.first) : nil
-        return current_scope.without_indexed_narrowing(*address) if address
+        if address && !aliasing_index?(address.last, current_scope.type_of(node.receiver))
+          return current_scope.without_indexed_narrowing(*address)
+        end
 
         current_scope.without_indexed_narrowings_for(*receiver)
+      end
+
+      # Whether the literal `key` may name the same slot as another literal key: a negative Integer, unless the
+      # receiver is a `Hash`, which tells `-1` from every other key.
+      def aliasing_index?(key, receiver_type)
+        key.is_a?(Integer) && key.negative? && !carrier_receiver_type?(receiver_type, HASH_CARRIER)
+      end
+
+      VERBATIM_STORE_CARRIERS = %w[Hash Array].freeze
+      HASH_CARRIER = %w[Hash].freeze
+      private_constant :VERBATIM_STORE_CARRIERS, :HASH_CARRIER
+
+      # Whether a store through `[]=` on a receiver of `receiver_type` at the literal `key` leaves exactly the stored
+      # value at that slot, so a recorded narrowing may claim it. Only a `Hash` or `Array` carrier (a shape, a tuple,
+      # a `Hash` / `Array` nominal, refined or not) does, for every member of a union. A `String`'s `[]=` splices
+      # (`s[0] = "xy"` leaves `s[0] == "x"`), and a project class's `[]=` may store anything. A negative Integer key
+      # aliases a non-negative one on an `Array` ({.aliasing_index?}), so it records only on a `Hash`.
+      def verbatim_slot?(receiver_type, key)
+        carrier_receiver_type?(receiver_type, VERBATIM_STORE_CARRIERS) && !aliasing_index?(key, receiver_type)
+      end
+
+      def carrier_receiver_type?(type, classes)
+        members = type.is_a?(Type::Union) ? type.members : [type]
+        members.all? { |member| classes.include?(UnknownStoreWidening.carrier_class(member)) }
+      end
+
+      # Whether evaluating a compound write's rvalue rebound its stable receiver variable: `h[k] += (h = {}; 1)` stores
+      # into the hash `h` named before the rvalue ran, so the slot of the hash `h` names afterwards is not the one
+      # written. A binding the rvalue left alone is the same object in both scopes.
+      def receiver_rebound?(receiver_node, before, after)
+        case receiver_node
+        when Prism::LocalVariableReadNode then !before.local(receiver_node.name).equal?(after.local(receiver_node.name))
+        when Prism::InstanceVariableReadNode then !before.ivar(receiver_node.name).equal?(after.ivar(receiver_node.name))
+        else false
+        end
       end
 
       def index_arguments(node)

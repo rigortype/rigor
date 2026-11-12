@@ -73,6 +73,36 @@ RSpec.describe Rigor::RootedGlob do
     expect(described_class.split_file("config/recurring[1].yml")).to eq([".", "config/recurring\\[1\\].yml"])
   end
 
+  # #2586 — the schedule readers expand a configured path with `File.expand_path`, so a `~/x` entry reads
+  # `$HOME/x`; the watch must be split from that spelling. `[".", "~/x"]` watched `./~/x` and never fired.
+  describe "a ~-prefixed configured file path" do
+    def with_home(home)
+      saved = Dir.home
+      ENV["HOME"] = home
+      yield
+    ensure
+      ENV["HOME"] = saved
+    end
+
+    it "splits where the readers' File.expand_path reads it" do
+      Dir.mktmpdir do |home|
+        with_home(home) do
+          write(File.join(home, "schedule[1].yml"))
+
+          root, pattern = described_class.split_file("~/schedule[1].yml")
+
+          expect(root).to eq(home)
+          expect(described_class.glob(root, pattern)).to eq([File.join(home, "schedule[1].yml")])
+        end
+      end
+    end
+
+    it "keeps a ~name it cannot expand literal, as File.expand_path fails on it too" do
+      expect(described_class.split_file("~rigor-no-such-user-2586/x.yml"))
+        .to eq([".", "~rigor-no-such-user-2586/x.yml"])
+    end
+  end
+
   it "does not leave a root named `{..,zz}`" do
     root = File.join(parent, "proj", "{..,zz}")
     write(File.join(root, "in.rb"))

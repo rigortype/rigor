@@ -3,6 +3,7 @@
 require_relative "../../plugin"
 require_relative "../../plugin/loader"
 require_relative "../../plugin/services"
+require_relative "../../plugin/trust_policy"
 require_relative "../../reflection"
 require_relative "../../type/combinator"
 
@@ -107,14 +108,16 @@ module Rigor
         end
 
         # Mirrors `Analysis::WorkerSession`'s services: the shared fact store plus whatever cache store the
-        # caller holds. Holding the `Services` is what gives access to the fact store the loaded plugins
-        # share — the loader hands the same instance to every plugin.
+        # caller holds, and the run's trust policy — `rigor unused`'s plugin roots read the same scope
+        # `rigor check` does (#2586). Holding the `Services` is what gives access to the fact store the
+        # loaded plugins share — the loader hands the same instance to every plugin.
         def build_services(configuration, cache_store)
           Plugin::Services.new(
             reflection: Reflection,
             type: Type::Combinator,
             configuration: configuration,
-            cache_store: cache_store
+            cache_store: cache_store,
+            trust_policy: Plugin::TrustPolicy.for_configuration(configuration)
           )
         end
 

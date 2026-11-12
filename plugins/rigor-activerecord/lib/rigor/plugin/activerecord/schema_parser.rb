@@ -32,8 +32,9 @@ module Rigor
       # {NON_COLUMN_METHODS} (indexes, constraints, foreign keys) are skipped.
       #
       # `create_table "x", primary_key: "name"` adds that column, typed from the `id:` option when the call is
-      # read completely and untyped otherwise. The `id` column stays registered; `id: false` or `id: nil` removes
-      # it and adds neither.
+      # read completely and untyped otherwise. `record.id` reads the primary key column's value, so the `id`
+      # column takes the same type; a composite or unreadable `primary_key:` leaves it untyped. `id: false` or
+      # `id: nil` removes it and adds neither.
       #
       # Designed for the Prism interpretation pattern from rigor-lisp-eval — recursive descent on the AST,
       # no eval.
@@ -100,10 +101,24 @@ module Rigor
           [table_name, columns.freeze]
         end
 
-        # A call this parser does not read completely may still say the key is not an integer.
+        # `record.id` reads the primary key column's value, so the `id` reader takes the key's type — the
+        # same shape the `id:` option gives the column `primary_key:` names or the implicit `id` column.
+        # A composite `primary_key:` makes `id` an Array this parser does not type, and a `primary_key:`
+        # it cannot read leaves `id` untyped as well.
         def implicit_id_column(call_node)
-          read = keywords_read?(call_keywords(call_node))
-          SchemaTable::Column.new(name: "id", type: read ? :integer : UNKNOWN_PRIMARY_KEY_TYPE, ruby_type: read ? "Integer" : "Object")
+          unless single_primary_key?(call_node)
+            return SchemaTable::Column.new(name: "id", type: UNKNOWN_PRIMARY_KEY_TYPE, ruby_type: "Object")
+          end
+
+          SchemaTable::Column.new(name: "id", **primary_key_shape(call_node))
+        end
+
+        # `primary_key:` names one key column when it is a String or Symbol literal; `nil` or `false` falls
+        # back to the default `id` column the way `primary_key || ...` does in Rails.
+        def single_primary_key?(call_node)
+          primary_key = keyword_value(call_node, :primary_key)
+          primary_key.nil? || primary_key.is_a?(Prism::NilNode) || primary_key.is_a?(Prism::FalseNode) ||
+            !literal_name(primary_key).nil?
         end
 
         def id_disabled?(call_node)
@@ -119,20 +134,30 @@ module Rigor
           name = literal_name(keyword_value(call_node, :primary_key))
           return nil if name.nil?
 
-          id = keyword_value(call_node, :id)
-          options = id.is_a?(Prism::HashNode) ? id.elements : []
-          type = primary_key_type_stated?(call_node, options) ? primary_key_type(id, options) : UNKNOWN_PRIMARY_KEY_TYPE
-          SchemaTable::Column.new(
-            name: name,
-            type: type,
-            ruby_type: primary_key_ruby_type(type),
-            array: keyword_in(options, :array).is_a?(Prism::TrueNode)
-          )
+          SchemaTable::Column.new(name: name, **primary_key_shape(call_node))
         end
 
-        # `id: :string` or `id: { type: :string, ... }`. Rails creates a bigint key when neither names a type,
-        # and a type this parser cannot read as a literal is left unknown rather than assumed to be bigint.
+        # The `id:` option describes the primary key column's type whether the key column is `id` itself or
+        # the column `primary_key:` names. An unreadable call still yields a shape — the column stays
+        # queryable, just untyped.
+        def primary_key_shape(call_node)
+          id = keyword_value(call_node, :id)
+          options = id.is_a?(Prism::HashNode) ? id.elements : []
+          array = keyword_in(options, :array).is_a?(Prism::TrueNode)
+          unless primary_key_type_stated?(call_node, options)
+            return { type: UNKNOWN_PRIMARY_KEY_TYPE, ruby_type: "Object", array: array }
+          end
+
+          type = primary_key_type(id, options)
+          { type: type, ruby_type: primary_key_ruby_type(type), array: array }
+        end
+
+        # `id: :string` or `id: { type: :string, ... }`. `id: true` asks for the default key, as does an
+        # `id:` hash that names no `type:`. A type this parser cannot read as a literal is left unknown
+        # rather than assumed to be bigint.
         def primary_key_type(id, options)
+          return DEFAULT_PRIMARY_KEY_TYPE if id.is_a?(Prism::TrueNode)
+
           declared = id.is_a?(Prism::HashNode) ? keyword_in(options, :type) : id
           return DEFAULT_PRIMARY_KEY_TYPE if declared.nil?
 

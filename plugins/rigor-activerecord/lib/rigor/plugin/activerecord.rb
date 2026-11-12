@@ -65,6 +65,10 @@ module Rigor
       manifest(
         id: "activerecord",
         target_gems: ["activerecord"],
+        # 0.16.0, 2026-11-13 (#2956) — the `id` column takes the primary key's type (`id: :uuid` reads `String`)
+        # instead of always `Integer`, and `serial` / `bigserial` columns read `Integer`. The schema table
+        # payload changes, so the bump follows the 0.15.0 entry.
+        #
         # 0.15.0, 2026-11-07 (#2945) — `create_table`'s `primary_key: "name"` registers that column, so a query
         # on it, or on an `alias_attribute` targeting it, no longer reports `unknown-column`. The schema table
         # payload changes, and the bump (part of the producer cache KEY) stops a warm run serving the old one.
@@ -128,7 +132,7 @@ module Rigor
         # a scope lambda body / class-method body now contributes `Relation[Model]` via `scope.self_type`
         # instead of falling through to `Kernel#select` (the IO multiplexer, `Array[String]` return). Plus
         # `:select` added to the relation-entry-point list.
-        version: "0.15.0",
+        version: "0.16.0",
         description: "Types ActiveRecord finders against the project's db/schema.rb and AR models.",
         config_schema: {
           "schema_file" => { kind: :string, default: "db/schema.rb" },

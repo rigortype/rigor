@@ -309,6 +309,17 @@ RSpec.describe "plugins/rigor-activerecord" do
         expect(result.diagnostics.map(&:message))
           .to include(a_string_including("undefined method `no_such_method' for String"))
       end
+
+      it "types the id reader from the primary key's type" do
+        result = run_ar("Rigor.dump_type(Setting.find(\"a\").id)\n", schema: schema, models: models)
+        dumped = result.diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message)
+        expect(dumped).to include(a_string_including("dump_type: String"))
+      end
+
+      it "does not report undefined-method on a String method called on id" do
+        result = run_ar(%(Setting.find("a").id.upcase\n), schema: schema, models: models)
+        expect(result.diagnostics.map(&:message).grep(/undefined method/)).to be_empty
+      end
     end
   end
 

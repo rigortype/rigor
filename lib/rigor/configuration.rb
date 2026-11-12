@@ -361,7 +361,8 @@ module Rigor
     # [PHPStan](https://phpstan.org/config-reference#paths).
     def self.load(path = nil)
       resolved = path || discover
-      if resolved.nil? || !File.exist?(resolved)
+      loaded = resolved && File.exist?(resolved) ? resolved : nil
+      if loaded.nil?
         data = DEFAULTS
         effects_key_present = false
         target_ruby_key_present = false
@@ -370,19 +371,31 @@ module Rigor
         # `DEFAULTS` itself carries an `"effects" => false` entry: once merged, "the file never wrote
         # `effects:`" and "the file wrote `effects: false`" collapse to the same value and become
         # indistinguishable to {#initialize}. This is the only place that distinction still exists.
-        raw = load_with_includes(resolved)
+        raw = load_with_includes(loaded)
         effects_key_present = raw.key?("effects")
         target_ruby_key_present = raw.key?("target_ruby")
         data = DEFAULTS.merge(raw)
       end
       new(autowire_default_plugins(data), effects_key_present, target_ruby_key_present || false)
-        .with_exclude_base(resolved && File.exist?(resolved) ? File.dirname(resolved) : nil)
+        .with_exclude_base(loaded && File.dirname(loaded))
+        .with_config_path(loaded)
     end
 
     # #1576 — the directory relative `exclude:` patterns are matched against: the directory of the config file in
     # use (the base `paths:` resolve against), or the working directory when no config file is used.
     def exclude_base
       @base_dir || Dir.pwd
+    end
+
+    # Issue #2742 — the path config-anchored diagnostics are positioned at: the loaded config file's path
+    # relative to the working directory (the project-root convention {Analysis::Baseline} uses), or
+    # `.rigor.yml` when no file was loaded. A `--config=config/rigor.yml` run names `config/rigor.yml`.
+    def config_display_path
+      return DEFAULT_PATH if @config_path.nil?
+
+      Pathname.new(@config_path).relative_path_from(Pathname.new(Dir.pwd)).to_s
+    rescue ArgumentError
+      @config_path
     end
 
     # ADR-93 WD2 — the one bundled plugin default-wired without a `plugins:` entry. `rigor-rbs-inline` is the
@@ -675,6 +688,10 @@ module Rigor
     def to_h # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
       {
         "target_ruby" => target_ruby,
+        # Issue #2742 — the loaded file's display path is part of the resolved configuration: two files
+        # with identical bodies still anchor their config diagnostics differently, so the run-cache and
+        # incremental fingerprints must tell them apart.
+        "config_path" => config_display_path,
         # A stated `target_ruby` turns on the deprecation rules a defaulted one leaves off (#1692), so the run cache
         # key and the incremental fingerprint must tell the two apart even where the value matches.
         "target_ruby_explicit" => target_ruby_explicit?,
@@ -781,6 +798,16 @@ module Rigor
     def with_exclude_base(dir)
       copy = dup
       copy.instance_variable_set(:@base_dir, dir && File.absolute_path(dir).freeze)
+      copy.freeze
+    end
+
+    # Issue #2742 — a sibling Configuration recording which file {Configuration.load} read, so the
+    # diagnostics anchored at "the configuration" name it ({#config_display_path}). `path` is the resolved
+    # config path; nil — no file loaded, or a bare {Configuration.new} — keeps the `.rigor.yml` default.
+    # Same frozen `dup` shape as {#with_exclude_base}.
+    def with_config_path(path)
+      copy = dup
+      copy.instance_variable_set(:@config_path, path && File.absolute_path(path).freeze)
       copy.freeze
     end
 

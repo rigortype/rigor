@@ -1007,7 +1007,7 @@ module Rigor
         # process — so they say so the same way, naming which backend it was (#414).
         def pool_degraded_diagnostic(count, backend)
           Diagnostic.new(
-            path: ".rigor.yml", line: 1, column: 1,
+            path: @configuration.config_display_path, line: 1, column: 1,
             message: "#{backend} pool degraded: #{count} file(s) re-analysed in-process " \
                      "after a worker exited abnormally",
             severity: :warning, rule: "pool-degraded", source_family: :builtin
@@ -1090,7 +1090,7 @@ module Rigor
           harvest_stats { environment }
           diagnostics.unshift(
             Diagnostic.new(
-              path: ".rigor.yml", line: 1, column: 1,
+              path: @configuration.config_display_path, line: 1, column: 1,
               message: "pool mode degraded to sequential: #{reason}",
               severity: :warning, rule: "pool-degraded", source_family: :builtin
             )

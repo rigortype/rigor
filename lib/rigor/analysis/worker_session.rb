@@ -504,7 +504,7 @@ module Rigor
       def plugin_prepare_error_diagnostic(plugin, error)
         plugin_id = safe_plugin_id(plugin)
         Diagnostic.new(
-          path: ".rigor.yml",
+          path: @configuration.config_display_path,
           line: 1,
           column: 1,
           message: "plugin #{plugin_id.inspect} raised during prepare: " \

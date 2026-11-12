@@ -1,0 +1,3 @@
+- **[engine]** Diagnostics anchored at the configuration file now name the file that was actually loaded instead of always `.rigor.yml`. ([#2742](https://github.com/rigortype/rigor/issues/2742))
+  - This covers the run-level rows (`rbs.coverage.*`, `dynamic.dependency-source.*`, `pre-eval.*`, plugin load/prepare errors, `pool-degraded`, plugin disclosures and trust refusals) and the `configuration-error` `target_ruby` row; `.rigor.yml` remains the position only when no file was loaded.
+  - A baseline entry recorded against `.rigor.yml` for one of these rows stops matching once the loaded file is named differently; `rigor baseline regenerate` re-keys it.

@@ -1000,6 +1000,58 @@ RSpec.describe Rigor::Configuration do
     end
   end
 
+  # Issue #2742 — config-anchored diagnostics name the file that was actually loaded, relative to the
+  # working directory, and keep `.rigor.yml` only when no file was loaded.
+  describe "#config_display_path" do
+    it "names the discovered `.rigor.dist.yml` when it is the file in use" do
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          File.write(".rigor.dist.yml", "paths: [lib]\n")
+
+          expect(described_class.load.config_display_path).to eq(".rigor.dist.yml")
+        end
+      end
+    end
+
+    it "names an explicitly loaded file relative to the working directory" do
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          File.write("custom.yml", "paths: [lib]\n")
+          expect(described_class.load("custom.yml").config_display_path).to eq("custom.yml")
+
+          FileUtils.mkdir_p("config")
+          File.write("config/rigor.yml", "paths: [lib]\n")
+          expect(described_class.load("config/rigor.yml").config_display_path).to eq("config/rigor.yml")
+        end
+      end
+    end
+
+    it "stays `.rigor.yml` when no file was loaded" do
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          expect(described_class.load.config_display_path).to eq(".rigor.yml")
+          expect(described_class.load(File.join(dir, "missing.yml")).config_display_path).to eq(".rigor.yml")
+          expect(described_class.new.config_display_path).to eq(".rigor.yml")
+        end
+      end
+    end
+
+    it "is carried by the `with_*` copies and rides `to_h` for the run-cache fingerprint" do
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          File.write(".rigor.dist.yml", "paths: [lib]\nbaseline: .rigor-baseline.yml\n")
+          configuration = described_class.load
+
+          expect(configuration.with_bleeding_edge(true).config_display_path).to eq(".rigor.dist.yml")
+          expect(configuration.with_effects_enabled.config_display_path).to eq(".rigor.dist.yml")
+          expect(configuration.without_baseline.config_display_path).to eq(".rigor.dist.yml")
+          expect(configuration.with_exclude_base(nil).config_display_path).to eq(".rigor.dist.yml")
+          expect(configuration.to_h["config_path"]).to eq(".rigor.dist.yml")
+        end
+      end
+    end
+  end
+
   describe "#unknown_keys" do
     it "records a top-level key the loader does not own" do
       configuration = described_class.new(described_class::DEFAULTS.merge("excludee" => ["x/**"]))

@@ -447,6 +447,81 @@ RSpec.describe Rigor::Analysis::Runner do
       end
     end
 
+    # Issue #2742 — config-anchored diagnostics name the file that was actually loaded.
+    describe "config-anchored diagnostic paths" do
+      it "positions `rbs.coverage.missing-gem` at `.rigor.dist.yml` when it is the file in use" do # rubocop:disable RSpec/ExampleLength
+        Dir.mktmpdir("rigor-config-path-dist-") do |tmpdir|
+          File.write(File.join(tmpdir, "Gemfile.lock"), <<~LOCK)
+            GEM
+              remote: https://rubygems.org/
+              specs:
+                rare_gem_a (1.0)
+
+            PLATFORMS
+              ruby
+
+            DEPENDENCIES
+              rare_gem_a
+
+            BUNDLED WITH
+               2.5.3
+          LOCK
+          File.write(File.join(tmpdir, ".rigor.dist.yml"), <<~YAML)
+            paths: []
+            bundler:
+              lockfile: Gemfile.lock
+              auto_detect: true
+          YAML
+
+          Dir.chdir(tmpdir) do
+            configuration = Rigor::Configuration.load
+            result = guarded_run(
+              described_class.new(configuration: configuration, cache_store: nil)
+            )
+            diag = result.diagnostics.find { |d| d.rule == "rbs.coverage.missing-gem" }
+
+            expect(diag).not_to be_nil
+            expect(diag.path).to eq(".rigor.dist.yml")
+          end
+        end
+      end
+
+      it "positions `configuration-error` at an explicitly loaded `--config` file" do
+        Dir.mktmpdir("rigor-config-path-custom-") do |tmpdir|
+          File.write(File.join(tmpdir, "custom.yml"), "target_ruby: \"3.0\"\npaths: []\n")
+
+          Dir.chdir(tmpdir) do
+            configuration = Rigor::Configuration.load("custom.yml")
+            result = guarded_run(
+              described_class.new(configuration: configuration, cache_store: nil)
+            )
+            diag = result.diagnostics.find { |d| d.rule == "configuration-error" }
+
+            expect(diag).not_to be_nil
+            expect(diag.path).to eq("custom.yml")
+          end
+        end
+      end
+
+      it "positions `configuration-error` at a config file in a subdirectory, relative to the working directory" do
+        Dir.mktmpdir("rigor-config-path-subdir-") do |tmpdir|
+          FileUtils.mkdir_p(File.join(tmpdir, "config"))
+          File.write(File.join(tmpdir, "config", "rigor.yml"), "target_ruby: \"3.0\"\npaths: []\n")
+
+          Dir.chdir(tmpdir) do
+            configuration = Rigor::Configuration.load("config/rigor.yml")
+            result = guarded_run(
+              described_class.new(configuration: configuration, cache_store: nil)
+            )
+            diag = result.diagnostics.find { |d| d.rule == "configuration-error" }
+
+            expect(diag).not_to be_nil
+            expect(diag.path).to eq("config/rigor.yml")
+          end
+        end
+      end
+    end
+
     # ADR-93 WD3 — the standalone residual routing hint. `rbs_inline_library_resolvable?` is pinned false
     # suite-wide (spec_helper), which models the library-absent standalone install these examples describe.
     it "surfaces the WD3 :info hint when annotations exist but rbs-inline is absent" do

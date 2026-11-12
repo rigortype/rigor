@@ -139,7 +139,9 @@ re-analysis runs the coordinator-side plugin instances the harvest
 reads. The fork backend has no such gap: its degrade re-analyses on
 the parent session and drains it.
 
-*Positioned at `.rigor.yml:1:1`.* Not at the first analysed file. A
+*Positioned at the loaded configuration file's `1:1`* — `.rigor.yml`
+when no file was loaded, `.rigor.dist.yml` or a `--config` path when one
+was (#2742). Not at the first analysed file. A
 disclosure has no source position it could be right about, and the
 config file is where the user declared the input the notice is about —
 the same position plugin load errors, `#prepare` raises and
@@ -1493,7 +1495,8 @@ Each failure is collected as a
 `LoadError` on the resulting registry, then surfaced by
 `Analysis::Runner#run` as an `:error` `Diagnostic` with:
 
-- `path`: `".rigor.yml"`
+- `path`: the loaded configuration file's path relative to the working
+  directory (`.rigor.yml` when no file was loaded — #2742)
 - `line`: `1`
 - `column`: `1`
 - `source_family`: `:plugin_loader`

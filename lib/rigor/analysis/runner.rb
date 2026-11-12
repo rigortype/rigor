@@ -2061,7 +2061,7 @@ module Rigor
       rescue ArgumentError => e
         floor = self.class.prism_supported_floor
         Diagnostic.new(
-          path: ".rigor.yml", line: 1, column: 1,
+          path: @configuration.config_display_path, line: 1, column: 1,
           message: "target_ruby #{@configuration.target_ruby.inspect} is not supported by this Rigor build " \
                    "(Prism accepts #{floor} and newer). Set target_ruby to your project's Ruby version " \
                    "(>= #{floor}) — read it from Gemfile.lock's `RUBY VERSION` or .ruby-version. " \

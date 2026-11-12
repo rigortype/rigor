@@ -680,6 +680,7 @@ lib/rigor/inference/statement_evaluator.rb:
     Rigor::Inference::StatementEvaluator#same_scope_local?: grandfathered
     Rigor::Inference::StatementEvaluator#scope_boundary?: grandfathered
     Rigor::Inference::StatementEvaluator#thread_operand: grandfathered
+    Rigor::Inference::StatementEvaluator#under_scope_body?: 'issue #1208, whether an instance variable a block body reads or writes sits in a def, class or module body the block defines, so that it is not the block''s self''s and the content seams leave it alone; it reads the ancestor node classes and derives no declaration context'
     Rigor::Inference::StatementEvaluator#walk_primary_frame: grandfathered
 lib/rigor/inference/struct_fold_safety.rb:
   computes: the Struct locals that are never mutated, aliased or escaped

@@ -816,6 +816,259 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
         expect(widen_diags(result)).to be_empty
       end
     end
+
+    # #3046: the parent is the ancestor whose own RBS declares the method, and a `-> void` override of
+    # a parent `-> nil` is exempt. Each row lists the shape and what the rule reports.
+    describe "the real owner and the void-over-nil exemption (#3046)" do
+      # An RBS-only module `Mid` includes declares the method nearer than the project `PBase`; the walk
+      # ends there instead of reaching past it to `PBase`.
+      let(:rbs_only_nearer_ruby) do
+        <<~RUBY
+          class PBase; def hook(_x) = 1; end
+          class Mid < PBase; end
+          class Leaf < Mid; def hook(_x) = "s"; end
+        RUBY
+      end
+
+      def rbs_only_nearer_rbs(mod_sig, base_sig, leaf_sig)
+        rbs_decls(
+          "module RMod" => "def hook: #{mod_sig}", "class PBase" => "def hook: #{base_sig}",
+          "class Mid < PBase" => "include RMod", "class Leaf < Mid" => "def hook: #{leaf_sig}"
+        )
+      end
+
+      def widen_messages(ruby, rbs)
+        widen_diags(analyze(ruby, sig: { "demo.rbs" => rbs })).map { |d| [d.line, d.message] }
+      end
+
+      # `{ "class B < A" => "def hook: () -> nil" }` as RBS, one member (or none) per declaration.
+      def rbs_decls(decls)
+        decls.map { |head, member| [head, member && "  #{member}", "end"].compact.join("\n") }.join("\n")
+      end
+
+      it "stays silent when the owner is RBS-only, reached through a project class that defines nothing" do
+        ruby = <<~RUBY
+          class Mid < Base; end
+          class Leaf < Mid; def hook = "s"; end
+          class Direct < Base; def hook = "s"; end
+        RUBY
+        rbs = <<~RBS
+          class Base
+            def hook: () -> Integer
+          end
+          class Mid < Base
+          end
+          class Leaf < Mid
+            def hook: () -> String
+          end
+          class Direct < Base
+            def hook: () -> String
+          end
+        RBS
+        expect(widen_messages(ruby, rbs)).to be_empty
+      end
+
+      # The issue's repro. Either half of the fix silences it alone (the owner walk passes `Mid`, the
+      # void exemption covers `nil`), so it fails only with both removed.
+      it "stays silent on the issue's `-> void` rows over an RBS-only `-> nil`" do
+        ruby = <<~RUBY
+          class Mid < Base; end
+          class Leaf < Mid; def hook; end; end
+          class Direct < Base; def hook; end; end
+        RUBY
+        rbs = <<~RBS
+          class Base
+            def hook: () -> nil
+          end
+          class Mid < Base
+          end
+          class Leaf < Mid
+            def hook: () -> void
+          end
+          class Direct < Base
+            def hook: () -> void
+          end
+        RBS
+        expect(widen_messages(ruby, rbs)).to be_empty
+      end
+
+      # Guard: master named `Mid` here too. It pins that the owner walk still stops at a project class
+      # whose own RBS declares the method.
+      it "names the intermediate project class when it declares the method itself, not the RBS-only root" do
+        ruby = <<~RUBY
+          class Mid < Base; def hook = 1; end
+          class Leaf < Mid; def hook = "s"; end
+        RUBY
+        rbs = <<~RBS
+          class Base
+            def hook: () -> Integer
+          end
+          class Mid < Base
+            def hook: () -> Integer
+          end
+          class Leaf < Mid
+            def hook: () -> String
+          end
+        RBS
+        expect(widen_messages(ruby, rbs)).to eq(
+          [[2, "return type of `hook' widened from Integer to String (overrides Mid#hook); breaks substitutability"]]
+        )
+      end
+
+      it "names a project module the hook comes through, and stays silent for an RBS-only module" do
+        ruby = <<~RUBY
+          module PMod; def hook = 1; end
+          class PMid; include PMod; end
+          class PLeaf < PMid; def hook = "s"; end
+          class RMid; include RMod; end
+          class RLeaf < RMid; def hook = "s"; end
+        RUBY
+        rbs = rbs_decls(
+          "module PMod" => "def hook: () -> Integer", "class PMid" => "include PMod",
+          "class PLeaf < PMid" => "def hook: () -> String",
+          "module RMod" => "def hook: () -> Integer", "class RMid" => "include RMod",
+          "class RLeaf < RMid" => "def hook: () -> String"
+        )
+        expect(widen_messages(ruby, rbs)).to eq(
+          [[3, "return type of `hook' widened from Integer to String (overrides PMod#hook); breaks substitutability"]]
+        )
+      end
+
+      it "keeps an interface the project class includes as that class's own declaration" do
+        ruby = <<~RUBY
+          class IMid; def hook = 1; end
+          class ILeaf < IMid; def hook = "s"; end
+          class XMid < XBase; end
+          class XLeaf < XMid; def hook = "s"; end
+        RUBY
+        rbs = rbs_decls(
+          "interface _Hookable" => "def hook: () -> Integer", "class IMid" => "include _Hookable",
+          "class ILeaf < IMid" => "def hook: () -> String",
+          "class XBase" => "include _Hookable", "class XMid < XBase" => nil,
+          "class XLeaf < XMid" => "def hook: () -> String"
+        )
+        expect(widen_messages(ruby, rbs)).to eq(
+          [[2, "return type of `hook' widened from Integer to String (overrides IMid#hook); breaks substitutability"]]
+        )
+      end
+
+      it "exempts `-> void` over a project parent's `-> nil`, also when the parent sits under an RBS-only root" do
+        ruby = <<~RUBY
+          class PBase; def hook = nil; end
+          class PLeaf < PBase; def hook; end; end
+          class Mid < Base; def hook = nil; end
+          class Leaf < Mid; def hook; end; end
+        RUBY
+        rbs = rbs_decls(
+          "class PBase" => "def hook: () -> nil", "class PLeaf < PBase" => "def hook: () -> void",
+          "class Base" => "def hook: () -> nil", "class Mid < Base" => "def hook: () -> nil",
+          "class Leaf < Mid" => "def hook: () -> void"
+        )
+        expect(widen_messages(ruby, rbs)).to be_empty
+      end
+
+      it "exempts `-> void` over a parent `-> NilClass` as over `-> nil`" do
+        ruby = <<~RUBY
+          class PB; def hook = nil; end
+          class PL < PB; def hook; end; end
+        RUBY
+        rbs = rbs_decls("class PB" => "def hook: () -> NilClass", "class PL < PB" => "def hook: () -> void")
+        expect(widen_messages(ruby, rbs)).to be_empty
+      end
+
+      it "exempts an overloaded override only when every arm returns `void`" do
+        ruby = <<~RUBY
+          class PB; def hook(_x = nil) = nil; end
+          class Mixed < PB; def hook(x = nil) = x; end
+          class AllVoid < PB; def hook(_x = nil); end; end
+        RUBY
+        rbs = rbs_decls(
+          "class PB" => "def hook: () -> nil | (Integer) -> nil",
+          "class Mixed < PB" => "def hook: () -> void | (Integer) -> Integer",
+          "class AllVoid < PB" => "def hook: () -> void | (Integer) -> void"
+        )
+        expect(widen_messages(ruby, rbs).map(&:first)).to eq([2])
+      end
+
+      it "stays silent when an RBS-only module nearer than the project parent declares the return" do
+        rbs = rbs_only_nearer_rbs("(Integer) -> Object", "(Integer) -> Integer", "(Integer) -> String")
+        expect(widen_messages(rbs_only_nearer_ruby, rbs)).to be_empty
+      end
+
+      it "stays silent when an RBS-only module nearer than the project parent declares the parameter" do
+        rbs = rbs_only_nearer_rbs("(String) -> Integer", "(Object) -> Integer", "(String) -> Integer")
+        result = analyze(rbs_only_nearer_ruby, sig: { "demo.rbs" => rbs })
+        expect(diags_for(result, "def.override-param-narrowed")).to be_empty
+      end
+
+      # `Mid` includes the project module `PMod` in RBS only, so the Ruby chain never reaches `PMod`: the
+      # nearest declaration does not answer, and `PBase` must not answer in its place.
+      def off_chain_result
+        analyze(<<~RUBY, sig: { "demo.rbs" => rbs_decls(
+          module PMod; def hook = 1; def take(_x) = nil; end
+          class PBase; def hook = 1; def take(_x) = nil; end
+          class Mid < PBase; end
+          class Leaf < Mid; def hook = "s"; def take(_x) = nil; end
+        RUBY
+          "module PMod" => "def hook: () -> Object\n  def take: (String) -> void",
+          "class PBase" => "def hook: () -> Integer\n  def take: (Object) -> void",
+          "class Mid < PBase" => "include PMod",
+          "class Leaf < Mid" => "def hook: () -> String\n  def take: (String) -> void"
+        ) })
+      end
+
+      it "stays silent on the return when a nearer project owner is off the Ruby chain" do
+        expect(widen_diags(off_chain_result)).to be_empty
+      end
+
+      it "stays silent on the parameter when a nearer project owner is off the Ruby chain" do
+        expect(diags_for(off_chain_result, "def.override-param-narrowed")).to be_empty
+      end
+
+      it "names a project module whose included interface supplies the signature" do
+        ruby = <<~RUBY
+          module PMod; def hook = 1; end
+          class Mid; include PMod; end
+          class Leaf < Mid; def hook = "s"; end
+        RUBY
+        rbs = rbs_decls(
+          "interface _Hookable" => "def hook: () -> Integer", "module PMod" => "include _Hookable",
+          "class Mid" => "include PMod", "class Leaf < Mid" => "def hook: () -> String"
+        )
+        expect(widen_messages(ruby, rbs)).to eq(
+          [[3, "return type of `hook' widened from Integer to String (overrides PMod#hook); breaks substitutability"]]
+        )
+      end
+
+      it "keeps `def.override-param-narrowed` silent through a project class over an RBS-only owner" do
+        ruby = <<~RUBY
+          class Mid < Base; end
+          class Leaf < Mid; def hook(_x) = nil; end
+        RUBY
+        rbs = rbs_decls(
+          "class Base" => "def hook: (Object) -> nil", "class Mid < Base" => nil,
+          "class Leaf < Mid" => "def hook: (String) -> nil"
+        )
+        expect(diags_for(analyze(ruby, sig: { "demo.rbs" => rbs }), "def.override-param-narrowed")).to be_empty
+      end
+
+      {
+        "`-> void` over a non-nil parent" => ["Integer", "void", "1", "Integer to top"],
+        "`-> top` over `-> nil`" => ["nil", "top", "nil", "nil to top"],
+        "`-> String` over `-> nil`" => ["nil", "String", "nil", "nil to String"]
+      }.each do |shape, (parent, child, parent_body, widened)|
+        it "still fires on #{shape}" do
+          ruby = <<~RUBY
+            class PB; def hook = #{parent_body}; end
+            class PL < PB; def hook = nil; end
+          RUBY
+          rbs = rbs_decls("class PB" => "def hook: () -> #{parent}", "class PL < PB" => "def hook: () -> #{child}")
+          expect(widen_messages(ruby, rbs)).to eq(
+            [[2, "return type of `hook' widened from #{widened} (overrides PB#hook); breaks substitutability"]]
+          )
+        end
+      end
+    end
   end
 
   describe "def.override-param-narrowed" do

@@ -30,11 +30,17 @@ on:
       - "apps/rigor-playground/wasm/**/*.json"
       - "apps/rigor-playground/fly.toml"
       - "apps/rigor-playground/Dockerfile"
+  # ready_for_review is not a default type: without it `gh pr ready` would
+  # start no run, and a PR that was a draft would have only the light run
+  # below. The ref-keyed concurrency group cancels a draft run still going.
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   # The merge queue on master (ADR-123) runs this workflow on each queued
   # PR merged onto master and the entries ahead of it, and merges only when
   # "CI required" passes there. That run is the check of what will land;
-  # the pull_request run before it is the check the review reads.
+  # the pull_request run before it is the full check of the head. While
+  # the PR is a draft its runs are the light gate (changes' `full` output),
+  # which is what the review reads beside a local verify-changed.
   merge_group:
 
 # A release or feature branch is validated through its pull request (the
@@ -84,6 +90,14 @@ jobs:
       nix: ${{ steps.detect.outputs.nix }}
       reused: ${{ steps.detect.outputs.reused }}
       tree: ${{ steps.tree.outputs.tree }}
+      # 'false' on a pull_request run for a draft PR: the light gate. Only
+      # this job, lint (on a code PR) and docs-check (on a no-code PR) run;
+      # every heavy job gates on `full == 'true'`, and "CI required" is
+      # skipped, so a draft head never reads SUCCESS and never attests. The
+      # full run starts at `gh pr ready` (ready_for_review above), on every
+      # push to a ready PR, and in the merge queue. Push and merge_group runs
+      # are always full.
+      full: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.draft) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
@@ -248,7 +262,7 @@ jobs:
   timing-cache:
     name: Resolve the shards' timing cache
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     outputs:
       key: ${{ steps.lookup.outputs.cache-matched-key }}
@@ -283,7 +297,7 @@ jobs:
   test:
     name: Tests (Ruby ${{ matrix.ruby }}, shard ${{ matrix.shard }}/3)
     needs: [changes, timing-cache]
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -424,7 +438,7 @@ jobs:
   excluded-specs:
     name: Excluded specs (pool runner + plugin integration, shard ${{ matrix.shard }}/3)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     # The plugin integration specs run under the ADR-128 plugin-boundary gate, a TracePoint that roughly doubles
     # them. Three shards (tool/plugin_integration_shard.rb partitions the files by size, with no timing cache to
@@ -483,7 +497,7 @@ jobs:
     name: Shard coverage (every test ran)
     needs: [changes, test]
     runs-on: ubuntu-latest
-    if: always() && needs.changes.outputs.code == 'true' && needs.test.result != 'cancelled'
+    if: always() && needs.changes.outputs.full == 'true' && needs.changes.outputs.code == 'true' && needs.test.result != 'cancelled'
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
@@ -517,7 +531,7 @@ jobs:
   rbs-compat:
     name: RBS compatibility (RBS ${{ matrix.rbs }})
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -666,7 +680,7 @@ jobs:
   self-check:
     name: Self-check (${{ matrix.cache }})
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -824,7 +838,7 @@ jobs:
   acceptance-gates:
     name: Acceptance gates (cold analysis)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -916,7 +930,7 @@ jobs:
     # artifacts to diff). Otherwise run whenever self-check was not
     # outright cancelled, so a discrepancy still surfaces when one variant
     # failed.
-    if: always() && needs.changes.outputs.code == 'true' && needs.self-check.result != 'cancelled'
+    if: always() && needs.changes.outputs.full == 'true' && needs.changes.outputs.code == 'true' && needs.self-check.result != 'cancelled'
     steps:
       - name: Download warm diagnostics
         uses: actions/download-artifact@v8.0.2
@@ -959,7 +973,7 @@ jobs:
   self-check-bleeding-edge:
     name: Self-check (bleeding-edge)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -992,7 +1006,7 @@ jobs:
   engine-allocations:
     name: Engine allocations (advisory)
     needs: changes
-    if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.full == 'true' && github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -1080,7 +1094,7 @@ jobs:
   arity-differential:
     name: Arity differential
     needs: changes
-    if: (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.full == 'true' && (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -1137,7 +1151,7 @@ jobs:
   nix-package:
     name: Nix package
     needs: changes
-    if: needs.changes.outputs.nix == 'true'
+    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.nix == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -1187,11 +1201,17 @@ jobs:
   # Configure branch protection to require only "CI required" rather
   # than each individual job. New jobs added above are automatically
   # gated without touching protection rules.
+  #
+  # Skipped on a draft's light run (changes' `full` output), so it concludes
+  # SKIPPED there, never SUCCESS: bin/land-pr reads this check on the head,
+  # and tested-tree attests only after it succeeded. `!= 'false'` keeps it
+  # running when change detection failed and left the output empty, so that
+  # failure still reads FAILURE.
   required:
     name: CI required
     needs: [changes, timing-cache, test, shard-coverage, excluded-specs, rbs-compat, lint, docs-check, self-check, self-check-diff, self-check-bleeding-edge, acceptance-gates, arity-differential, nix-package]
     runs-on: ubuntu-latest
-    if: always()
+    if: always() && needs.changes.outputs.full != 'false'
     steps:
       - name: All checks passed
         env:

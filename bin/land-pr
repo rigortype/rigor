@@ -11,7 +11,10 @@
 #   1. it queues only the head that was reviewed: <sha> is passed to GitHub as
 #      the expected head, so a commit pushed after the review is refused;
 #   2. it checks that head's "CI required" passed, which an administrator's
-#      token would otherwise be allowed to skip;
+#      token would otherwise be allowed to skip. A head can carry that check
+#      from more than one run (a draft's light run concludes it SKIPPED, the
+#      full run at `gh pr ready` then reports its own), so only the newest
+#      check run counts: the one with the highest id;
 #   3. without a merge queue on master nothing would test the merged result,
 #      so it refuses and leaves the merge to the user;
 #   4. a PR the queue drops stays OPEN exactly as a queued one does, so it
@@ -86,14 +89,35 @@ pr_fields() {
     --jq ".data.repository.pullRequest | [$2] | @tsv"
 }
 
+# Print the conclusion of the newest check run in $1, a comma-separated list of
+# <databaseId>:<conclusion> entries (a pending run's conclusion is null), or MISSING
+# when it holds none. The query prints "none" for no entry: an empty TSV field would
+# collapse under read's tab splitting. Check-run ids only grow, so the highest is the
+# newest.
+newest_conclusion() {
+  local entry id best=-1 conclusion=MISSING
+  local -a entries
+  IFS=, read -r -a entries <<<"$1"
+  for entry in "${entries[@]}"; do
+    id="${entry%%:*}"
+    [[ "$id" =~ ^[0-9]+$ ]] || continue
+    if ((id > best)); then
+      best="$id"
+      conclusion="${entry#*:}"
+    fi
+  done
+  echo "$conclusion"
+}
+
 info="$(pr_fields 'id isDraft state isMergeQueueEnabled isInMergeQueue baseRefName headRefOid
-  commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:100){nodes{... on CheckRun{name conclusion}}}}}}}' \
+  commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:100){nodes{... on CheckRun{name databaseId conclusion}}}}}}}' \
   '.id, .isDraft, .state, .isMergeQueueEnabled, .isInMergeQueue, .baseRefName, .headRefOid,
-   ([.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]? | select(.name == "CI required") | .conclusion]
-    | if length == 0 then "MISSING" else (map(tostring) | join(",")) end),
+   ([.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]? | select(.name == "CI required")
+     | "\(.databaseId):\(.conclusion)"] | if length == 0 then "none" else join(",") end),
    (.commits.nodes[0].commit.oid // "")')" ||
   die "cannot read PR #$number"
-IFS=$'\t' read -r id draft state queue queued base head ci checked <<<"$info"
+IFS=$'\t' read -r id draft state queue queued base head runs checked <<<"$info"
+ci="$(newest_conclusion "$runs")"
 # The check belongs to the last commit GitHub lists; count it only when that is the head.
 [[ "$checked" == "$head" ]] || ci="MISSING"
 [[ "$state" == OPEN ]] || die "PR #$number is $state, not open"

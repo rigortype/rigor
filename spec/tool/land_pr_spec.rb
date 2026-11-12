@@ -19,8 +19,9 @@ RSpec.describe "bin/land-pr" do
 
   after { FileUtils.rm_rf(root) }
 
-  # The PR as the first query reads it: id, draft, state, queue on master, queued, base, head, CI required.
-  def info(draft: false, state: "OPEN", queue: true, queued: false, head: sha, check: "SUCCESS", checked: head)
+  # The PR as the first query reads it: id, draft, state, queue on master, queued, base, head, the CI
+  # required check runs on the head as <databaseId>:<conclusion> entries, and the commit they belong to.
+  def info(draft: false, state: "OPEN", queue: true, queued: false, head: sha, check: "7:SUCCESS", checked: head)
     ["PR_id", draft, state, queue, queued, "master", head, check, checked].join("\t")
   end
 
@@ -257,17 +258,29 @@ RSpec.describe "bin/land-pr" do
   end
 
   it "refuses a PR whose base is not master, before queueing, so the bottom PR lands first" do
-    reply = ["PR_id", false, "OPEN", true, false, "parent-branch", sha, "SUCCESS", sha].join("\t")
+    reply = ["PR_id", false, "OPEN", true, false, "parent-branch", sha, "7:SUCCESS", sha].join("\t")
     out, code = run_land_pr("42", sha, replies: [[reply, 0]])
     expect([code, enqueued?]).to eq([1, false])
     expect(out).to include("land the bottom PR of its stack first")
   end
 
   it "refuses when CI required on the head has not passed, before queueing" do
-    %w[FAILURE MISSING null].each do |ci|
+    %w[7:FAILURE none 7:null 7:SKIPPED].each do |ci|
       FileUtils.rm_f(Dir.glob(File.join(root, "*")))
       _, code = run_land_pr("42", sha, replies: [[info(check: ci), 0]])
       expect([ci, code, enqueued?]).to eq([ci, 1, false])
+    end
+  end
+
+  # After `gh pr ready` the head carries the draft's light run (SKIPPED) and the full run's check; a
+  # re-run adds another. Only the newest, by check-run id, is the verdict.
+  it "reads only the newest CI required check run on the head" do
+    { "7:SKIPPED,12:SUCCESS" => 0, "12:SUCCESS,7:SKIPPED" => 0, "7:SKIPPED,12:null" => 1,
+      "7:SUCCESS,12:FAILURE" => 1, "12:FAILURE,7:SUCCESS" => 1, "9:SUCCESS,12:null" => 1 }.each do |runs, want|
+      FileUtils.rm_f(Dir.glob(File.join(root, "*")))
+      out, code = run_land_pr("42", sha, "--no-wait", replies: [[info(check: runs), 0], ["queued", 0]])
+      expect([runs, code, enqueued?]).to eq([runs, want, want.zero?])
+      expect(out).to include("not SUCCESS") unless want.zero?
     end
   end
 
@@ -280,7 +293,7 @@ RSpec.describe "bin/land-pr" do
   end
 
   it "only waits when the PR is already queued" do
-    out, code = run_land_pr("42", sha, replies: [[info(queued: true, check: "MISSING"), 0],
+    out, code = run_land_pr("42", sha, replies: [[info(queued: true, check: "none"), 0],
                                                  [poll("MERGED", oid: "b" * 40), 0]])
     expect([code, enqueued?]).to eq([0, false])
     expect(out).to include("already queued")

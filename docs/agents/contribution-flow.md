@@ -104,21 +104,21 @@ silently".
   enqueues through the auto-merge API, which this repository keeps off, and fails with "Auto merge
   is not allowed". `bin/land-pr` queues only the head that was reviewed (a commit pushed since is
   refused; pass the SHA the reviewer reported on, never one read back from the PR), checks that
-  head's `CI required` passed, and refuses when `master` has no merge queue (nothing would then test
-  the merged result; stop and tell the user). It then polls once a minute until the PR merges (exit
-  0, merge commit printed) or leaves the queue (exit 1), and it is that PR's one watcher. For a PR in
-  a native stack it falls back to the asynchronous merge REST API, and `--no-wait` can return while
-  that request is still pending. A wait
-  outlasts a foreground command (the queue batches for up to five minutes and CI takes about
-  twelve), so run it in the background; run again on a queued PR, it only waits. When the merged
-  tree is one a `pull_request` run into `master` passed `CI required` on (its signed `Tested tree`
-  attestation, from a branch of this repository; usually because the head already contained
-  `master`), the queue run reuses that result and finishes in
-  about a minute ([ADR-123](../adr/123-merge-queue-and-post-hoc-approval.md), amended 2026-10-19);
-  otherwise it runs the full CI. A dropped PR stays
-  `OPEN` exactly as a queued one does: read the failed run in `gh run list --event merge_group`, or
-  the new push or manual removal that took it out, and fix it on the branch. Never `gh pr merge
-  --admin`: it skips the queue and its check.
+  head's newest `CI required` check run passed (after `gh pr ready` the head also carries the draft
+  run's SKIPPED one, so it refuses until the full run succeeds), and refuses when `master` has no
+  merge queue (nothing would then test the merged result; stop and tell the user). It then polls
+  once a minute until the PR merges (exit 0, merge commit printed) or leaves the queue (exit 1), and
+  it is that PR's one watcher. For a PR in a native stack it falls back to the asynchronous merge
+  REST API, and `--no-wait` can return while that request is still pending. A wait outlasts a
+  foreground command (the queue batches for up to five minutes and CI takes about twelve), so run it
+  in the background; run again on a queued PR, it only waits. When the merged tree is one a
+  `pull_request` run into `master` passed `CI required` on (its signed `Tested tree` attestation,
+  from a branch of this repository; usually because the head already contained `master`), the queue
+  run reuses that result and finishes in about a minute
+  ([ADR-123](../adr/123-merge-queue-and-post-hoc-approval.md), amended 2026-10-19); otherwise it
+  runs the full CI. A dropped PR stays `OPEN` exactly as a queued one does: read the failed run in
+  `gh run list --event merge_group`, or the new push or manual removal that took it out, and fix it
+  on the branch. Never `gh pr merge --admin`: it skips the queue and its check.
 - **Mergeability lags a push.** When `git merge-base --is-ancestor origin/master origin/<branch>`
   confirms the branch contains master, a "Head branch is out of date" refusal clears on its own;
   retry with backoff rather than merging `master` in again.
@@ -129,11 +129,15 @@ silently".
 
 Once the change is implemented and `make verify-changed` passes:
 
-1. **Push and open the Draft PR.** CI starts on the push and is the full gate; read the result for
-   the head commit, not the branch (how: § "GitHub and git traps"). The changelog fragment needs the
-   PR link, so it is a second push.
-2. **Start the adversarial review at the same time**, not after CI: the two are independent, and a
-   later push re-runs CI anyway, and the merge queue runs it once more on the merged result. The
+1. **Push and open the Draft PR.** CI on a Draft PR is a light gate: change detection plus `lint` on
+   a code PR, or `docs-check` on a no-code PR. Every heavy job is skipped and `CI required`
+   concludes SKIPPED, so a draft head never reads green. The full CI runs at `gh pr ready` (step 6),
+   on every later push to the ready PR, and in the merge queue. Read the result for the head commit,
+   not the branch (how: § "GitHub and git traps"). The changelog fragment needs the PR link, so it
+   is a second push.
+2. **Start the adversarial review at the same time**, not after CI: the two are independent. The
+   review reads the light run plus the local `make verify-changed`; the full run at `gh pr ready`
+   and the merge queue's run on the merged result check what lands. The
    reviewer is a fresh agent that did not write the change, on the
    strongest model the harness offers — Claude Opus 5.5 under Claude Code; elsewhere a model of that
    class at high effort (the Pi harness's co-primary pair is in [ADR-115](../adr/115-pi-multi-model-harness.md)). A harness that offers neither uses its strongest
@@ -147,8 +151,9 @@ Once the change is implemented and `make verify-changed` passes:
    A PR that changes a skill also runs the `waza` review in [`skill-authoring.md`](skill-authoring.md)
    at the same time; its findings join this triage.
 3. **Triage.** For a PR that changes the engine, read the "Engine allocations (advisory)" job's
-   summary too, and the "Acceptance gates" job's type_of shadow section (ADR-129 stage 3): both stay
-   green when they warn, so `gh pr checks` does not show them. A shadow FAIL is a finding like a
+   summary too, and the "Acceptance gates" job's type_of shadow section (ADR-129 stage 3), on the
+   full run that `gh pr ready` starts (the Draft's light run skips both): both stay green when they
+   warn, so `gh pr checks` does not show them. A shadow FAIL is a finding like a
    failing spec. A warning is a
    finding, fixed or answered with the reason in a PR comment like any other; a delta above
    `pr_allocations_pct` (`bench/thresholds.yml`) holds the PR until it is cut or the session landing
@@ -181,17 +186,22 @@ Once the change is implemented and `make verify-changed` passes:
    stays Draft for the user. A non-severe finding from that check is fixed only in wording or specs;
    anything that would change behaviour is filed as an issue. Other fixes made after round 3 land
    without another round.
-6. **Merge through the queue** (`gh pr ready`, then `bin/land-pr N <reviewed-head-sha>`; see
-   § "GitHub and git traps") once CI is green on the head commit and the review has stopped, and
-   when the landing point is settled: a `ready-for-agent` issue, a user request that states the
-   expected outcome, or every decision the PR embodies made under § "Decisions and the approval
-   queue" below. A PR need not contain the latest `master` to be queued; the queue tests the merged
-   result. Re-push it (`bin/lane-push`) only when it is `CONFLICTING`, which starts no CI and
-   cannot enter the queue, or when the queue drops it. A PR held by step 3's allocation rule stays
-   Draft until that hold is resolved. A PR that changes a skill also needs its
-   `waza` review comment; until one is posted it stays Draft. A PR carrying a serious decision
-   stays Draft until the user makes it. A skill with its own landing rule (`rigor-release-prep`,
-   `rigor-dependency-update`) keeps that rule; the review in steps 2–5 still runs.
+6. **Merge through the queue** (`gh pr ready`, then `bin/land-pr N <reviewed-head-sha>` once the
+   full run's `CI required` passes; see § "GitHub and git traps") once the light run is green on the
+   head commit and the review has stopped, and when the landing point is settled: a
+   `ready-for-agent` issue, a user request that states the expected outcome, or every decision the
+   PR embodies made under § "Decisions and the approval queue" below. A PR need not contain the
+   latest `master` to be queued; the queue tests the merged result. Run `gh pr ready` only after the
+   last reviewed fix-up push: it starts the full CI, and that run is the first to run the specs in
+   CI, so a full-CI failure after it costs a fix push and another full run
+   (`agents/pi-harness/scripts/land-when-green.sh` marks the PR ready, waits for that run, then runs
+   `bin/land-pr`). Re-push it (`bin/lane-push`) only when it is `CONFLICTING`, which starts no CI
+   and cannot enter the queue, or when the queue drops it. A PR held by step 3's allocation rule
+   (read on the full run, so after `gh pr ready`) is not queued until that hold is resolved. A PR
+   that changes a skill also needs its `waza` review comment; until one is posted it stays Draft. A
+   PR carrying a serious decision stays Draft until the user makes it. A skill with its own landing
+   rule (`rigor-release-prep`, `rigor-dependency-update`) keeps that rule; the review in steps 2–5
+   still runs.
 
 ## Decisions and the approval queue
 

@@ -20,7 +20,7 @@ After the review of a lane's PR:
 
 ```bash
 agents/pi-harness/scripts/takt-lane-push.sh <worktree>         # push a fix-up commit from the lane's worktree
-agents/pi-harness/scripts/land-when-green.sh <pr> <full-sha>   # wait for CI, then bin/land-pr; run in the background
+agents/pi-harness/scripts/land-when-green.sh <pr> <full-sha>   # gh pr ready, wait for the full CI, then bin/land-pr; run in the background
 ```
 
 CI runners, not lanes or reviews, bound the throughput (about one full CI run flows at a time), so

@@ -4969,12 +4969,16 @@ module Rigor
           from = overridden_ancestors_start(scope, class_name)
           return nil if from.nil?
 
+          passed_owners = []
           case Inference::DefinerResolution.resolve(scope, class_name, method_name, :instance,
                                                     question: :override, from: from) do |ancestor|
-                 override_parent_answer(scope, ancestor, method_name)
+                 override_parent_answer(scope, ancestor, method_name, passed_owners)
                end
           in Inference::DefinerResolution::Known(owner:, answer:)
-            unless answer.last == RBS_ONLY_OWNER
+            # The nearest declaration must be the one that answers: an ancestor asked past for a project
+            # owner the walk never reached (one the Ruby chain does not hold) leaves the rule silent.
+            unless answer.last == RBS_ONLY_OWNER ||
+                   passed_owners.any? { |passed| passed != normalize_class_name(owner) }
               method_def = safe_instance_method_definition(owner, method_name, scope)
               method_def && [owner, method_def]
             end
@@ -4992,18 +4996,20 @@ module Rigor
         # One project ancestor's answer to the override walk. The signature text is the answer two worlds
         # compare: an `RBS::Definition::Method` has no structural equality of its own. Only an ancestor whose
         # own RBS declares the method answers with it (#3046). One that inherits the declaration from another
-        # project class or module is asked past, so that owner answers at its own entry. One that inherits it
-        # from an RBS-only owner the project chain cannot see ends the walk silent ({RBS_ONLY_OWNER}): that
-        # owner is the nearest declaration, and RBS-only ancestors are #130's.
-        def override_parent_answer(scope, ancestor, method_name)
+        # project class or module is asked past, so that owner answers at its own entry; the owner is recorded
+        # in `passed_owners`, which the answering owner must match. One that inherits it from an RBS-only owner
+        # the project chain cannot see ends the walk silent ({RBS_ONLY_OWNER}): that owner is the nearest
+        # declaration, and RBS-only ancestors are #130's.
+        def override_parent_answer(scope, ancestor, method_name, passed_owners)
           method_def = safe_instance_method_definition(ancestor, method_name, scope)
           return nil if method_def.nil?
           return method_def.method_types.map(&:to_s) if declared_by?(method_def, ancestor)
 
           owner = method_def.implemented_in || method_def.defined_in
-          return nil if owner && scope.discovered_classes.key?(normalize_class_name(owner))
+          return RBS_ONLY_OWNER unless owner && scope.discovered_classes.key?(normalize_class_name(owner))
 
-          RBS_ONLY_OWNER
+          passed_owners << normalize_class_name(owner)
+          nil
         end
 
         # True when `ancestor`'s own RBS declares `method_def`: on its body, or through an interface it

@@ -1001,6 +1001,41 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
         expect(diags_for(result, "def.override-param-narrowed")).to be_empty
       end
 
+      # `Mid` includes the project module `PMod` in RBS only, so the Ruby chain never reaches `PMod`: the
+      # nearest declaration does not answer, and `PBase` must not answer in its place.
+      it "stays silent when a nearer project owner is off the Ruby chain, on both rules" do
+        ruby = <<~RUBY
+          module PMod; def hook = 1; def take(_x) = nil; end
+          class PBase; def hook = 1; def take(_x) = nil; end
+          class Mid < PBase; end
+          class Leaf < Mid; def hook = "s"; def take(_x) = nil; end
+        RUBY
+        rbs = rbs_decls(
+          "module PMod" => "def hook: () -> Object\n  def take: (String) -> void",
+          "class PBase" => "def hook: () -> Integer\n  def take: (Object) -> void",
+          "class Mid < PBase" => "include PMod",
+          "class Leaf < Mid" => "def hook: () -> String\n  def take: (String) -> void"
+        )
+        result = analyze(ruby, sig: { "demo.rbs" => rbs })
+        expect(widen_diags(result)).to be_empty
+        expect(diags_for(result, "def.override-param-narrowed")).to be_empty
+      end
+
+      it "names a project module whose included interface supplies the signature" do
+        ruby = <<~RUBY
+          module PMod; def hook = 1; end
+          class Mid; include PMod; end
+          class Leaf < Mid; def hook = "s"; end
+        RUBY
+        rbs = rbs_decls(
+          "interface _Hookable" => "def hook: () -> Integer", "module PMod" => "include _Hookable",
+          "class Mid" => "include PMod", "class Leaf < Mid" => "def hook: () -> String"
+        )
+        expect(widen_messages(ruby, rbs)).to eq(
+          [[3, "return type of `hook' widened from Integer to String (overrides PMod#hook); breaks substitutability"]]
+        )
+      end
+
       it "keeps `def.override-param-narrowed` silent through a project class over an RBS-only owner" do
         ruby = <<~RUBY
           class Mid < Base; end

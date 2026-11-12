@@ -9,3 +9,10 @@ assertions:
   '6': Hash[:a | :b | Symbol, 0 | 1]
   '7': Array[0]
   '8': Array[Dynamic[top]]
+  '9': Array[1]?
+  '10': Array[1]?
+  '11': Array[Dynamic[top]]
+  '12': Array[0]
+  '13': Array[0]
+  '14': Array[Dynamic[top]]?
+  '15': Array[5]

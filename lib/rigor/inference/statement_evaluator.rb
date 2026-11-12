@@ -7083,7 +7083,9 @@ module Rigor
           next if under_scope_body?(ancestors)
           next if CapturedLocals.under_foreign_self_block?(ancestors, scope)
 
-          (names ||= []) << receiver.name if CapturedLocals.rebindable_ivar?(scope, receiver.name)
+          next unless CapturedLocals.rebindable_ivar?(scope, receiver.name) && collection_only?(scope.ivar(receiver.name))
+
+          (names ||= []) << receiver.name
         end
         names ? names.uniq : NO_REWRITES
       end
@@ -7774,6 +7776,8 @@ module Rigor
       # another object ({CapturedLocals.under_foreign_self_block?}, or `call_node`'s own block).
       def captured_content_mutations(block, shadows, call_node)
         mutations = Hash.new { |h, k| h[k] = [] }
+        # Every self-rebinding call classifies `:unknown` today, so this seam does not meet one; the guard keeps the
+        # ivar arm right should the escape analysis learn to call one non-escaping.
         foreign = foreign_self_block?(call_node)
         Source::NodeWalker.each_with_ancestors(block.body) do |node, ancestors|
           name, site = content_mutation_target(node) { |receiver| receiver.depth > scope_nesting(ancestors) }
@@ -7795,8 +7799,21 @@ module Rigor
         receiver = node.receiver
         return NO_CONTENT_MUTATION unless receiver.is_a?(Prism::InstanceVariableReadNode)
         return NO_CONTENT_MUTATION unless capturable_ivar?(receiver.name, ancestors)
+        return NO_CONTENT_MUTATION unless collection_only?(scope.ivar(receiver.name))
 
         [receiver.name, node]
+      end
+
+      # True when every member of `type` is an Array, a Hash or a String carrier. The content seams take an
+      # instance variable only then: the join drops a seed's `nil` after a guarded mutation (#1219) and the escaping
+      # floor takes a union with a collection member whole (#1251), so `@buf = flag ? [1] : nil; [1].each { @buf << 2
+      # if @buf }` would lose the `nil` the runtime keeps when the block never runs it. The local spelling has both
+      # gaps; an instance variable, the common lazily-initialised spelling, keeps its pre-call binding until they close.
+      def collection_only?(type)
+        return false if type.nil?
+        return type.members.all? { |member| collection_only?(member) } if type.is_a?(Type::Union)
+
+        arrayish?(type) || hashish?(type) || UnknownStoreWidening.carrier_class(type) == "String"
       end
 
       # True when the instance variable `name`, read or written at `ancestors` under a block body, is this scope's
@@ -7951,11 +7968,15 @@ module Rigor
         type.nil? || type.is_a?(Type::Bot) ? [] : [type]
       end
 
+      # A joined name is a local or an instance variable (#1208), so a store reading either moves.
+      CAPTURE_READ_NODES = Set[Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode].freeze
+      private_constant :CAPTURE_READ_NODES
+
       def store_arguments_read?(node, names)
         arguments = node.arguments
         return false if arguments.nil?
 
-        Source::NodeWalker.each(arguments).any? { |n| n.is_a?(Prism::LocalVariableReadNode) && names.include?(n.name) }
+        Source::NodeWalker.each(arguments).any? { |n| CAPTURE_READ_NODES.include?(n.class) && names.include?(n.name) }
       end
 
       # ADR-56 slice C (B3). For `recv.each_with_object(memo) { |x, acc| … }` the return is the memo object after the
@@ -8218,7 +8239,7 @@ module Rigor
           when Prism::LocalVariableReadNode
             next unless receiver.name == name && yield(receiver.depth, scope_nesting(ancestors))
           when Prism::InstanceVariableReadNode
-            next unless receiver.name == name
+            next unless receiver.name == name && capturable_ivar?(name, ancestors)
           else
             next
           end

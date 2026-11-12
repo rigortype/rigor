@@ -125,7 +125,8 @@ From `docs/notes/20260921-queue-release-lane-experience.md`:
 
 ## Approved gate
 
-After CI is green on a draft PR:
+After the light CI on a draft PR is green (change detection plus `lint` or
+`docs-check`; the full run comes at `gh pr ready`, after review):
 
 1. **Default:** spawn co-primaries `rigor-reviewer-grok` (`thinking: xhigh`) and
    `rigor-reviewer-swe2` (`devin/swe-2:high`). Both must `Approved`.
@@ -149,7 +150,7 @@ anything that section holds as Draft waits for a human.
 | Ranking, triage, evidence, proposing next unit | Architect: only if a unit needs a fresh LaneInput |
 | Waiting on next/skip/stop / spawn | Lane: prefer `subagent` → `rigor-lane` + managed worktree; fallback `run-role.sh lane` |
 | Sparse CI verdict after a lane push | — |
-| CI green on a draft PR | Co-primary `rigor-reviewer-grok` + `rigor-reviewer-swe2`; +Opus if complex; Fable only for complex design |
+| Light CI green on a draft PR | Co-primary `rigor-reviewer-grok` + `rigor-reviewer-swe2`; +Opus if complex; Fable only for complex design |
 
 ## Finish phrases
 

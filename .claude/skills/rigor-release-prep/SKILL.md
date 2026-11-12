@@ -525,21 +525,24 @@ required gate is green:
 ```sh
 gh pr create --draft --base master --head release/x.y.z \
   --title "Bump up version to x.y.z" --body "<short release summary>"
-# wait for the required ci.yml gate on the head commit's run, not `gh pr checks --watch`
-# (docs/agents/contribution-flow.md § "GitHub and git traps")
-gh run list --branch release/x.y.z --workflow CI --limit 3 --json databaseId,headSha
-gh run view <run-id> --json status,conclusion,headSha   # repeat until status is "completed"
-gh pr ready <pr>                 # only on the user's explicit word, CI green, no stop instruction
-bin/land-pr <pr> <reviewed-head-sha>   # in the background: queues it and waits;
+gh pr ready <pr>                 # at once: a Draft PR's CI is only the light gate
+# wait for the full run's required ci.yml gate on the head, not `gh pr checks --watch`
+# (docs/agents/contribution-flow.md § "GitHub and git traps"); repeat until SUCCESS or FAILURE
+bin/ci-required <full-head-sha>
+# only on the user's explicit word to land it, CI green, no stop instruction; bin/land-pr
+# refuses a release/** PR without RIGOR_RELEASE_APPROVED=1, so set it only on that word
+RIGOR_RELEASE_APPROVED=1 bin/land-pr <pr> <reviewed-head-sha>   # in the background: queues it and waits;
 # the queue merges with a merge commit. Delete release/x.y.z only after it
 # prints that merge commit.
 ```
 
-The release PR is created `--draft` like every other PR, but lands by this
-skill's own rule, which `docs/agents/contribution-flow.md` § "Landing a pull
-request" defers to: the user
-reviews the sealed section on the PR, and `gh pr ready` is the recorded
-hand-off from review to landing.
+The release PR is created `--draft` like every other PR and marked ready at
+once, so the CI it waits on is the full run rather than the Draft's light
+gate. It lands by this skill's own rule, which `docs/agents/contribution-flow.md`
+§ "Landing a pull request" defers to: the user reviews the sealed section on
+the PR, and their explicit word to land it, followed by `bin/land-pr` with
+`RIGOR_RELEASE_APPROVED=1` (set only on that word), is the hand-off from review
+to landing.
 
 - **Merge on the required gate; review the advisory one.** `ci.yml` is the
   merge gate; `release-gate.yml` is advisory (apply the wall-noise / sweep

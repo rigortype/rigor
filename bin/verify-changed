@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # The local pre-push gate: check only what this branch changed, in under a minute.
 #
-# The full gate (`make verify`) belongs to CI on the Draft PR: locally it runs
-# the whole suite, and several parallel sessions running it at once is what
+# The full gate (`make verify`) belongs to the PR's full CI run, at `gh pr ready`
+# (a Draft PR gets only a light gate): locally it runs the whole suite, and several parallel sessions running it at once is what
 # stalls the host (five at once took 12-20 minutes each in September 2026).
 # This script covers the checks a session can answer cheaply before pushing,
 # over the files changed since the merge base (committed, uncommitted and
@@ -312,11 +312,11 @@ run_on "rigor check (changed lib files)" "$check_files" \
 
 echo
 if [[ -n "$uncovered" ]]; then
-  echo "verify-changed: not covered locally — CI on the Draft PR decides these:"
+  echo "verify-changed: not covered locally — the full CI run at gh pr ready decides these:"
   lines "$uncovered" | sed 's/^/  - /'
 fi
 if ((${#failures[@]})); then
   echo "verify-changed: FAILED — ${failures[*]}"
   exit 1
 fi
-echo "verify-changed: OK. The full gate is CI on the Draft PR."
+echo "verify-changed: OK. The full gate is the PR's full CI run, at gh pr ready."

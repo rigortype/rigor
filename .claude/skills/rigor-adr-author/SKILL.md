@@ -197,7 +197,7 @@ nix develop --command make docs-check         # gates the index rules (ADR-97)
 ADR authoring is docs-only, so the code gates are not required for the ADR
 itself. If the ADR lands *alongside* an implementation slice, that slice
 follows the normal protocol (AGENTS.md § "Validation": `make verify-changed`
-locally, CI on the Draft PR) — but the ADR text does not gate on it. An ADR
+locally, then the full CI at `gh pr ready`) — but the ADR text does not gate on it. An ADR
 records a decision, so its PR stays Draft for the user
 (`docs/agents/contribution-flow.md` § "Landing a pull request").
 

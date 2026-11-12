@@ -93,6 +93,24 @@ first verifies the run's `event` is `merge_group` and its `conclusion` is `succe
 `head_sha` matches the queued entry and that `path` is `.github/workflows/ci.yml`. The option is
 deferred until that trigger fires.
 
+*Amended 2026-11-13 (coordinator's decision under the user's delegation of CI-load measures).* A
+`pull_request` run on a Draft PR is a light gate: change detection, `lint` on a code PR and
+`docs-check` on a no-code PR. The heavy jobs are skipped and `CI required` is skipped too, so it
+concludes SKIPPED: a draft head never reads green to `bin/land-pr` and never attests a tree.
+GitHub's own rollup and merge box count a SKIPPED required check as passing, so there a draft head
+looks green until the full run's `CI required` exists; that window is accepted, because nothing
+reaches `master` except through the queue, which always runs in full. The full
+run starts at `gh pr ready` (the `ready_for_review` event) and on every push to a ready PR; push and
+`merge_group` runs are unchanged. GitHub Actions runs about 20 jobs at once and one full run is about
+20 jobs, while a PR used to cost three full runs (the Draft push, the review fix-up push, the queue);
+on 2026-11-12, six merges took 45 `merge_group` and 69 `pull_request` runs. The review now reads the
+light run plus a local `make verify-changed`, and what lands is still checked in full twice, by the
+ready run and by the queue (or the queue's reuse of the ready run's attestation). A head can then
+carry several `CI required` check runs, so `bin/land-pr` reads the newest one by check-run id
+(`bin/ci-required`). The advisory engine-allocation and type_of-shadow results exist only on the
+full run, so `land-when-green.sh` reads them there and stops before landing when either warns. The
+cost: a spec failure surfaces only after `gh pr ready`, and costs a fix push and another full run.
+
 **2. Decisions below a stated line are made by precedent and ratified afterwards.** A decision
 that is not *serious* (the list in `contribution-flow.md` § "Decisions and the approval queue") is
 made by the coordinator, following the closest precedent, and lands with its PR. The PR carries an

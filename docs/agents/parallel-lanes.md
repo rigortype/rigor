@@ -114,7 +114,11 @@ lives in the PR body and the issues, which the coordinator reads only when a dec
    Settle the decisions you can foresee before the lane starts, per contribution-flow.md § "Decisions
    and the approval queue".
 6. **Review when the Draft PR lands**, with the [reviewer contract](#reviewer-contract), and triage
-   per contribution-flow.md step 3, including the "Engine allocations (advisory)" summary. A PR
+   per contribution-flow.md step 3. The Draft's CI is the light gate (contribution-flow.md step 1),
+   so the specs, self-check, the "Engine allocations (advisory)" summary and the acceptance gates
+   first run at `gh pr ready`. A failure there goes back to the lane like a review finding. Read the
+   advisory summaries on the full run before `bin/land-pr`; `land-when-green.sh` does so and stops
+   (exit 6) when either warns or has no verdict, naming the run: read the summary, and land by hand if accepted. A PR
    whose allocation delta is above `pr_allocations_pct` (`bench/thresholds.yml`) does not land until
    you have its attribution and either the lane cuts the cost or an approval-queue entry accepts it.
    Accepting one when the release gate's measurement (`make bench-perf` against
@@ -131,8 +135,12 @@ lives in the PR body and the issues, which the coordinator reads only when a dec
    non-converging design goes to the user. When a lane stops at a gate or an open choice, decide it
    per contribution-flow.md § "Decisions and the approval queue" and send the lane the decision with
    its approval-queue entry to commit; only a serious decision goes to the user.
-7. **Land through the merge queue** with `bin/land-pr N <reviewed-head-sha>` in the background, as
-   soon as the PR may land (contribution-flow.md step 6 and § "GitHub and git traps"); it refuses
+7. **Land through the merge queue**: after the last reviewed fix-up push, `gh pr ready` starts the
+   full CI; once its `CI required` passes, run `bin/land-pr N <reviewed-head-sha>` in the background
+   (contribution-flow.md step 6 and § "GitHub and git traps"; `land-when-green.sh` does all three,
+   and holds on an advisory warning per step 6). The PR stays ready after a failure or a hold, so
+   each fix push then costs a full run.
+   `bin/land-pr` refuses
    when `master` has no queue, and a PR behind `master` then waits for the user. It is the PR's
    watcher, so start no other. The queue runs CI on the PR merged onto `master` and the PRs ahead of
    it, which is the check of how changes in different files interact (an engine fix on one side

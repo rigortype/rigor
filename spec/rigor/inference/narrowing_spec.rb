@@ -1958,11 +1958,11 @@ RSpec.describe Rigor::Inference::Narrowing do
     def string_t = Rigor::Type::Combinator.nominal_of("String")
     def matchdata_t = Rigor::Type::Combinator.nominal_of("MatchData")
 
-    def when_body_scope(case_source)
-      program = parse_program(case_source, locals: %i[x])
+    def when_body_scope(case_source, base = scope)
+      program = parse_program(case_source, locals: %i[x re])
       case_node = program.statements.body.first
       branch = case_node.conditions.first
-      body, = described_class.case_when_scopes(case_node.predicate, branch.conditions, scope)
+      body, = described_class.case_when_scopes(case_node.predicate, branch.conditions, base)
       body
     end
 
@@ -1980,6 +1980,50 @@ RSpec.describe Rigor::Inference::Narrowing do
 
     it "promotes only $~/$& with multiple regex conditions" do
       body = when_body_scope("case x\nwhen /a(b)/, /c(d)/ then 1\nend")
+      expect(body.global(:$~)).to eq(matchdata_t)
+      expect(body.global(:$1)).to be_nil
+    end
+
+    # Issue #1474 — `when /(a)(b)/, "lit"` is also entered through `"lit"`, after the regex's `===`
+    # failed and left the globals nil, so the body joins the match globals of every way in.
+    it "joins the match globals across a mixed regex and literal clause" do
+      body = when_body_scope("case x\nwhen /(a)(b)/, \"lit\" then 1\nend")
+      expect(body.global(:$~)).to eq(Rigor::Type::Combinator.union(matchdata_t, constant_nil))
+      expect(body.global(:$1)).to eq(Rigor::Type::Combinator.union(string_t, constant_nil))
+      expect(body.global(:$2)).to eq(Rigor::Type::Combinator.union(string_t, constant_nil))
+      expect(body.global(:$&)).to eq(Rigor::Type::Combinator.union(string_t, constant_nil))
+    end
+
+    it "leaves the match globals unbound when no regex ran before the matching condition" do
+      body = when_body_scope("case x\nwhen \"lit\", /(a)/ then 1\nend")
+      expect(body.global(:$~)).to be_nil
+      expect(body.global(:$1)).to be_nil
+    end
+
+    it "does not keep an earlier match's narrowing where a failed regex cleared it" do
+      bound = scope.with_global(:$1, string_t).with_global(:$~, matchdata_t)
+      body = when_body_scope("case x\nwhen /(a)/, \"lit\" then 1\nend", bound)
+      expect(body.global(:$~)).to eq(Rigor::Type::Combinator.union(matchdata_t, constant_nil))
+      expect(body.global(:$1)).to eq(Rigor::Type::Combinator.union(string_t, constant_nil))
+    end
+
+    it "keeps an earlier match's narrowing where every way in preserves it" do
+      bound = scope.with_global(:$1, string_t).with_global(:$2, string_t).with_global(:$~, matchdata_t)
+      body = when_body_scope("case x\nwhen \"lit\", /(a)/ then 1\nend", bound)
+      expect(body.global(:$~)).to eq(matchdata_t)
+      expect(body.global(:$1)).to eq(string_t)
+      expect(body.global(:$2)).to be_nil
+    end
+
+    it "joins the unknown-match edges for a condition that may be a Regexp" do
+      body = when_body_scope("case x\nwhen /(a)/, re then 1\nend")
+      expect(body.global(:$~)).to eq(Rigor::Type::Combinator.union(matchdata_t, constant_nil))
+      expect(body.global(:$1)).to be_nil
+      expect(body.global(:$&)).to eq(Rigor::Type::Combinator.union(string_t, constant_nil))
+    end
+
+    it "keeps $~ matched when every condition of the clause matches" do
+      body = when_body_scope("case x\nwhen /(a)/, /\#{x}/ then 1\nend")
       expect(body.global(:$~)).to eq(matchdata_t)
       expect(body.global(:$1)).to be_nil
     end

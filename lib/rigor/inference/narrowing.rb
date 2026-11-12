@@ -13,6 +13,7 @@ require_relative "guard_rebinding"
 require_relative "intervening_ivar_reset"
 require_relative "key_presence_guard"
 require_relative "last_line"
+require_relative "match_rebinding"
 require_relative "operand_effects"
 require_relative "optimistic_origin"
 require_relative "project_method_ownership"
@@ -598,12 +599,21 @@ module Rigor
         end
       end
 
-      # When the clause has exactly one `RegularExpressionNode` literal condition, narrow the
-      # match-data globals on the body edge (same rule as `analyse_regex_match_predicate`'s
-      # truthy edge). With multiple regex conditions (`when /a/, /b/`) the body is reachable
-      # through any of them, so only `$~`/`$&` are safely non-nil; numbered groups whose
-      # presence differs per alternative stay `String | nil`. With no regex condition the entry
-      # scope passes through unchanged.
+      # When every condition is a `RegularExpressionNode` literal, the body edge narrows the
+      # match-data globals as `analyse_regex_match_predicate`'s truthy edge does. With multiple
+      # regex conditions (`when /a/, /b/`) the body is reachable through any of them, so only
+      # `$~`/`$&` are safely non-nil; numbered groups whose presence differs per alternative stay
+      # `String | nil`. With no regex condition the entry scope passes through unchanged.
+      #
+      # Issue #1474 — a clause that mixes a regex literal with another condition (`when /(a)/,
+      # "lit"`) is also entered through the other conditions: each regex literal before them ran
+      # its `===` and failed, leaving the globals nil, and a condition before any regex leaves
+      # them as they were. The body scope then joins the match globals of every way in rather
+      # than claiming the regex matched: each condition contributes the scope its own `===`
+      # leaves — a regex literal's truthy edge, the falsey edge of the regex literals that
+      # failed before it, the entry state where none ran, and the unknown-match edges for a
+      # condition that may itself be or run a Regexp ({MatchRebinding::Operands.pattern_value?},
+      # {MatchRebinding.may_match?}).
       def apply_when_regex_globals(conditions, scope)
         regexes = conditions.grep(Prism::RegularExpressionNode)
         return scope if regexes.empty?
@@ -614,8 +624,50 @@ module Rigor
           else
             Set.new
           end
-        truthy, = regex_match_predicate_scopes(scope, unconditional)
-        truthy
+        truthy, falsey = regex_match_predicate_scopes(scope, unconditional)
+        return truthy if regexes.size == conditions.size
+
+        empty_truthy, empty_falsey = regex_match_predicate_scopes(scope, Set.new)
+        failed = scope
+        paths = conditions.map do |condition|
+          kind = when_regex_condition_kind(condition, scope)
+          path, failed = when_regex_condition_scopes(kind, failed, truthy, falsey, empty_truthy, empty_falsey)
+          path
+        end
+        paths.reduce(:join)
+      end
+
+      # How a `when` condition's `===` can touch the match globals, for {#apply_when_regex_globals}:
+      # `:literal` a `RegularExpressionNode`, whose match the clause's shared unconditional groups
+      # describe; `:interpolated` an interpolated regex literal, a definite match whose groups are
+      # unknown; `:may_match` any other condition that may be a Regexp or run one, whose `===`
+      # outcome for the globals is unknown; `:neutral` a condition whose `===` and evaluation run
+      # no match, leaving the globals as the earlier conditions left them.
+      def when_regex_condition_kind(condition, scope)
+        return :literal if condition.is_a?(Prism::RegularExpressionNode)
+        return :interpolated if condition.is_a?(Prism::InterpolatedRegularExpressionNode)
+        if MatchRebinding::Operands.pattern_value?(condition, scope) ||
+           MatchRebinding.may_match?(condition, scope)
+          return :may_match
+        end
+
+        :neutral
+      end
+
+      # `[body_path_scope, failed_scope]` for one `when` condition of a mixed clause, `failed`
+      # being the globals state the conditions before it left. On the path where this condition's
+      # `===` matched the body reads the truthy edge (`:literal`), the ungrouped truthy edge
+      # (`:interpolated`), the join of that edge with `failed` (`:may_match` — it may not have
+      # been a match at all), or `failed` itself (`:neutral`). On the path where it failed the
+      # next conditions read the matching falsey edge, the ungrouped one, the join of it with
+      # `failed`, or `failed`.
+      def when_regex_condition_scopes(kind, failed, truthy, falsey, empty_truthy, empty_falsey)
+        case kind
+        when :literal then [truthy, falsey]
+        when :interpolated then [empty_truthy, empty_falsey]
+        when :may_match then [empty_truthy.join(failed), failed.join(empty_falsey)]
+        else [failed, failed]
+        end
       end
 
       # Issue #2443 — `scope` with what every match binds, laid over the bindings it holds, for the block of a call

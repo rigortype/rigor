@@ -274,6 +274,18 @@ RSpec.describe Rigor::Analysis::IncrementalRunSlot::WriteGuard do
       expect(guard.admits?(signature_kind_rows("sig"))).to be(true)
     end
 
+    # The mark takes its roots from Environment, not from a spelling of its own: a root only Environment
+    # names is watched, so a call site that hard-codes `signature_paths || ["sig"]` again fails here.
+    it "watches the roots Environment names, not a default of its own" do
+      allow(Rigor::Environment).to receive(:project_signature_root_candidates)
+        .with(configuration.signature_paths).and_return(["elsewhere"])
+      write("elsewhere/widget.rbs", "class Widget\nend\n")
+      guard = start
+      write("elsewhere/.#widget.rbs", "")
+      FileUtils.rm_f("elsewhere/.#widget.rbs")
+      expect(guard.admits?(signature_kind_rows("elsewhere"))).to be(true)
+    end
+
     context "with configured signature_paths" do
       let(:configuration) do
         Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge(

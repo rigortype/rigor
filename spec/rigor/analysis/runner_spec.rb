@@ -190,6 +190,18 @@ RSpec.describe Rigor::Analysis::Runner do
       expect(libraries_args).to include("set")
     end
 
+    # Issue #1619 — the run's own signature roots come from Environment, not from a spelling in the runner.
+    it "asks Environment for the signature root candidates it watches" do
+      asked = []
+      allow(Rigor::Environment).to receive(:project_signature_root_candidates).and_wrap_original do |original, paths|
+        asked << paths
+        original.call(paths)
+      end
+      analyze("x = 1\n", config: { "signature_paths" => %w[custom-sig] })
+
+      expect(asked).to include(%w[custom-sig])
+    end
+
     it "passes `signature_paths:` to Environment.for_project" do
       sig_paths_args = nil
       allow(Rigor::Environment).to receive(:for_project).and_wrap_original do |original, **kwargs|

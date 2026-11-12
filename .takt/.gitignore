@@ -5,6 +5,7 @@
 !facets/
 !facets/**
 !README.md
+!runtime.yaml
 !.gitignore
 runs/
 tasks/

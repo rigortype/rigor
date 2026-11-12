@@ -1,0 +1,16 @@
+version: 1
+# Provider/model binding for the takt workflows (ADR-115). No secrets here:
+# Opus runs on the Anthropic API via the TAKT_ANTHROPIC_API_KEY environment
+# variable, set only on the takt process (never exported shell-wide, which
+# would flip interactive `claude` / pi-claude-bridge to API billing).
+provider:
+  profiles:
+    opus-api: { provider: claude-sdk, model: claude-opus-5-5 }
+    # takt's embedded Pi cannot see the `devin/` provider (it comes from a pi
+    # extension), so lanes go through the Devin CLI provider instead.
+    lane-cheap: { provider: devin, model: swe-2-flash-high }
+  defaults: { profile: lane-cheap }
+  targets:
+    personas:
+      architect: { profile: opus-api }
+      adversary: { profile: opus-api }

@@ -6,6 +6,10 @@ description: >
 max_steps: 40
 initial_step: plan
 
+# Unattended providers deny every tool not allow-listed: without this the plan
+# step cannot run `gh issue view`. Steps that write override it with `edit`.
+capabilities: readonly
+
 personas:
   architect: ../facets/personas/architect.md
   lane: ../facets/personas/lane.md
@@ -37,6 +41,7 @@ steps:
         next: ABORT
 
   - name: develop
+    capabilities: edit
     persona: lane
     policy: rigor-lane
     instruction: develop
@@ -49,6 +54,7 @@ steps:
         next: ABORT
 
   - name: ship
+    capabilities: edit
     persona: shipper
     policy: rigor-lane
     instruction: ship-draft-pr
@@ -88,6 +94,7 @@ steps:
         next: fix
 
   - name: fix
+    capabilities: edit
     persona: lane
     policy: rigor-lane
     instruction: fix-from-review

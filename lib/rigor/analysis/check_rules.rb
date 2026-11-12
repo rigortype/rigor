@@ -185,7 +185,8 @@ module Rigor
       # check in the body stands. The refine-body test runs only once a mismatch would report, so a file pays the
       # {LexicalMethodSites} walk only then.
       def refinement_aware_return_type_mismatch(path, node, scope_index, lexical_sites)
-        diagnostic = return_type_mismatch_diagnostic(path, node, scope_index, lexical_sites&.replaced_singleton_defs)
+        replaced = lexical_sites&.replaced_singleton_defs(scope_index)
+        diagnostic = return_type_mismatch_diagnostic(path, node, scope_index, replaced)
         return diagnostic if diagnostic.nil? || lexical_sites.nil?
 
         lexical_sites.refinements.refinement_def?(node) ? nil : diagnostic

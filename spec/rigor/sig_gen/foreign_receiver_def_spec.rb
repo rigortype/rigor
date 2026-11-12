@@ -76,9 +76,42 @@ RSpec.describe "a def whose receiver is not the lexical self (#3155)", type: :ru
     expect(return_mismatches(self.class.meta_source, "class M1\n  def self.n: () -> :sing_n\nend\n")).to eq([])
   end
 
-  it "does not check a singleton def a later def of the name replaced" do
-    source = "class V\n  def V.w = \"first\"\n  def self.w = :second\nend\n"
-    expect(return_mismatches(source, "class V\n  def self.w: () -> :second\nend\n")).to eq([])
+  context "with a later singleton def of the same name" do
+    it "does not check a singleton def a later certain def replaced" do
+      source = "class V\n  def V.w = \"first\"\n  def self.w = :second\nend\n"
+      expect(return_mismatches(source, "class V\n  def self.w: () -> :second\nend\n")).to eq([])
+    end
+
+    it "does not check a singleton def a later `class << self` def replaced" do
+      source = "class V\n  def self.w = \"first\"\n  class << self\n    def w = :second\n  end\nend\n"
+      expect(return_mismatches(source, "class V\n  def self.w: () -> :second\nend\n")).to eq([])
+    end
+
+    it "still checks the surviving def" do
+      source = "class V\n  def V.w = :first\n  def self.w = \"second\"\nend\n"
+      expect(return_mismatches(source, "class V\n  def self.w: () -> :first\nend\n")).to eq([3])
+    end
+
+    {
+      "a Class.new block" => "Class.new do\n    def self.g = 1\n  end",
+      "a Struct.new block" => "Struct.new(:a) do\n    def self.g = 1\n  end",
+      "a condition" => "if rand > 0.5\n    def self.g = 1\n  end"
+    }.each do |label, later|
+      it "still checks a singleton def when the later def sits in #{label}" do
+        source = "class SV\n  def self.g = \"bad\"\n  #{later}\nend\n"
+        expect(return_mismatches(source, "class SV\n  def self.g: () -> Integer\nend\n")).to eq([2])
+      end
+    end
+  end
+
+  it "checks `def (self).x` as `def self.x`" do
+    source = "class PS\n  def (self).p2 = \"bad\"\nend\n"
+    expect(return_mismatches(source, "class PS\n  def self.p2: () -> Integer\nend\n")).to eq([2])
+  end
+
+  it "keeps a module's singleton def when module_function precedes a foreign def of the name" do
+    source = "module MFR\n  def self.g = :real\n  module_function\n  def String.g = 2\nend\n"
+    expect(assert_type_mismatches("#{source}assert_type(\":real\", MFR.g)\n")).to eq([])
   end
 
   context "with the lexical self as the receiver (controls)" do

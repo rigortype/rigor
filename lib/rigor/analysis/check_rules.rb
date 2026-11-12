@@ -185,7 +185,7 @@ module Rigor
       # check in the body stands. The refine-body test runs only once a mismatch would report, so a file pays the
       # {LexicalMethodSites} walk only then.
       def refinement_aware_return_type_mismatch(path, node, scope_index, lexical_sites)
-        diagnostic = return_type_mismatch_diagnostic(path, node, scope_index)
+        diagnostic = return_type_mismatch_diagnostic(path, node, scope_index, lexical_sites&.replaced_singleton_defs)
         return diagnostic if diagnostic.nil? || lexical_sites.nil?
 
         lexical_sites.refinements.refinement_def?(node) ? nil : diagnostic
@@ -4600,7 +4600,7 @@ module Rigor
         #     :no    → emit at :error (severity_profile may re-stamp; default `balanced` keeps the
         #              authored severity).
         #     :maybe → silent (see {#compare_return}; ADR-8's `strict` promotion is deferred).
-        def return_type_mismatch_diagnostic(path, def_node, scope_index)
+        def return_type_mismatch_diagnostic(path, def_node, scope_index, replaced_defs = nil)
           return nil if def_node.body.nil?
 
           last_expr = body_last_expression(def_node.body)
@@ -4609,7 +4609,7 @@ module Rigor
           inner_scope = scope_index[last_expr] || scope_index[def_node.body] || scope_index[def_node]
           return nil if inner_scope.nil?
 
-          declared = declared_return_type(def_node, scope_index)
+          declared = declared_return_type(def_node, scope_index, replaced_defs)
           return nil if declared.nil?
 
           # Issue #1362 — a body that ends on a builtin global still on its declared seed, or on a local copied from
@@ -4656,7 +4656,7 @@ module Rigor
         # `non-empty-array[Integer]`, etc. — are stricter than the underlying RBS class, so a body whose
         # inferred type the bare RBS sig would accept may still fail the refinement (e.g. `def name; "";
         # end` returns `Constant[""]`, accepted by `String` but rejected by `non-empty-string`).
-        def declared_return_type(def_node, scope_index)
+        def declared_return_type(def_node, scope_index, replaced_defs = nil)
           scope = scope_index[def_node]
           return nil if scope.nil?
 
@@ -4666,7 +4666,7 @@ module Rigor
           side = if def_node.receiver.nil?
                    receiverless_def_side(scope, self_type.class_name, def_node)
                  else
-                   receiver_def_side(scope, self_type.class_name, def_node)
+                   receiver_def_side(scope, self_type.class_name, def_node, replaced_defs)
                  end
           return nil if side.nil?
 
@@ -4703,18 +4703,17 @@ module Rigor
         # Issue #3155 — `def self.x`, or `def K.x` in `K`'s body, answers to K's singleton signature. A def on another
         # object (`def String.q`, `def obj.q` in a class body) or `def self.x` in a `class << self` body (a method of
         # the singleton class's own singleton) answers to none of K's: `nil`, and the caller declines. So does a
-        # singleton def a later def of the name replaced (`def K.w`; `def self.w`), as {#receiverless_def_side}'s.
-        def receiver_def_side(scope, class_name, def_node)
-          receiver = def_node.receiver
+        # singleton def a later certain def of the name in the same body replaced (`def K.w`; `def self.w`;
+        # {ReplacedSingletonDefs}). `def (self).x` reads as `def self.x`; `K = self; def K.x` is not read.
+        def receiver_def_side(scope, class_name, def_node, replaced_defs)
+          receiver = ReplacedSingletonDefs.unparenthesized(def_node.receiver)
           lexical_self = if receiver.is_a?(Prism::SelfNode)
                            !scope.singleton_class_body?
                          else
                            Inference::ScopeIndexer.def_receiver_targets_lexical_self?(receiver, class_name.split("::"))
                          end
           return nil unless lexical_self
-
-          recorded = scope.singleton_def_for(class_name, def_node.name)
-          return nil if recorded.is_a?(Prism::DefNode) && !same_def_node?(recorded, def_node)
+          return nil if replaced_defs&.replaced?(def_node)
 
           :singleton
         end

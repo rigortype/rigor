@@ -7083,9 +7083,10 @@ module Rigor
           next if under_scope_body?(ancestors)
           next if CapturedLocals.under_foreign_self_block?(ancestors, scope)
 
-          next unless CapturedLocals.rebindable_ivar?(scope, receiver.name) && collection_only?(scope.ivar(receiver.name))
+          name = receiver.name
+          next unless CapturedLocals.rebindable_ivar?(scope, name) && collection_only?(scope.ivar(name))
 
-          (names ||= []) << receiver.name
+          (names ||= []) << name
         end
         names ? names.uniq : NO_REWRITES
       end

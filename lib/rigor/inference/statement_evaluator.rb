@@ -7669,8 +7669,9 @@ module Rigor
       private_constant :NON_LOCAL_SCOPE_BODY_NODES
 
       # True when a non-local of `kind` (`:ivar`, `:cvar` or `:global`) at `ancestors` under a block body sits in a body
-      # the block defines that makes it another variable or does not run during the block ({NON_LOCAL_SCOPE_BODY_NODES}):
-      # for an instance variable, any method, class or module body, where `self` is that body's own.
+      # the block defines that makes it another variable or does not run during the block
+      # ({NON_LOCAL_SCOPE_BODY_NODES}): for an instance variable, any method, class or module body, where `self` is that
+      # body's own.
       def under_scope_body?(ancestors, kind = :ivar)
         bodies = NON_LOCAL_SCOPE_BODY_NODES.fetch(kind)
         ancestors.any? { |a| bodies.any? { |k| a.is_a?(k) } }

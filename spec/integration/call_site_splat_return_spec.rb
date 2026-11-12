@@ -97,7 +97,8 @@ def fwd(...) = count(...)"
 
   describe "a callee that always raises keeps its bot" do
     it "through an implicit-self call" do
-      source = raising("", "die(*msgs)").sub("class Caller\n", "class Caller\n  def die(*m) = raise(ArgumentError, m.join)\n")
+      source = raising("", "die(*msgs)")
+               .sub("class Caller\n", "class Caller\n  def die(*m) = raise(ArgumentError, m.join)\n")
       expect(rules(source)).to eq([])
     end
 

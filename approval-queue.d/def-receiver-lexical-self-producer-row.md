@@ -19,7 +19,7 @@ A first cut rendered the class header to get the name. That would have been a de
 
 ## Options and trade-offs
 
-- Add a producers.yml row with this reason. The rule stays exact (direct statements only). The cost is one more syntactic walk over class bodies, run lazily and only once a return mismatch would report, for a later reader to keep consistent with the indexer.
+- Add a producers.yml row with this reason. The rule stays exact (direct statements only). The cost is one more syntactic walk over class bodies, run lazily, once per file, and only when a def with a receiver has a declared signature to answer to, for a later reader to keep consistent with the indexer.
 - Route the question through `DeclarationWalk::Context` or the indexer, by having the singleton table record whether each write is a certain direct statement. That needs no row, but it changes the shared discovery tables for one rule's decline.
 - Drop the skip and report every replaced singleton def. That needs no row either, but it brings back the report the issue lists (`def V.w = "first"; def self.w = :second` checked against the last def's signature), a false positive on correct code.
 

@@ -104,6 +104,29 @@ RSpec.describe "a def whose receiver is not the lexical self (#3155)", type: :ru
     end
   end
 
+  describe "what counts as a replacing def" do
+    def mismatches(body, name)
+      return_mismatches("class RD\n#{body}end\n", "class RD\n  def self.#{name}: () -> Integer\nend\n")
+    end
+
+    it "does not count a later def on another object" do
+      expect(mismatches("  def self.f = \"bad\"\n  def String.f = 1\n", "f")).to eq([2])
+    end
+
+    it "does not count a later `def self.x` in a `class << self` body" do
+      expect(mismatches("  class << self\n    def a5 = \"bad\"\n    def self.a5 = 1\n  end\n", "a5")).to eq([3])
+    end
+
+    it "does not count a later def in a `class << other` body" do
+      body = "  OTHER = Object.new\n  def self.a7 = \"bad\"\n  class << OTHER\n    def a7 = 1\n  end\n"
+      expect(mismatches(body, "a7")).to eq([3])
+    end
+
+    it "counts a later `def (self).x`" do
+      expect(mismatches("  def self.a6 = \"x\"\n  def (self).a6 = 1\n", "a6")).to eq([])
+    end
+  end
+
   it "checks `def (self).x` as `def self.x`" do
     source = "class PS\n  def (self).p2 = \"bad\"\nend\n"
     expect(return_mismatches(source, "class PS\n  def self.p2: () -> Integer\nend\n")).to eq([2])

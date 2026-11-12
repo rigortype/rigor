@@ -940,6 +940,15 @@ binding cannot manufacture a diagnostic inside the callee's body.
   last case is what leaves the literal form's existing binding untouched (`def target(a:, b:, **rest)` called
   `target(a: 1, b: 2)` still binds `rest` to `Dynamic[top]`), while a caller that leaves keys over — the only shape
   where the parameter holds something to report — gets them typed.
+- A positional splat (`f(*a)`, `f(1, *a)`, `f(*a, 2)`, a literal `f(*[1, 2])` included) is carried in the list as
+  ONE argument, so the list does not say how many positionals the callee receives. A call whose arguments hold one
+  MUST NOT have its return typed by re-typing a user `def` body from that list (issue
+  [#1237](https://github.com/rigortype/rigor/issues/1237)): the instance and singleton body tiers, a top-level
+  `def`, a refine body and the ADR-110 overriding `def` all decline. Where the tier would otherwise let a declaration
+  the `def` shadows answer (the top-level `def`, the refine body, the overriding `def`) the call answers
+  `Dynamic[top]`; the instance and singleton tiers fall through to the unresolved-call answer. The return value
+  is not a lower bound: `def count(*keys) = keys.size` called `r.count(*[0, 1])` folded to `1` and drew
+  `flow.always-truthy-condition` on `== 2`. Expanding a `Tuple` splat into positionals is not done.
 - `def m(...)` MUST NOT be declined by the call-site binder. Its NAMED parameters (a leading `def m(a, ...)`
   required) bind as before, and nothing is bound for the forwarding slot, which is not a binding at all.
 - A `f(...)` call inside a `def m(...)` body MUST expand to the argument types of the call that entered the frame, so

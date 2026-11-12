@@ -339,7 +339,7 @@ module Rigor
       # `name` anyway. Minting a `Prism::CallNode` for the read would hand plugins a node that is not in the
       # tree, through a constructor whose field list changed inside the `prism` range the gemspec accepts.
       def implicit_index_read_type(node, receiver, arg_types)
-        return splat_index_read_type(node, receiver, arg_types) if node.arguments&.arguments&.any?(Prism::SplatNode)
+        return splat_index_read_type(node, receiver, arg_types) if splat_arguments?(node)
 
         try_overriding_def_dispatch(node, receiver, arg_types, method_name: :[]) ||
           index_read_dispatch(node, receiver, arg_types) ||
@@ -1613,6 +1613,7 @@ module Rigor
         return declined_top_level_def_answer(node) if local_def.nil?
         return nil if self_type_answers?(node.name)
         return nil if plugin_member_answers?(node, receiver)
+        return dynamic_top if splat_arguments?(node)
 
         local_inference = infer_top_level_user_method(local_def, receiver, arg_types, block_type)
         return local_inference if local_inference
@@ -2361,6 +2362,7 @@ module Rigor
         winner = RefinedDispatch.winner(scope, class_name, node.name, list)
         return nil if winner.nil?
         return dynamic_top if winner == RefinedDispatch::UNKNOWN
+        return dynamic_top if splat_arguments?(node)
 
         refined_body_return(winner, node.name, Type::Combinator.nominal_of(class_name), arg_types, block_type) ||
           dynamic_top
@@ -2407,6 +2409,18 @@ module Rigor
         when Type::FloatRange then "Float"
         when Type::Refined, Type::Difference then refined_receiver_class_name(receiver.base)
         end
+      end
+
+      # Issue #1237 — whether the call's argument list holds a `*splat`. The splat's expansion decides how many
+      # positional arguments the callee receives, and `call_arg_types` carries it as one untyped argument, so a
+      # body re-typed from that list binds it to one parameter: `def count(*keys) = keys.size` called as
+      # `r.count(*[0, 1])` folded to `1` and drew an always-falsey `== 2`. Every tier that re-types a user `def`
+      # body from the call's arguments declines under a splat, as {#try_literal_send} does; a tier that would
+      # otherwise let a declaration the `def` shadows speak answers `Dynamic[top]` instead. A Tuple splat of
+      # known arity is declined too rather than expanded. A `**h` keyword splat is not a positional and keeps
+      # its {#double_splat_hash_shape} binding.
+      def splat_arguments?(node)
+        node.arguments&.arguments&.any?(Prism::SplatNode) || false
       end
 
       # The post-dispatch tiers for a call `MethodDispatcher` could not answer, in their historical
@@ -2759,6 +2773,7 @@ module Rigor
 
       def try_user_method_inference(receiver, call_node, arg_types, method_name: call_node.name, block_type: nil)
         return nil unless user_inference_receiver?(receiver)
+        return nil if splat_arguments?(call_node)
 
         def_node, owner, raising = resolve_typing_def_with_owner(receiver.class_name, method_name)
         return every_definer_raises_type(raising, receiver, call_node, arg_types, block_type) if def_node.nil?
@@ -3096,6 +3111,8 @@ module Rigor
       # object (#320) — so the two are mutually exclusive and consulting both is one resolution attempt.
       def try_project_singleton_inference(receiver, call_node, arg_types, method_name: call_node.name,
                                           block_type: nil)
+        return nil if splat_arguments?(call_node)
+
         kwargs = { method_name: method_name, block_type: block_type }
         try_singleton_method_inference(receiver, call_node, arg_types, **kwargs) ||
           try_singleton_object_constant_inference(receiver, call_node, arg_types, **kwargs)

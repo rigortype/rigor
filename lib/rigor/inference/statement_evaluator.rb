@@ -7078,10 +7078,11 @@ module Rigor
       # (already floored by `drop_captured_narrowing`) are untouched.
       #
       # An instance variable of this scope's `self` the body mutates in place is floored too (issue #1208): a callback
-      # that runs `@opts[:format] = "json"` later left `@opts[:format]` folding to `"text"`. It floors member by member
-      # ({#member_content_floor}, issue #3095), so a lazily initialised `@buf = flag ? [1] : nil` keeps its `nil`. One
-      # under a block that runs on another object is that object's, and so is every one when `foreign_self` says the
-      # closure itself does.
+      # that runs `@opts[:format] = "json"` later left `@opts[:format]` folding to `"text"`, and so are a class variable
+      # and a global (issue #3096). Each floors member by member ({#member_content_floor}, issue #3095), so a lazily
+      # initialised `@buf = flag ? [1] : nil` keeps its `nil`. An instance variable under a block that runs on another
+      # object is that object's, and so is every one when `foreign_self` says the closure itself does; a class
+      # variable resolves lexically and a global is global, so neither depends on `self`.
       def widen_escaping_content_captures(block_node, post_scope, foreign_self: false)
         body = block_node.body
         return post_scope if body.nil?
@@ -7094,10 +7095,9 @@ module Rigor
           floored = content_floor_for(CapturedLocals.bound_type(acc, name))
           floored.nil? ? acc : bind_mutated_capture(acc, name, floored)
         end
-        return post_scope if foreign_self
 
-        escaping_ivar_content_mutations(body, post_scope).reduce(post_scope) do |acc, name|
-          bound = acc.ivar(name)
+        escaping_non_local_content_mutations(body, post_scope, foreign_self).reduce(post_scope) do |acc, name|
+          bound = CapturedLocals.bound_type(acc, name)
           floored = member_content_floor(bound)
           floored.equal?(bound) ? acc : CapturedLocals.bind(acc, name, floored)
         end
@@ -7115,23 +7115,19 @@ module Rigor
         Type::Combinator.union(*floored)
       end
 
-      # The instance variables of `scope`'s `self` an escaping body mutates in place, on the terms
-      # {#capturable_ivar?} reads against `scope` — the continuation the floor writes into.
-      def escaping_ivar_content_mutations(body, scope)
+      # The instance variables of `scope`'s `self`, the class variables and the globals an escaping body mutates in
+      # place, on the terms {#capturable_non_local?} reads against `scope` — the continuation the floor writes into.
+      def escaping_non_local_content_mutations(body, scope, foreign_self)
         names = nil
         Source::NodeWalker.each_with_ancestors(body) do |node, ancestors|
           is_call_mutator = node.is_a?(Prism::CallNode) && CONTENT_MUTATORS.include?(node.name)
           next unless is_call_mutator || index_write?(node)
 
           receiver = node.receiver
-          next unless receiver.is_a?(Prism::InstanceVariableReadNode)
-          next if under_scope_body?(ancestors)
-          next if CapturedLocals.under_foreign_self_block?(ancestors, scope)
+          next unless NON_LOCAL_READ_NODES.include?(receiver.class)
+          next unless capturable_non_local?(receiver.name, ancestors, scope, foreign_self: foreign_self)
 
-          name = receiver.name
-          next unless CapturedLocals.rebindable_ivar?(scope, name)
-
-          (names ||= []) << name
+          (names ||= []) << receiver.name
         end
         names ? names.uniq : NO_REWRITES
       end
@@ -7396,16 +7392,16 @@ module Rigor
         end
       end
 
-      # Binds a name from `CapturedLocals.writes`. An ivar goes through {CapturedLocals.bind}, which keeps its issue
-      # #286 optimistic mark. A local keeps the plain `with_local` these seams have always used, so a block that
-      # rebinds no ivar leaves the locals exactly as before.
+      # Binds a name from `CapturedLocals.writes`. An ivar (or any other non-local) goes through
+      # {CapturedLocals.bind}, which keeps an ivar's issue #286 optimistic mark. A local keeps the plain `with_local`
+      # these seams have always used, so a block that rebinds no ivar leaves the locals exactly as before.
       #
       # Issue #1402 — `optimistic` is a mark a write-back pass's exit held ({#with_capture_exit_marks}); a name that has
       # one binds through {CapturedLocals.bind} whatever its kind, which adds it.
       def bind_capture(scope, name, type, optimistic: nil)
         return CapturedLocals.bind(scope, name, type, optimistic: optimistic) if optimistic
 
-        CapturedLocals.ivar_name?(name) ? CapturedLocals.bind(scope, name, type) : scope.with_local(name, type)
+        CapturedLocals.local_name?(name) ? scope.with_local(name, type) : CapturedLocals.bind(scope, name, type)
       end
 
       # A block-level `break` ends the CALL, so the binding it leaves with starts no further iteration and is no input
@@ -7514,16 +7510,21 @@ module Rigor
       end
 
       # `scope` with a capture the block mutated in place bound to its joined or floored content: a local through
-      # `Scope#with_mutated_local`, which keeps the marks a source-level write drops, and an instance variable through
-      # {CapturedLocals.bind}, which keeps its optimistic nil-freeness mark. The binding still names the same object.
+      # `Scope#with_mutated_local`, which keeps the marks a source-level write drops, and an instance variable, class
+      # variable or global through {CapturedLocals.bind}, which keeps an ivar's optimistic nil-freeness mark. The
+      # binding still names the same object.
       def bind_mutated_capture(scope, name, type)
-        CapturedLocals.ivar_name?(name) ? CapturedLocals.bind(scope, name, type) : scope.with_mutated_local(name, type)
+        CapturedLocals.local_name?(name) ? scope.with_mutated_local(name, type) : CapturedLocals.bind(scope, name, type)
       end
 
       # `scope` with a content seam's working binding for `name` — its join so far, or `Dynamic[top]` for a read the
       # body rebinds — whatever kind of variable it is.
       def bind_capture_slot(scope, name, type)
-        CapturedLocals.ivar_name?(name) ? scope.with_ivar(name, type) : scope.with_local(name, type)
+        case CapturedLocals.variable_kind(name)
+        when :local then scope.with_local(name, type)
+        when :ivar then scope.with_ivar(name, type)
+        else CapturedLocals.bind(scope, name, type)
+        end
       end
 
       NO_REWRITES = [].freeze
@@ -7581,12 +7582,13 @@ module Rigor
       # - one more walk of the body to the store inherits every gap in the engine's in-body flow.
       #
       # An instance variable the body rebinds is one too (issue #1235): `@total += x; out << @total` stored the
-      # pre-call `@total`. It counts on the terms the content walk takes one ({#capturable_ivar?}).
+      # pre-call `@total`, and so are a class variable and a global (issue #3096). Each counts on the terms the content
+      # walk takes one ({#capturable_non_local?}).
       #
       # See ADR-56 WD2.13.
       def shadow_rebound_reads(block, sites, seeds, shadows, call_node)
         entry_names = scope.locals.keys | CapturedLocals.introduced_locals(block).to_a
-        written = (scope_local_writes(block) & entry_names) | rebound_capturable_ivars(block, call_node)
+        written = (scope_local_writes(block) & entry_names) | rebound_capturable_non_locals(block, call_node)
         return if written.empty?
 
         sites.each do |name, nodes|
@@ -7600,17 +7602,19 @@ module Rigor
         end
       end
 
-      # The instance variables the block body writes that {#capturable_ivar?} accepts; none for a block that runs on
-      # another object. Every self-rebinding call classifies `:unknown` today, so neither content seam that calls this
-      # meets one; the guard keeps the answer right should the escape analysis learn to call one non-escaping.
-      def rebound_capturable_ivars(block, call_node)
-        return NO_REWRITES if block.body.nil? || foreign_self_block?(call_node)
+      # The instance variables, class variables and globals the block body writes that {#capturable_non_local?}
+      # accepts; no instance variable for a block that runs on another object. Every self-rebinding call classifies
+      # `:unknown` today, so neither content seam that calls this meets one; the guard keeps the answer right should
+      # the escape analysis learn to call one non-escaping.
+      def rebound_capturable_non_locals(block, call_node)
+        return NO_REWRITES if block.body.nil?
 
+        foreign = foreign_self_block?(call_node)
         names = []
         Source::NodeWalker.each_with_ancestors(block.body) do |node, ancestors|
-          next unless IVAR_WRITE_NODES.include?(node.class)
+          next unless CapturedLocals::NON_LOCAL_WRITE_NODES.include?(node.class)
 
-          names << node.name if capturable_ivar?(node.name, ancestors)
+          names << node.name if capturable_non_local?(node.name, ancestors, scope, foreign_self: foreign)
         end
         names.uniq
       end
@@ -7675,18 +7679,27 @@ module Rigor
       ].freeze
       private_constant :LOCAL_READ_NODES
 
-      # The same for an instance variable.
-      IVAR_READ_NODES = [
+      # The same for an instance variable, a class variable and a global.
+      NON_LOCAL_VALUE_READ_NODES = Set[
         Prism::InstanceVariableReadNode,
         Prism::InstanceVariableOperatorWriteNode,
         Prism::InstanceVariableOrWriteNode,
-        Prism::InstanceVariableAndWriteNode
+        Prism::InstanceVariableAndWriteNode,
+        Prism::ClassVariableReadNode,
+        Prism::ClassVariableOperatorWriteNode,
+        Prism::ClassVariableOrWriteNode,
+        Prism::ClassVariableAndWriteNode,
+        Prism::GlobalVariableReadNode,
+        Prism::GlobalVariableOperatorWriteNode,
+        Prism::GlobalVariableOrWriteNode,
+        Prism::GlobalVariableAndWriteNode
       ].freeze
-      private_constant :IVAR_READ_NODES
+      private_constant :NON_LOCAL_VALUE_READ_NODES
 
-      # Every local `node` reads from the scope it sits in, and every instance variable outside a nested method or
-      # class body: a read inside an inner block of a name that block introduces is a different variable. The caller
-      # intersects the answer with the names the body writes, which {#rebound_capturable_ivars} has already filtered.
+      # Every local `node` reads from the scope it sits in, and every instance variable, class variable or global
+      # outside a nested method or class body: a read inside an inner block of a name that block introduces is a
+      # different variable. The caller intersects the answer with the names the body writes, which
+      # {#rebound_capturable_non_locals} has already filtered.
       def local_reads(node)
         return [] if node.nil?
 
@@ -7694,7 +7707,7 @@ module Rigor
         Source::NodeWalker.each_with_ancestors(node) do |n, ancestors|
           if LOCAL_READ_NODES.any? { |klass| n.is_a?(klass) }
             names << n.name if same_scope_local?(n, ancestors)
-          elsif IVAR_READ_NODES.any? { |klass| n.is_a?(klass) }
+          elsif NON_LOCAL_VALUE_READ_NODES.include?(n.class)
             names << n.name unless under_scope_body?(ancestors)
           end
         end
@@ -7821,6 +7834,9 @@ module Rigor
       # {CapturedLocals.writes} takes a rebound one: bound at the call site and not on its ADR-58 declaration seed
       # ({CapturedLocals.rebindable_ivar?}), outside a nested method or class body, and not in a block that runs on
       # another object ({CapturedLocals.under_foreign_self_block?}, or `call_node`'s own block).
+      #
+      # Issue #3096 — a class variable and a global are captures on the same terms, less the foreign-self one: Ruby
+      # resolves a class variable lexically, and a global is the same one whatever `self` is.
       def captured_content_mutations(block, shadows, call_node)
         mutations = Hash.new { |h, k| h[k] = [] }
         # Every self-rebinding call classifies `:unknown` today, so this seam does not meet one; the guard keeps the
@@ -7828,7 +7844,7 @@ module Rigor
         foreign = foreign_self_block?(call_node)
         Source::NodeWalker.each_with_ancestors(block.body) do |node, ancestors|
           name, site = content_mutation_target(node) { |receiver| receiver.depth > scope_nesting(ancestors) }
-          name, site = ivar_content_mutation_target(node, ancestors) if name.nil? && !foreign
+          name, site = non_local_content_mutation_target(node, ancestors, foreign) if name.nil?
           next if name.nil?
 
           mutations[name] << site
@@ -7837,19 +7853,26 @@ module Rigor
         mutations
       end
 
-      # `[name, node]` when `node` mutates the content of an instance variable of this scope's `self` that the
-      # content seams may join ({#captured_content_mutations}), else {NO_CONTENT_MUTATION}.
-      def ivar_content_mutation_target(node, ancestors)
+      # `[name, node]` when `node` mutates the content of an instance variable of this scope's `self`, a class
+      # variable or a global that the content seams may join ({#captured_content_mutations}), else
+      # {NO_CONTENT_MUTATION}. `foreign_self` says the seam's block runs on another object.
+      def non_local_content_mutation_target(node, ancestors, foreign_self)
         is_call_mutator = node.is_a?(Prism::CallNode) && CONTENT_MUTATORS.include?(node.name)
         return NO_CONTENT_MUTATION unless is_call_mutator || index_write?(node)
 
         receiver = node.receiver
-        return NO_CONTENT_MUTATION unless receiver.is_a?(Prism::InstanceVariableReadNode)
-        return NO_CONTENT_MUTATION unless capturable_ivar?(receiver.name, ancestors)
-        return NO_CONTENT_MUTATION unless collection_only?(scope.ivar(receiver.name))
+        return NO_CONTENT_MUTATION unless NON_LOCAL_READ_NODES.include?(receiver.class)
+        return NO_CONTENT_MUTATION unless capturable_non_local?(receiver.name, ancestors, scope, foreign_self:)
+        return NO_CONTENT_MUTATION unless collection_only?(CapturedLocals.bound_type(scope, receiver.name))
 
         [receiver.name, node]
       end
+
+      # The receiver reads of a variable the content seams take besides a local.
+      NON_LOCAL_READ_NODES = Set[
+        Prism::InstanceVariableReadNode, Prism::ClassVariableReadNode, Prism::GlobalVariableReadNode
+      ].freeze
+      private_constant :NON_LOCAL_READ_NODES
 
       # True when every member of `type` is an Array, a Hash or a String carrier. The non-escaping join takes an
       # instance variable only then: it drops a seed's `nil` after a guarded mutation (#1219), so `@buf = flag ? [1] :
@@ -7863,13 +7886,27 @@ module Rigor
         arrayish?(type) || hashish?(type) || UnknownStoreWidening.carrier_class(type) == "String"
       end
 
-      # True when the instance variable `name`, read or written at `ancestors` under a block body, is this scope's
-      # `self`'s and bound here off its declaration seed.
-      def capturable_ivar?(name, ancestors)
+      # True when the non-local `name`, read or written at `ancestors` under a block body, is one the content seams
+      # take against `in_scope`: bound there ({CapturedLocals.rebindable_non_local?}, which keeps an instance
+      # variable on its declaration seed out) and outside a method or class body the block defines.
+      #
+      # - An instance variable must be `self`'s: not under a block that runs on another object, nor in a seam whose
+      #   block does (`foreign_self`).
+      # - A class variable resolves lexically and a global is global, so `self` does not matter to either (issue
+      #   #3096). The scope-body exclusion still holds for both: a class body in the block reads that class's class
+      #   variables, and a `def` body runs only when called.
+      # - A global Ruby's own signatures declare (`$stdout`, `$;`, `$0`, the frame-local `$~` and `$_`, …) is left
+      #   alone: the interpreter owns it, and some of them read through a getter (`$0` answers a frozen copy).
+      def capturable_non_local?(name, ancestors, in_scope, foreign_self: false)
         return false if under_scope_body?(ancestors)
-        return false if CapturedLocals.under_foreign_self_block?(ancestors, scope)
 
-        CapturedLocals.rebindable_ivar?(scope, name)
+        case CapturedLocals.variable_kind(name)
+        when :ivar
+          return false if foreign_self || CapturedLocals.under_foreign_self_block?(ancestors, in_scope)
+        when :global
+          return false if in_scope.environment.global_for_name(name, builtin: true)
+        end
+        CapturedLocals.rebindable_non_local?(in_scope, name)
       end
 
       def scope_nesting(ancestors)
@@ -8015,8 +8052,12 @@ module Rigor
         type.nil? || type.is_a?(Type::Bot) ? [] : [type]
       end
 
-      # A joined name is a local or an instance variable (#1208), so a store reading either moves.
-      CAPTURE_READ_NODES = Set[Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode].freeze
+      # A joined name is a local, an instance variable (#1208), a class variable or a global (#3096), so a store
+      # reading any of them moves.
+      CAPTURE_READ_NODES = Set[
+        Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode, Prism::ClassVariableReadNode,
+        Prism::GlobalVariableReadNode
+      ].freeze
       private_constant :CAPTURE_READ_NODES
 
       def store_arguments_read?(node, names)
@@ -8285,8 +8326,8 @@ module Rigor
           case receiver
           when Prism::LocalVariableReadNode
             next unless receiver.name == name && yield(receiver.depth, scope_nesting(ancestors))
-          when Prism::InstanceVariableReadNode
-            next unless receiver.name == name && capturable_ivar?(name, ancestors)
+          when Prism::InstanceVariableReadNode, Prism::ClassVariableReadNode, Prism::GlobalVariableReadNode
+            next unless receiver.name == name && capturable_non_local?(name, ancestors, scope)
           else
             next
           end

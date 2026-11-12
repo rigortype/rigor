@@ -1,0 +1,14 @@
+---
+locals: {}
+assertions:
+  '1': Array[0 | 1 | 2 | 3]
+  '2': Array[0 | 1 | 2 | 3]
+  '3': Hash[:a | :b | Symbol, 0 | 1]
+  '4': Hash[:a | :b | Symbol, 0 | 1]
+  '5': Array[Dynamic[top]]?
+  '6': Hash[Dynamic[top], Dynamic[top]]?
+  '7': Array[Dynamic[top]]
+  '8': Array[Dynamic[top]]
+  '9': "[1]?"
+  '10': '","'
+  '11': "[0]"

@@ -3387,6 +3387,23 @@ RSpec.describe "Rigor type construction (integration)" do
       end
     end
 
+    # The same seams took a local and an instance variable only: a class variable or a global a block
+    # mutated in place kept its pre-call contents (issue #3096).
+    describe "fixtures/block_content_cvar_global_capture/ — a class variable or global a block mutates in place" do
+      let(:harness) { harness_for("block_content_cvar_global_capture") }
+
+      it "produces no assert_type mismatches" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+
+      it "reports nothing but the genuine fold" do
+        reported = harness.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
+        expect(reported.map { |d| [d.line, d.rule.to_s] })
+          .to eq(marked_lines(harness, "# GENUINE-FALSEY").map { |line| [line, "flow.always-truthy-condition"] })
+      end
+    end
+
     # The slice-A rebind fixpoint re-ran the body with only the REBOUND locals moving, so a captured
     # collection the body mutates in place re-entered every pass at its pre-call contents, and a
     # rebind read from it (`last = a.last; a << x`) closed over the first iteration's answer.

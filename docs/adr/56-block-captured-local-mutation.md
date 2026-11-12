@@ -1016,6 +1016,14 @@ are the common spelling of that seed, so they keep their pre-call
 binding until those two issues close. The `block_content_ivar_capture`
 fixture is the gate.
 
+*(Amended 2026-11-12, issue #3096.)* A class variable and a global
+are captures on the same terms, read and bound through the accessor of
+their kind, with two differences. The foreign-self exclusion does not
+apply: Ruby resolves a class variable lexically, and a global is the
+same one whatever `self` is. A global Ruby's own signatures declare
+(`$;`, `$_`, `$~`, `$stdout`, …) is left out, because the interpreter
+owns it. The `block_content_cvar_global_capture` fixture is the gate.
+
 Gate: the `block_content_self_read` fixture carries the six
 self-reading shapes, the String read and the two `each_with_object`
 captured reads, a parameter shadowing a mutated outer local, a nested

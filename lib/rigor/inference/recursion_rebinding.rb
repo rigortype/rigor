@@ -25,8 +25,8 @@ module Rigor
       ].freeze
       private_constant :LOCAL_WRITE_NODES
 
-      # @return [Set<Symbol>] the names the body's recursive calls, or its own assignments, rebind. It may
-      #   hold a name that is no parameter (any assigned local); the caller looks up parameters only.
+      # The names the body's recursive calls, or its own assignments, rebind, as a Set. It may hold a name that
+      # is no parameter (any assigned local); the caller looks up parameters only.
       def rebound_parameters(def_node)
         rebound = Set.new
         params = def_node.parameters

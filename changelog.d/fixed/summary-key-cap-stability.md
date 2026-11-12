@@ -1,0 +1,4 @@
+- **[incremental]** `rigor check --incremental` no longer serves a stale diagnostic for a reader of a method that is called with more than eight distinct argument-type combinations. ([#3159](https://github.com/rigortype/rigor/pull/3159))
+  - The return-summary gate kept the first eight observed call keys of a method and skipped its readers when the return was unchanged at those, so an edit that moved the return only at a ninth key was missed.
+  - Such a method now re-checks all of its readers on a body edit; a method at or under eight keys is gated as before.
+  - The incremental snapshot schema moves to 49, so the first run after upgrading is a cold one.

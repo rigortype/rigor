@@ -178,6 +178,74 @@ RSpec.describe "plugins/rigor-activerecord SchemaParser" do
     end
   end
 
+  describe "the id reader's type" do
+    it "takes the type of the named primary key" do
+      table = parse(<<~RUBY)
+        create_table "settings", primary_key: "name", id: { type: :string, limit: 64 }, force: :cascade do |t|
+          t.text "value"
+        end
+      RUBY
+      expect(table.column("settings", "id").ruby_type).to eq("String")
+    end
+
+    it "stays an integer when primary_key: names a key with no id: type" do
+      table = parse(%(create_table "items", primary_key: "num" do |t|\nend\n))
+      expect(table.column("items", "id").ruby_type).to eq("Integer")
+    end
+
+    it "stays an integer when primary_key: names an integer key" do
+      table = parse(%(create_table "items", primary_key: "num", id: :bigint do |t|\nend\n))
+      expect(table.column("items", "id").ruby_type).to eq("Integer")
+    end
+
+    it "reads the id: type of each table with no primary_key: option" do
+      table = parse(<<~RUBY)
+        ActiveRecord::Schema[8.1].define(version: 1) do
+          create_table "tokens", id: :uuid do |t|
+            t.text "value"
+          end
+
+          create_table "codes", id: :string do |t|
+            t.text "value"
+          end
+
+          create_table "slugs", id: { type: :string, limit: 64 } do |t|
+            t.text "value"
+          end
+
+          create_table "bigs", id: :bigint do |t|
+            t.text "value"
+          end
+        end
+      RUBY
+      expect(table.column("tokens", "id").ruby_type).to eq("String")
+      expect(table.column("codes", "id").ruby_type).to eq("String")
+      expect(table.column("slugs", "id").ruby_type).to eq("String")
+      expect(table.column("bigs", "id").ruby_type).to eq("Integer")
+    end
+
+    it "reads id: true as the default integer key" do
+      table = parse(%(create_table "items", id: true do |t|\nend\n))
+      expect(table.column("items", "id").ruby_type).to eq("Integer")
+    end
+
+    {
+      "a composite primary_key:" => %(primary_key: ["x", "y"], force: :cascade),
+      "a non-literal primary_key:" => "primary_key: KEY",
+      "a decimal id: type" => "id: { type: :decimal }",
+      "a non-literal id:" => "id: MY_TYPE",
+      "a non-literal type in the id: hash" => "id: { type: MY_TYPE }",
+      "a splat in the id: hash" => "id: { **ID_OPTIONS }",
+      "a splat that may hold id:" => "**TABLE_OPTIONS",
+      "an as: table" => %(as: "SELECT 1 AS id", id: :string)
+    }.each do |description, options|
+      it "leaves id untyped with #{description}" do
+        table = parse(%(create_table "items", #{options} do |t|\nend\n))
+        expect(table.column("items", "id").ruby_type).to eq("Object")
+      end
+    end
+  end
+
   describe "a decimal column's class follows its scale" do
     it "reads a decimal at scale 0 as an Integer, as DecimalWithoutScale does" do
       table = parse(<<~RUBY)

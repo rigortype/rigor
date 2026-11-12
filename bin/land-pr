@@ -173,7 +173,7 @@ while :; do
       # Read once more before calling it dropped: the state may lag the merge.
       ((++suspect >= 2)) || continue
       if [[ -z "$merge_uuid" ]]; then
-        die "#$number left the queue unmerged (a failed merge_group run in gh run list --event merge_group, a new push, or a manual removal)"
+        die "#$number left the queue unmerged (a failed merge_group run of CI or verify-lockfile in gh run list --event merge_group, a new push, or a manual removal)"
       fi
       request="$(gh api "repos/rigortype/rigor/pulls/$number/merge-async/$merge_uuid" \
         --jq '"\(.status) \(.details.message // "")"' 2>&1)" ||

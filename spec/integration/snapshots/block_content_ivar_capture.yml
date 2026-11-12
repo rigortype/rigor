@@ -10,9 +10,11 @@ assertions:
   '7': Array[0]
   '8': Array[Dynamic[top]]
   '9': Array[1]?
-  '10': Array[1]?
-  '11': Array[Dynamic[top]]
-  '12': Array[0]
-  '13': Array[0]
-  '14': Array[5]
-  '15': Array[Dynamic[top]]
+  '10': Array[Dynamic[top]]?
+  '11': Hash[Dynamic[top], Dynamic[top]]?
+  '12': 3 | Array[Dynamic[top]]
+  '13': Array[Dynamic[top]]
+  '14': Array[0]
+  '15': Array[0]
+  '16': Array[5]
+  '17': Array[Dynamic[top]]

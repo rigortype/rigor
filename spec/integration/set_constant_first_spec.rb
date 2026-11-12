@@ -54,11 +54,54 @@ RSpec.describe "Set#first on a constant-folded Set", type: :runner do
     "a container element" => "[s].each(&:clear)",
     "a Method object" => "s.method(:clear).call",
     "instance_eval" => "s.instance_eval { clear }",
-    "a proc called later" => ["pr = proc { s.clear }\npr.call", "Dynamic[top] | String | nil"]
+    "a proc called later" => ["pr = proc { s.clear }\npr.call", "Dynamic[top] | String | nil"],
+    # Issue #3057 — the same reflective frame access through a `send`-family dispatch on a literal
+    # frame-call name (Symbol or String), `local_variable_get`-style names, or a `TOPLEVEL_BINDING` reference.
+    "send(:eval)" => "send(:eval, \"s.clear\")",
+    "__send__(:eval)" => "__send__(:eval, \"s.clear\")",
+    "public_send(:binding)" => "public_send(:binding)",
+    "send(:instance_eval)" => "send(:instance_eval, \"s.clear\")",
+    "send(\"eval\")" => "send(\"eval\", \"s.clear\")",
+    "__send__(\"binding\")" => "__send__(\"binding\")"
   }.each do |label, (emptier, answer)|
     it "declines when the local escapes through #{label}" do
       expect(dumped(%(s = Set["r"]\n#{emptier}\ndump_type(s.first)))).to eq([answer || "Dynamic[top]?"])
     end
+  end
+
+  # The helper empties the top-level `s` through the binding it is handed, so Ruby's `s.first` is nil. It goes
+  # through `method(:local_variable_get)` to stand in for a helper in another file: the scan also covers a nested
+  # `def`, so a direct `local_variable_get` there would escape `s` without the reference under test.
+  ["TOPLEVEL_BINDING", "::TOPLEVEL_BINDING", "Object::TOPLEVEL_BINDING"].each do |reference|
+    it "declines when the local escapes through #{reference} handed to a helper" do
+      source = <<~RUBY
+        module Helper
+          def self.h(b) = b.method(:local_variable_get).call(:s).clear
+        end
+        s = Set["r"]
+        Helper.h(#{reference})
+        dump_type(s.first)
+      RUBY
+      expect(dumped(source)).to eq(["Dynamic[top]?"])
+    end
+  end
+
+  it "still folds first after a block-only send(:instance_eval) that leaves the set alone" do
+    expect(dumped(%(s = Set["r"]\nsend(:instance_eval) { 1 }\ndump_type(s.first)))).to eq([%("r")])
+  end
+
+  it "declines when local_variable_get reaches the local through another binding" do
+    expect(dumped(<<~RUBY)).to eq(["Dynamic[top]?"])
+      def reach(b)
+        s = Set["r"]
+        b.local_variable_get(:s)
+        dump_type(s.first)
+      end
+    RUBY
+  end
+
+  it "still folds first after a send naming no frame call" do
+    expect(dumped(%(s = Set["r"]\nsend(:foo)\ndump_type(s.first)))).to eq([%("r")])
   end
 
   it "declines for a global mutated inside a def, and for a receiver that is not a local" do

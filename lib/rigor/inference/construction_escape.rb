@@ -3,6 +3,7 @@
 require "prism"
 require_relative "../source/node_walker"
 require_relative "../source/node_children"
+require_relative "../source/literals"
 require_relative "../typing_state"
 require_relative "../memo_audit"
 
@@ -27,8 +28,10 @@ module Rigor
     # A listed name the project defines anywhere (a reopen, a prepended or included module, a refinement, any
     # class at all) escapes all the same ({.project_defines?}). Every argument position escapes, and so does
     # any reference inside a block or lambda, a write whose value is used (`a = b = …`), and every local of a
-    # body that calls `binding`, `eval`, `local_variable_set`, `instance_variable_set` or a string-form
-    # `instance_eval` / `class_eval` / `module_eval`.
+    # body that reaches the frame reflectively: a call of `binding`, `eval`, `local_variable_get`,
+    # `local_variable_set`, `instance_variable_set` or a string-form `instance_eval` / `class_eval` /
+    # `module_eval`, a `send` / `__send__` / `public_send` dispatch whose first argument is one of those names
+    # as a literal Symbol or String, or a `TOPLEVEL_BINDING` reference.
     # The scan is flow insensitive and runs once per body, so an escape anywhere drops the fact for the whole body:
     # the conservative direction, since without the fact the seams answer as before. A nested `def` or class body is
     # scanned too, though its locals are its own; a same-named local there can only over-report an escape.
@@ -60,8 +63,11 @@ module Rigor
       )
 
       # Calls that read or rebind the frame's locals by name: one anywhere in a body escapes every local in it.
-      FRAME_CALLS = %i[binding eval local_variable_set instance_variable_set].to_set.freeze
+      FRAME_CALLS = %i[binding eval local_variable_get local_variable_set instance_variable_set].to_set.freeze
       STRING_EVAL_CALLS = %i[instance_eval class_eval module_eval].to_set.freeze
+      # The spellings that reach a {FRAME_CALLS} or {STRING_EVAL_CALLS} name through a literal Symbol or String
+      # argument (`send(:eval, …)`, `send("eval", …)`).
+      SEND_CALLS = %i[send __send__ public_send].to_set.freeze
 
       CLOSURES = [Prism::BlockNode, Prism::LambdaNode].freeze
       LOCAL_REFERENCES = [
@@ -82,7 +88,7 @@ module Rigor
         reason: "keyed by the body node; the escape scan is a pure function of the body"
       )
       private_constant :CLOSURES, :LOCAL_REFERENCES, :LOCAL_WRITES, :ALL, :EMPTY_CALLS, :CACHE,
-                       :STRING_EVAL_CALLS
+                       :STRING_EVAL_CALLS, :SEND_CALLS
 
       # One body's answer: per name, ALL or the classes it escapes as, and the calls the scan admitted on it.
       Result = Data.define(:escapes, :calls)
@@ -141,7 +147,7 @@ module Rigor
         escapes = {}
         calls = {}
         Source::NodeWalker.each_with_ancestors(body) do |node, ancestors|
-          return ALL if frame_call?(node)
+          return ALL if frame_access?(node)
           next unless LOCAL_REFERENCES.any? { |k| node.is_a?(k) }
 
           record(escapes, calls, node, ancestors)
@@ -163,10 +169,30 @@ module Rigor
         escapes[name] = unsafe.size == CLASSES.size ? ALL : (escapes[name] || Set.new).merge(unsafe)
       end
 
-      def frame_call?(node)
-        return false unless node.is_a?(Prism::CallNode)
+      # A node that reaches the frame's locals by name: a {FRAME_CALLS} or string-eval call, a `send`-family
+      # dispatch on a literal frame-call name (`send(:eval, …)`), or a `TOPLEVEL_BINDING` reference under any
+      # qualification (a project's own `X::TOPLEVEL_BINDING` escapes too, costing only precision), whose
+      # `local_variable_get` / `local_variable_set` reads and rebinds the top frame.
+      def frame_access?(node)
+        case node
+        when Prism::CallNode then frame_call_name?(node)
+        when Prism::ConstantReadNode, Prism::ConstantPathNode then node.name == :TOPLEVEL_BINDING
+        else false
+        end
+      end
 
-        FRAME_CALLS.include?(node.name) || (STRING_EVAL_CALLS.include?(node.name) && !node.arguments.nil?)
+      def frame_call_name?(node)
+        name = node.name
+        return true if FRAME_CALLS.include?(name)
+        return true if STRING_EVAL_CALLS.include?(name) && !node.arguments.nil?
+        return false unless SEND_CALLS.include?(name)
+
+        arguments = node.arguments&.arguments
+        return false if arguments.nil? || arguments.empty?
+
+        dispatched = Source::Literals.symbol_or_string(arguments.first)
+        FRAME_CALLS.include?(dispatched) ||
+          (STRING_EVAL_CALLS.include?(dispatched) && arguments.size > 1)
       end
 
       # The call a read outside any closure is the receiver of, or nil.

@@ -7546,11 +7546,11 @@ module Rigor
       end
 
       # A local the caller's test admits, or an instance variable, class variable or global outside a body that makes
-      # it another variable ({#non_local_under_scope_body?}): the names the content walks can collect.
+      # it another variable ({#under_scope_body?}): the names the content walks can collect.
       def rewritten_capture_receiver?(receiver, ancestors)
         case receiver
         when Prism::LocalVariableReadNode then yield(receiver, ancestors)
-        when *NON_LOCAL_READ_NODES then !non_local_under_scope_body?(receiver.name, ancestors)
+        when *NON_LOCAL_READ_NODES then !under_scope_body?(ancestors, CapturedLocals.variable_kind(receiver.name))
         else false
         end
       end
@@ -7657,12 +7657,6 @@ module Rigor
       SCOPE_BODY_NODES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
       private_constant :SCOPE_BODY_NODES
 
-      # True when a node at `ancestors` under a block body sits in a method, class or module body the block defines:
-      # there `self`, and every instance variable, is that body's own.
-      def under_scope_body?(ancestors)
-        ancestors.any? { |a| SCOPE_BODY_NODES.any? { |k| a.is_a?(k) } }
-      end
-
       # The bodies under a block body where a non-local of each kind is no longer the one the block's caller sees, or
       # does not run while the block does. A `def` body runs only when called. A class or module body is a class of
       # its own for an instance variable and a class variable, but runs at once and reads the one global. `class <<
@@ -7674,10 +7668,11 @@ module Rigor
       }.freeze
       private_constant :NON_LOCAL_SCOPE_BODY_NODES
 
-      # True when the non-local `name`, at `ancestors` under a block body, sits in a body that makes it another
-      # variable or one that does not run during the block ({NON_LOCAL_SCOPE_BODY_NODES}).
-      def non_local_under_scope_body?(name, ancestors)
-        bodies = NON_LOCAL_SCOPE_BODY_NODES.fetch(CapturedLocals.variable_kind(name))
+      # True when a non-local of `kind` (`:ivar`, `:cvar` or `:global`) at `ancestors` under a block body sits in a body
+      # the block defines that makes it another variable or does not run during the block ({NON_LOCAL_SCOPE_BODY_NODES}):
+      # for an instance variable, any method, class or module body, where `self` is that body's own.
+      def under_scope_body?(ancestors, kind = :ivar)
+        bodies = NON_LOCAL_SCOPE_BODY_NODES.fetch(kind)
         ancestors.any? { |a| bodies.any? { |k| a.is_a?(k) } }
       end
 
@@ -7726,7 +7721,7 @@ module Rigor
           if LOCAL_READ_NODES.any? { |klass| n.is_a?(klass) }
             names << n.name if same_scope_local?(n, ancestors)
           elsif NON_LOCAL_VALUE_READ_NODES.include?(n.class)
-            names << n.name unless non_local_under_scope_body?(n.name, ancestors)
+            names << n.name unless under_scope_body?(ancestors, CapturedLocals.variable_kind(n.name))
           end
         end
         names.uniq
@@ -7907,7 +7902,7 @@ module Rigor
       # True when the non-local `name`, read or written at `ancestors` under a block body, is one the content seams
       # take against `in_scope`: bound there ({CapturedLocals.rebindable_non_local?}, which keeps an instance
       # variable on its declaration seed out) and outside a body the block defines that makes it another variable or
-      # runs later ({#non_local_under_scope_body?}).
+      # runs later ({#under_scope_body?}).
       #
       # - An instance variable must be `self`'s: not under a block that runs on another object, nor in a seam whose
       #   block does (`foreign_self`), nor in any method, class or module body.
@@ -7918,7 +7913,7 @@ module Rigor
       # - A global Ruby's own signatures declare (`$stdout`, `$;`, `$0`, the frame-local `$~` and `$_`, …) is left
       #   alone: the interpreter owns it, and some of them read through a getter (`$0` answers a frozen copy).
       def capturable_non_local?(name, ancestors, in_scope, foreign_self: false)
-        return false if non_local_under_scope_body?(name, ancestors)
+        return false if under_scope_body?(ancestors, CapturedLocals.variable_kind(name))
 
         case CapturedLocals.variable_kind(name)
         when :ivar

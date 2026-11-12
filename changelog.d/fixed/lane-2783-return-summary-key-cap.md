@@ -1,0 +1,1 @@
+- **[rigor check]** `rigor check --incremental` no longer keeps a stale diagnostic on correct code after a method observed at more than eight distinct call keys changes its return type for one of them. ([#3141](https://github.com/rigortype/rigor/pull/3141))

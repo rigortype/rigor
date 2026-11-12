@@ -49,6 +49,24 @@ class KeywordRecursion
   def keyword_tuple(xs:) = xs[0] > 0 ? keyword_tuple(xs: [xs[0] - 1]) : :base
   def positional_tuple(xs) = xs[0] > 0 ? positional_tuple([xs[0] - 1]) : :base
 
+  def positional_config(n, mode = :fast) = n > 0 ? positional_config(n - 1, mode) : mode
+  def keyword_config(n:, mode: :fast) = n > 0 ? keyword_config(n: n - 1, mode:) : mode
+  def positional_step(n, step = 1) = n <= 0 ? step : positional_step(n - step, step)
+  def keyword_step(n:, step: 1) = n <= 0 ? step : keyword_step(n: n - step, step: step)
+
+  def positional_omitted(n, mode = :fast) = n > 0 ? positional_omitted(n - 1) : mode
+  def positional_splatted(n, mode = :fast) = n > 0 ? positional_splatted(*[n - 1, :slow]) : mode
+
+  def positional_assigned(n, mode = :fast)
+    mode = :slow if n == 1
+    n > 0 ? positional_assigned(n - 1, mode) : mode
+  end
+
+  def rest_kept(n, *a) = n > 0 ? rest_kept(n - 1, *a) : a
+  def rest_grown(n, *a) = n > 0 ? rest_grown(n - 1, *a, 1) : a
+  def keyword_rest_kept(n, **kw) = n > 0 ? keyword_rest_kept(n - 1, **kw) : kw
+  def keyword_rest_grown(n, **kw) = n > 0 ? keyword_rest_grown(n - 1, **kw, z: 1) : kw
+
   # Ruby: neither call returns (SystemStackError). No base case, so `bot` is the answer in both forms. The
   # rows sit in a method body: the code after a `bot` call is unreachable.
   def diverging_rows
@@ -95,18 +113,22 @@ assert_type(":blk", subject.positional_block(2) { :blk })
 assert_type(":blk", subject.keyword_block(n: some_int) { :blk })
 assert_type(":blk", subject.positional_block(some_int) { :blk })
 
-# A default the call leaves unfilled, with an unpinned counter. The widened retry types the body for every
-# call the recursion makes, and a recursive call passes the defaulted slot something else, so the default's
-# literal is not the answer.
+# A parameter the recursion rebinds, with an unpinned counter. The widened retry types the body for every
+# call the recursion makes, and a recursive call passes the slot something else (`f: !f`, `acc + [depth]`),
+# so neither the default's literal nor the outer call's own argument is the answer.
 # Ruby: true for 1, false for 2.
 assert_type("Dynamic[top]", subject.keyword_toggle(n: some_int))
 assert_type("Dynamic[top]", subject.positional_toggle(some_int))
+assert_type("Dynamic[top]", subject.keyword_toggle(n: some_int, f: false))
+assert_type("Dynamic[top]", subject.positional_toggle(some_int, false))
 # Ruby: false. A pinned counter unrolls, default included.
 assert_type("false", subject.keyword_toggle(n: 2))
 assert_type("false", subject.positional_toggle(2))
 # Ruby: [1] for 1, [2, 1] for 2.
 assert_type("Dynamic[top]", subject.keyword_build(depth: some_int))
 assert_type("Dynamic[top]", subject.positional_build(some_int))
+assert_type("Dynamic[top]", subject.keyword_build(depth: some_int, acc: []))
+assert_type("Dynamic[top]", subject.positional_build(some_int, []))
 # Ruby: [2, 1].
 assert_type("[2, 1]", subject.keyword_build(depth: 2))
 assert_type("[2, 1]", subject.positional_build(2))
@@ -128,3 +150,24 @@ assert_type(":base", subject.keyword_nested(opts: { n: some_int }))
 assert_type(":base", subject.keyword_tuple(xs: [some_int]))
 assert_type(":base", subject.positional_tuple([some_int]))
 assert_type("Integer", subject.positional_hash(1, coin ? { n: 2 } : { n: 2, m: 1 }))
+
+# A parameter every recursive call passes through unchanged keeps its binding in the retry.
+# Ruby: :fast, :fast (the `mode:` shorthand), 1, 1.
+assert_type(":fast", subject.positional_config(some_int))
+assert_type(":fast", subject.keyword_config(n: some_int))
+assert_type("1", subject.positional_step(some_int))
+assert_type("1", subject.keyword_step(n: some_int))
+# Ruby: [:a], { a: 1 }. `*a` passed as `*a` and `**kw` as `**kw` are unchanged; the values widen.
+assert_type("[Symbol]", subject.rest_kept(some_int, :a))
+assert_type("{ a: Integer }", subject.keyword_rest_kept(some_int, a: 1))
+
+# The other ways a recursive call rebinds a parameter.
+# Ruby: :fast. The recursive call omits `mode`, so the default replaces the outer call's 5.
+assert_type("Dynamic[top]", subject.positional_omitted(some_int, 5))
+# Ruby: :slow. A splat at the recursive call may reach every positional from its own slot on.
+assert_type("Dynamic[top]", subject.positional_splatted(some_int))
+# Ruby: :slow. The body assigns the parameter before it passes it on.
+assert_type(":slow | Dynamic[top]", subject.positional_assigned(some_int))
+# Ruby: [:a, 1, 1], { a: 1, z: 1 }. The rest parameter grows at each call.
+assert_type("Dynamic[top]", subject.rest_grown(some_int, :a))
+assert_type("Dynamic[top]", subject.keyword_rest_grown(some_int, a: 1))

@@ -28,20 +28,35 @@ assertions:
   '24': ":blk"
   '25': Dynamic[top]
   '26': Dynamic[top]
-  '27': 'false'
-  '28': 'false'
-  '29': Dynamic[top]
-  '30': Dynamic[top]
-  '31': "[2, 1]"
-  '32': "[2, 1]"
-  '33': Integer
-  '34': Integer
-  '35': "{ x: 1 }"
-  '36': "{ x: 1 }"
-  '37': "{ x: 1 }"
-  '38': "{}"
-  '39': "[1, 2]"
-  '40': ":base"
-  '41': ":base"
-  '42': ":base"
-  '43': Integer
+  '27': Dynamic[top]
+  '28': Dynamic[top]
+  '29': 'false'
+  '30': 'false'
+  '31': Dynamic[top]
+  '32': Dynamic[top]
+  '33': Dynamic[top]
+  '34': Dynamic[top]
+  '35': "[2, 1]"
+  '36': "[2, 1]"
+  '37': Integer
+  '38': Integer
+  '39': "{ x: 1 }"
+  '40': "{ x: 1 }"
+  '41': "{ x: 1 }"
+  '42': "{}"
+  '43': "[1, 2]"
+  '44': ":base"
+  '45': ":base"
+  '46': ":base"
+  '47': Integer
+  '48': ":fast"
+  '49': ":fast"
+  '50': '1'
+  '51': '1'
+  '52': "[Symbol]"
+  '53': "{ a: Integer }"
+  '54': Dynamic[top]
+  '55': Dynamic[top]
+  '56': ":slow | Dynamic[top]"
+  '57': Dynamic[top]
+  '58': Dynamic[top]

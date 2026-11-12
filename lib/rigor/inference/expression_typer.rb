@@ -44,6 +44,7 @@ require_relative "mutation_widening"
 require_relative "narrowing"
 require_relative "optimistic_origin"
 require_relative "receiver_alias"
+require_relative "recursion_rebinding"
 require_relative "repeated_or_writes"
 require_relative "singleton_object_constant"
 require_relative "refined_dispatch"
@@ -4490,14 +4491,15 @@ module Rigor
       # Rebuilds the user-method body scope with every bound positional parameter widened to its nominal
       # base (`1 | 2 | 3` → `Integer`, `Constant[:x]` → `Symbol`). Used by the bot-collapse retry in
       # `fixpoint_user_method_return`: call-site argument narrowing can prune a recursive method's base
-      # case, and widening restores the declared-type view under which the base case is reachable. Returns
-      # `nil` when the parameter shape is not inferable (mirrors `build_user_method_body_scope`).
+      # case, and widening restores the declared-type view under which the base case is reachable. A
+      # parameter the def's own recursive calls rebind is bound `Dynamic[top]` instead ({RecursionRebinding}).
+      # Returns `nil` when the parameter shape is not inferable (mirrors `build_user_method_body_scope`).
       def widened_user_method_body_scope(def_node, receiver, arg_types, self_fold_safe: false,
                                          positionals_unknown: false)
         widened_args = arg_types.map { |arg_type| widen_bound_argument(arg_type) }
-        build_user_method_body_scope(def_node, receiver, widened_args, self_fold_safe: self_fold_safe,
-                                                                       positionals_unknown: positionals_unknown,
-                                                                       defaults_unknown: true)
+        build_user_method_body_scope(def_node, receiver, widened_args,
+                                     self_fold_safe: self_fold_safe, positionals_unknown: positionals_unknown,
+                                     rebound: RecursionRebinding.rebound_parameters(def_node))
       end
 
       # Issue #3115 — one argument of the widened retry. A keyword argument reaches the binder inside the call's
@@ -4719,20 +4721,22 @@ module Rigor
       # (#1276). Setting `source_path` here was rejected: plugins read it, and the return memo would become
       # caller-dependent.
       #
-      # Issue #3115 — `defaults_unknown:` is the widened retry's binding ({#widened_user_method_body_scope}): a
-      # parameter the call leaves to its default binds `Dynamic[top]`, not the default's literal. The retry
-      # types the body for every call the recursion makes, and a recursive call may pass that slot anything
-      # (`tog(n: n - 1, f: !f)` against `f: false`), so the literal there is one call's value only.
+      # Issue #3115 — `rebound:` is the widened retry's set ({#widened_user_method_body_scope}): the parameters
+      # the def's own recursive calls rebind ({RecursionRebinding}), each bound `Dynamic[top]` whether the call
+      # wrote the slot or a default filled it. The retry types the body for every call the recursion makes,
+      # and such a slot holds whatever a recursive call passes (`tog(n: n - 1, f: !f)` against `f: false`).
       def build_user_method_body_scope(def_node, receiver, arg_types, self_fold_safe: false,
-                                       positionals_unknown: false, defaults_unknown: false)
+                                       positionals_unknown: false, rebound: nil)
         params = def_node.parameters
         locals =
           if positionals_unknown
-            bind_params_without_correspondence(params, arg_types.last, defaults_unknown)
+            bind_params_without_correspondence(params, arg_types.last)
           else
-            bind_params_from_call_types(params, arg_types, defaults_unknown)
+            bind_params_from_call_types(params, arg_types)
           end
         return nil if locals.nil?
+
+        rebound&.each { |name| locals[name] = dynamic_top if locals.key?(name) }
 
         # Construct the body scope in a SINGLE Scope allocation (plus the issue #1358 frame it carries, whose
         # scans run only on demand) — the previous `Scope.empty.with_*.with_*…` chain
@@ -4832,21 +4836,21 @@ module Rigor
       # The locals table for the body scope, or nil to decline. Keys match `with_local`'s `name.to_sym`.
       # The body scope starts from an empty fact store and narrowing set, so `with_local`'s fact /
       # narrowing invalidations would be no-ops here — the table is built directly.
-      def bind_params_from_call_types(params, arg_types, defaults_unknown)
+      def bind_params_from_call_types(params, arg_types)
         return arg_types.empty? ? {} : nil if params.nil?
         return nil unless bindable_param_shape?(params)
 
         positional = arg_types.dup
         kw_shape = positional.pop if takes_keywords?(params) && positional.last.is_a?(Type::HashShape)
-        locals = bind_positional_params(params, positional, defaults_unknown)
+        locals = bind_positional_params(params, positional)
         return nil if locals.nil?
 
-        bind_keyword_and_block_params(params, kw_shape, locals, defaults_unknown)
+        bind_keyword_and_block_params(params, kw_shape, locals)
       end
 
       # The keyword, `**rest` and block parameters' bindings, added to `locals`, which it returns.
-      def bind_keyword_and_block_params(params, kw_shape, locals, defaults_unknown)
-        bind_keyword_params(params, kw_shape, locals, defaults_unknown)
+      def bind_keyword_and_block_params(params, kw_shape, locals)
+        bind_keyword_params(params, kw_shape, locals)
         rest_name = keyword_rest_name(params)
         locals[rest_name.to_sym] = keyword_rest_type(params, kw_shape) if rest_name
         locals[params.block.name.to_sym] = dynamic_top if params.block&.name
@@ -4858,7 +4862,7 @@ module Rigor
       # parameter an `Array[untyped]`; the keyword parameters bind from `keywords` as {#bind_keyword_params} does
       # for any call, so an open shape leaves them `Dynamic[top]`. An optional's default is not used: the splat
       # may supply the slot.
-      def bind_params_without_correspondence(params, keywords, defaults_unknown)
+      def bind_params_without_correspondence(params, keywords)
         return {} if params.nil?
         return nil unless params.is_a?(Prism::ParametersNode)
 
@@ -4869,7 +4873,7 @@ module Rigor
         if rest.respond_to?(:name) && rest.name
           locals[rest.name.to_sym] = Type::Combinator.nominal_of("Array", type_args: [dynamic_top])
         end
-        bind_keyword_and_block_params(params, keywords, locals, defaults_unknown)
+        bind_keyword_and_block_params(params, keywords, locals)
       end
 
       # Trailing required positionals after a rest (`def f(a, *m, z)`) shift the correspondence and stay
@@ -4901,7 +4905,7 @@ module Rigor
         params.keywords.any? || !params.keyword_rest.nil?
       end
 
-      def bind_positional_params(params, positional, defaults_unknown)
+      def bind_positional_params(params, positional)
         requireds = params.requireds
         optionals = params.optionals
         return nil if positional.size < requireds.size
@@ -4912,7 +4916,8 @@ module Rigor
         locals = {}
         requireds.each_with_index { |param, index| bind_positional_param(locals, param, positional[index]) }
         optionals.each_with_index do |param, index|
-          locals[param.name.to_sym] = positional[requireds.size + index] || default_binding(param, defaults_unknown)
+          supplied = positional[requireds.size + index]
+          locals[param.name.to_sym] = supplied || literal_default_type(param.value)
         end
         bind_rest_param(params, positional, locals)
         locals
@@ -4936,20 +4941,17 @@ module Rigor
         end
       end
 
-      def bind_keyword_params(params, kw_shape, locals, defaults_unknown)
-        open_shape = defaults_unknown || (kw_shape && kw_shape.extra_keys == :open)
+      def bind_keyword_params(params, kw_shape, locals)
+        open_shape = kw_shape && kw_shape.extra_keys == :open
         params.keywords.each do |param|
           name = param.name.to_s.delete_suffix(":").to_sym
           supplied = kw_shape&.pairs&.[](name)
-          locals[name] = supplied || default_binding(param, open_shape)
+          locals[name] = supplied ||
+                         (open_shape ? dynamic_top : keyword_default_type(param))
         end
       end
 
-      # What a parameter the call does not fill binds: its literal default's type, or `Dynamic[top]` for a
-      # required keyword, and for any parameter when the default is not to be read (`unknown`).
-      def default_binding(param, unknown)
-        return dynamic_top if unknown
-
+      def keyword_default_type(param)
         param.respond_to?(:value) && param.value ? literal_default_type(param.value) : dynamic_top
       end
 

@@ -1030,6 +1030,21 @@ because each one runs at once. A global Ruby's own signatures declare
 (`$;`, `$_`, `$~`, `$stdout`, …) is left out, because the interpreter
 owns it. The `block_content_cvar_global_capture` fixture is the gate.
 
+*(Amended 2026-11-13, issue #3163.)* A `def` the block defines runs
+only when called, but the block may call it:
+`$buf = []; [1].each { def h; $buf << 1; end; h }` leaves `$buf` as
+`[1]`. The join reads no evidence from a method body, so an instance
+variable, class variable or global that such a method mutates in place
+is floored member by member instead, after a non-escaping block and an
+escaping one alike. No call is followed. The floor applies whenever the
+block defines the method, so a method nothing calls, or one called only
+after the read, costs the variable its contents too. A method inside a
+`class`, `module` or `class << self` body the block opens stays out for
+every kind, and so does an instance variable in a method defined on a
+receiver other than `self` (`def other.m`), which is that object's.
+Only in-place mutations count: a rebinding inside the method is #3122
+and #3123. The `block_defined_method_mutation` fixture is the gate.
+
 Gate: the `block_content_self_read` fixture carries the six
 self-reading shapes, the String read and the two `each_with_object`
 captured reads, a parameter shadowing a mutated outer local, a nested

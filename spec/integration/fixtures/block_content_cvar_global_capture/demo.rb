@@ -208,7 +208,9 @@ class CvarGlobalContentCapture
     assert_type('","', $;)
   end
 
-  # A `def` the block defines runs only when called.
+  # A `def` the block defines may run during it, so what it mutates
+  # floors although nothing here calls it (issue #3163; the
+  # `block_defined_method_mutation` fixture has the rest).
   def cvar_nested_def
     @@nd = [0]
     [1].each do
@@ -216,7 +218,7 @@ class CvarGlobalContentCapture
         @@nd << 1
       end
     end
-    assert_type("[0]", @@nd)
+    assert_type("Array[Dynamic[top]]", @@nd)
   end
 
   def global_nested_def
@@ -226,7 +228,7 @@ class CvarGlobalContentCapture
         $cg_nd << 1
       end
     end
-    assert_type("[0]", $cg_nd)
+    assert_type("Array[Dynamic[top]]", $cg_nd)
   end
 
   # A class body in the block has class variables of its own.

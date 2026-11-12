@@ -252,6 +252,7 @@ lib/rigor/inference/operand_effects.rb:
     Rigor::Inference::OperandEffects#collect_read: grandfathered
     Rigor::Inference::OperandEffects#collect_written: grandfathered
     Rigor::Inference::OperandEffects#effect?: grandfathered
+    Rigor::Inference::OperandEffects#method_mutation?: 'issue #3163, whether a def under an operand''s block mutates an instance variable, class variable or global in place, so that the operand is threaded and the content floor reaches it; it stops at a class or module body by node class and derives no declaration context'
 lib/rigor/inference/project_patched_methods.rb:
   computes: whether a call may reach a pre_eval patch, and the order of the modules the pre_eval files mix in (#1708)
   producers:
@@ -674,6 +675,7 @@ lib/rigor/inference/statement_evaluator.rb:
   computes: the scope a class, module or class << self body is evaluated in
   producers:
     Rigor::Inference::StatementEvaluator: grandfathered
+    Rigor::Inference::StatementEvaluator#block_defined_method_capture?: 'issue #3163, whether an instance variable, class variable or global mutated under a block body sits in a method the block defines, so that the content floor takes it; a class, module or class << self body between the block and the mutation leaves every kind out; it reads the ancestor node classes and derives no declaration context'
     Rigor::Inference::StatementEvaluator#eval_class_body: grandfathered
     Rigor::Inference::StatementEvaluator#evaluate: grandfathered
     Rigor::Inference::StatementEvaluator#forget_last_line_first?: grandfathered

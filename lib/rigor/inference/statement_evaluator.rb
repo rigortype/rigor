@@ -7139,7 +7139,12 @@ module Rigor
           floored.nil? ? acc : bind_mutated_capture(acc, name, floored)
         end
 
-        escaping_non_local_content_mutations(body, post_scope, foreign_self).reduce(post_scope) do |acc, name|
+        floor_non_local_contents(escaping_non_local_content_mutations(body, post_scope, foreign_self), post_scope)
+      end
+
+      # `scope` with each instance variable, class variable or global in `names` floored member by member.
+      def floor_non_local_contents(names, scope)
+        names.reduce(scope) do |acc, name|
           bound = CapturedLocals.bound_type(acc, name)
           floored = member_content_floor(bound)
           floored.equal?(bound) ? acc : CapturedLocals.bind(acc, name, floored)
@@ -7168,11 +7173,35 @@ module Rigor
 
           receiver = node.receiver
           next unless NON_LOCAL_READ_NODES.include?(receiver.class)
-          next unless capturable_non_local?(receiver.name, ancestors, scope, foreign_self: foreign_self)
+          next unless capturable_non_local?(receiver.name, ancestors, scope, foreign_self: foreign_self) ||
+                      block_defined_method_capture?(receiver.name, ancestors, scope, foreign_self)
 
           (names ||= []) << receiver.name
         end
         names ? names.uniq : NO_REWRITES
+      end
+
+      # Issue #3163 — `post_scope` with every instance variable, class variable and global floored member by member
+      # ({#member_content_floor}) that a method defined in `call_node`'s non-escaping block mutates in place
+      # ({#block_defined_method_capture?}). The block, or anything it calls, may call that method before it returns:
+      # `$buf = []; [1].each { def h; $buf << 1; end; h }` leaves `$buf` as `[1]`, and the content join reads no
+      # evidence from a method body, which it types in no scope of the block's. No call is followed, so a method the
+      # block defines and nothing calls floors too. An escaping block floors the same names
+      # ({#escaping_non_local_content_mutations}).
+      def floor_block_defined_method_mutations(call_node, block, post_scope)
+        foreign = foreign_self_block?(call_node)
+        names = nil
+        Source::NodeWalker.each_with_ancestors(block.body) do |node, ancestors|
+          is_call_mutator = node.is_a?(Prism::CallNode) && CONTENT_MUTATORS.include?(node.name)
+          next unless is_call_mutator || index_write?(node)
+
+          receiver = node.receiver
+          next unless NON_LOCAL_READ_NODES.include?(receiver.class)
+          next unless block_defined_method_capture?(receiver.name, ancestors, scope, foreign)
+
+          (names ||= []) << receiver.name
+        end
+        names.nil? ? post_scope : floor_non_local_contents(names.uniq, post_scope)
       end
 
       # Inside an ESCAPING block body, a captured outer local can be content- mutated transitively: the body is (or
@@ -7532,10 +7561,17 @@ module Rigor
         block = call_node.block
         return post_scope unless block.is_a?(Prism::BlockNode)
         return post_scope unless classify_closure_escape(call_node) == :non_escaping
+        return post_scope if block.body.nil?
 
+        post_scope = join_block_content_captures(call_node, block, post_scope, seed_scope)
+        # Issue #3163 — a method the block defines may run during the block, so its in-place mutations of an instance
+        # variable, class variable or global floor that binding. The join reads no evidence from a method body.
+        floor_block_defined_method_mutations(call_node, block, post_scope)
+      end
+
+      # The join {#content_writeback_block_captures} documents, for a non-escaping `block` with a body.
+      def join_block_content_captures(call_node, block, post_scope, seed_scope)
         body = block.body
-        return post_scope if body.nil?
-
         shadows = {}.compare_by_identity
         mutations = captured_content_mutations(block, shadows, call_node)
         return post_scope if mutations.empty?
@@ -7699,6 +7735,9 @@ module Rigor
       # The bodies that open a scope of their own, where a local's `depth` starts again from zero.
       SCOPE_BODY_NODES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
       private_constant :SCOPE_BODY_NODES
+
+      CLASS_BODY_NODES = [Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
+      private_constant :CLASS_BODY_NODES
 
       # The bodies under a block body where a non-local of each kind is no longer the one the block's caller sees, or
       # does not run while the block does. A `def` body runs only when called. A class or module body is a class of
@@ -7959,6 +7998,31 @@ module Rigor
       def capturable_non_local?(name, ancestors, in_scope, foreign_self: false)
         return false if under_scope_body?(ancestors, CapturedLocals.variable_kind(name))
 
+        non_local_of_scope?(name, ancestors, in_scope, foreign_self)
+      end
+
+      # Issue #3163 — true when the non-local `name`, mutated at `ancestors` under a block body, sits in a method the
+      # block defines and is one the content floor takes against `in_scope`. {#capturable_non_local?} leaves a `def`
+      # body out because it runs only when called, but the block may call it. The terms are that method's, less the
+      # `def` boundary:
+      #
+      # - A class or module body or a `class << self` between the block and the mutation still leaves every kind out:
+      #   a method defined there is another class's, and the walks do not ask who calls it.
+      # - An instance variable in a method defined on an explicit receiver other than `self` (`def other.m`) is that
+      #   object's. A plain `def` counts wherever it is written, so one in a class body's block, whose instance
+      #   variables are an instance's and not the class's, floors the class's too.
+      def block_defined_method_capture?(name, ancestors, in_scope, foreign_self)
+        defs = ancestors.grep(Prism::DefNode)
+        return false if defs.empty? || ancestors.any? { |a| CLASS_BODY_NODES.any? { |k| a.is_a?(k) } }
+
+        foreign_def = defs.any? { |d| !d.receiver.nil? && !d.receiver.is_a?(Prism::SelfNode) }
+        return false if foreign_def && CapturedLocals.variable_kind(name) == :ivar
+
+        non_local_of_scope?(name, ancestors, in_scope, foreign_self)
+      end
+
+      # The half of {#capturable_non_local?} that does not read the bodies between the block and the non-local.
+      def non_local_of_scope?(name, ancestors, in_scope, foreign_self)
         case CapturedLocals.variable_kind(name)
         when :ivar
           return false if foreign_self || CapturedLocals.under_foreign_self_block?(ancestors, in_scope)

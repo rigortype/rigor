@@ -227,10 +227,12 @@ gh pr create --draft --base master --title "Update dependencies: bundled gems + 
 ```
 
 The PR's `ci.yml` gate re-runs the full suite on a clean checkout (its own
-`bundle install`), which is the authoritative cross-environment check. The PR
-is created `--draft` and goes Ready (`gh pr ready <pr>`) only on the user's
-explicit instruction to land it, with CI green and no stop instruction standing
-(this skill's own landing rule, which `docs/agents/contribution-flow.md` § "Landing a pull
+`bundle install`), which is the authoritative cross-environment check. A Draft
+PR's CI is only the light gate, so the PR is created `--draft` and marked ready
+(`gh pr ready <pr>`) at once, which starts that full run; read its verdict with
+`bin/ci-required <full-head-sha>`. It is queued (`bin/land-pr`) only on the
+user's explicit instruction to land it, with that run green and no stop
+instruction standing (this skill's own landing rule, which `docs/agents/contribution-flow.md` § "Landing a pull
 request" defers to — a GitHub
 APPROVE cannot exist on a one-developer repository, so it is not the trigger).
 

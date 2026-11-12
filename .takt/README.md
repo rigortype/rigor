@@ -23,6 +23,11 @@ agents/pi-harness/scripts/takt-lane-push.sh <worktree>         # push a fix-up c
 agents/pi-harness/scripts/land-when-green.sh <pr> <full-sha>   # gh pr ready, wait for the full CI, then bin/land-pr; run in the background
 ```
 
+`land-when-green.sh` lands only through a clean full run. When that run's "Engine allocations
+(advisory)" or type_of shadow warns, it stops with exit 6 and the run's link: read the job summary,
+and land by hand with `bin/land-pr` if the warning is answered or accepted. After exit 4, 5 or 6 the
+PR stays ready, so each fix push costs a full run.
+
 CI runners, not lanes or reviews, bound the throughput (about one full CI run flows at a time), so
 the intake is pull-based:
 

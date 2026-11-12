@@ -90,7 +90,7 @@ The plugin is shippable when **all** of these hold:
 
 - `bundle exec exe/rigor check` against the plugin's `demo/` prints the diagnostic stream documented in the plugin's `README.md` § "What the plugin recognises" — verbatim, no drift.
 - `spec/integration/plugins/<id>_plugin_spec.rb` (or `examples/`) covers every diagnostic shape the plugin emits, passing in CI.
-- `make verify-changed` passes locally and CI is green on the Draft PR: rspec 0 failures, rubocop 0 offenses on the spec file (the plugin source itself is excluded from rubocop), `rigor check lib` baseline unchanged.
+- `make verify-changed` passes locally and the full CI is green after `gh pr ready` (a Draft PR's CI is only the light gate): rspec 0 failures, rubocop 0 offenses on the spec file (the plugin source itself is excluded from rubocop), `rigor check lib` baseline unchanged.
 - `git status` is clean (`tmp/`-anchored cache + per-demo `.gitignore` keep build artefacts out of the index).
 - A `changelog.d/added/<branch-slug>.md` fragment carries one sentence naming the plugin; `Rigor::VERSION` is **not** bumped (the user drives release cuts per `docs/agents/contribution-flow.md` § "Release Cadence").
 - One commit, subject following `docs/agents/contribution-flow.md` style (`Add rigor-<id> plugin (<facet>)` or `Add rigor-<id> walkthrough (<facet>)`).

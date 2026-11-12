@@ -92,8 +92,10 @@ jobs:
       tree: ${{ steps.tree.outputs.tree }}
       # 'false' on a pull_request run for a draft PR: the light gate. Only
       # this job, lint (on a code PR) and docs-check (on a no-code PR) run;
-      # every heavy job gates on `full == 'true'`, and "CI required" is
-      # skipped, so a draft head never reads SUCCESS and never attests. The
+      # every heavy job gates on `full == 'true'`. "CI required" is skipped
+      # by the same condition, written on the event in its own `if:` (see
+      # there), so a draft head never reads SUCCESS to bin/land-pr and never
+      # attests. The
       # full run starts at `gh pr ready` (ready_for_review above), on every
       # push to a ready PR, and in the merge queue. Push and merge_group runs
       # are always full.
@@ -1202,20 +1204,26 @@ jobs:
   # than each individual job. New jobs added above are automatically
   # gated without touching protection rules.
   #
-  # Skipped on a draft's light run (changes' `full` output), so it concludes
-  # SKIPPED there, never SUCCESS: bin/land-pr reads this check on the head,
-  # and tested-tree attests only after it succeeded. `!= 'false'` keeps it
-  # running when change detection failed and left the output empty, so that
-  # failure still reads FAILURE.
+  # Skipped on a draft's light run, so it concludes SKIPPED there, never
+  # SUCCESS or FAILURE: bin/land-pr reads the newest such check on the head
+  # (bin/ci-required), and tested-tree attests only after it succeeded. It
+  # keys on the event itself, not on changes' `full` output: `gh pr ready`
+  # cancels a draft run whose change detection may not have finished, and an
+  # empty output would then run this job and conclude FAILURE on the head.
+  # GitHub's own merge box counts a SKIPPED required check as passing, so a
+  # draft head can look mergeable there; nothing lands through it, since the
+  # merge queue always runs in full.
   required:
     name: CI required
     needs: [changes, timing-cache, test, shard-coverage, excluded-specs, rbs-compat, lint, docs-check, self-check, self-check-diff, self-check-bleeding-edge, acceptance-gates, arity-differential, nix-package]
     runs-on: ubuntu-latest
-    if: always() && needs.changes.outputs.full != 'false'
+    if: always() && !(github.event_name == 'pull_request' && github.event.pull_request.draft)
     steps:
       - name: All checks passed
         env:
           CHANGES_RESULT: ${{ needs.changes.result }}
+          CHANGES_CODE: ${{ needs.changes.outputs.code }}
+          CHANGES_FULL: ${{ needs.changes.outputs.full }}
           TIMING_CACHE_RESULT: ${{ needs.timing-cache.result }}
           TEST_RESULT: ${{ needs.test.result }}
           SHARD_COVERAGE_RESULT: ${{ needs.shard-coverage.result }}
@@ -1235,6 +1243,13 @@ jobs:
           # whether the gated jobs were legitimately skipped.
           if [[ "$CHANGES_RESULT" != "success" ]]; then
             echo "Change detection did not succeed (result: $CHANGES_RESULT)"
+            failed=1
+          fi
+          # This job runs only on a full run, so a code change whose tests
+          # were skipped means a gate failed open (a `full` output that read
+          # anything but 'true'), not a legitimate skip.
+          if [[ "$CHANGES_CODE" == "true" && ( "$CHANGES_FULL" != "true" || "$TEST_RESULT" == "skipped" ) ]]; then
+            echo "Code changed but the tests did not run (full: '$CHANGES_FULL', tests: $TEST_RESULT)"
             failed=1
           fi
           # A gated job that was skipped (the code jobs on a no-code

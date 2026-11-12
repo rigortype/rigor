@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Print the verdict of the newest "CI required" check run on a commit, as
+#   <CONCLUSION> <check-suite-id>
+# with the conclusion upper-cased (SUCCESS, FAILURE, SKIPPED, CANCELLED, ...),
+# NULL while that run is pending, and "MISSING 0" when the commit has none.
+#
+# One commit can carry several such check runs: a Draft PR's light CI run
+# concludes it SKIPPED, the full run that `gh pr ready` starts reports its own,
+# and a run cancelled before change detection finished may conclude it too.
+# Only the newest counts, and check-run ids only grow, so the newest is the
+# highest id. The REST list is paginated in full (filter=all keeps every run,
+# not GitHub's latest-per-name pick), so no cap can drop the newest one.
+# bin/land-pr and agents/pi-harness/scripts/land-when-green.sh read CI through
+# this, so the two cannot drift apart.
+#
+# Exit status: 0 printed a verdict; 1 GitHub unreadable; 2 usage error.
+#
+# Usage: bin/ci-required <full-commit-sha>
+
+set -uo pipefail
+
+[[ $# -eq 1 && "$1" =~ ^[0-9a-f]{40}$ ]] || {
+  echo "ci-required: give one full 40-character commit SHA" >&2
+  exit 2
+}
+
+runs="$(gh api --paginate \
+  "repos/rigortype/rigor/commits/$1/check-runs?check_name=CI%20required&filter=all&per_page=100" \
+  --jq '.check_runs[] | "\(.id) \(.conclusion) \(.check_suite.id)"')" || exit 1
+
+best=-1
+verdict="MISSING 0"
+while read -r id conclusion suite; do
+  [[ "$id" =~ ^[0-9]+$ ]] || continue
+  if ((id > best)); then
+    best="$id"
+    verdict="$(tr '[:lower:]' '[:upper:]' <<<"$conclusion") ${suite:-0}"
+  fi
+done <<<"$runs"
+echo "$verdict"

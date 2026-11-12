@@ -14,13 +14,19 @@ after gates. You do not replace ADR-98’s backlog; you consume it.
 
 - Backlog signals (Issues with triage labels)
 - Lane head SHAs / draft PR URLs
-- CI status (prefer sparse `gh pr view … --json statusCheckRollup`; at
-  most one poll per minute; never tight-loop `gh pr checks`)
+- CI status: the newest `CI required` check run on the head, read with
+  `bin/ci-required <head-sha>` (at most one poll per minute; never tight-loop
+  `gh pr checks`). Not the rollup: a Draft PR's light run leaves `CI required`
+  SKIPPED, which the rollup counts as passing, and after `gh pr ready` one head
+  carries both runs
 
 **Output**
 
 - Issue / lane assignments
-- CI verdict: `CI green` / `CI red` / `CI stalled` with head SHA
+- CI verdict: `CI green` (newest `CI required` is SUCCESS, which only a full
+  run gives) / `CI red` / `CI stalled` with head SHA. On a Draft PR, read the
+  light run's jobs (`changes`, `lint` or `docs-check`) instead; its `CI
+  required` is SKIPPED by design
 - Merge judgment (human may still be required for push/PR approval —
   see ADR-115 trial findings)
 - Landing: the orchestrator that owns an `Approved` PR lands it itself

@@ -64,12 +64,16 @@ silently".
 - **An empty PR body.** `gh pr edit N --body "$var"` with an empty `$var` blanks the body. Pass
   `--body-file`, or guard `[ -n "$var" ]`.
 - **CI verdict.** `gh pr checks --watch` exits 1 with "no checks reported" when a push cancels the
-  earlier run, and it watches only the check set present when it started. Read the head commit's run
-  instead: find its id in `gh run list --branch <branch>` by matching `headSha` (`gh run list
-  --commit` needs the full SHA; a short one returns `[]`). `gh run watch <id> --exit-status` can
-  return while jobs are still running, so poll `gh run view <id> --json status` until it reads
-  `completed`, then read `conclusion` and `headSha`. The same check applies to the master run after
-  a merge. `gh pr view --json merged` is not a field; read `state`, `mergedAt` or `mergeCommit`.
+  earlier run, and it watches only the check set present when it started. A run's `conclusion` is
+  not the verdict either: a Draft PR's light run concludes success with `CI required` SKIPPED, and
+  after `gh pr ready` two runs share the head SHA. Read the newest `CI required` check run on the
+  head with `bin/ci-required <full-head-sha>` (SUCCESS, FAILURE, SKIPPED, NULL while pending), the
+  rule `bin/land-pr` applies; GitHub's rollup and merge box count a SKIPPED required check as
+  passing, so a draft head can look green there. To read a run's jobs, find its id in `gh run list
+  --branch <branch>` by matching `headSha` (`gh run list --commit` needs the full SHA; a short one
+  returns `[]`). `gh run watch <id> --exit-status` can return while jobs are still running, so poll
+  `gh run view <id> --json status` until it reads `completed`. On the master run after a merge,
+  which is always full, the run's `conclusion` and `headSha` are the verdict. `gh pr view --json merged` is not a field; read `state`, `mergedAt` or `mergeCommit`.
 - **Stacked PRs.** Delete a parent branch only after the parent reads `MERGED` and its merge commit is
   an ancestor of `origin/master`: a queued parent is not merged yet, and deleting a queued PR's branch
   closes it. That applies to both kinds below. Two kinds of stack. A GitHub-native stack (`gh stack`)
@@ -131,7 +135,9 @@ Once the change is implemented and `make verify-changed` passes:
 
 1. **Push and open the Draft PR.** CI on a Draft PR is a light gate: change detection plus `lint` on
    a code PR, or `docs-check` on a no-code PR. Every heavy job is skipped and `CI required`
-   concludes SKIPPED, so a draft head never reads green. The full CI runs at `gh pr ready` (step 6),
+   concludes SKIPPED, so a draft head never reads green to `bin/land-pr` (GitHub's merge box counts
+   the SKIPPED check as passing, but nothing lands through it: the queue always runs in full). The
+   full CI runs at `gh pr ready` (step 6),
    on every later push to the ready PR, and in the merge queue. Read the result for the head commit,
    not the branch (how: § "GitHub and git traps"). The changelog fragment needs the PR link, so it
    is a second push.
@@ -193,15 +199,19 @@ Once the change is implemented and `make verify-changed` passes:
    PR embodies made under § "Decisions and the approval queue" below. A PR need not contain the
    latest `master` to be queued; the queue tests the merged result. Run `gh pr ready` only after the
    last reviewed fix-up push: it starts the full CI, and that run is the first to run the specs in
-   CI, so a full-CI failure after it costs a fix push and another full run
-   (`agents/pi-harness/scripts/land-when-green.sh` marks the PR ready, waits for that run, then runs
-   `bin/land-pr`). Re-push it (`bin/lane-push`) only when it is `CONFLICTING`, which starts no CI
+   CI, so a full-CI failure after it costs a fix push and another full run; a PR once ready stays
+   ready, and `gh pr ready --undo` does not cancel a full run already going.
+   `agents/pi-harness/scripts/land-when-green.sh` marks the PR ready, waits for that run, and runs
+   `bin/land-pr` only when step 3's advisory jobs did not warn on it; when one did, it stops (exit
+   6) with the run's link: read the summary, and land by hand once the warning is answered or
+   accepted. Re-push it (`bin/lane-push`) only when it is `CONFLICTING`, which starts no CI
    and cannot enter the queue, or when the queue drops it. A PR held by step 3's allocation rule
    (read on the full run, so after `gh pr ready`) is not queued until that hold is resolved. A PR
    that changes a skill also needs its `waza` review comment; until one is posted it stays Draft. A
    PR carrying a serious decision stays Draft until the user makes it. A skill with its own landing
-   rule (`rigor-release-prep`, `rigor-dependency-update`) keeps that rule; the review in steps 2–5
-   still runs.
+   rule (`rigor-release-prep`, `rigor-dependency-update`) keeps that rule: it marks its PR ready right
+   after creating it, so the CI it waits on is the full run, and the user's explicit go-ahead gates
+   the queueing. The review in steps 2–5 still runs.
 
 ## Decisions and the approval queue
 

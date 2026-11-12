@@ -19,10 +19,16 @@ RSpec.describe "bin/land-pr" do
 
   after { FileUtils.rm_rf(root) }
 
-  # The PR as the first query reads it: id, draft, state, queue on master, queued, base, head, the CI
-  # required check runs on the head as <databaseId>:<conclusion> entries, and the commit they belong to.
-  def info(draft: false, state: "OPEN", queue: true, queued: false, head: sha, check: "7:SUCCESS", checked: head)
-    ["PR_id", draft, state, queue, queued, "master", head, check, checked].join("\t")
+  # The PR as the first query reads it: id, draft, state, queue on master, queued, base, head.
+  def info(draft: false, state: "OPEN", queue: true, queued: false, head: sha)
+    ["PR_id", draft, state, queue, queued, "master", head].join("\t")
+  end
+
+  # The head's "CI required" check runs as bin/ci-required lists them: <id> <conclusion> <check suite>, one per
+  # line, conclusions lower-case as the REST API spells them and null while pending.
+  def checks(*runs)
+    runs = ["7 success 1"] if runs.empty?
+    runs.join("\n")
   end
 
   def poll(state, queued: false, oid: "")
@@ -75,7 +81,7 @@ RSpec.describe "bin/land-pr" do
 
   it "requests a native-stack PR through the merge-async REST endpoint once GraphQL refuses it" do
     out, code = run_land_pr("42", sha, "--no-wait",
-                            replies: [[info, 0], [stacked_refusal, 1], [async_body("pending"), 0]])
+                            replies: [[info, 0], [checks, 0], [stacked_refusal, 1], [async_body("pending"), 0]])
     expect(code).to eq(0)
     expect(out).to include("native stack", "merge requested (pending)", "request u-1")
     expect(out).not_to include("queued")
@@ -85,14 +91,14 @@ RSpec.describe "bin/land-pr" do
   end
 
   it "waits for a native-stack PR requested through merge-async until it merges" do
-    out, code = run_land_pr("42", sha, replies: [[info, 0], [stacked_refusal, 1], [async_body("pending"), 0],
+    out, code = run_land_pr("42", sha, replies: [[info, 0], [checks, 0], [stacked_refusal, 1], [async_body("pending"), 0],
                                                  [poll("MERGED", oid: "b" * 40), 0]])
     expect(code).to eq(0)
     expect(out).to include("merged as #{'b' * 40}")
   end
 
   it "reports a merge-async request that is already in the queue as such" do
-    out, code = run_land_pr("42", sha, replies: [[info, 0], [stacked_refusal, 1],
+    out, code = run_land_pr("42", sha, replies: [[info, 0], [checks, 0], [stacked_refusal, 1],
                                                  [async_body("enqueued", uuid: "u-2"), 0],
                                                  [poll("MERGED", oid: "b" * 40), 0]])
     expect(code).to eq(0)
@@ -100,7 +106,7 @@ RSpec.describe "bin/land-pr" do
   end
 
   it "reports a merge-async request that is already merged as such" do
-    out, code = run_land_pr("42", sha, replies: [[info, 0], [stacked_refusal, 1],
+    out, code = run_land_pr("42", sha, replies: [[info, 0], [checks, 0], [stacked_refusal, 1],
                                                  [async_body("merged", uuid: "u-3"), 0],
                                                  [poll("MERGED", oid: "b" * 40), 0]])
     expect(code).to eq(0)
@@ -108,14 +114,14 @@ RSpec.describe "bin/land-pr" do
   end
 
   it "waits for a 409 whose pending request is for the merge queue" do
-    out, code = run_land_pr("42", sha, replies: [[info, 0], [stacked_refusal, 1], [conflict_body, 1],
+    out, code = run_land_pr("42", sha, replies: [[info, 0], [checks, 0], [stacked_refusal, 1], [conflict_body, 1],
                                                  [poll("MERGED", oid: "b" * 40), 0]])
     expect(code).to eq(0)
     expect(out).to include("already has a merge request pending at #{sha}, request u-9; waiting")
   end
 
   it "refuses a 409 whose pending request uses another merge action, without waiting" do
-    out, code = run_land_pr("42", sha, replies: [[info, 0], [stacked_refusal, 1],
+    out, code = run_land_pr("42", sha, replies: [[info, 0], [checks, 0], [stacked_refusal, 1],
                                                  [conflict_body(action: "direct_merge"), 1]])
     expect(code).to eq(1)
     expect(out).to include("uses direct_merge, not the merge queue; refusing to endorse it")
@@ -123,20 +129,20 @@ RSpec.describe "bin/land-pr" do
   end
 
   it "reports a refusal from merge-async with GitHub's reply, without waiting" do
-    out, code = run_land_pr("42", sha, "--no-wait", replies: [[info, 0], [stacked_refusal, 1], ["draft", 1]])
+    out, code = run_land_pr("42", sha, "--no-wait", replies: [[info, 0], [checks, 0], [stacked_refusal, 1], ["draft", 1]])
     expect(code).to eq(1)
     expect(out).to include("through the merge-async API: draft")
   end
 
   it "dies when merge-async accepts the request and reports it failed" do
-    out, code = run_land_pr("42", sha, replies: [[info, 0], [stacked_refusal, 1], [async_body("failed"), 0]])
+    out, code = run_land_pr("42", sha, replies: [[info, 0], [checks, 0], [stacked_refusal, 1], [async_body("failed"), 0]])
     expect([code, enqueued?]).to eq([1, true])
     expect(out).to include("failed the merge-async request")
     expect(out).not_to include("unreadable")
   end
 
   it "keeps polling while the merge-async request is pending, then waits for the merge" do
-    out, code = run_land_pr("42", sha, replies: [[info, 0], [stacked_refusal, 1], [async_body("pending"), 0],
+    out, code = run_land_pr("42", sha, replies: [[info, 0], [checks, 0], [stacked_refusal, 1], [async_body("pending"), 0],
                                                  [poll("OPEN"), 0], [poll("OPEN"), 0],
                                                  ["pending waiting for checks", 0],
                                                  [poll("OPEN", queued: true), 0],
@@ -147,7 +153,7 @@ RSpec.describe "bin/land-pr" do
   end
 
   it "gives up with the request's status once a pending request passes the bound" do
-    replies = [[info, 0], [stacked_refusal, 1], [async_body("pending"), 0],
+    replies = [[info, 0], [checks, 0], [stacked_refusal, 1], [async_body("pending"), 0],
                [poll("OPEN"), 0], [poll("OPEN"), 0], ["pending waiting for checks", 0]]
     out, code = run_land_pr("42", sha, env: { "LAND_PR_PENDING_LIMIT" => "0" }, replies: replies)
     expect(code).to eq(1)
@@ -170,17 +176,17 @@ RSpec.describe "bin/land-pr" do
 
   it "stops polling once the pending clock, started at the first pending read, passes the bound" do
     stub_clock
-    replies = [[info, 0], [stacked_refusal, 1], [async_body("pending"), 0],
+    replies = [[info, 0], [checks, 0], [stacked_refusal, 1], [async_body("pending"), 0],
                [poll("OPEN"), 0], [poll("OPEN"), 0], ["pending waiting for checks", 0],
                [poll("OPEN"), 0], [poll("OPEN"), 0], ["pending waiting for checks", 0]]
     out, code = run_land_pr("42", sha, env: { "LAND_PR_PENDING_LIMIT" => "1" }, replies: replies)
     expect(code).to eq(1)
     expect(out).to include("merge-async request u-1 is still pending after 0 minutes")
-    expect(File.read(File.join(root, "count")).to_i).to eq(9)
+    expect(File.read(File.join(root, "count")).to_i).to eq(10)
   end
 
   it "keeps polling while the request reads merged until the PR merges" do
-    replies = [[info, 0], [stacked_refusal, 1], [async_body("pending"), 0],
+    replies = [[info, 0], [checks, 0], [stacked_refusal, 1], [async_body("pending"), 0],
                [poll("OPEN"), 0], [poll("OPEN"), 0], ["merged", 0],
                [poll("OPEN", queued: true), 0], [poll("MERGED", oid: "b" * 40), 0]]
     out, code = run_land_pr("42", sha, replies: replies)
@@ -189,20 +195,20 @@ RSpec.describe "bin/land-pr" do
   end
 
   it "refuses a 2xx reply whose status it cannot parse, and says the request may still be accepted" do
-    out, code = run_land_pr("42", sha, replies: [[info, 0], [stacked_refusal, 1], ["{}", 0]])
+    out, code = run_land_pr("42", sha, replies: [[info, 0], [checks, 0], [stacked_refusal, 1], ["{}", 0]])
     expect(code).to eq(1)
     expect(out).to include("could not read the merge-async reply", "may still have been accepted")
   end
 
   it "refuses when the request reads enqueued but the PR is not in the queue" do
-    out, code = run_land_pr("42", sha, replies: [[info, 0], [stacked_refusal, 1], [async_body("pending"), 0],
+    out, code = run_land_pr("42", sha, replies: [[info, 0], [checks, 0], [stacked_refusal, 1], [async_body("pending"), 0],
                                                  [poll("OPEN"), 0], [poll("OPEN"), 0], ["enqueued ", 0]])
     expect(code).to eq(1)
     expect(out).to include("is not in the queue, but merge-async request u-1 reads enqueued")
   end
 
   it "names the merge-async request when a requested PR never reaches the queue" do
-    out, code = run_land_pr("42", sha, replies: [[info, 0], [stacked_refusal, 1], [async_body("pending"), 0],
+    out, code = run_land_pr("42", sha, replies: [[info, 0], [checks, 0], [stacked_refusal, 1], [async_body("pending"), 0],
                                                  [poll("OPEN"), 0], [poll("OPEN"), 0],
                                                  ["failed Merge conflict", 0]])
     expect(code).to eq(1)
@@ -212,7 +218,7 @@ RSpec.describe "bin/land-pr" do
   end
 
   it "dies when the merge-async request cannot be read" do
-    out, code = run_land_pr("42", sha, replies: [[info, 0], [stacked_refusal, 1], [async_body("pending"), 0],
+    out, code = run_land_pr("42", sha, replies: [[info, 0], [checks, 0], [stacked_refusal, 1], [async_body("pending"), 0],
                                                  [poll("OPEN"), 0], [poll("OPEN"), 0], ["HTTP 500", 1]])
     expect(code).to eq(1)
     expect(out).to include("cannot be read")
@@ -220,35 +226,37 @@ RSpec.describe "bin/land-pr" do
 
   it "prints the queue position GraphQL reports for an ordinary queue" do
     out, code = run_land_pr("42", sha, "--no-wait",
-                            replies: [[info, 0], ["land-pr: #42 queued at #{sha}, position 3", 0]])
+                            replies: [[info, 0], [checks, 0], ["land-pr: #42 queued at #{sha}, position 3", 0]])
     expect(code).to eq(0)
     expect(out).to include("queued at #{sha}, position 3")
     expect(calls).to include('position \(.data.enqueuePullRequest.mergeQueueEntry.position)')
   end
 
   it "does not fall back to merge-async for a GraphQL refusal that is not the stacked one" do
-    out, code = run_land_pr("42", sha, "--no-wait", replies: [[info, 0], ["Resource not accessible", 1]])
+    out, code = run_land_pr("42", sha, "--no-wait", replies: [[info, 0], [checks, 0], ["Resource not accessible", 1]])
     expect(code).to eq(1)
     expect(out).to include("GitHub refused to queue #42", "Resource not accessible")
     expect(calls).not_to include("merge-async")
   end
 
   it "queues the reviewed head, passing it as the expected head, and reports the merge commit" do
-    out, code = run_land_pr("42", sha, replies: [[info, 0], ["queued", 0], [poll("MERGED", oid: "b" * 40), 0]])
+    out, code = run_land_pr("42", sha, replies: [[info, 0], [checks, 0], ["queued", 0], [poll("MERGED", oid: "b" * 40), 0]])
     expect(code).to eq(0)
     expect(out).to include("merged as #{'b' * 40}")
     expect(calls).to match(/enqueuePullRequest.*expectedHeadOid/)
     expect(calls).to include("sha=#{sha}")
   end
 
-  it "reads CI required from the head commit and the PR's fields by name" do
-    run_land_pr("42", sha, "--no-wait", replies: [[info, 0], ["queued", 0]])
-    expect(calls).to include("statusCheckRollup", 'select(.name == "CI required")', "headRefOid", "isMergeQueueEnabled")
+  it "reads CI required from the reviewed head's own check runs, every page, and the PR's fields by name" do
+    run_land_pr("42", sha, "--no-wait", replies: [[info, 0], [checks, 0], ["queued", 0]])
+    expect(calls).to include("headRefOid", "isMergeQueueEnabled", "--paginate",
+                             "repos/rigortype/rigor/commits/#{sha}/check-runs?check_name=CI%20required&filter=all")
   end
 
-  it "refuses when the green check belongs to a commit other than the head, before queueing" do
-    _, code = run_land_pr("42", sha, replies: [[info(checked: "d" * 40), 0]])
+  it "refuses when CI required cannot be read, before queueing" do
+    out, code = run_land_pr("42", sha, replies: [[info, 0], ["HTTP 502", 1]])
     expect([code, enqueued?]).to eq([1, false])
+    expect(out).to include("cannot read")
   end
 
   it "refuses a head other than the reviewed one, before queueing" do
@@ -258,16 +266,16 @@ RSpec.describe "bin/land-pr" do
   end
 
   it "refuses a PR whose base is not master, before queueing, so the bottom PR lands first" do
-    reply = ["PR_id", false, "OPEN", true, false, "parent-branch", sha, "7:SUCCESS", sha].join("\t")
+    reply = ["PR_id", false, "OPEN", true, false, "parent-branch", sha].join("\t")
     out, code = run_land_pr("42", sha, replies: [[reply, 0]])
     expect([code, enqueued?]).to eq([1, false])
     expect(out).to include("land the bottom PR of its stack first")
   end
 
   it "refuses when CI required on the head has not passed, before queueing" do
-    %w[7:FAILURE none 7:null 7:SKIPPED].each do |ci|
+    ["7 failure 1", "", "7 null 1", "7 skipped 1", "7 cancelled 1"].each do |ci|
       FileUtils.rm_f(Dir.glob(File.join(root, "*")))
-      _, code = run_land_pr("42", sha, replies: [[info(check: ci), 0]])
+      _, code = run_land_pr("42", sha, replies: [[info, 0], [ci, 0]])
       expect([ci, code, enqueued?]).to eq([ci, 1, false])
     end
   end
@@ -275,10 +283,12 @@ RSpec.describe "bin/land-pr" do
   # After `gh pr ready` the head carries the draft's light run (SKIPPED) and the full run's check; a
   # re-run adds another. Only the newest, by check-run id, is the verdict.
   it "reads only the newest CI required check run on the head" do
-    { "7:SKIPPED,12:SUCCESS" => 0, "12:SUCCESS,7:SKIPPED" => 0, "7:SKIPPED,12:null" => 1,
-      "7:SUCCESS,12:FAILURE" => 1, "12:FAILURE,7:SUCCESS" => 1, "9:SUCCESS,12:null" => 1 }.each do |runs, want|
+    { %w[7:skipped 12:success] => 0, %w[12:success 7:skipped] => 0, %w[7:skipped 12:null] => 1,
+      %w[7:success 12:failure] => 1, %w[12:failure 7:success] => 1, %w[9:success 12:null] => 1,
+      %w[7:failure 12:success] => 0 }.each do |runs, want|
       FileUtils.rm_f(Dir.glob(File.join(root, "*")))
-      out, code = run_land_pr("42", sha, "--no-wait", replies: [[info(check: runs), 0], ["queued", 0]])
+      lines = runs.map { |run| "#{run.tr(':', ' ')} 1" }
+      out, code = run_land_pr("42", sha, "--no-wait", replies: [[info, 0], [checks(*lines), 0], ["queued", 0]])
       expect([runs, code, enqueued?]).to eq([runs, want, want.zero?])
       expect(out).to include("not SUCCESS") unless want.zero?
     end
@@ -293,40 +303,40 @@ RSpec.describe "bin/land-pr" do
   end
 
   it "only waits when the PR is already queued" do
-    out, code = run_land_pr("42", sha, replies: [[info(queued: true, check: "none"), 0],
+    out, code = run_land_pr("42", sha, replies: [[info(queued: true), 0],
                                                  [poll("MERGED", oid: "b" * 40), 0]])
     expect([code, enqueued?]).to eq([0, false])
     expect(out).to include("already queued")
   end
 
   it "re-reads once before calling a PR dropped, so a lagging merge still reports merged" do
-    _, code = run_land_pr("42", sha, replies: [[info, 0], ["queued", 0], [poll("OPEN"), 0],
+    _, code = run_land_pr("42", sha, replies: [[info, 0], [checks, 0], ["queued", 0], [poll("OPEN"), 0],
                                                [poll("MERGED", oid: "b" * 40), 0]])
     expect(code).to eq(0)
   end
 
   it "reports a PR that stays out of the queue as dropped" do
-    out, code = run_land_pr("42", sha, replies: [[info, 0], ["queued", 0], [poll("OPEN"), 0], [poll("OPEN"), 0]])
+    out, code = run_land_pr("42", sha, replies: [[info, 0], [checks, 0], ["queued", 0], [poll("OPEN"), 0], [poll("OPEN"), 0]])
     expect(code).to eq(1)
     expect(out).to include("left the queue unmerged")
   end
 
   it "waits for the merge commit when the state reads MERGED before it" do
-    out, code = run_land_pr("42", sha, replies: [[info, 0], ["queued", 0], [poll("MERGED"), 0],
+    out, code = run_land_pr("42", sha, replies: [[info, 0], [checks, 0], ["queued", 0], [poll("MERGED"), 0],
                                                  [poll("MERGED", oid: "b" * 40), 0]])
     expect(code).to eq(0)
     expect(out).to include("merged as #{'b' * 40}")
   end
 
   it "gives up after ten unreadable polls in a row" do
-    out, code = run_land_pr("42", sha, replies: [[info, 0], ["queued", 0]])
+    out, code = run_land_pr("42", sha, replies: [[info, 0], [checks, 0], ["queued", 0]])
     expect(code).to eq(1)
     expect(out).to include("unreadable for 10 polls")
-    expect(File.read(File.join(root, "count")).to_i).to eq(12) # the read, the enqueue, then ten failed polls
+    expect(File.read(File.join(root, "count")).to_i).to eq(13) # the read, the CI read, the enqueue, then ten failed polls
   end
 
   it "returns once queued with --no-wait" do
-    _, code = run_land_pr("42", sha, "--no-wait", replies: [[info, 0], ["queued", 0]])
+    _, code = run_land_pr("42", sha, "--no-wait", replies: [[info, 0], [checks, 0], ["queued", 0]])
     expect([code, enqueued?]).to eq([0, true])
   end
 

@@ -20,7 +20,9 @@ coordinator, which settled this design; nobody had decided whether a Draft PR ne
   at three full runs a PR.
 - **Light gate on drafts, full at `gh pr ready` (taken).** A Draft push runs change detection, `lint`
   on a code PR and `docs-check` on a no-code PR; `CI required` is skipped, so a draft never reads
-  green to `bin/land-pr` and never attests. The full run starts at `gh pr ready` and on every later
+  green to `bin/land-pr` and never attests. GitHub's rollup and merge box do count the SKIPPED
+  check as passing, so a draft head looks green there until the full run's check exists; that is
+  accepted, since only the queue, which always runs in full, merges into `master`. The full run starts at `gh pr ready` and on every later
   push, and the queue runs as before. A PR costs two full runs (one, when the queue reuses the ready
   run's attestation). The gate trade-off: the review no longer sees the specs, self-check, the
   acceptance gates or the engine-allocation summary in CI; it reads the light run plus the lane's
@@ -36,13 +38,17 @@ coordinator, which settled this design; nobody had decided whether a Draft PR ne
 The light draft gate. It keeps `CI required` as the only landing signal and keeps two full checks of
 what lands, and ADR-123's criterion (check the result that will land, once, rather than re-gating
 every step) favours dropping the checks of intermediate draft heads. `bin/land-pr` and
-`land-when-green.sh` read the newest `CI required` check run, since a head now carries the draft
-run's SKIPPED one beside the full run's.
+`land-when-green.sh` read the newest `CI required` check run through `bin/ci-required`, since a
+head now carries the draft run's SKIPPED one beside the full run's. Since the advisory summaries
+now appear only on the full run, `land-when-green.sh` reads them there and stops (exit 6) instead of
+landing when either warns.
 
 ## To undo
 
 Remove the `full` output from the `changes` job in `.github/workflows/ci.yml`, the
-`needs.changes.outputs.full == 'true'` term from each heavy job's `if:`, and the `full != 'false'`
-term from `required`; keep `ready_for_review` in the trigger types or drop it too. Restore
-contribution-flow.md steps 1, 2, 3 and 6, parallel-lanes.md steps 6 and 7, and the ADR-123
-amendment. The newest-run rule in `bin/land-pr` and `land-when-green.sh` is harmless to keep.
+`needs.changes.outputs.full == 'true'` term from each heavy job's `if:`, the draft term from
+`required`'s `if:` and its full-or-tests check; keep `ready_for_review` in the trigger types or drop
+it too. Restore contribution-flow.md steps 1, 2, 3 and 6 and its CI-verdict trap, parallel-lanes.md
+steps 6 and 7, the release-prep and dependency-update landing steps, and the ADR-123 amendment.
+`bin/ci-required`, its use in `bin/land-pr` and `land-when-green.sh`, and the advisory hold are
+harmless to keep.

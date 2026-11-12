@@ -5,8 +5,14 @@
 # directory alone. That is safe only while the Ruby suite and the linters never read those paths, so a tracked
 # file they would read must not land in the skipped set. The check runs the workflow's own `skip_re` assignments
 # (everything from the first `skip_re=` to `non_code=`, so a `skip_re+=` line counts too) through bash over
-# `git ls-files`, so the list it guards cannot drift from the one CI uses. It also checks that the `push`
-# trigger's `paths-ignore` skips nothing the PR-side list would run.
+# `git ls-files -z`, so the list it guards cannot drift from the one CI uses and every tracked path reaches the
+# guard as its exact byte name — plain `git ls-files` quotes non-ASCII paths, and a quoted name matches none of
+# the anchors (#3060). It also checks that the `push` trigger's `paths-ignore` skips nothing the PR-side list
+# would run.
+#
+# The read check is an exclusion list, not a directory list: every tracked path counts as read unless it is a
+# `.sh` outside the source trees or matches CI_NO_CODE_UNREAD, so a new `skip_re` term for a path the suite
+# could read fails here until the path is added to that list on purpose, with its reason.
 #
 # Markdown is exempt from the read check, and that is a known gap, not a claim that nothing reads it: the specs
 # `spec/rigor/analysis/check_rules/deprecated_ruby2_keywords_spec.rb`, `spec/rigor/cli/skill_command_spec.rb` and
@@ -14,57 +20,91 @@
 # Markdown-only PR skips them. The `\.md` skip predates this spec; see #3050.
 require "spec_helper"
 require "open3"
+require "tmpdir"
 require "yaml"
-require "rubygems"
 
 CI_NO_CODE_REPO_ROOT = File.expand_path("../..", __dir__)
 CI_NO_CODE_WORKFLOW = File.join(CI_NO_CODE_REPO_ROOT, ".github", "workflows", "ci.yml")
 
-# Directories the Ruby suite, `make lint`, an analysis or the packaged gem read. `data/oss-sweep/` is the one
-# tooling-only subtree and is allowed to be skipped.
-CI_NO_CODE_READ_DIRS = %w[spec/ lib/ sig/ exe/ plugins/ examples/ bin/ schemas/ data/].freeze
-CI_NO_CODE_TOOLING_ONLY = ["data/oss-sweep/"].freeze
-# Root files that configure the suite, the linters, the bundle or the gem.
-CI_NO_CODE_ROOT_FILES = %w[
-  .rubocop.yml .rspec .ruby-version .rigor.dist.yml binpacker.yml Gemfile Gemfile.lock Rakefile Makefile Steepfile
+# `.sh` files under these directories can be fixtures a spec reads; anywhere else a shell script is run by a
+# workflow or a developer and never opened by the suite.
+CI_NO_CODE_SH_SOURCE_DIRS = %w[spec/ lib/ sig/ exe/ plugins/ examples/ bin/ schemas/ data/].freeze
+
+# The tracked paths `skip_re` may skip because nothing the always-on jobs read opens them; each entry carries
+# its reason. Anything else tracked — `docs/`, `skills/`, `agents/`, `.claude/`, `tool/` and whatever comes
+# next — counts as read.
+CI_NO_CODE_UNREAD = [
+  # vscode-extension.yml builds and tests the extension; `spec/docs/` reads one `runtime.ts` value from it and
+  # runs even when the code suite is skipped.
+  %r{\Aeditors/},
+  # Only oss-sweep.yml reads the sweep corpus.
+  %r{\Adata/oss-sweep/},
+  # Steep and Sorbet bundles that no CI job runs.
+  %r{\Atool/(?:steep|sorbet)/},
+  # container.yml builds the image.
+  /\ADockerfile(?:\.dockerignore)?\z/,
+  # playground-wasm.yml builds the frontend and wasm pages that fly.io deploys.
+  %r{\Aapps/rigor-playground/(?:frontend/[^/]*\.html|frontend/_(?:headers|redirects)|fly\.toml|Dockerfile)\z},
+  %r{\Aapps/rigor-playground/wasm/.*\.(?:html|mjs|json)\z},
+  # Every workflow but ci.yml has its own trigger and nothing in the suite reads it; ci.yml itself is read by
+  # this spec.
+  %r{\A\.github/workflows/(?!ci\.yml\z)[^/]*\.yml\z}
 ].freeze
-# Ruby that `make lint` reaches through `apps/` without a `.rb` extension.
-CI_NO_CODE_APPS_RUBY = %r{\Aapps/.*(\.rb|\.gemspec|/Gemfile|/Rakefile|/config\.ru)\z}
 
 RSpec.describe "CI no-code path list (ci.yml `skip_re`)" do
-  def tracked_files
-    out, status = Open3.capture2("git", "ls-files", chdir: CI_NO_CODE_REPO_ROOT)
-    raise "git ls-files failed" unless status.success?
+  # `git ls-files -z` hands every tracked path over as its exact byte name; the default quoting would return
+  # `"na\303\257ve.json"` for a non-ASCII path, which matches none of the anchors (#3060). Binary strings keep
+  # byte-exact names safe to match: a name that is not valid UTF-8 would make a UTF-8-tagged string raise on
+  # `match?`.
+  def tracked_files(root = CI_NO_CODE_REPO_ROOT)
+    out, err, status = Open3.capture3("git", "ls-files", "-z", chdir: root)
+    raise "`git ls-files -z` failed in #{root} (exit #{status.exitstatus}): #{err.strip}" unless status.success?
 
-    out.split("\n")
+    out.b.split("\0")
   end
 
-  # The workflow's own assignments, evaluated by bash over `files`, so a `+=` or a reordering is honoured.
-  def skipped_by_workflow(files)
-    text = File.read(CI_NO_CODE_WORKFLOW)
-    block = text[/^\s*skip_re=.*?(?=^\s*non_code=)/m]
+  def repo_files
+    @repo_files ||= tracked_files
+  end
+
+  def git!(dir, *args)
+    _out, err, status = Open3.capture3("git", *args, chdir: dir)
+    raise "git #{args.join(' ')} failed in #{dir} (exit #{status.exitstatus}): #{err.strip}" unless status.success?
+  end
+
+  # The workflow's own `skip_re=` ... `non_code=` assignments.
+  def skip_re_block
+    block = File.read(CI_NO_CODE_WORKFLOW)[/^\s*skip_re=.*?(?=^\s*non_code=)/m]
     raise "no `skip_re=` ... `non_code=` block in #{CI_NO_CODE_WORKFLOW}" unless block
 
-    out, status = Open3.capture2("bash", "-c", "#{block}\ngrep -E \"$skip_re\" || true", stdin_data: files.join("\n"))
-    raise "bash failed evaluating skip_re" unless status.success?
+    block
+  end
 
-    out.split("\n")
+  # The assignments evaluated by bash over `files`, so a `+=` or a reordering is honoured.
+  def skipped_by_block(block, files)
+    out, err, status = Open3.capture3("bash", "-c", "#{block}\ngrep -E \"$skip_re\" || true",
+                                      stdin_data: files.join("\n"))
+    return out.b.split("\n") if status.success?
+
+    raise "evaluating `skip_re` through bash failed (exit #{status.exitstatus}): #{err.strip}"
   end
 
   def skipped_paths
-    @skipped_paths ||= skipped_by_workflow(tracked_files)
+    @skipped_paths ||= skipped_by_block(skip_re_block, repo_files)
   end
 
+  # What the guard reports: skipped paths the suite, a linter or the packaged gem would read. Markdown is
+  # exempt (the `\.md` skip predates this spec; see #3050).
+  def read_but_skipped(block, files)
+    skipped_by_block(block, files).reject { |path| path.end_with?(".md") }.select { |path| reads_it?(path) }
+  end
+
+  # Every tracked path counts as read unless it is a `.sh` outside the source trees or matches
+  # CI_NO_CODE_UNREAD.
   def reads_it?(path)
-    return true if CI_NO_CODE_ROOT_FILES.include?(path) || (path.end_with?(".gemspec") && !path.include?("/"))
-    return true if CI_NO_CODE_APPS_RUBY.match?(path)
-    return false if CI_NO_CODE_TOOLING_ONLY.any? { |dir| path.start_with?(dir) }
+    return false if path.end_with?(".sh") && CI_NO_CODE_SH_SOURCE_DIRS.none? { |dir| path.start_with?(dir) }
 
-    CI_NO_CODE_READ_DIRS.any? { |dir| path.start_with?(dir) } || gem_files.include?(path)
-  end
-
-  def gem_files
-    @gem_files ||= Dir.chdir(CI_NO_CODE_REPO_ROOT) { Gem::Specification.load("rigortype.gemspec").files.to_set }
+    CI_NO_CODE_UNREAD.none? { |re| re.match?(path) }
   end
 
   before do
@@ -76,14 +116,47 @@ RSpec.describe "CI no-code path list (ci.yml `skip_re`)" do
     expect(skipped_paths).not_to include(".github/workflows/ci.yml")
   end
 
+  it "hands every tracked path to the guard as its exact byte name" do
+    Dir.mktmpdir do |dir|
+      git!(dir, "init", "--quiet")
+      File.write(File.join(dir, "naïve.json"), "{}")
+      git!(dir, "add", "--", "naïve.json")
+
+      expect(tracked_files(dir)).to include("naïve.json".b)
+    end
+  end
+
+  it "fails with the command, exit status and stderr when git fails" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, ".git"), "gitdir: /nonexistent-3060\n")
+
+      expect { tracked_files(dir) }
+        .to raise_error(/`git ls-files -z` failed in .* \(exit 128\): fatal: /)
+    end
+  end
+
+  it "fails with the command and stderr when bash cannot evaluate skip_re" do
+    expect { skipped_by_block("skip_re='unterminated", []) }
+      .to raise_error(/evaluating `skip_re` through bash failed \(exit 2\): bash: -c:/)
+  end
+
+  # #3060 — the read check used to be a hand-kept directory list, so a tracked path under docs/, skills/,
+  # agents/, .claude/ or tool/ that a suite file reads passed silently once a skip_re term matched it.
+  it "flags a skipped path the suite reads wherever it sits, not only under the old directory list" do
+    files = %w[docs/foo.json spec/x_spec.rb]
+
+    expect(read_but_skipped("skip_re='^docs/'", files)).to eq(["docs/foo.json"])
+  end
+
   it "skips no file the suite, a linter or the packaged gem would read, apart from Markdown" do
-    escaped = skipped_paths.reject { |path| path.end_with?(".md") }.select { |path| reads_it?(path) }
+    escaped = read_but_skipped(skip_re_block, repo_files)
 
     expect(escaped).to be_empty, <<~MESSAGE
       These tracked files match `skip_re` in .github/workflows/ci.yml but are read by the Ruby suite, `make lint` or
       the packaged gem, so a pull request touching only them would skip the suite:
       #{escaped.map { |path| "  #{path}" }.join("\n")}
-      Narrow `skip_re` (and the `push` trigger's `paths-ignore`), or move the file.
+      Narrow `skip_re` (and the `push` trigger's `paths-ignore`), move the file, or — if nothing reads it —
+      add it to CI_NO_CODE_UNREAD in this spec with the reason.
     MESSAGE
   end
 
@@ -114,7 +187,7 @@ RSpec.describe "CI no-code path list (ci.yml `skip_re`)" do
     flags = File::FNM_PATHNAME | File::FNM_EXTGLOB | File::FNM_DOTMATCH
     # With FNM_PATHNAME a trailing `dir/**` matches only direct children, but GitHub's matches the whole subtree.
     globs = globs.map { |glob| glob.sub(%r{/\*\*\z}, "/**/*") }
-    ignored = tracked_files.select { |path| globs.any? { |glob| File.fnmatch(glob, path, flags) } }
+    ignored = repo_files.select { |path| globs.any? { |glob| File.fnmatch(glob, path, flags) } }
     run_on_push_only = ignored - skipped_paths
 
     expect(run_on_push_only).to be_empty, <<~MESSAGE

@@ -1774,7 +1774,8 @@ module Rigor
       # The expression value is the result type, matching Ruby's semantics: `(x = params[:f] ||= []); x` observes the
       # post-`||=` value, not the rvalue alone.
       def eval_index_or_write(node)
-        _rhs_type, post_rhs = sub_eval(node.value, scope)
+        operands = index_write_operand_scope(node)
+        _rhs_type, post_rhs = sub_eval(node.value, operands)
         result_type = index_write_stored_type(node, scope)
 
         # A narrowing is keyed on ONE literal slot — `a[k]` — but a multi-index `||=` reads and
@@ -1792,7 +1793,7 @@ module Rigor
         # the reverse order would trade this feature away for the widening. The two are complementary — the shape
         # forgets that the collection is still empty, the narrowing remembers that THIS slot is now non-nil.
         post = IndexWriteWidening.widen(node: node, current_scope: post,
-                                        arg_types: index_write_arg_types(node, result_type))
+                                        arg_types: index_write_arg_types(node, result_type, join_scope: operands))
         post = post.with_indexed_narrowing(*address, result_type) if address
 
         # The value the expression yields takes the memoizing reading ({#index_compound_write_value}, #1155) for a
@@ -1859,11 +1860,30 @@ module Rigor
       # `eval_index_or_write` does, so they take the same widening; the stored value is the compound result —
       # `falsey(h[k]) | v` for `&&=`, the dispatched `h[k] + v` for `+=` — not the rvalue alone.
       def eval_index_write(node)
-        _rhs_type, post_rhs = sub_eval(node.value, scope)
+        operands = index_write_operand_scope(node)
+        _rhs_type, post_rhs = sub_eval(node.value, operands)
         stored = index_write_stored_type(node, scope)
         widened = IndexWriteWidening.widen(node: node, current_scope: post_rhs,
-                                           arg_types: index_write_arg_types(node, stored))
+                                           arg_types: index_write_arg_types(node, stored, join_scope: operands))
         [stored, forget_rebound_specials(widened, node)]
+      end
+
+      # The scope a compound index write's rvalue runs from: Ruby evaluates the receiver, then the index arguments,
+      # then a block-pass argument, then the rvalue, so a write in any of them is threaded in that order
+      # ({#thread_operand}) before the rvalue. Issue #1272 — `(h ||= {})[k] ||= v`, `(@h ||= {})[k] ||= v` and
+      # `h[(i = 1)] ||= v` left `h`, `@h` and `i` on their pre-write bindings, so a later `h.fetch(k)` on a
+      # nil-initialised `h` reported a call on `nil`. A receiver or argument holding no write answers the entry scope
+      # unchanged. The read, the stored value and the widening's argument types are still typed from the entry scope,
+      # where the receiver expression's own value (`(h ||= {})` is the hash) already answers what the write produced;
+      # only the receiver's joinability is read from this scope ({#index_write_arg_types}' `join_scope`), since the
+      # binding the store widens is the one the receiver's write left (`h` is `{}`, not the entry's `nil`).
+      def index_write_operand_scope(node)
+        walk = OperandWalk.new(walk_recorder)
+        after = thread_operand(node.receiver, scope, walk, scope)
+        after = thread_operand(node.arguments, after, walk, scope)
+        block_pass = node.block
+        after = thread_operand(block_pass, after, walk, scope) if block_pass.is_a?(Prism::BlockArgumentNode)
+        after
       end
 
       # `[index_type..., stored_value_type]` for an index-write node, shaped exactly like a `[]=`
@@ -1879,15 +1899,16 @@ module Rigor
       # The index arguments are typed, and the receiver's joinability read, in `type_scope`: the
       # evaluator's entry scope by default; a `for` index passes its post-collection scope and a
       # rescue reference its arm's entry scope, the nearest the engine has to where Ruby evaluates
-      # them (each iteration, the moment of the catch).
+      # them (each iteration, the moment of the catch). A compound index write reads the joinability alone in
+      # `join_scope`, the scope its receiver and index arguments left ({#index_write_operand_scope}).
       # There is deliberately NO `rescue` here. `Scope#type_of` is a total query over well-formed Prism input,
       # so a raise is an engine bug, and swallowing it would silently downgrade a live seam to "no evidence" —
       # the join would quietly stop happening with nothing to show for it. Let it reach the runner's
       # internal-error path, where it is visible.
-      def index_write_arg_types(node, stored_type, type_scope: scope)
+      def index_write_arg_types(node, stored_type, type_scope: scope, join_scope: type_scope)
         args = node.arguments
         return MutationWidening::NO_ARG_TYPES if args.nil? || stored_type.nil?
-        return MutationWidening::NO_ARG_TYPES unless MutationWidening.joinable_receiver?(node.receiver, type_scope)
+        return MutationWidening::NO_ARG_TYPES unless MutationWidening.joinable_receiver?(node.receiver, join_scope)
 
         list = args.respond_to?(:arguments) ? args.arguments : args
         # A splat argument is marked `nil` — its expansion decides the store's arity at

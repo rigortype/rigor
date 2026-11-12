@@ -166,6 +166,18 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #1272 — a compound index write evaluates its receiver and index arguments before the rvalue, so a variable
+  # written in either holds its new value afterwards. The control reads a variable the receiver may leave unbound.
+  describe "fixtures/index_write_receiver_write.rb — a write in a compound index write's receiver binds" do
+    let(:harness) { harness_for("index_write_receiver_write") }
+
+    it "reports nothing but the control" do
+      reported = harness.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
+      expected = marked_lines(harness, "# GENUINE-NIL").map { |line| [line, "call.possible-nil-receiver"] }
+      expect(reported.map { |d| [d.line, d.rule.to_s] }).to match_array(expected)
+    end
+  end
+
   describe "fixtures/multi_write_index_target_widening.rb — a multi-assign `h[k], x = …` widens like `h[k] = v`" do
     let(:harness) { harness_for("multi_write_index_target_widening") }
 

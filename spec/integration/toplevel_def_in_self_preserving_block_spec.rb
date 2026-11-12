@@ -241,18 +241,25 @@ RSpec.describe "a cross-file top-level def called from a block (#2861)", type: :
       expect(undefined("z_helpers.rb" => helpers, "b_script.rb" => refined_times)).to eq([])
     end
 
-    it "keeps the opaque mark inside a refined Object#tap block" do
-      use = script(
-        "module R",
-        "  refine Object do",
-        "    def tap(&b) = (instance_exec(&b); self)",
-        "  end",
-        "end",
-        "using R",
-        "Object.new.tap { format(1).upcase }"
-      )
+    # The refined `tap` rebinds `self` to the `Foo`, whose own `format` answers a `String`: Ruby runs it clean,
+    # while a self-preserving block would bind the top-level def and report `upcase` on `42`.
+    %w[Object Kernel].each do |owner|
+      it "keeps the opaque mark inside a refined #{owner}#tap block" do
+        use = script(
+          "class Foo",
+          "  def format(x) = \"f\"",
+          "end",
+          "module R",
+          "  refine #{owner} do",
+          "    def tap(&b) = (instance_exec(&b); self)",
+          "  end",
+          "end",
+          "using R",
+          "Foo.new.tap { format(1).upcase }"
+        )
 
-      expect(undefined("helpers.rb" => helpers, "script.rb" => use)).to eq([])
+        expect(undefined("helpers.rb" => helpers, "script.rb" => use)).to eq([])
+      end
     end
 
     # The decline is lexical: the same refinement with no `using` in the calling file leaves the block

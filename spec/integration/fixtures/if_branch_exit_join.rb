@@ -179,6 +179,39 @@ def both_exit(c)
   assert_type('"s"', x)
 end
 
+# `redo` re-runs the loop body with the branch's writes, so it is no
+# exit: the then-branch's nil reaches the code after the loop and
+# `x ? 1 : 0` is a real test.
+def cond = [true, false].sample
+
+def while_redo
+  x = "s"
+  while cond
+    break if cond
+    if cond
+      x = nil
+      redo
+    else
+      x = "s"
+    end
+  end
+  x ? 1 : 0
+end
+
+def block_redo
+  x = "s"
+  [1, 2].each do |_i|
+    break if cond
+    if cond
+      x = nil
+      redo
+    else
+      x = "s"
+    end
+  end
+  x ? 1 : 0
+end
+
 # Control: a branch that exits only conditionally still joins.
 def then_raises_conditionally(c, d)
   x = maybe

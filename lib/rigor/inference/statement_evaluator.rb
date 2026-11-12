@@ -9502,14 +9502,15 @@ module Rigor
       end
 
       # Issue #1230 — a strict, syntactic-only exit test for the then-exits-beside-an-else arm ({#if_join}). The
-      # branch's last statement is a `return` / `next` / `break` / `redo` / `retry`; a receiver-less `raise` / `fail` /
+      # branch's last statement is a `return` / `next` / `break`; a receiver-less `raise` / `fail` /
       # `exit` / `exit!` / `abort` / `throw` whose name no project file defines on any class or module, at the top level
       # or by `define_method` ({Scope#project_method_name?}); or an if / unless / case with an else whose every arm
-      # certainly exits. Unlike {#branch_terminates?} it reads no type, so a `bot`-typed helper call does not qualify:
+      # certainly exits. A `redo` / `retry` does not: it re-runs a loop body or a `begin` that reads the branch's
+      # writes. Unlike {#branch_terminates?} it reads no type, so a `bot`-typed helper call does not qualify:
       # the typer types a call to an overridable or Kernel-shadowing project method `bot` (issue #3110).
       def branch_certainly_exits?(node)
         case node
-        when Prism::ReturnNode, Prism::NextNode, Prism::BreakNode, Prism::RedoNode, Prism::RetryNode then true
+        when Prism::ReturnNode, Prism::NextNode, Prism::BreakNode then true
         when Prism::CallNode then certain_exit_call?(node)
         when Prism::StatementsNode then branch_certainly_exits?(node.body.last)
         when Prism::ParenthesesNode then branch_certainly_exits?(node.body)

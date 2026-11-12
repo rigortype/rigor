@@ -114,7 +114,7 @@ RSpec.describe "a def whose receiver is not the lexical self (#3155)", type: :ru
     end
 
     it "does not count a later `def self.x` in a `class << self` body" do
-      expect(mismatches("  class << self\n    def a5 = \"bad\"\n    def self.a5 = 1\n  end\n", "a5")).to eq([3])
+      expect(mismatches("  def self.a5 = \"bad\"\n  class << self\n    def self.a5 = 1\n  end\n", "a5")).to eq([2])
     end
 
     it "does not count a later def in a `class << other` body" do

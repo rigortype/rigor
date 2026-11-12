@@ -834,12 +834,19 @@ module Rigor
 
             capped = entries.first(RETURN_SUMMARY_KEYS_PER_DEF)
             result[[path_line.split(":", 2).first, "#{class_name}#{separator}#{method_name}"]] = {
-              keys: capped.map { |entry| [entry.receiver, entry.arg_types] },
+              keys: capped.map { |entry| return_summary_key(entry) },
               returns: capped.map { |entry| entry.result.describe(:short) },
               effects: content_effects(effects_evaluator, node)
             }
           end
         end
+      end
+
+      # One observed call key: `[receiver, arg_types]`, or, for an entry a splat call stored (issue #1237),
+      # `[receiver, arg_types, true]`, which {#evaluate_spec_returns} re-drives with no positional correspondence.
+      def return_summary_key(entry)
+        key = [entry.receiver, entry.arg_types]
+        entry.positionals_unknown ? key << true : key
       end
 
       # The content-mutated parameter positions of `node`, or `[]` if the computation raises (defensive: the
@@ -906,8 +913,9 @@ module Rigor
         return spec[:keys].map { nil } if node.nil?
 
         scope = seed_project_scope(Scope.empty(environment: environment, source_path: spec[:path]))
-        spec[:keys].map do |(receiver, arg_types)|
-          result = scope.user_method_return(node, receiver, arg_types)
+        spec[:keys].map do |(receiver, arg_types, positionals_unknown)|
+          result = scope.user_method_return(node, receiver, arg_types,
+                                            positionals_unknown: positionals_unknown || false)
           result&.describe(:short)
         end
       end

@@ -160,7 +160,8 @@ module Rigor
 
         def collect_def_writes(def_node, qualified_prefix)
           return if def_node.body.nil? || qualified_prefix.empty?
-          return if def_node.receiver.is_a?(Prism::SelfNode)
+          # A def with a receiver writes the ivars of another object than an instance (#3155).
+          return if def_node.receiver
 
           class_name = qualified_prefix.join("::")
           gather_writes(def_node.body, class_name, def_node.name)

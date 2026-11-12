@@ -124,4 +124,50 @@ RSpec.describe "a def whose receiver is not the lexical self (#3155)", type: :ru
     source = "module MF\n  module_function\n  def f = 1\n  def String.g = 2\nend\n"
     expect(proposals("code.rb" => source)).to eq([["MF", "def self?.f: () -> 1"]])
   end
+
+  it "does not check `def String.q` against the enclosing class's own `def self.q` signature" do
+    source = "class L\n  def String.q = \"other\"\nend\n"
+    expect(return_mismatches(source, "class L\n  def self.q: () -> 1\nend\n")).to eq([])
+  end
+
+  it "does not check `def self.n` in a `class << self` body against the class's `def self.n` signature" do
+    source = "class M2\n  class << self\n    def self.n = \"meta\"\n  end\nend\n"
+    expect(return_mismatches(source, "class M2\n  def self.n: () -> :sing_n\nend\n")).to eq([])
+  end
+
+  context "with an ivar the foreign def's body writes" do
+    let(:source) do
+      <<~RUBY
+        class IV
+          def initialize = @x = 1
+          def a = @x
+          def String.q
+            @x = "s"
+          end
+        end
+      RUBY
+    end
+
+    it "leaves the write out of the class's ivar census" do
+      expect(assert_type_mismatches(source.sub("def a = @x", 'def a = assert_type("1", @x)'))).to eq([])
+    end
+
+    it "leaves the write out of def.ivar-write-mismatch" do
+      rules = analyze(files: { "code.rb" => source }).diagnostics.map { |d| d.rule.to_s }
+      expect(rules).not_to include("def.ivar-write-mismatch")
+    end
+  end
+
+  describe "the indexer's tables" do
+    let(:program) { Prism.parse("class L\n  def q = 1\n  def String.other = 2\nend\n").value }
+
+    it "files no method of the enclosing class" do
+      expect(Rigor::Inference::ScopeIndexer.build_methods_and_def_nodes(program).first).to eq("L" => { q: :instance })
+    end
+
+    it "claims no owner or side in the deferred-range row" do
+      rows = Rigor::Inference::ScopeIndexer.build_deferred_ranges(program)
+      expect(rows.map { |row| row.drop(2) }).to eq([[:q, :instance, "L"], [:other, nil, nil]])
+    end
+  end
 end

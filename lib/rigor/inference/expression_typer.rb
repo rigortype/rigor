@@ -4491,9 +4491,24 @@ module Rigor
       # `nil` when the parameter shape is not inferable (mirrors `build_user_method_body_scope`).
       def widened_user_method_body_scope(def_node, receiver, arg_types, self_fold_safe: false,
                                          positionals_unknown: false)
-        widened_args = arg_types.map { |arg_type| widen_value_pinned(arg_type) }
+        widened_args = arg_types.map { |arg_type| widen_bound_argument(arg_type) }
         build_user_method_body_scope(def_node, receiver, widened_args, self_fold_safe: self_fold_safe,
                                                                        positionals_unknown: positionals_unknown)
+      end
+
+      # Issue #3115 — one argument of the widened retry. A keyword argument reaches the binder inside the call's
+      # trailing `HashShape`, which {#widen_value_pinned} leaves as it is (a shape is not a value pin), so a
+      # keyword parameter kept its call-site pin through the retry and the base case stayed pruned: the body
+      # then converged on the `bot` seed. The shape keeps its keys and policy and each entry's value widens as
+      # a positional argument does.
+      def widen_bound_argument(arg_type)
+        return widen_value_pinned(arg_type) unless arg_type.is_a?(Type::HashShape)
+
+        Type::HashShape.new(
+          arg_type.pairs.transform_values { |value| widen_value_pinned(value) },
+          required_keys: arg_type.required_keys, optional_keys: arg_type.optional_keys,
+          read_only_keys: arg_type.read_only_keys, extra_keys: arg_type.extra_keys
+        )
       end
 
       # ADR-55 slice 2 bot-collapse resolution (2026-06-11). Called when a fixpoint iteration computed `bot`
@@ -4649,7 +4664,26 @@ module Rigor
             total += descriptor.last
           end
           [["t", parts], total]
+        when Type::HashShape then pinned_shape_descriptor(arg)
         end
+      end
+
+      # Issue #3115 — a call's keyword arguments arrive as one closed `HashShape`, so `m(n: 2)` is as
+      # value-pinned as `m(2)` when every entry is. An open shape, or one with an optional key, does not name
+      # one argument list and stays on the type-keyed path.
+      def pinned_shape_descriptor(shape)
+        return nil unless shape.closed? && shape.optional_keys.empty?
+
+        parts = []
+        total = 1
+        shape.pairs.each do |key, value|
+          descriptor = pinned_value_descriptor(value)
+          return nil if descriptor.nil?
+
+          parts << [key.inspect, descriptor.first]
+          total += descriptor.last
+        end
+        [["h", parts], total]
       end
 
       # Builds the body scope for a user-defined instance method call: a fresh `Scope` with `self_type` set

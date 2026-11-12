@@ -7556,7 +7556,8 @@ module Rigor
       end
 
       # The instance variables the block body writes that {#capturable_ivar?} accepts; none for a block that runs on
-      # another object.
+      # another object. Every self-rebinding call classifies `:unknown` today, so neither content seam that calls this
+      # meets one; the guard keeps the answer right should the escape analysis learn to call one non-escaping.
       def rebound_capturable_ivars(block, call_node)
         return NO_REWRITES if block.body.nil? || foreign_self_block?(call_node)
 

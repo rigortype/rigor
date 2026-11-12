@@ -824,6 +824,11 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
         widen_diags(analyze(ruby, sig: { "demo.rbs" => rbs })).map { |d| [d.line, d.message] }
       end
 
+      # `{ "class B < A" => "def hook: () -> nil" }` as RBS, one member (or none) per declaration.
+      def rbs_decls(decls)
+        decls.map { |head, member| [head, member && "  #{member}", "end"].compact.join("\n") }.join("\n")
+      end
+
       it "stays silent when the owner is RBS-only, reached through a project class that defines nothing" do
         ruby = <<~RUBY
           class Mid < Base; end
@@ -901,26 +906,12 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
           class RMid; include RMod; end
           class RLeaf < RMid; def hook = "s"; end
         RUBY
-        rbs = <<~RBS
-          module PMod
-            def hook: () -> Integer
-          end
-          class PMid
-            include PMod
-          end
-          class PLeaf < PMid
-            def hook: () -> String
-          end
-          module RMod
-            def hook: () -> Integer
-          end
-          class RMid
-            include RMod
-          end
-          class RLeaf < RMid
-            def hook: () -> String
-          end
-        RBS
+        rbs = rbs_decls(
+          "module PMod" => "def hook: () -> Integer", "class PMid" => "include PMod",
+          "class PLeaf < PMid" => "def hook: () -> String",
+          "module RMod" => "def hook: () -> Integer", "class RMid" => "include RMod",
+          "class RLeaf < RMid" => "def hook: () -> String"
+        )
         expect(widen_messages(ruby, rbs)).to eq(
           [[3, "return type of `hook' widened from Integer to String (overrides PMod#hook); breaks substitutability"]]
         )
@@ -933,25 +924,12 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
           class XMid < XBase; end
           class XLeaf < XMid; def hook = "s"; end
         RUBY
-        rbs = <<~RBS
-          interface _Hookable
-            def hook: () -> Integer
-          end
-          class IMid
-            include _Hookable
-          end
-          class ILeaf < IMid
-            def hook: () -> String
-          end
-          class XBase
-            include _Hookable
-          end
-          class XMid < XBase
-          end
-          class XLeaf < XMid
-            def hook: () -> String
-          end
-        RBS
+        rbs = rbs_decls(
+          "interface _Hookable" => "def hook: () -> Integer", "class IMid" => "include _Hookable",
+          "class ILeaf < IMid" => "def hook: () -> String",
+          "class XBase" => "include _Hookable", "class XMid < XBase" => nil,
+          "class XLeaf < XMid" => "def hook: () -> String"
+        )
         expect(widen_messages(ruby, rbs)).to eq(
           [[2, "return type of `hook' widened from Integer to String (overrides IMid#hook); breaks substitutability"]]
         )
@@ -964,62 +942,29 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
           class Mid < Base; def hook = nil; end
           class Leaf < Mid; def hook; end; end
         RUBY
-        rbs = <<~RBS
-          class PBase
-            def hook: () -> nil
-          end
-          class PLeaf < PBase
-            def hook: () -> void
-          end
-          class Base
-            def hook: () -> nil
-          end
-          class Mid < Base
-            def hook: () -> nil
-          end
-          class Leaf < Mid
-            def hook: () -> void
-          end
-        RBS
+        rbs = rbs_decls(
+          "class PBase" => "def hook: () -> nil", "class PLeaf < PBase" => "def hook: () -> void",
+          "class Base" => "def hook: () -> nil", "class Mid < Base" => "def hook: () -> nil",
+          "class Leaf < Mid" => "def hook: () -> void"
+        )
         expect(widen_messages(ruby, rbs)).to be_empty
       end
 
-      it "still fires on `-> void` over a non-nil parent, on `-> top` over `-> nil`, and on `-> String` over `-> nil`" do
-        ruby = <<~RUBY
-          class IB; def hook = 1; end
-          class IL < IB; def hook; end; end
-          class TB; def hook = nil; end
-          class TL < TB; def hook = nil; end
-          class SB; def hook = nil; end
-          class SL < SB; def hook = "s"; end
-        RUBY
-        rbs = <<~RBS
-          class IB
-            def hook: () -> Integer
-          end
-          class IL < IB
-            def hook: () -> void
-          end
-          class TB
-            def hook: () -> nil
-          end
-          class TL < TB
-            def hook: () -> top
-          end
-          class SB
-            def hook: () -> nil
-          end
-          class SL < SB
-            def hook: () -> String
-          end
-        RBS
-        expect(widen_messages(ruby, rbs)).to eq(
-          [
-            [2, "return type of `hook' widened from Integer to top (overrides IB#hook); breaks substitutability"],
-            [4, "return type of `hook' widened from nil to top (overrides TB#hook); breaks substitutability"],
-            [6, "return type of `hook' widened from nil to String (overrides SB#hook); breaks substitutability"]
-          ]
-        )
+      {
+        "`-> void` over a non-nil parent" => ["Integer", "void", "1", "Integer to top"],
+        "`-> top` over `-> nil`" => ["nil", "top", "nil", "nil to top"],
+        "`-> String` over `-> nil`" => ["nil", "String", "nil", "nil to String"]
+      }.each do |shape, (parent, child, parent_body, widened)|
+        it "still fires on #{shape}" do
+          ruby = <<~RUBY
+            class PB; def hook = #{parent_body}; end
+            class PL < PB; def hook = nil; end
+          RUBY
+          rbs = rbs_decls("class PB" => "def hook: () -> #{parent}", "class PL < PB" => "def hook: () -> #{child}")
+          expect(widen_messages(ruby, rbs)).to eq(
+            [[2, "return type of `hook' widened from #{widened} (overrides PB#hook); breaks substitutability"]]
+          )
+        end
       end
     end
   end

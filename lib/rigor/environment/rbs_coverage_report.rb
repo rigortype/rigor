@@ -5,8 +5,9 @@ module Rigor
     # Open item O4 Layer 3 slice 3 — graceful-degradation coverage report.
     #
     # When the user has a `Gemfile.lock` (via slice 1) and rigor has resolved its target-project RBS sources
-    # (DEFAULT_LIBRARIES, `data/vendored_gem_sigs/`, slice-1 bundle-shipped `sig/`, slice-2
-    # `rbs_collection.lock.yaml` paths), this module classifies each locked gem by RBS provenance and
+    # (the resolved library list — `Environment::BaseLibraries.resolve`, `data/vendored_gem_sigs/`,
+    # slice-1 bundle-shipped `sig/`, slice-2 `rbs_collection.lock.yaml` paths), this module classifies each
+    # locked gem by RBS provenance and
     # surfaces the "no RBS available" set so the run-start diagnostic in {Rigor::Analysis::Runner} can
     # suggest `rbs collection install` or `dependencies.source_inference:` for the uncovered gems.
     #
@@ -37,9 +38,9 @@ module Rigor
 
       # @param locked_gems — The lockfile-resolved gem set. Empty
       #   hash → no coverage analysis to do.
-      # @param default_libraries — gem names rigor auto-loads through
-      #   `RBS::EnvironmentLoader#add(library:)`. Pass `Rigor::Environment::DEFAULT_LIBRARIES` from callers
-      #   running in a project context.
+      # @param default_libraries — the resolved list of names rigor loads as RBS libraries
+      #   (`Environment::BaseLibraries.resolve`: `DEFAULT_LIBRARIES` + `libraries:` + the collection
+      #   lockfile's stdlib entries). Pass it from callers running in a project context.
       # @param bundle_sig_paths — the discovered `<bundle>/.../gems/<name>-<ver>/sig`
       #   paths from {BundleSigDiscovery.discover}.
       # @param rbs_collection_paths — the discovered `<collection>/<name>/<version>/`

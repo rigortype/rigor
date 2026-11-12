@@ -487,11 +487,9 @@ module Rigor
       # skip set so the collection's copy still loads. Issue #2978 — that holds for a gem whose own `sig/` the bundle
       # loaded too: its collection copy loads behind that `sig/` ({.collection_paths_behind_gem_sigs}).
       def collection_skip_gem_names(library_names)
-        extra = library_names.reject do |name|
-          DEFAULT_LIBRARIES.include?(name) || RequiredFeatures.feature_of_token(name)
+        LibraryProbe.loadable(library_names) + RbsLoader.vendored_gem_names.reject do |name|
+          RequiredFeatures.gated_dir?(name)
         end
-        unavailable = extra.empty? ? [] : extra.reject(&LibraryProbe.predicate)
-        (library_names - unavailable) + RbsLoader.vendored_gem_names.reject { |name| RequiredFeatures.gated_dir?(name) }
       end
 
       # Issue #2978 — the `collection_paths` (`<collection>/<name>/<version>/`) of the locked gems whose own `sig/` is

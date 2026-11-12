@@ -22,6 +22,18 @@ module Rigor
       ->(lib) { gem_sig_dir?(lib) || stdlib_library?(stdlib, lib) }
     end
 
+    # The names of `library_names` the environment loads: a default library, a vendored feature token, or a name
+    # RBS has. The loader drops any other name (`RbsLoader.library_loader` keeps only `has_library?` ones), so it
+    # covers nothing. The predicate is built only when a name needs it: building it can construct an RBS loader.
+    # Callers have `Environment` loaded, which defines `DEFAULT_LIBRARIES`.
+    def loadable(library_names)
+      has = nil
+      library_names.select do |name|
+        Environment::DEFAULT_LIBRARIES.include?(name) || Environment::RequiredFeatures.feature_of_token(name) ||
+          (has ||= predicate).call(name)
+      end
+    end
+
     # The `libraries:` names worth auditing: a vendored feature name (`prime`) becomes a vendored feature token
     # that the loader never asks `has_library?` about, so it is not an RBS library name to check.
     def auditable(libraries)

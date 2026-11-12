@@ -1,0 +1,2 @@
+- **[environment]** `rbs.coverage.missing-gem` no longer lists a locked gem whose RBS loads through `libraries:` or a `source: { type: stdlib }` entry in `rbs_collection.lock.yaml`. ([#2962](https://github.com/rigortype/rigor/issues/2962), [#3079](https://github.com/rigortype/rigor/pull/3079))
+  - The coverage check reads the same resolved library list the environment loads (`Environment::BaseLibraries.resolve`), so a gem named under `libraries:` is not reported as having no RBS available.

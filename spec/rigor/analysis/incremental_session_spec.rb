@@ -2680,6 +2680,22 @@ end
       end
     end
 
+    # Issue #1237 — a call with a positional splat re-types the callee with no positional correspondence, which the
+    # re-drive's ordinary binder cannot reproduce from the call key, so that frame keeps no return-memo entry and no
+    # return summary is observed for it.
+    it "observes no return summary at a splat call" do
+      Dir.mktmpdir do |dir|
+        fmt = File.join(dir, "fmt.rb")
+        File.write(fmt, "class Fmt\n  def self.label(*values)\n    values.size\n  end\nend\n")
+        write_once(File.join(dir, "user.rb"),
+                   "class User\n  def show\n    Rigor.dump_type(1)\n    Fmt.label(*[\"x\"])\n  end\nend\n")
+        session = session_for(configuration(dir))
+        guarded_baseline(session)
+
+        expect(session.instance_variable_get(:@return_summaries)).not_to have_key([fmt, "Fmt.label"])
+      end
+    end
+
     it "propagates a return-visible body edit to symbol dependents (return moved at observed key)" do
       Dir.mktmpdir do |dir|
         user = File.join(dir, "user.rb")

@@ -73,6 +73,11 @@ RSpec.describe "a call-site splat does not bind as one positional argument (#123
       expect(rules(program("def count(*keys) = keys.size", "count(*idx)"))).to eq([])
     end
 
+    it "a singleton method on a constant's object" do
+      defs = "OBJ = Object.new\nclass << OBJ\n  def count(*keys) = keys.size\nend"
+      expect(rules(program(defs, "OBJ.count(*idx)"))).to eq([])
+    end
+
     it "a call through a refinement" do
       defs = "module R\n  refine Integer do\n    def count(*keys) = keys.size\n  end\nend\nusing R"
       expect(rules(program(defs, "1.count(*idx)"))).to eq([])
@@ -107,6 +112,11 @@ def fwd(...) = count(...)"
       expect(rules(raising(defs, "K.sdie(*msgs)"))).to eq([])
     end
 
+    it "through a singleton method on a constant's object" do
+      defs = "OBJ = Object.new\nclass << OBJ\n  def die(*m) = raise(ArgumentError, m.join)\nend"
+      expect(rules(raising(defs, "OBJ.die(*msgs)"))).to eq([])
+    end
+
     it "through a module_function" do
       defs = "module Util\n  module_function\n\n  def bail(*m) = exit(1)\nend"
       expect(rules(raising(defs, "Util.bail(*msgs)"))).to eq([])
@@ -129,6 +139,25 @@ def fwd(...) = count(...)"
     it "through an index read" do
       defs = "class Row\n  def [](*k) = raise(KeyError)\nend"
       expect(rules(raising(defs, "Row.new[*msgs]"))).to eq([])
+    end
+  end
+
+  # An ancestry no table can order (an `include` of a module nothing defines) leaves the definer unknown, and the
+  # call answers `bot` only when every project definer raises.
+  describe "a callee whose definer is unknown" do
+    let(:base) { "class Base\n  def fail_with(*m) = %s\nend\nclass Caller < Base\n  include Missing::Helper\nend" }
+
+    def unknown_definer(body)
+      raising(format(base, body), "fail_with(*msgs)").sub("class Caller\n", "class Caller < Base\n")
+    end
+
+    it "keeps the bot of a definer that always raises" do
+      expect(rules(unknown_definer("raise(ArgumentError, m.join)"))).to eq([])
+    end
+
+    it "does not take the bot of a definer that raises for one argument only" do
+      expect(rules(unknown_definer("m.size == 1 ? raise(ArgumentError) : nil")))
+        .to eq(["call.possible-nil-receiver"])
     end
   end
 

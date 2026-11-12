@@ -818,7 +818,10 @@ module Rigor
       # `separator`. A live def node (a cold / re-walked file) is the identity every cross-file caller
       # resolved through, so `memo[node]` holds those callers' observed keys; a {DefHandle} (an unchanged
       # file on the warm path) never keyed a memo entry, so it is skipped (its summary is carried over from
-      # the snapshot). Bounded per def and in total so the snapshot stays small.
+      # the snapshot). Bounded per def and in total so the snapshot stays small: a def observed at more
+      # than `RETURN_SUMMARY_KEYS_PER_DEF` keys persists NO summary — a truncated one could prove the def
+      # stable on keys whose answers did not move while a dropped key's did (ADR-89 WD2's "cap overflow →
+      # keep the dependents"), and a missing summary already keeps them.
       def collect_return_summaries(result, nodes, sources, separator, memo, effects_evaluator)
         nodes.each do |class_name, methods|
           methods.each do |method_name, node|
@@ -826,16 +829,16 @@ module Rigor
 
             entries = memo[node]
             next if entries.nil? || entries.empty?
+            next if entries.size > RETURN_SUMMARY_KEYS_PER_DEF
 
             path_line = sources.dig(class_name, method_name)
             next if path_line.nil?
 
             break if result.size >= RETURN_SUMMARY_TOTAL_CAP
 
-            capped = entries.first(RETURN_SUMMARY_KEYS_PER_DEF)
             result[[path_line.split(":", 2).first, "#{class_name}#{separator}#{method_name}"]] = {
-              keys: capped.map { |entry| return_summary_key(entry) },
-              returns: capped.map { |entry| entry.result.describe(:short) },
+              keys: entries.map { |entry| return_summary_key(entry) },
+              returns: entries.map { |entry| entry.result.describe(:short) },
               effects: content_effects(effects_evaluator, node)
             }
           end

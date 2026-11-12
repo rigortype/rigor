@@ -2811,6 +2811,45 @@ end
         expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
       end
     end
+
+    # Issue #2783 — `Foo#g` is called from nine sites with nine distinct argument keys, one more than
+    # `Runner::RETURN_SUMMARY_KEYS_PER_DEF`. A summary truncated to the first eight keys would re-evaluate
+    # "stable" while the ninth caller's answer changed; the over-cap def must persist NO summary, so WD2
+    # keeps its dependents (ADR-89 WD2's "cap overflow → keep the dependents").
+    def write_over_cap_tree(dir, g_body:)
+      File.write(File.join(dir, "g.rb"), <<~RUBY)
+        class Foo
+          def g(x)
+            #{g_body}
+          end
+        end
+      RUBY
+      callers = (1..8).map { |i| "  def c#{i} = Foo.new.g(#{i}).succ\n" }.join
+      callers += "  def c9 = Foo.new.g(9).upcase\n"
+      write_once(File.join(dir, "user.rb"), "class Bar\n#{callers}end\n")
+    end
+
+    it "persists no return summary for a def observed at more keys than the per-def cap (#2783)" do
+      Dir.mktmpdir do |dir|
+        g = File.join(dir, "g.rb")
+        user = File.join(dir, "user.rb")
+        write_over_cap_tree(dir, g_body: "x")
+        session = session_for(configuration(dir))
+        baseline = guarded_baseline(session)
+
+        # Non-vacuity: the ninth caller's `.upcase` on Integer 9 is a real baseline diagnostic.
+        expect(baseline.map(&:message)).to include(a_string_matching(/undefined method `upcase' for 9/))
+        expect(session.instance_variable_get(:@return_summaries)).not_to have_key([g, "Foo#g"])
+
+        # `g` now answers a String for the ninth key only — correct code (Ruby prints "NINE").
+        write_over_cap_tree(dir, g_body: 'x == 9 ? "nine" : x')
+        recheck = guarded_recheck(session)
+
+        expect(recheck.affected).to include(user)
+        expect(recheck.diagnostics.map(&:message)).not_to include(a_string_matching(/undefined method `upcase'/))
+        expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+      end
+    end
   end
 
   # ADR-67 WD6c lift — `parameter_inference:` composes with the incremental session. The collector pre-pass

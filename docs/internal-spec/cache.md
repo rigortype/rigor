@@ -1565,7 +1565,11 @@ Two persisted summaries prove "nothing changed":
   the memo; all-equal returns **and** equal effects drop the def's symbol
   dependents. Any mismatch, a changed signature, a missing def, an
   ineligible def (one that also exposes ivar/cvar writes or `yield` values),
-  or a cap overflow keeps the dependents — the conservative direction.
+  or a cap overflow keeps the dependents — the conservative direction: a def
+  observed at more call keys than the per-def cap persists no summary, since
+  a truncated one could prove it stable on the keys it kept while a dropped
+  key's answer moved
+  ([#2783](https://github.com/rigortype/rigor/issues/2783)).
   A key a splat call observed ([#1237](https://github.com/rigortype/rigor/issues/1237)) is stored as
   `(receiver, args, true)` and re-evaluated the way that call bound it, with no
   positional correspondence ([`inference-engine.md`](inference-engine.md)); snapshot SCHEMA 48.

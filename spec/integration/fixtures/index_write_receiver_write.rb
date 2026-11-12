@@ -61,12 +61,14 @@ end
 def and_write
   x = nil
   (x ||= {})[:a] &&= 1
+  assert_type("Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer | nil]", x)
   x.fetch(:a)
 end
 
 def operator_write
   x = nil
   (x ||= Hash.new(0))[:a] += 1
+  assert_type("Hash[Dynamic[top] | Symbol, Integer]", x)
   x.fetch(:a)
 end
 

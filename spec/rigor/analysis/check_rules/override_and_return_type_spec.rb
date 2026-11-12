@@ -1068,6 +1068,95 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
           )
         end
       end
+
+      # #3156: a project class or module whose Ruby body records no method, superclass or include is an
+      # external entry on the resolution chain; the override walk still asks it, from its RBS.
+      describe "a body-less project ancestor (#3156)" do
+        def widened(line, parent)
+          [line, "return type of `hook' widened from Integer to String (overrides #{parent}#hook); breaks substitutability"]
+        end
+
+        it "names a body-less project module whose included interface supplies the signature" do
+          ruby = <<~RUBY
+            module PMod; end
+            class Mid; include PMod; end
+            class Leaf < Mid; def hook = "s"; end
+          RUBY
+          rbs = rbs_decls(
+            "interface _Hookable" => "def hook: () -> Integer", "module PMod" => "include _Hookable",
+            "class Mid" => "include PMod", "class Leaf < Mid" => "def hook: () -> String"
+          )
+          expect(widen_messages(ruby, rbs)).to eq([widened(3, "PMod")])
+        end
+
+        it "names an empty-body class whose RBS declares the method, also as an `attr_reader`" do
+          ruby = <<~RUBY
+            class AMid
+            end
+            class ALeaf < AMid; def hook = "s"; end
+            class RMid
+            end
+            class RLeaf < RMid; def hook = "s"; end
+          RUBY
+          rbs = rbs_decls(
+            "class AMid" => "def hook: () -> Integer", "class ALeaf < AMid" => "def hook: () -> String",
+            "class RMid" => "attr_reader hook: Integer", "class RLeaf < RMid" => "def hook: () -> String"
+          )
+          expect(widen_messages(ruby, rbs)).to eq([widened(3, "AMid"), widened(6, "RMid")])
+        end
+
+        it "names a body-less class whose RBS aliases the method" do
+          ruby = <<~RUBY
+            class AMid
+            end
+            class ALeaf < AMid; def hook = "s"; end
+          RUBY
+          rbs = rbs_decls(
+            "class AMid" => "def base: () -> Integer\n  alias hook base", "class ALeaf < AMid" => "def hook: () -> String"
+          )
+          expect(widen_messages(ruby, rbs)).to eq([widened(3, "AMid")])
+        end
+
+        it "fires `def.override-param-narrowed` for an interface the body-less class includes" do
+          ruby = <<~RUBY
+            class IMid
+            end
+            class ILeaf < IMid; def take(_x) = nil; end
+          RUBY
+          rbs = rbs_decls(
+            "interface _Takes" => "def take: (Integer | String) -> void", "class IMid" => "include _Takes",
+            "class ILeaf < IMid" => "def take: (Integer) -> void"
+          )
+          diags = diags_for(analyze(ruby, sig: { "demo.rbs" => rbs }), "def.override-param-narrowed")
+          expect(diags.map { |d| [d.line, d.message] }).to eq(
+            [[3, "parameter 1 of `take' narrowed from Integer | String to Integer (overrides IMid#take); " \
+                 "breaks substitutability"]]
+          )
+        end
+
+        it "stays silent when the body-less module only RBS-includes an RBS-only module" do
+          ruby = <<~RUBY
+            module PMod; end
+            class Mid; include PMod; end
+            class Leaf < Mid; def hook = "s"; end
+          RUBY
+          rbs = rbs_decls(
+            "module RMod" => "def hook: () -> Integer", "module PMod" => "include RMod",
+            "class Mid" => "include PMod", "class Leaf < Mid" => "def hook: () -> String"
+          )
+          expect(widen_messages(ruby, rbs)).to be_empty
+        end
+
+        it "stays silent on a correct override through a body-less ancestor" do
+          ruby = <<~RUBY
+            class AMid
+            end
+            class ALeaf < AMid; def hook = 1; end
+          RUBY
+          rbs = rbs_decls("class AMid" => "def hook: () -> Numeric", "class ALeaf < AMid" => "def hook: () -> Integer")
+          expect(widen_messages(ruby, rbs)).to be_empty
+        end
+      end
     end
   end
 

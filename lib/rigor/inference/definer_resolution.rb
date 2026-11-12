@@ -82,13 +82,40 @@ module Rigor
       # the entry's answer, as `[owner_name, value]` (the owner is part of the answer so that two worlds naming
       # different parents disagree). It is the override lints' parent read: the nearest project ancestor after the
       # class whose block answers.
+      #
+      # Issue #3156 — a class or module the project declares but whose Ruby body records no method, superclass or
+      # include (`module PMod; end`, `class AMid` / `end`) is an external entry on the chain, which only its RBS
+      # declaration speaks for. The override block answers from RBS, so such an entry is asked too, under the
+      # project name it resolves to ({#declared_external_name}); an external the project does not declare is not.
       def override_answer(scope)
         lambda do |chain, from|
-          first_hit(chain, scope, from) do |entry|
-            value = yield(entry.name)
-            [entry.name, value] unless value.nil?
+          first_hit(chain, scope, from, askable_external: true) do |name|
+            value = yield(name)
+            [name, value] unless value.nil?
           end
         end
+      end
+
+      # The project-declared class or module an external entry names, or nil: the first of its spellings (the
+      # owner-qualified one ahead of the candidates, #1698) the project declares, read in Ruby's lookup order, so a
+      # spelling RBS alone knows ahead of it resolves the constant first and leaves the entry unasked. It files the
+      # entry's `class:` edge, which a declaration of the name appearing or vanishing fires.
+      def declared_external_name(scope, entry)
+        Analysis::DependencyRecorder.read_last_segment(:class, entry.raw.to_s)
+        spellings = entry.candidates.dup
+        raw = entry.raw.to_s
+        spellings.unshift("#{entry.owner}::#{raw}") if entry.owner && !raw.start_with?("::")
+        spellings.uniq.each do |candidate|
+          return candidate if scope.discovered_classes.key?(candidate)
+          return nil if rbs_class_known?(scope, candidate)
+        end
+        nil
+      end
+
+      def rbs_class_known?(scope, name)
+        Rigor::Reflection.rbs_class_known?(name, scope: scope)
+      rescue StandardError
+        false
       end
 
       # `from` is a position on `chain`; the same position on the retro world is just after the entry it followed.
@@ -331,24 +358,28 @@ module Rigor
         kind == :singleton ? [:singleton, method_name.to_sym] : method_name.to_sym
       end
 
-      def first_hit(chain, scope, from)
+      # The first entry at or after `from` whose block answers. The default answer functions are handed the project
+      # entry; the override one (`askable_external:`) is handed a name, and also asks an external entry the project
+      # declares ({#declared_external_name}).
+      def first_hit(chain, scope, from, askable_external: false)
         index = from - 1
         found = nil
         chain.search(scope, from) do |entry|
           index += 1
-          next if entry.external?
+          name = entry.external? ? (askable_external && declared_external_name(scope, entry)) : entry.name
+          next unless name
 
-          answer = yield(entry)
+          answer = yield(askable_external ? name : entry)
           next if answer.nil?
 
-          found = Hit.new(answer, entry.name, index, entry.side)
+          found = Hit.new(answer, name, index, entry.side)
         end
         found
       end
 
       private_class_method :override_answer, :retro_position, :candidates, :past_fold_copies, :decided,
                            :external_may_answer?, :implicit_object_answers?, :project_tail_defines?, :external_lacks?,
-                           :outcomes, :collapse, :possible?,
+                           :outcomes, :collapse, :possible?, :declared_external_name, :rbs_class_known?,
                            :default_answer, :definer_answer, :visibility_answer, :side_visibility,
                            :self_extended_copy_visibility, :module_function_row?, :visibility_slot, :first_hit
     end

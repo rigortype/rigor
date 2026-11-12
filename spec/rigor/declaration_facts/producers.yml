@@ -268,8 +268,10 @@ lib/rigor/inference/project_patched_mixins.rb:
 lib/rigor/inference/project_patched_scanner.rb:
   computes: the def and def self methods each class declares in the pre_eval files (ADR-17), and their visibility (#1708)
   producers:
+    Rigor::Inference::ProjectPatchedScanner: 'issue #3056, names the two receiverless mixin calls (include, extend) #unread_call? excludes; it is a list of spellings and derives no declaration context'
     Rigor::Inference::ProjectPatchedScanner#alias_entry: 'issue #1708, gives an alias in a pre_eval: file its old name''s recorded visibility (public when no patch binds that name), as Ruby''s alias does; it writes no discovery table and derives no declaration context'
     Rigor::Inference::ProjectPatchedScanner#record_def_node: 'issue #1708, records the visibility a pre_eval: patch has (the def-argument and toggle forms, private :x, module_function''s public singleton copy, an alias copying its old name''s visibility) on the pre_eval: registry entry only, so a private patch does not answer an explicit-receiver call; it writes no discovery table and derives no declaration context'
+    Rigor::Inference::ProjectPatchedScanner#unread_call?: 'issue #3056, tells a call the pre_eval: walk does not read (define_method, class_eval, attr_reader, ...) from a visibility call and a receiverless include / extend, so a repeated module_function stops assuming its copy is unchanged; it writes no discovery table and derives no declaration context'
     Rigor::Inference::ProjectPatchedScanner#walk_node: grandfathered
 lib/rigor/inference/project_patched_visibility.rb:
   computes: the visibility a pre_eval file gives each def it writes in a class, module or class << body (#1708)

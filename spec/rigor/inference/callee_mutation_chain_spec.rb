@@ -207,5 +207,67 @@ RSpec.describe Rigor::Inference::CalleeMutationChain do
       Rigor::Inference::MemoAudit.drain
       Rigor::Inference::MemoAudit.disable!
     end
+
+    # ADR-127 WD3, #3071 — `def_census` and the unrecorded hand-off memo bypass under a memo-audit recomputation
+    # the way `resolved_census` does. Each example plants a stale entry that agrees with the stored `:close`
+    # answer, so the `:close` hit's recomputation catches it only by reading around the memo, not the entry.
+    describe "def_census and the unrecorded hand-off memo" do
+      it "is detected for def_census only because the recomputation bypasses it" do
+        Rigor::Inference::MemoAudit.disable!
+        evaluator = Rigor::Inference::StatementEvaluator.new(scope: index[call])
+        poke_def = nil
+        Rigor::Source::NodeWalker.each(program) { |n| poke_def ||= n if n.is_a?(Prism::DefNode) && n.name == :poke }
+        # `def_census[poke][:own]` claims `poke` mutates nothing; `:close[stripes]` holds the answer that stale
+        # census produces (`stripes` mutates nothing itself), so the two stored entries agree.
+        table = Rigor::TypingState.current.weak_key_map(Rigor::TypingState.slot(:callee_def_census).index)
+        (table[poke_def] ||= {})[:own] = {}
+        plant_census(:close, stripes_def, evaluator.send(:own_content_parameters, stripes_def))
+        expect(floored_arguments).to eq([])
+
+        Rigor::Inference::MemoAudit.enable!
+        expect { floored_arguments }.to raise_error(Rigor::Inference::MemoAudit::Mismatch, /:close/)
+      ensure
+        Rigor::Inference::MemoAudit.drain
+        Rigor::Inference::MemoAudit.disable!
+      end
+
+      describe "a def whose nesting was not recorded" do
+        let(:source) do
+          <<~RUBY
+            module Helper
+              def self.poke(acc) = (acc[0] = "x")
+            end
+
+            class Mut
+              def run(acc)
+                stripes(acc)
+              end
+
+              def stripes(acc) = Helper.poke(acc)
+            end
+          RUBY
+        end
+
+        it "is detected for the unrecorded hand-off memo only because the recomputation bypasses it" do
+          # A nil recorded nesting sends `Helper.poke(acc)` through `unrecorded_hand_off_callees`.
+          allow_any_instance_of(Rigor::Inference::StatementEvaluator) # rubocop:disable RSpec/AnyInstance
+            .to receive(:recorded_def_nesting).and_return(nil)
+
+          Rigor::Inference::MemoAudit.disable!
+          evaluator = Rigor::Inference::StatementEvaluator.new(scope: index[call])
+          # The unrecorded hand-off memo claims `Helper.poke` hands `acc` to nothing; `:close[stripes]` holds the
+          # answer that stale entry produces, so the two stored entries agree.
+          evaluator.send(:unrecorded_hand_off_memo, "Helper")[[false, :poke]] = []
+          plant_census(:close, stripes_def, evaluator.send(:own_content_parameters, stripes_def))
+          expect(floored_arguments).to eq([])
+
+          Rigor::Inference::MemoAudit.enable!
+          expect { floored_arguments }.to raise_error(Rigor::Inference::MemoAudit::Mismatch, /:close/)
+        ensure
+          Rigor::Inference::MemoAudit.drain
+          Rigor::Inference::MemoAudit.disable!
+        end
+      end
+    end
   end
 end

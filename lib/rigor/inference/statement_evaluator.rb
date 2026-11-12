@@ -6396,6 +6396,9 @@ module Rigor
 
       # Issue #2104 — the per-thread memo of a census that reads nothing but `def_node`'s AST, under `kind`.
       def def_census(kind, def_node, &)
+        # An audit recomputation bypasses the memo, so it reads no stored entry (ADR-127 WD3, #3071).
+        return MemoAudit.key_audit("def census", &) if MemoAudit.suspended?
+
         table = typing_state.weak_key_map(DEF_CENSUS)
         entry = (table[def_node] ||= {})
         return entry[kind] = MemoAudit.key_audit("def census", &) unless entry.key?(kind)

@@ -178,6 +178,16 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  describe "fixtures/index_slot_narrowing_reset.rb — a store into a narrowed slot replaces or drops the narrowing" do
+    let(:harness) { harness_for("index_slot_narrowing_reset") }
+
+    # Every slot read is an `assert_type`, so a stale `||=` narrowing surfaces as `assert.type-mismatch` here.
+    it "reports nothing" do
+      reported = harness.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
+      expect(reported.map { |d| [d.line, d.rule.to_s, d.message] }).to eq([])
+    end
+  end
+
   describe "fixtures/multi_write_index_target_widening.rb — a multi-assign `h[k], x = …` widens like `h[k] = v`" do
     let(:harness) { harness_for("multi_write_index_target_widening") }
 

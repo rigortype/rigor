@@ -33,8 +33,10 @@ module Rigor
     #
     # **Invalidation.** Three conditions drop a recorded narrowing:
     # - The receiver variable is rebound (handled inside `Scope#with_local` / `Scope#with_ivar`).
-    # - An intervening `receiver[key] = value` writes the same slot — `:[]=` could rebind the
-    #   slot to nil; conservative drop.
+    # - An intervening store writes the same slot — `receiver[key] = value`, an index target, or a
+    #   compound `receiver[key] op= value` / `&&=` (issue #1218) — since it could rebind the slot to
+    #   nil; conservative drop. A store whose index is not one literal key drops every narrowing
+    #   on the receiver.
     # - An intervening mutator from {MutationWidening::SHAPE_MUTATORS} runs against the receiver
     #   (e.g. `params.delete(:f)`, `params.clear`, `params.default = 0`, `buf.delete_prefix!("x")`).
     #
@@ -138,14 +140,61 @@ module Rigor
         MutationWidening::SHAPE_MUTATORS.include?(method_name)
       end
 
-      def invalidate_indexed_write(call_node, current_scope)
-        args = call_node.arguments&.arguments
-        return current_scope if args.nil? || args.empty?
+      # Drops the narrowing on the slot a store through `[]=` overwrote. `node` is the `[]=` call, an index target
+      # (a multi-assign slot, a `for` index, a rescue reference) or a compound index write (`h[k] += v`,
+      # `h[k] &&= v`, `h[k] ||= v`); every form reads only `receiver` and `arguments`, and only a `[]=` call's last
+      # argument is the stored value rather than an index.
+      #
+      # Issue #1218 — a literal single index drops that one slot and leaves the others. Any other index list on a
+      # stable receiver — a key that is not a literal (`h[k] = 1` may be `h[:e] = 1`), a multi-index splice
+      # (`s[0, 1] = [1, 2]` shifts every later slot), a splat — may write any slot, so it drops every narrowing on
+      # the receiver, as {.invalidate_mutator} does. So does a negative Integer index on a receiver not shown to be a
+      # `Hash`: on an `Array` `a[-1]` is the slot some non-negative index also names. An unstable receiver records
+      # no narrowing to drop.
+      def invalidate_indexed_write(node, current_scope)
+        receiver = stable_receiver(node.receiver)
+        return current_scope if receiver.nil?
 
-        address = stable_address(call_node.receiver, args.first)
-        return current_scope if address.nil?
+        indexes = index_arguments(node)
+        address = indexes.size == 1 ? stable_address(node.receiver, indexes.first) : nil
+        if address && !(negative_index?(address.last) && !hash_receiver?(current_scope.type_of(node.receiver)))
+          return current_scope.without_indexed_narrowing(*address)
+        end
 
-        current_scope.without_indexed_narrowing(*address)
+        current_scope.without_indexed_narrowings_for(*receiver)
+      end
+
+      # Whether the literal `key` may name the same slot as another literal key: a negative Integer, unless the
+      # receiver is a `Hash`, which tells `-1` from every other key.
+      def aliasing_index?(key, receiver_type)
+        negative_index?(key) && !hash_receiver?(receiver_type)
+      end
+
+      def negative_index?(key) = key.is_a?(Integer) && key.negative?
+
+      def hash_receiver?(receiver_type) = carrier_receiver_type?(receiver_type, HASH_CARRIER)
+
+      VERBATIM_STORE_CARRIERS = %w[Hash Array].freeze
+      HASH_CARRIER = %w[Hash].freeze
+      private_constant :VERBATIM_STORE_CARRIERS, :HASH_CARRIER
+
+      # Whether a store through `[]=` on a receiver of `receiver_type` at the literal `key` leaves exactly the stored
+      # value at that slot, so a recorded narrowing may claim it. Only a `Hash` or `Array` carrier (a shape, a tuple,
+      # a `Hash` / `Array` nominal, refined or not) does, for every member of a union. A `String`'s `[]=` splices
+      # (`s[0] = "xy"` leaves `s[0] == "x"`), and a project class's `[]=` may store anything. A negative Integer key
+      # aliases a non-negative one on an `Array` ({.aliasing_index?}), so it records only on a `Hash`.
+      def verbatim_slot?(receiver_type, key)
+        carrier_receiver_type?(receiver_type, VERBATIM_STORE_CARRIERS) && !aliasing_index?(key, receiver_type)
+      end
+
+      def carrier_receiver_type?(type, classes)
+        members = type.is_a?(Type::Union) ? type.members : [type]
+        members.all? { |member| classes.include?(UnknownStoreWidening.carrier_class(member)) }
+      end
+
+      def index_arguments(node)
+        args = node.arguments&.arguments || []
+        node.is_a?(Prism::CallNode) ? args[0...-1] : args
       end
 
       def invalidate_mutator(call_node, current_scope)

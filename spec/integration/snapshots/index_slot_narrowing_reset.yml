@@ -1,0 +1,36 @@
+---
+locals: {}
+assertions:
+  '1': '1'
+  '2': '5'
+  '3': nil
+  '4': '1'
+  '5': '0'
+  '6': '0'
+  '7': Dynamic[top] | Integer
+  '8': Dynamic[top]?
+  '9': Dynamic[top]?
+  '10': Dynamic[top]?
+  '11': Dynamic[top] | Integer | nil
+  '12': '1'
+  '13': Dynamic[top] | Integer
+  '14': String?
+  '15': String?
+  '16': Dynamic[top]
+  '17': Dynamic[top]
+  '18': Dynamic[top]?
+  '19': Dynamic[top]?
+  '20': Dynamic[top]?
+  '21': '0'
+  '22': Dynamic[top] | Integer
+  '23': Dynamic[top] | Integer
+  '24': 0 | 1
+  '25': 1?
+  '26': Dynamic[top] | Integer
+  '27': Dynamic[top] | Integer
+  '28': Dynamic[top] | Integer
+  '29': Dynamic[top] | Integer
+  '30': Dynamic[top] | Integer | nil
+  '31': '"1"'
+  '32': "[]"
+  '33': Dynamic[top] | String | nil

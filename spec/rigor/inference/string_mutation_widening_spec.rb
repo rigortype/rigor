@@ -187,11 +187,13 @@ RSpec.describe "String mutation widening", type: :runner do
   end
 
   # A `receiver[key] ||= default` narrowing is dropped when a mutator runs against the receiver; the String mutators
-  # were not among the ones that dropped it.
+  # were not among the ones that dropped it. Issue #1218 — a String receiver records no slot narrowing at all, since
+  # its `[]=` splices (`t = +""; t[0] ||= "xy"` leaves `t[0] == "x"`, which the recorded `"xy"` folded `t[0] == "xy"`
+  # always truthy on), so the non-mutating `delete_prefix` control reads the plain `String?` too.
   describe "the indexed narrowing" do
     it "drops a slot narrowing when a String mutator rewrites the receiver" do
       expect(run("", '(self[0] ||= "x"; delete_prefix!("x"))')[0]).to be_nil
-      expect(dumped_types(<<~RUBY)).to eq(["String?", '"x" | String'])
+      expect(dumped_types(<<~RUBY)).to eq(["String?", "String?"])
         s = String.new("")
         s[0] ||= "x"
         s.delete_prefix!("x")

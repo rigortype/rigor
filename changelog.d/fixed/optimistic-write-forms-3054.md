@@ -1,0 +1,3 @@
+- **[engine]** `flow.always-truthy-condition` no longer fires on an optimistic nil-free lookup behind a write whose value is its right-hand side (`v ||= h[k]`, `v &&= h[k]`, `$g = h[k]`, `@@cv = h[k]`, `a, b = h[k]`, `self.x = h[k]`, `arr[0] = h[k]`). ([#3054](https://github.com/rigortype/rigor/issues/3054))
+  - `v ||= h[k]` still reports when the old binding is provably truthy (`v = "x"`), since `||=` then never reaches the lookup and the verdict is proof.
+  - Operator writes (`v += h[k]`) and compound attribute or index writes (`self.x ||= h[k]`, `arr[0] += h[k]`) are unchanged: their value is not the right-hand side's.

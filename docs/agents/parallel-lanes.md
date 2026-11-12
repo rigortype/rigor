@@ -152,8 +152,13 @@ lives in the PR body and the issues, which the coordinator reads only when a dec
    origin/<branch>` before its next commit. Do it only while the lane has pushed everything;
    otherwise the push rejects or the branches diverge. Rebasing first makes the push
    non-fast-forward.
-8. **File the review's scope expansion** as issues outside the milestone. When a merged commit
-   carried a `Fixes #N` for an issue the PR only partly fixed, reopen #N with what remains.
+8. **File the review's scope expansion** as issues outside the milestone, but only what was
+   reproduced: a finding the reviewer ran (a command and its output, or a mutation that left the
+   specs green) becomes an issue. One the reviewer only read off the code, or marked unverified,
+   stays a comment on the PR until someone reproduces it. Six reviews on 2026-11-12 produced five
+   issues for six fixes, several of them unreproduced, so the backlog grew as fast as the lanes
+   closed it. When a merged commit carried a `Fixes #N` for an issue the PR only partly fixed,
+   reopen #N with what remains.
 
 ## Lane contract
 

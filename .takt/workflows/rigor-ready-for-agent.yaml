@@ -1,9 +1,9 @@
 name: rigor-ready-for-agent
 description: >
-  Rigor ready-for-agent trial workflow (ADR-115): plan → implement →
-  draft PR → CI watch → adversarial review (default Grok:xhigh; +Opus if complex; Fable reserved for design) → fix loop. Encodes the
-  long quality-stable loop that plain `pure` omits.
-max_steps: 40
+  Rigor ready-for-agent lane (ADR-115): plan → implement → draft PR. The lane
+  ends at the Draft PR; the coordinator waits for CI, runs the independent
+  adversarial review and lands (see .takt/README.md).
+max_steps: 20
 initial_step: plan
 
 # Unattended providers deny every tool not allow-listed: without this the plan
@@ -14,8 +14,6 @@ personas:
   architect: ../facets/personas/architect.md
   lane: ../facets/personas/lane.md
   shipper: ../facets/personas/shipper.md
-  ci-watcher: ../facets/personas/ci-watcher.md
-  adversary: ../facets/personas/adversary.md
 
 policies:
   rigor-lane: ../facets/policies/rigor-lane.md
@@ -24,9 +22,6 @@ instructions:
   plan: ../facets/instructions/plan.md
   develop: ../facets/instructions/develop.md
   ship-draft-pr: ../facets/instructions/ship-draft-pr.md
-  watch-ci: ../facets/instructions/watch-ci.md
-  adversarial-review: ../facets/instructions/adversarial-review.md
-  fix-from-review: ../facets/instructions/fix-from-review.md
 
 steps:
   - name: plan
@@ -63,46 +58,8 @@ steps:
     allow_git_commit: true
     rules:
       - condition: Draft PR opened
-        next: watch_ci
-      - condition: Draft PR already exists
-        next: watch_ci
-      - condition: Ship blocked
-        next: ABORT
-
-  - name: watch_ci
-    persona: ci-watcher
-    policy: rigor-lane
-    instruction: watch-ci
-    edit: false
-    rules:
-      - condition: CI green
-        next: adversarial_review
-      - condition: CI red
-        next: fix
-      - condition: CI stalled
-        next: ABORT
-
-  - name: adversarial_review
-    persona: adversary
-    policy: rigor-lane
-    instruction: adversarial-review
-    edit: false
-    rules:
-      - condition: Approved
         next: COMPLETE
-      - condition: Needs fix
-        next: fix
-
-  - name: fix
-    capabilities: edit
-    persona: lane
-    policy: rigor-lane
-    instruction: fix-from-review
-    edit: true
-    required_permission_mode: edit
-    allow_git_commit: true
-    rules:
-      - condition: Fixes pushed
-        next: watch_ci
-      - condition: Blocked — need human
+      - condition: Draft PR already exists
+        next: COMPLETE
+      - condition: Ship blocked
         next: ABORT

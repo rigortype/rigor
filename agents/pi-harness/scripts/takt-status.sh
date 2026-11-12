@@ -7,9 +7,11 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 WT_ROOT="${WT_ROOT:-$(dirname "$REPO")/rigor-wt}"
+# Queue-mode lanes (worktree_provisioner) live beside it, not under rigor-wt.
+TAKT_WT_ROOT="${TAKT_WT_ROOT:-$(dirname "$REPO")/takt-worktrees}"
 
 render() {
-  python3 -I - "$REPO" "$WT_ROOT" <<'PY'
+  python3 -I - "$REPO" "$WT_ROOT" "$TAKT_WT_ROOT" <<'PY'
 import glob, json, os, subprocess, sys, time
 from datetime import datetime, timezone
 
@@ -38,7 +40,8 @@ def alive(pid):
 live = subprocess.run(["pgrep", "-fl", "bin/takt"], capture_output=True, text=True).stdout
 
 rows = []
-roots = glob.glob(os.path.join(wt_root, "*", ".takt", "runs", "*")) + glob.glob(os.path.join(repo, ".takt", "runs", "*"))
+roots = [r for root in (wt_root, sys.argv[3]) for r in glob.glob(os.path.join(root, "*", ".takt", "runs", "*"))]
+roots += glob.glob(os.path.join(repo, ".takt", "runs", "*"))
 for run in roots:
     mp = os.path.join(run, "meta.json")
     if not os.path.exists(mp): continue

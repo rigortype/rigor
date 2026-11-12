@@ -16,6 +16,17 @@ if [[ -z "${TAKT_MCP:-}" ]]; then
 fi
 [[ -f "$TAKT_MCP" ]] || { echo "takt-enqueue: no takt-mcp at $TAKT_MCP (set TAKT_MCP)" >&2; exit 1; }
 
+# Pull-based intake: lanes finish faster than CI can land them, and every open
+# PR costs runner time, so intake stops while enough work is already unlanded.
+# Unlanded = open takt/ PRs + tasks takt has not finished yet.
+max="${TAKT_MAX_UNLANDED:-5}"
+open_prs="$(cd "$REPO" && gh pr list --state open --limit 200 --json headRefName -q '[.[] | select(.headRefName | startswith("takt/"))] | length')"
+queued="$(grep -cE '^    status: (pending|running)$' "$REPO/.takt/tasks.yaml" 2>/dev/null || true)"
+if (( open_prs + ${queued:-0} + $# > max )); then
+  echo "takt-enqueue: $open_prs open takt PRs + ${queued:-0} queued tasks + $# new > $max unlanded (TAKT_MAX_UNLANDED); land some first" >&2
+  exit 3
+fi
+
 REPO="$REPO" TAKT_MCP="$TAKT_MCP" WORKFLOW="${WORKFLOW:-rigor-ready-for-agent}" python3 -I - "$@" <<'PY'
 import json, os, subprocess, sys
 

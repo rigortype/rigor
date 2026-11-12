@@ -158,16 +158,6 @@ class IvarContentCapture
     assert_type("Array[0]", @nd)
   end
 
-  # --- An instance variable on its ADR-58 declaration seed is left alone:
-  # the seed already unions every write in the class. ---
-  def seed_write
-    @seeded = [0]
-  end
-
-  def seed_read
-    [1].each { |x| @seeded << x }
-    assert_type("Array[Dynamic[top]]?", @seeded)
-  end
 
   # --- Paired control for #1235: a store reading an instance variable the
   # body does not write keeps its precise binding, and still folds. ---
@@ -181,5 +171,19 @@ class IvarContentCapture
     end
     assert_type("Array[5]", caps)
     puts "never" if caps.last == 6 # GENUINE-FALSEY
+  end
+end
+
+# --- An instance variable on its ADR-58 declaration seed is left alone:
+# the seed already unions every write in the class, so the block's `1`
+# does not join it. ---
+class IvarContentSeeded
+  def initialize
+    @seeded = [0]
+  end
+
+  def seed_read
+    [1].each { |x| @seeded << x }
+    assert_type("Array[Dynamic[top]]", @seeded)
   end
 end

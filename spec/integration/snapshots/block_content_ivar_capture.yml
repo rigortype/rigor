@@ -14,5 +14,5 @@ assertions:
   '11': Array[Dynamic[top]]
   '12': Array[0]
   '13': Array[0]
-  '14': Array[Dynamic[top]]?
-  '15': Array[5]
+  '14': Array[5]
+  '15': Array[Dynamic[top]]

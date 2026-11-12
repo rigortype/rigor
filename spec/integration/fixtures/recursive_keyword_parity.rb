@@ -56,6 +56,7 @@ class KeywordRecursion
 
   def positional_omitted(n, mode = :fast) = n > 0 ? positional_omitted(n - 1) : mode
   def positional_splatted(n, mode = :fast) = n > 0 ? positional_splatted(*[n - 1, :slow]) : mode
+  def positional_shifted(n, mode = :fast, tail = nil) = n > 0 ? positional_shifted(*[n - 1, :slow], mode) : mode
 
   def positional_assigned(n, mode = :fast)
     mode = :slow if n == 1
@@ -66,6 +67,7 @@ class KeywordRecursion
   def rest_grown(n, *a) = n > 0 ? rest_grown(n - 1, *a, 1) : a
   def keyword_rest_kept(n, **kw) = n > 0 ? keyword_rest_kept(n - 1, **kw) : kw
   def keyword_rest_grown(n, **kw) = n > 0 ? keyword_rest_grown(n - 1, **kw, z: 1) : kw
+  def keyword_rest_replaced(n, **kw) = n > 0 ? keyword_rest_replaced(n - 1, z: 1) : kw
 
   # Ruby: neither call returns (SystemStackError). No base case, so `bot` is the answer in both forms. The
   # rows sit in a method body: the code after a `bot` call is unreachable.
@@ -166,8 +168,12 @@ assert_type("{ a: Integer }", subject.keyword_rest_kept(some_int, a: 1))
 assert_type("Dynamic[top]", subject.positional_omitted(some_int, 5))
 # Ruby: :slow. A splat at the recursive call may reach every positional from its own slot on.
 assert_type("Dynamic[top]", subject.positional_splatted(some_int))
+# Ruby: :slow. The splat fills `mode`, and the `mode` written in the second place lands in `tail`.
+assert_type("Dynamic[top]", subject.positional_shifted(some_int))
 # Ruby: :slow. The body assigns the parameter before it passes it on.
 assert_type(":slow | Dynamic[top]", subject.positional_assigned(some_int))
 # Ruby: [:a, 1, 1], { a: 1, z: 1 }. The rest parameter grows at each call.
 assert_type("Dynamic[top]", subject.rest_grown(some_int, :a))
 assert_type("Dynamic[top]", subject.keyword_rest_grown(some_int, a: 1))
+# Ruby: { z: 1 }. No `**kw` at the recursive call.
+assert_type("Dynamic[top]", subject.keyword_rest_replaced(some_int, a: 1))

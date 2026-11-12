@@ -57,6 +57,8 @@ assertions:
   '53': "{ a: Integer }"
   '54': Dynamic[top]
   '55': Dynamic[top]
-  '56': ":slow | Dynamic[top]"
-  '57': Dynamic[top]
+  '56': Dynamic[top]
+  '57': ":slow | Dynamic[top]"
   '58': Dynamic[top]
+  '59': Dynamic[top]
+  '60': Dynamic[top]

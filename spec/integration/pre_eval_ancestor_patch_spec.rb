@@ -652,6 +652,34 @@ RSpec.describe "a pre_eval: patch on an ancestor reaches its descendants (#1708)
       expect(rules(result)).to eq([["a.rb", 1, "call.undefined-method"]])
     end
 
+    # A `module_function` def's singleton copy runs with self = the owner, but the analysed def is typed
+    # `Nominal[owner]`: `Kernel.a1` inside `def go` must not report — Ruby reads `Kernel.go` as 1. The
+    # `include KHelp` keeps Kernel's instance ancestors from collapsing to itself, which would take the
+    # permissive escape and hide the check.
+    it "does not report the protected copy inside the owner's own module_function def" do
+      patch = <<~RUBY
+        module KHelp; end
+        module Kernel
+          include KHelp
+          def a1 = 1
+          module_function :a1
+          class << self
+            protected :a1
+          end
+        end
+      RUBY
+      calls = <<~RUBY
+        module Kernel
+          module_function
+          def go = Kernel.a1  # Kernel.go => 1
+        end
+        Kernel.go
+      RUBY
+      result = run_project("ext/core.rb" => patch, "lib/a.rb" => calls)
+
+      expect(rules(result)).to eq([])
+    end
+
     it "reports Kernel.a3, whose copy a repeated `module_function :a3` leaves private" do
       patch = <<~RUBY
         module Kernel

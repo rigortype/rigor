@@ -273,6 +273,14 @@ RSpec.describe Rigor::Inference::ProjectPatchedMethods do
       expect(registry.callable?(found, explicit: true, self_type: self_type, rbs_loader: loader)).to be(true)
     end
 
+    it "answers an explicit call from a self typed as an instance of the owner" do
+      # A `module_function` / `extend self` def is typed `Nominal[owner]` though its singleton copy runs
+      # with self = owner: `Kernel.a1` inside `def go` under a bare `module_function` => 1 in Ruby
+      # (Kernel.go), so the ambiguous self answers rather than reporting.
+      self_type = Rigor::Type::Nominal.new("Kernel")
+      expect(registry.callable?(found, explicit: true, self_type: self_type, rbs_loader: loader)).to be(true)
+    end
+
     it "refuses an explicit call from another class's singleton" do
       # `class Foo; def self.bar = Kernel.a1; end` raises NoMethodError in Ruby.
       self_type = Rigor::Type::Singleton.new("Foo")

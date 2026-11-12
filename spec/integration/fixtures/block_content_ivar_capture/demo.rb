@@ -110,8 +110,8 @@ class IvarContentCapture
     puts "three" if sizes.last == 3
   end
 
-  # --- A nil-able instance variable keeps its pre-call binding on both
-  # paths: the join and the floor would drop the `nil` (#1219, #1251). ---
+  # --- A nil-able instance variable keeps its pre-call binding under a
+  # non-escaping block: the join would drop the `nil` (#1219). ---
   def guarded(flag)
     @maybe = flag ? [1] : nil
     [1].each { @maybe << 2 if @maybe }
@@ -120,12 +120,56 @@ class IvarContentCapture
     puts "one" if y == 1
   end
 
+  # --- The escaping floor takes a nil-able or mixed instance variable
+  # member by member (#3095): each collection member reads its bare
+  # carrier, and the `nil` a callback that never runs leaves, like any
+  # member no mutation can fill, stays. ---
+  # Each comparison sits before its `assert_type`, an unresolved self-call
+  # that would reset the narrowing it reads; each folds if the floor leaves
+  # the instance variable at its pre-call contents.
   def guarded_escaping(button, flag)
     @later = flag ? [1] : nil
     button.on_click { @later&.push(2) }
-    assert_type("Array[1]?", @later)
+    puts "two" if @later&.last == 2
+    assert_type("Array[Dynamic[top]]?", @later)
     y = @later.nil? ? 1 : 2
     puts "one" if y == 1
+  end
+
+  def guarded_escaping_hash(button, flag)
+    @lazy = flag ? { a: 1 } : nil
+    button.on_click { @lazy[:a] = 2 if @lazy }
+    puts "two" if @lazy&.fetch(:a) == 2
+    assert_type("Hash[Dynamic[top], Dynamic[top]]?", @lazy)
+  end
+
+  def mixed_escaping(button, flag)
+    @mixed = flag ? [1] : 3
+    button.on_click { @mixed << 2 if @mixed.is_a?(Array) }
+    case @mixed
+    when Array then puts "two" if @mixed.last == 2
+    end
+    assert_type("3 | Array[Dynamic[top]]", @mixed)
+  end
+
+  # The same floors read right after the callback, before any condition
+  # re-narrows the binding: each mismatches if the floor drops a member.
+  def kept_nil(button, flag)
+    @kn = flag ? [1] : nil
+    button.on_click { @kn&.push(2) }
+    assert_type("Array[Dynamic[top]]?", @kn)
+  end
+
+  def kept_nil_hash(button, flag)
+    @kh = flag ? { a: 1 } : nil
+    button.on_click { @kh[:a] = 2 if @kh }
+    assert_type("Hash[Dynamic[top], Dynamic[top]]?", @kh)
+  end
+
+  def kept_member(button, flag)
+    @km = flag ? [1] : 3
+    button.on_click { @km << 2 if @km.is_a?(Array) }
+    assert_type("3 | Array[Dynamic[top]]", @km)
   end
 
   # --- A rewriter beside an append is re-applied to the join. ---

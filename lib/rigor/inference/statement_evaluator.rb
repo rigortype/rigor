@@ -7070,10 +7070,11 @@ module Rigor
       # precision is forgotten; only the carrier survives. Read-only captures and locals the block merely rebinds
       # (already floored by `drop_captured_narrowing`) are untouched.
       #
-      # An instance variable of this scope's `self` the body mutates in place is floored the same way (issue #1208): a
-      # callback that runs `@opts[:format] = "json"` later left `@opts[:format]` folding to `"text"`. One under a block
-      # that runs on another object is that object's, and so is every one when `foreign_self` says the closure itself
-      # does.
+      # An instance variable of this scope's `self` the body mutates in place is floored too (issue #1208): a callback
+      # that runs `@opts[:format] = "json"` later left `@opts[:format]` folding to `"text"`. It floors member by member
+      # ({#member_content_floor}, issue #3095), so a lazily initialised `@buf = flag ? [1] : nil` keeps its `nil`. One
+      # under a block that runs on another object is that object's, and so is every one when `foreign_self` says the
+      # closure itself does.
       def widen_escaping_content_captures(block_node, post_scope, foreign_self: false)
         body = block_node.body
         return post_scope if body.nil?
@@ -7082,14 +7083,29 @@ module Rigor
         # `local[k] = v` write, which `collect_content_mutations` cannot see (see below).
         post_scope = floor_block_body_callee_escaped_args(body, post_scope)
 
-        names = collect_content_mutations(body).keys
-        names |= escaping_ivar_content_mutations(body, post_scope) unless foreign_self
-        return post_scope if names.empty?
-
-        names.reduce(post_scope) do |acc, name|
+        post_scope = collect_content_mutations(body).keys.reduce(post_scope) do |acc, name|
           floored = content_floor_for(CapturedLocals.bound_type(acc, name))
           floored.nil? ? acc : bind_mutated_capture(acc, name, floored)
         end
+        return post_scope if foreign_self
+
+        escaping_ivar_content_mutations(body, post_scope).reduce(post_scope) do |acc, name|
+          bound = acc.ivar(name)
+          floored = member_content_floor(bound)
+          floored.equal?(bound) ? acc : CapturedLocals.bind(acc, name, floored)
+        end
+      end
+
+      # `type` with each member {#content_floor_for} recognises floored to its bare carrier and every other member
+      # kept (issue #3095): `Array[1]?` reads `Array[Dynamic[top]]?` and `3 | [1]` reads `3 | Array[Dynamic[top]]`,
+      # so the floor neither drops the `nil` a callback that never runs leaves nor narrows the binding. `type` itself
+      # when no member floors.
+      def member_content_floor(type)
+        members = type.is_a?(Type::Union) ? type.members : [type]
+        floored = members.map { |member| content_floor_for(member) || member }
+        return type if floored.each_with_index.all? { |member, index| member.equal?(members[index]) }
+
+        Type::Combinator.union(*floored)
       end
 
       # The instance variables of `scope`'s `self` an escaping body mutates in place, on the terms
@@ -7106,7 +7122,7 @@ module Rigor
           next if CapturedLocals.under_foreign_self_block?(ancestors, scope)
 
           name = receiver.name
-          next unless CapturedLocals.rebindable_ivar?(scope, name) && collection_only?(scope.ivar(name))
+          next unless CapturedLocals.rebindable_ivar?(scope, name)
 
           (names ||= []) << name
         end
@@ -7828,11 +7844,11 @@ module Rigor
         [receiver.name, node]
       end
 
-      # True when every member of `type` is an Array, a Hash or a String carrier. The content seams take an
-      # instance variable only then: the join drops a seed's `nil` after a guarded mutation (#1219) and the escaping
-      # floor takes a union with a collection member whole (#1251), so `@buf = flag ? [1] : nil; [1].each { @buf << 2
-      # if @buf }` would lose the `nil` the runtime keeps when the block never runs it. The local spelling has both
-      # gaps; an instance variable, the common lazily-initialised spelling, keeps its pre-call binding until they close.
+      # True when every member of `type` is an Array, a Hash or a String carrier. The non-escaping join takes an
+      # instance variable only then: it drops a seed's `nil` after a guarded mutation (#1219), so `@buf = flag ? [1] :
+      # nil; [1].each { @buf << 2 if @buf }` would lose the `nil` the runtime keeps when the block never runs it. The
+      # local spelling has the gap; an instance variable, the common lazily-initialised spelling, keeps its pre-call
+      # binding until it closes. The escaping floor takes every instance variable ({#member_content_floor}).
       def collection_only?(type)
         return false if type.nil?
         return type.members.all? { |member| collection_only?(member) } if type.is_a?(Type::Union)

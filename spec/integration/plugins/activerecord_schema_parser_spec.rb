@@ -224,6 +224,37 @@ RSpec.describe "plugins/rigor-activerecord SchemaParser" do
       expect(table.column("bigs", "id").ruby_type).to eq("Integer")
     end
 
+    it "reads a PostgreSQL serial key, and a serial column, as an Integer" do
+      table = parse(<<~RUBY)
+        ActiveRecord::Schema[8.1].define(version: 1) do
+          create_table "serials", id: :serial do |t|
+            t.bigserial "position"
+          end
+
+          create_table "bigserials", primary_key: "num", id: :bigserial do |t|
+          end
+        end
+      RUBY
+      expect(table.column("serials", "id").ruby_type).to eq("Integer")
+      expect(table.column("serials", "position").ruby_type).to eq("Integer")
+      expect(table.column("bigserials", "id").ruby_type).to eq("Integer")
+      expect(table.column("bigserials", "num").ruby_type).to eq("Integer")
+    end
+
+    it "falls back to the id column's own type when primary_key: is nil or false" do
+      table = parse(<<~RUBY)
+        ActiveRecord::Schema[8.1].define(version: 1) do
+          create_table "nils", primary_key: nil, id: :string do |t|
+          end
+
+          create_table "falses", primary_key: false, id: :uuid do |t|
+          end
+        end
+      RUBY
+      expect(table.column("nils", "id").ruby_type).to eq("String")
+      expect(table.column("falses", "id").ruby_type).to eq("String")
+    end
+
     it "reads id: true as the default integer key" do
       table = parse(%(create_table "items", id: true do |t|\nend\n))
       expect(table.column("items", "id").ruby_type).to eq("Integer")

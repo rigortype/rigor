@@ -27,6 +27,9 @@ module Rigor
           text: "String",
           integer: "Integer",
           bigint: "Integer",
+          # PostgreSQL's dumper writes `id: :serial` / `t.serial` for a sequence-backed integer column.
+          serial: "Integer",
+          bigserial: "Integer",
           float: "Float",
           decimal: "Object",
           boolean: "bool",

@@ -623,10 +623,12 @@ module Rigor
       # `Model.select` is `all.select`, so a block makes it `Enumerable#select` over the loaded records, as the
       # bundled `Relation#select` overload says (#1408), and the answer is an Array of the model. Fields next to a
       # block answer the Array too, for the reason given on that overload. A model that defines its own
-      # `self.select` keeps its own answer in every form, as `find` does (`project_find_defined?`).
+      # `self.select` keeps its own answer for the block forms, as it does for `find`'s block and multi-id
+      # forms (`project_find_defined?`); the builder form stays the relation, as `find`'s one-id form stays the
+      # model.
       def class_select_return_type(call_node, entry, scope)
-        return nil if project_singleton_defined?(entry, :select, scope)
         return relation_of(entry.class_name) if call_node.block.nil?
+        return nil if project_singleton_defined?(entry, :select, scope)
 
         Rigor::Type::Combinator.nominal_of("Array", type_args: [Rigor::Type::Combinator.nominal_of(entry.class_name)])
       end

@@ -304,11 +304,15 @@ module Rigor
         FirstParty.bundled?(id)
       end
 
-      # Whether the plugin contributes anything to the effect surfaces at all. The compiled per-run tables
-      # skip a plugin that answers false, so a project whose plugins predate this contract pays nothing.
+      # Whether the manifest declares anything for the effect surfaces — a convenience predicate over the
+      # manifest-declared fields only, true exactly when a `Registry::Contribution` built from these
+      # declarations would not be empty (`Contribution#empty?` reads the same five fields,
+      # `effect_ancestry:` included). A plugin that overrides the `Base#effect_*` readers instead of
+      # declaring rows here (rigor-sidekiq) can contribute while this answers false. The compiled
+      # per-run tables filter on `Contribution#empty?` themselves; nothing consults this predicate.
       def effects?
         !effect_labels.empty? || !effect_attributions.empty? || !effect_edges.empty? ||
-          !effect_entry_points.empty?
+          !effect_entry_points.empty? || !effect_ancestry.empty?
       end
 
       def ==(other)

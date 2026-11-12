@@ -189,16 +189,19 @@ RSpec.describe "issue #1125 — keyword-splat and `...` call-site binding" do
   end
 
   describe "the declines recorded while in the call-site binder" do
-    it "declines a bare *args forwarding (a SplatNode has no binder-visible expansion)" do
+    it "does not expand a bare *args forwarding (a SplatNode has no binder-visible expansion)" do
       # RECORDED DECISION (issue #1125): `target(*args)` types the splat node `Dynamic[top]`, so the
       # callee's required positionals cannot be counted. Expanding a `Tuple`-typed rest into positional
       # slots is a positional-correspondence slice of its own and is NOT part of this change.
+      #
+      # Issue #1237: the body is re-typed with no positional correspondence instead of declined, so each
+      # positional parameter is `Dynamic[top]` and the body's shape survives; the Tuple is still not expanded.
       expect_binds(<<~RUBY)
         require "rigor/testing"
         include Rigor::Testing
         def target(a, b) = [a, b]
         def forward(*args) = target(*args)
-        assert_type("Dynamic[top]", forward(1, 2))
+        assert_type("[Dynamic[top], Dynamic[top]]", forward(1, 2))
       RUBY
     end
 

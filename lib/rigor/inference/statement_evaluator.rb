@@ -7080,7 +7080,7 @@ module Rigor
 
           receiver = node.receiver
           next unless receiver.is_a?(Prism::InstanceVariableReadNode)
-          next if ancestors.any? { |a| SCOPE_BODY_NODES.any? { |k| a.is_a?(k) } }
+          next if under_scope_body?(ancestors)
           next if CapturedLocals.under_foreign_self_block?(ancestors, scope)
 
           (names ||= []) << receiver.name if CapturedLocals.rebindable_ivar?(scope, receiver.name)
@@ -7483,13 +7483,13 @@ module Rigor
 
       # The {RewriteMutation} names `root` calls on each local its block admits — `a.map!(&:to_s)` beside an `a << x`.
       # The receiver test is the one the caller's content-mutation walk applies.
-      def local_rewrites(root, &admit)
+      def local_rewrites(root, &)
         rewrites = {}
         Source::NodeWalker.each_with_ancestors(root) do |node, ancestors|
           next unless node.is_a?(Prism::CallNode) && RewriteMutation.rewriter?(node.name)
 
           receiver = node.receiver
-          next unless rewritten_capture_receiver?(receiver, ancestors, &admit)
+          next unless rewritten_capture_receiver?(receiver, ancestors, &)
 
           (rewrites[receiver.name] ||= []) << node.name
         end
@@ -7501,7 +7501,7 @@ module Rigor
       def rewritten_capture_receiver?(receiver, ancestors)
         case receiver
         when Prism::LocalVariableReadNode then yield(receiver, ancestors)
-        when Prism::InstanceVariableReadNode then ancestors.none? { |a| SCOPE_BODY_NODES.any? { |k| a.is_a?(k) } }
+        when Prism::InstanceVariableReadNode then !under_scope_body?(ancestors)
         else false
         end
       end
@@ -7604,6 +7604,12 @@ module Rigor
       SCOPE_BODY_NODES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
       private_constant :SCOPE_BODY_NODES
 
+      # True when a node at `ancestors` under a block body sits in a method, class or module body the block defines:
+      # there `self`, and every instance variable, is that body's own.
+      def under_scope_body?(ancestors)
+        ancestors.any? { |a| SCOPE_BODY_NODES.any? { |k| a.is_a?(k) } }
+      end
+
       # True when the local `node` names lives in the scope the walk started in or an outer one.
       def same_scope_local?(node, ancestors)
         return false if ancestors.any? { |ancestor| SCOPE_BODY_NODES.any? { |klass| ancestor.is_a?(klass) } }
@@ -7640,7 +7646,7 @@ module Rigor
           if LOCAL_READ_NODES.any? { |klass| n.is_a?(klass) }
             names << n.name if same_scope_local?(n, ancestors)
           elsif IVAR_READ_NODES.any? { |klass| n.is_a?(klass) }
-            names << n.name if ancestors.none? { |a| SCOPE_BODY_NODES.any? { |k| a.is_a?(k) } }
+            names << n.name unless under_scope_body?(ancestors)
           end
         end
         names.uniq
@@ -7796,7 +7802,7 @@ module Rigor
       # True when the instance variable `name`, read or written at `ancestors` under a block body, is this scope's
       # `self`'s and bound here off its declaration seed.
       def capturable_ivar?(name, ancestors)
-        return false if ancestors.any? { |a| SCOPE_BODY_NODES.any? { |k| a.is_a?(k) } }
+        return false if under_scope_body?(ancestors)
         return false if CapturedLocals.under_foreign_self_block?(ancestors, scope)
 
         CapturedLocals.rebindable_ivar?(scope, name)

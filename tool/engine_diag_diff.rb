@@ -286,7 +286,7 @@ module EngineDiagDiff
   # An entry inside the corpus, spelled as the entry is written (a symlink inside the corpus keeps its own name, and
   # one pointing outside it is still `app`, as `rigor check` prints it). Inside is decided lexically under `root`, or
   # by realpath matching the corpus root — an ancestor's, or the entry's own, which makes the root itself `.` — so a
-  # corpus reached through a symlink still matches. The entry itself is never resolved. Anything outside the corpus
+  # corpus reached through a symlink still matches. Otherwise the entry itself is never resolved. Anything outside the corpus
   # is its real absolute path.
   def corpus_relative(path, root)
     return "." if path == root

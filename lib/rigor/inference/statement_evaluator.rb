@@ -2279,11 +2279,7 @@ module Rigor
         return [Type::Combinator.union(then_type, else_type), then_scope] \
           if branch_terminates?(node.subsequent, else_type) && node.statements
 
-        [
-          Type::Combinator.union(then_type, else_type),
-          UntypedRejoin.apply(join_with_nil_injection(then_scope, else_scope), post_pred,
-                              [node.statements, node.subsequent])
-        ]
+        if_join(node.statements, node.subsequent, [then_type, then_scope], [else_type, else_scope], post_pred)
       end
 
       # `unless pred; t; else; e; end`. Same shape as `if`, but Prism exposes the else-branch as `else_clause` (no elsif
@@ -2315,11 +2311,22 @@ module Rigor
         return [Type::Combinator.union(then_type, else_type), then_scope] \
           if branch_terminates?(node.else_clause, else_type) && node.statements
 
-        [
-          Type::Combinator.union(then_type, else_type),
-          UntypedRejoin.apply(join_with_nil_injection(then_scope, else_scope), post_pred,
-                              [node.statements, node.else_clause])
-        ]
+        if_join(node.statements, node.else_clause, [then_type, then_scope], [else_type, else_scope], post_pred)
+      end
+
+      # The `[type, post_scope]` an `if` / `unless` with both branches evaluated ends with, once the arms above found no
+      # terminating branch by {#branch_terminates?}.
+      #
+      # Issue #1230 — the then-body (`then_node`) certainly exits beside an else (`else_node`): the only surviving path
+      # is the else that RAN, so the continuation is the else's exit scope, the predicate's other edge PLUS the else's
+      # writes, not a join with the exited body's writes. {#branch_certainly_exits?} is stricter than
+      # {#branch_terminates?}, which the arms above use: a `bot`-typed helper call does not qualify (issue #3110).
+      # Otherwise both exit scopes join with nil-injection.
+      def if_join(then_node, else_node, (then_type, then_scope), (else_type, else_scope), post_pred)
+        type = Type::Combinator.union(then_type, else_type)
+        return [type, else_scope] if else_node && branch_certainly_exits?(then_node)
+
+        [type, UntypedRejoin.apply(join_with_nil_injection(then_scope, else_scope), post_pred, [then_node, else_node])]
       end
 
       # Returns the `[type, post_scope]` of the live branch when the predicate is provably truthy / falsey, else nil so
@@ -9509,6 +9516,39 @@ module Rigor
         branch_unconditionally_exits?(branch_node) ||
           branch_type.is_a?(Type::Bot)
       end
+
+      # Issue #1230 — a strict, syntactic-only exit test for the then-exits-beside-an-else arm ({#if_join}). The
+      # branch's last statement is a `return` / `next` / `break`; a receiver-less `raise` / `fail` /
+      # `exit` / `exit!` / `abort` / `throw` whose name no project file defines on any class or module, at the top level
+      # or by `define_method` ({Scope#project_method_name?}); or an if / unless / case with an else whose every arm
+      # certainly exits. A `redo` / `retry` does not: it re-runs a loop body or a `begin` that reads the branch's
+      # writes. Unlike {#branch_terminates?} it reads no type, so a `bot`-typed helper call does not qualify:
+      # the typer types a call to an overridable or Kernel-shadowing project method `bot` (issue #3110).
+      def branch_certainly_exits?(node)
+        case node
+        when Prism::ReturnNode, Prism::NextNode, Prism::BreakNode then true
+        when Prism::CallNode then certain_exit_call?(node)
+        when Prism::StatementsNode then branch_certainly_exits?(node.body.last)
+        when Prism::ParenthesesNode then branch_certainly_exits?(node.body)
+        when Prism::ElseNode then branch_certainly_exits?(node.statements)
+        when Prism::IfNode, Prism::UnlessNode
+          branch_certainly_exits?(node.statements) && branch_certainly_exits?(node_else_branch(node))
+        when Prism::CaseNode, Prism::CaseMatchNode then case_certainly_exits?(node)
+        else false
+        end
+      end
+
+      def certain_exit_call?(node)
+        node.receiver.nil? && CERTAIN_EXIT_NAMES.include?(node.name) && !scope.project_method_name?(node.name)
+      end
+
+      def case_certainly_exits?(node)
+        !node.else_clause.nil? && branch_certainly_exits?(node.else_clause) &&
+          node.conditions.all? { |arm| branch_certainly_exits?(arm.statements) }
+      end
+
+      CERTAIN_EXIT_NAMES = %i[raise fail exit exit! abort throw].freeze
+      private_constant :CERTAIN_EXIT_NAMES
 
       def eval_branch_or_nil(branch_node, branch_scope, on_enter: @on_enter)
         return [Type::Combinator.constant_of(nil), branch_scope] if branch_node.nil?

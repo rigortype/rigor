@@ -1199,6 +1199,33 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #1230 — an `if` / `unless` branch that certainly exits beside an `else` keeps its writes and its predicate
+  # edge out of the scope after it; only the branch that ran carries on. The controls join: one exits only
+  # conditionally, the other ends in a `bot` helper call, which is no proof of an exit (#3110).
+  describe "fixtures/if_branch_exit_join.rb — an exiting branch beside an else stays out of the join" do
+    let(:harness) { harness_for("if_branch_exit_join") }
+
+    it "reports nothing but the joined controls" do
+      reported = harness.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
+      expected = %w[CONDITIONAL-EXIT BOT-HELPER-JOINED].flat_map do |marker|
+        marked_lines(harness, "# #{marker}").map { |line| [line, "call.possible-nil-receiver"] }
+      end
+      expect(reported.map { |d| [d.line, d.rule.to_s] }).to match_array(expected)
+    end
+  end
+
+  # Issue #1230 — the arm accepts a Kernel exit name only where no project file defines it, so a project `fail`,
+  # `exit` or `raise`, and a `bot` helper a subclass overrides, join beside an else as on the base and add nothing.
+  describe "fixtures/if_branch_exit_join_project_exits.rb — a project-defined exit name is no exit beside an else" do
+    let(:harness) { harness_for("if_branch_exit_join_project_exits") }
+
+    it "reports nothing but the joined control" do
+      reported = harness.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
+      expected = marked_lines(harness, "# PROJECT-NAME-JOINED").map { |line| [line, "call.possible-nil-receiver"] }
+      expect(reported.map { |d| [d.line, d.rule.to_s] }).to match_array(expected)
+    end
+  end
+
   describe "fixtures/return_barrier_receivers.rb — define_method and lambda bodies keep their `return`" do
     let(:harness) { harness_for("return_barrier_receivers") }
 

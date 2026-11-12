@@ -232,7 +232,8 @@ PR's CI is only the light gate, so the PR is created `--draft` and marked ready
 (`gh pr ready <pr>`) at once, which starts that full run; read its verdict with
 `bin/ci-required <full-head-sha>`. It is queued (`bin/land-pr`) only on the
 user's explicit instruction to land it, with that run green and no stop
-instruction standing (this skill's own landing rule, which `docs/agents/contribution-flow.md` § "Landing a pull
+instruction standing; the branch has no fixed prefix, so `bin/land-pr` cannot
+enforce this the way it does for `release/**` (this skill's own landing rule, which `docs/agents/contribution-flow.md` § "Landing a pull
 request" defers to — a GitHub
 APPROVE cannot exist on a one-developer repository, so it is not the trigger).
 

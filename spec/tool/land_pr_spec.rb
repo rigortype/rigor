@@ -19,9 +19,9 @@ RSpec.describe "bin/land-pr" do
 
   after { FileUtils.rm_rf(root) }
 
-  # The PR as the first query reads it: id, draft, state, queue on master, queued, base, head.
-  def info(draft: false, state: "OPEN", queue: true, queued: false, head: sha)
-    ["PR_id", draft, state, queue, queued, "master", head].join("\t")
+  # The PR as the first query reads it: id, draft, state, queue on master, queued, base, head, head branch.
+  def info(draft: false, state: "OPEN", queue: true, queued: false, head: sha, branch: "topic")
+    ["PR_id", draft, state, queue, queued, "master", head, branch].join("\t")
   end
 
   # The head's "CI required" check runs as bin/ci-required lists them: <id> <conclusion> <check suite>, one per
@@ -271,7 +271,7 @@ RSpec.describe "bin/land-pr" do
   end
 
   it "refuses a PR whose base is not master, before queueing, so the bottom PR lands first" do
-    reply = ["PR_id", false, "OPEN", true, false, "parent-branch", sha].join("\t")
+    reply = ["PR_id", false, "OPEN", true, false, "parent-branch", sha, "topic"].join("\t")
     out, code = run_land_pr("42", sha, replies: [[reply, 0]])
     expect([code, enqueued?]).to eq([1, false])
     expect(out).to include("land the bottom PR of its stack first")
@@ -297,6 +297,16 @@ RSpec.describe "bin/land-pr" do
       expect([runs, code, enqueued?]).to eq([runs, want, want.zero?])
       expect(out).to include("not SUCCESS") unless want.zero?
     end
+  end
+
+  it "refuses a release PR without RIGOR_RELEASE_APPROVED=1, before queueing, and queues it with it" do
+    out, code = run_land_pr("42", sha, replies: [[info(branch: "release/0.5.0"), 0]])
+    expect([code, enqueued?]).to eq([1, false])
+    expect(out).to include("RIGOR_RELEASE_APPROVED=1")
+    FileUtils.rm_f(Dir.glob(File.join(root, "*")))
+    replies = [[info(branch: "release/0.5.0"), 0], [checks, 0], ["queued", 0]]
+    _, code = run_land_pr("42", sha, "--no-wait", env: { "RIGOR_RELEASE_APPROVED" => "1" }, replies: replies)
+    expect([code, enqueued?]).to eq([0, true])
   end
 
   it "refuses when master has no merge queue, a draft, or a closed PR, before queueing" do

@@ -18,7 +18,11 @@
 #   3. without a merge queue on master nothing would test the merged result,
 #      so it refuses and leaves the merge to the user;
 #   4. a PR the queue drops stays OPEN exactly as a queued one does, so it
-#      polls `isInMergeQueue` and re-reads once before calling it dropped.
+#      polls `isInMergeQueue` and re-reads once before calling it dropped;
+#   5. a release PR (head branch release/**) is marked ready as soon as it is
+#      opened, so readiness no longer records the user's go-ahead: it is
+#      refused unless RIGOR_RELEASE_APPROVED=1 is set, which rigor-release-prep
+#      sets only on the user's explicit word to land it.
 #
 # Running it again on a PR that is already queued only waits. A wait outlasts
 # an agent's foreground command limit (the queue batches for up to five
@@ -89,14 +93,16 @@ pr_fields() {
     --jq ".data.repository.pullRequest | [$2] | @tsv"
 }
 
-info="$(pr_fields 'id isDraft state isMergeQueueEnabled isInMergeQueue baseRefName headRefOid' \
-  '.id, .isDraft, .state, .isMergeQueueEnabled, .isInMergeQueue, .baseRefName, .headRefOid')" ||
+info="$(pr_fields 'id isDraft state isMergeQueueEnabled isInMergeQueue baseRefName headRefOid headRefName' \
+  '.id, .isDraft, .state, .isMergeQueueEnabled, .isInMergeQueue, .baseRefName, .headRefOid, .headRefName')" ||
   die "cannot read PR #$number"
-IFS=$'\t' read -r id draft state queue queued base head <<<"$info"
+IFS=$'\t' read -r id draft state queue queued base head branch <<<"$info"
 [[ "$state" == OPEN ]] || die "PR #$number is $state, not open"
 [[ "$base" == master ]] ||
   die "PR #$number targets $base, not master; land the bottom PR of its stack first"
 [[ "$draft" == false ]] || die "PR #$number is a draft; run gh pr ready first"
+[[ "$branch" != release/* || "${RIGOR_RELEASE_APPROVED:-}" == 1 ]] ||
+  die "PR #$number is the release PR $branch; land it only on the user's explicit word, with RIGOR_RELEASE_APPROVED=1"
 [[ "$queue" == true ]] ||
   die "master has no merge queue, so nothing would test the merged result; stop and tell the user"
 [[ "$head" == "$sha" ]] ||

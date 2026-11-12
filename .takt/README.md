@@ -24,7 +24,7 @@ agents/pi-harness/scripts/land-when-green.sh <pr> <full-sha>   # gh pr ready, wa
 ```
 
 `land-when-green.sh` lands only through a clean full run. When that run's "Engine allocations
-(advisory)" or type_of shadow warns, it stops with exit 6 and the run's link: read the job summary,
+(advisory)" or type_of shadow warns, or either has no verdict, it stops with exit 6 and the run's link: read the job summary,
 and land by hand with `bin/land-pr` if the warning is answered or accepted. After exit 4, 5 or 6 the
 PR stays ready, so each fix push costs a full run.
 

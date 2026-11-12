@@ -202,8 +202,8 @@ Once the change is implemented and `make verify-changed` passes:
    CI, so a full-CI failure after it costs a fix push and another full run; a PR once ready stays
    ready, and `gh pr ready --undo` does not cancel a full run already going.
    `agents/pi-harness/scripts/land-when-green.sh` marks the PR ready, waits for that run, and runs
-   `bin/land-pr` only when step 3's advisory jobs did not warn on it; when one did, it stops (exit
-   6) with the run's link: read the summary, and land by hand once the warning is answered or
+   `bin/land-pr` only when step 3's advisory jobs finished on it without a warning; when one warned
+   or has no verdict, it stops (exit 6) with the run's link: read the summary, and land by hand once the warning is answered or
    accepted. Re-push it (`bin/lane-push`) only when it is `CONFLICTING`, which starts no CI
    and cannot enter the queue, or when the queue drops it. A PR held by step 3's allocation rule
    (read on the full run, so after `gh pr ready`) is not queued until that hold is resolved. A PR
@@ -211,7 +211,7 @@ Once the change is implemented and `make verify-changed` passes:
    PR carrying a serious decision stays Draft until the user makes it. A skill with its own landing
    rule (`rigor-release-prep`, `rigor-dependency-update`) keeps that rule: it marks its PR ready right
    after creating it, so the CI it waits on is the full run, and the user's explicit go-ahead gates
-   the queueing. The review in steps 2–5 still runs.
+   the queueing (`bin/land-pr` refuses a `release/**` PR without `RIGOR_RELEASE_APPROVED=1`). The review in steps 2–5 still runs.
 
 ## Decisions and the approval queue
 

@@ -118,7 +118,7 @@ lives in the PR body and the issues, which the coordinator reads only when a dec
    so the specs, self-check, the "Engine allocations (advisory)" summary and the acceptance gates
    first run at `gh pr ready`. A failure there goes back to the lane like a review finding. Read the
    advisory summaries on the full run before `bin/land-pr`; `land-when-green.sh` does so and stops
-   (exit 6) when either warns, naming the run: read the summary, and land by hand if accepted. A PR
+   (exit 6) when either warns or has no verdict, naming the run: read the summary, and land by hand if accepted. A PR
    whose allocation delta is above `pr_allocations_pct` (`bench/thresholds.yml`) does not land until
    you have its attribution and either the lane cuts the cost or an approval-queue entry accepts it.
    Accepting one when the release gate's measurement (`make bench-perf` against

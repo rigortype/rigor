@@ -128,6 +128,13 @@ declaration_fact_specs=(
   spec/rigor/declaration_facts/producers_spec.rb
   spec/rigor/declaration_facts/witness_spec.rb
 )
+# The ancestry-walker gate (ADR-24) Prism-scans every file under lib/ and
+# plugins/*/lib/ for methods that walk the discovery tables' ancestry outside
+# Scope::ResolutionChain; its allow-list and its scanner
+# (spec/support/ancestry_walker_scan.rb) are pins any lib or plugin-lib change
+# can stale. It runs in about 1s. Added for #2053: on #2051 this gate passed and
+# CI shard 2/3 then failed on a new lib file it never ran.
+ancestry_walker_spec=spec/rigor/scope/ancestry_walker_detection_spec.rb
 # An edit to how the engine records ADR-46 dependencies can over-invalidate
 # files no spec of the edited file names: #2136 failed CI twice on
 # incremental specs that assert a reader is NOT re-checked
@@ -146,6 +153,7 @@ engine_drift_specs=(
   spec/rigor/ractor_readiness_spec.rb
   "$provenance_spec"
   "${declaration_fact_specs[@]}"
+  "$ancestry_walker_spec"
 )
 
 for path in ${changed[@]+"${changed[@]}"}; do
@@ -159,6 +167,7 @@ for path in ${changed[@]+"${changed[@]}"}; do
       ;;
     plugins/*/lib/*)
       for spec in "${declaration_fact_specs[@]}"; do add_spec "$spec"; done
+      add_spec "$ancestry_walker_spec"
       ;;
   esac
   case "$path" in
@@ -169,6 +178,8 @@ for path in ${changed[@]+"${changed[@]}"}; do
       uncovered+="$path (shared spec setup: the suite depends on it)"$'\n'
       # The G3 classifier and its helpers: provenance_spec is their only user.
       [[ "$path" == spec/support/sig_* ]] && add_spec "$provenance_spec"
+      # The ancestry-walker scan: the detection spec is its only user.
+      [[ "$path" == spec/support/ancestry_walker_scan.rb ]] && add_spec "$ancestry_walker_spec"
       ;;
     spec/*_spec.rb) add_spec "$path" ;;
     spec/*)
@@ -238,6 +249,7 @@ for path in ${deleted[@]+"${deleted[@]}"}; do
       ;;
     plugins/*/lib/*)
       for spec in "${declaration_fact_specs[@]}"; do add_spec "$spec"; done
+      add_spec "$ancestry_walker_spec"
       ;;
   esac
   case "$path" in

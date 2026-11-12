@@ -54,6 +54,17 @@ module Rigor
     module ModuleFunctionState
       module_function
 
+      # The `[kind, owner]` of a deferred-range row for a `def` passed to a `module_function` spelling: `:singleton`
+      # for a singleton def, `:both` for an instance one, and `[nil, nil]` for a def on another object's singleton
+      # (#3155), which claims no owner or side.
+      def def_row_side(def_node, qualified_prefix, in_singleton_class, owner)
+        case ScopeIndexer.def_side(def_node, qualified_prefix, in_singleton_class)
+        when :singleton then [:singleton, owner]
+        when :instance then [:both, owner]
+        else [nil, nil]
+        end
+      end
+
       # A receiverless `module_function` call, bare or named.
       def call?(node)
         node.name == :module_function && node.receiver.nil?
@@ -360,8 +371,8 @@ module Rigor
           owner = qualified_prefix.empty? ? nil : qualified_prefix.join("::")
           node.arguments&.arguments&.each do |arg|
             if arg.is_a?(Prism::DefNode)
-              kind = ScopeIndexer.def_singleton?(arg, qualified_prefix, in_singleton_class) ? :singleton : :both
-              ranges << [arg.location.start_offset, arg.location.end_offset, arg.name, kind, owner]
+              ranges << [arg.location.start_offset, arg.location.end_offset, arg.name,
+                         *ModuleFunctionState.def_row_side(arg, qualified_prefix, in_singleton_class, owner)]
             elsif (name = symbol_argument_name(arg))
               ranges << [node.location.start_offset, node.location.end_offset, name, :singleton, owner]
             else

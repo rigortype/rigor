@@ -4663,7 +4663,11 @@ module Rigor
           self_type = scope.self_type
           return nil unless self_type.respond_to?(:class_name)
 
-          side = def_node.receiver.nil? ? receiverless_def_side(scope, self_type.class_name, def_node) : :singleton
+          side = if def_node.receiver.nil?
+                   receiverless_def_side(scope, self_type.class_name, def_node)
+                 else
+                   receiver_def_side(scope, self_type.class_name, def_node)
+                 end
           return nil if side.nil?
 
           method_def =
@@ -4694,6 +4698,25 @@ module Rigor
           return :singleton if singleton && !instance
 
           nil
+        end
+
+        # Issue #3155 — `def self.x`, or `def K.x` in `K`'s body, answers to K's singleton signature. A def on another
+        # object (`def String.q`, `def obj.q` in a class body) or `def self.x` in a `class << self` body (a method of
+        # the singleton class's own singleton) answers to none of K's: `nil`, and the caller declines. So does a
+        # singleton def a later def of the name replaced (`def K.w`; `def self.w`), as {#receiverless_def_side}'s.
+        def receiver_def_side(scope, class_name, def_node)
+          receiver = def_node.receiver
+          lexical_self = if receiver.is_a?(Prism::SelfNode)
+                           !scope.singleton_class_body?
+                         else
+                           Inference::ScopeIndexer.def_receiver_targets_lexical_self?(receiver, class_name.split("::"))
+                         end
+          return nil unless lexical_self
+
+          recorded = scope.singleton_def_for(class_name, def_node.name)
+          return nil if recorded.is_a?(Prism::DefNode) && !same_def_node?(recorded, def_node)
+
+          :singleton
         end
 
         # The tables hold the live node or one re-resolved from a `DefHandle`, so identity is the name and span.

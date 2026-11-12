@@ -1,0 +1,3 @@
+- **[rigor-activerecord]** The `id` reader now takes the primary key column's type instead of always reading `Integer`, so `Setting.new.id.upcase` on a string-keyed table no longer reports `call.undefined-method`, thank you @takayamaki! ([#2956](https://github.com/rigortype/rigor/issues/2956))
+  - `create_table` types `id` from the `id:` option whether `primary_key:` names the key column or the key is `id` itself, so `id: :uuid`, `id: :string` and `id: { type: :string, limit: 64 }` all read `String`.
+  - A composite or unreadable `primary_key:` leaves `id` untyped, and `id: true` still reads as the default integer key.

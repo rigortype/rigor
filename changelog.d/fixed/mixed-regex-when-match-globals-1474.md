@@ -1,0 +1,3 @@
+- **[inference]** A `when` clause mixing a regex literal with another condition (`when /(a)/, "lit"`) no longer reads `$~` as `MatchData` and `$1` as `String` in the body, so a later use of them no longer trusts a match that may not have run. ([#3142](https://github.com/rigortype/rigor/pull/3142))
+  - The body now joins the match globals of every way into the clause: a regex literal's truthy edge, the falsey edge of the regexes that failed before a later condition, the entry state where none ran, and the unknown-match edges of a condition that may be or run a Regexp.
+  - `when /(a)(b)/, "lit"` reads `$~` as `MatchData | nil` and the numbered globals as `String | nil`; a clause of only regex literals is unchanged.

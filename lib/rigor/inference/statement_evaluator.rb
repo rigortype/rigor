@@ -2278,6 +2278,12 @@ module Rigor
         # Event 3).
         return [Type::Combinator.union(then_type, else_type), then_scope] \
           if branch_terminates?(node.subsequent, else_type) && node.statements
+        # Issue #1230 — the then-branch exits and an else / elsif-chain exists: the only surviving path is the else that
+        # RAN, so the continuation is `else_scope` (the predicate-falsey narrowing PLUS the else-body's writes). Joining
+        # the exited then-branch's writes would leak them past a path that never reaches the code after the if. Checked
+        # after the else-exits arm so a both-branches-exit if keeps its existing continuation.
+        return [Type::Combinator.union(then_type, else_type), else_scope] \
+          if branch_terminates?(node.statements, then_type)
 
         [
           Type::Combinator.union(then_type, else_type),
@@ -2314,6 +2320,10 @@ module Rigor
         # not the bare `falsey_scope` — otherwise body-bound locals are dropped and an enclosing merge nil-injects them.
         return [Type::Combinator.union(then_type, else_type), then_scope] \
           if branch_terminates?(node.else_clause, else_type) && node.statements
+        # Mirror of the `if` then-exits arm (issue #1230): the unless-body exits beside an else, so the continuation is
+        # the else-clause that RAN, not a join with the exited body's writes.
+        return [Type::Combinator.union(then_type, else_type), else_scope] \
+          if branch_terminates?(node.statements, then_type)
 
         [
           Type::Combinator.union(then_type, else_type),

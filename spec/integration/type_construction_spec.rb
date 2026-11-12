@@ -1199,6 +1199,18 @@ RSpec.describe "Rigor type construction (integration)" do
     end
   end
 
+  # Issue #1230 — an `if` / `unless` branch that exits beside an `else` keeps its writes and its predicate edge out
+  # of the scope after it; only the branch that ran carries on. The control exits only conditionally, so it joins.
+  describe "fixtures/if_branch_exit_join.rb — an exiting branch beside an else stays out of the join" do
+    let(:harness) { harness_for("if_branch_exit_join") }
+
+    it "reports nothing but the conditional-exit control" do
+      reported = harness.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
+      expected = marked_lines(harness, "# CONDITIONAL-EXIT").map { |line| [line, "call.possible-nil-receiver"] }
+      expect(reported.map { |d| [d.line, d.rule.to_s] }).to match_array(expected)
+    end
+  end
+
   describe "fixtures/return_barrier_receivers.rb — define_method and lambda bodies keep their `return`" do
     let(:harness) { harness_for("return_barrier_receivers") }
 

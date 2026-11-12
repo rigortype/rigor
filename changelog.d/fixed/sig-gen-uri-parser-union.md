@@ -1,0 +1,2 @@
+- **[sig-gen]** `rigor sig-gen` now writes `def M.x` inside `module M` as a singleton method, so a same-named instance method keeps its own proposal and `rigor check` stays quiet on it. ([#3153](https://github.com/rigortype/rigor/pull/3153))
+  - Before, the singleton def was filed as a second instance method and its return type replaced the instance method's (mail's `Mail::Utilities#uri_parser`, [#2950](https://github.com/rigortype/rigor/issues/2950)).

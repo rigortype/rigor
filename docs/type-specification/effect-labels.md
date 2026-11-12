@@ -202,7 +202,7 @@ A selected class receives the entry's bound **exactly as a class-level annotatio
 
 Among configuration entries, the **first** one that selects a class binds it; a list is read top to bottom, and a later entry never silently overrides one written above it. A method therefore has at most one envelope, from exactly one source, and there is no merging of bounds. The diagnostic names that source as `.rigor.yml effects.envelopes[N]` and stays positioned at the Ruby `def`.
 
-An unrecognised label in an entry's `effect:` degrades the whole entry to ⊤ and surfaces as `effect.unknown-label` positioned at `.rigor.yml`, exactly as it does for an annotation (§ Unknown labels).
+An unrecognised label in an entry's `effect:` degrades the whole entry to ⊤ and surfaces as `effect.unknown-label` positioned at the loaded configuration file (`.rigor.yml` when none was loaded, #2742), exactly as it does for an annotation (§ Unknown labels).
 
 ### Liskov inclusion
 

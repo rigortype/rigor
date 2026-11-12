@@ -176,6 +176,26 @@ RSpec.describe "effect.unknown-label" do
 
       expect(found.grep(/effects\.tolerated/)).to be_empty
     end
+
+    # Issue #2742 — the config-value position names the file that was actually loaded.
+    it "positions the finding at `.rigor.dist.yml` when it is the file in use" do
+      Dir.mktmpdir("rigor-unknown-label-dist-") do |dir|
+        File.write(File.join(dir, ".rigor.dist.yml"), <<~YAML)
+          paths: []
+          effects:
+            tolerated: [io.netw]
+        YAML
+
+        Dir.chdir(dir) do
+          runner = Rigor::Analysis::Runner.new(
+            configuration: Rigor::Configuration.load, cache_store: nil
+          )
+          found = guarded_run(runner).diagnostics.find { |d| d.rule == rule }
+
+          expect([found.path, found.line, found.column]).to eq([".rigor.dist.yml", 1, 1])
+        end
+      end
+    end
   end
 
   describe "the gate" do

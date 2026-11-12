@@ -489,6 +489,7 @@ members:
     - lib/rigor/analysis/check_rules.rb
     - lib/rigor/inference/expression_typer.rb
     - lib/rigor/inference/in_effect_refinements/scope_reads.rb
+    - lib/rigor/inference/self_preserving_block.rb
     copies: []
   possible_discovered_methods:
     reads: []

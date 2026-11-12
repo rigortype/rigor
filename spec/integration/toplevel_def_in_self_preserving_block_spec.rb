@@ -217,6 +217,83 @@ RSpec.describe "a cross-file top-level def called from a block (#2861)", type: :
     end
   end
 
+  # Issue #2909 — a `def` inside `refine X do … end` is no `ProjectMethodOwnership.defines?` answer, so a
+  # refinement of the yielding method must decline self-preservation where a `using` of its module is in
+  # effect at the call site: the refined `times` / `tap` may `instance_exec` the block, and the top-level `def`
+  # inside it binds no more than beside the call — here it answers `Dynamic`, never `Kernel#format`'s `String`.
+  context "with a refinement of the yielding method in effect (#2909)" do
+    let(:refined_times) do
+      script(
+        "module R",
+        "  refine Integer do",
+        "    def times(&b) = instance_exec(&b)",
+        "    def format(x) = \"r\"",
+        "  end",
+        "end",
+        "using R",
+        "5.times { format(1).upcase }"
+      )
+    end
+
+    # File order is not load order: the def sorts after the caller in one run and before it in the other.
+    it "keeps the opaque mark inside a refined Integer#times block" do
+      expect(undefined("a_helpers.rb" => helpers, "b_script.rb" => refined_times)).to eq([])
+      expect(undefined("z_helpers.rb" => helpers, "b_script.rb" => refined_times)).to eq([])
+    end
+
+    # The refined `tap` rebinds `self` to the `Foo`, whose own `format` answers a `String`: Ruby runs it clean,
+    # while a self-preserving block would bind the top-level def and report `upcase` on `42`.
+    %w[Object Kernel].each do |owner|
+      it "keeps the opaque mark inside a refined #{owner}#tap block" do
+        use = script(
+          "class Foo",
+          "  def format(x) = \"f\"",
+          "end",
+          "module R",
+          "  refine #{owner} do",
+          "    def tap(&b) = (instance_exec(&b); self)",
+          "  end",
+          "end",
+          "using R",
+          "Foo.new.tap { format(1).upcase }"
+        )
+
+        expect(undefined("helpers.rb" => helpers, "script.rb" => use)).to eq([])
+      end
+    end
+
+    # The decline is lexical: the same refinement with no `using` in the calling file leaves the block
+    # self-preserving, so the def binds and `42.upcase` reports as it does beside the call.
+    it "stays self-preserving where the refinement is not used" do
+      use = script(
+        "module R",
+        "  refine Integer do",
+        "    def times(&b) = instance_exec(&b)",
+        "  end",
+        "end",
+        "5.times { format(1).upcase }"
+      )
+
+      expect_reports({ "helpers.rb" => helpers, "script.rb" => use }, [["script.rb", 6, "for 42"]])
+    end
+
+    # The decline keys on the yielding method's name: a refinement in effect that defines only `format`
+    # leaves `times` self-preserving.
+    it "stays self-preserving when the refinement defines another name" do
+      use = script(
+        "module R",
+        "  refine Integer do",
+        "    def format(x) = \"r\"",
+        "  end",
+        "end",
+        "using R",
+        "5.times { format(1).upcase }"
+      )
+
+      expect_reports({ "helpers.rb" => helpers, "script.rb" => use }, [["script.rb", 7, "for 42"]])
+    end
+  end
+
   it "uses the class's own method in a block inside one of its methods" do
     use = script(
       "class Fmt",

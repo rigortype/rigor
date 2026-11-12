@@ -1,0 +1,3 @@
+- **[inference]** A recursive method that passes its counter as a keyword argument no longer infers `bot`, which marked the code after the call unreachable. ([#3158](https://github.com/rigortype/rigor/pull/3158))
+  - `def rp(a, n:) = n > 0 ? rp(a, n: n - 1) : a` now answers what its positional form answers: `rp(1, n: 2)` is `1`, and a call with an unpinned `n:` is `Integer`.
+  - The same holds for a keyword default that starts the recursion, a `**opts` parameter, mutual recursion through keywords, and a hash passed positionally.

@@ -3,7 +3,7 @@
 - **PR:** [#3094](https://github.com/rigortype/rigor/pull/3094)
 - **Issue:** [#1208](https://github.com/rigortype/rigor/issues/1208)
 - **Class:** scope
-- **Precedent:** none — sets one
+- **Precedent:** [#2295](https://github.com/rigortype/rigor/pull/2295)
 - **Decided:** 2026-11-12
 
 ## Background
@@ -18,7 +18,7 @@
 
 ## Decision
 
-The third option. It keeps the fix for every shape #1208 lists and fires nothing new. The cost is that a nil-able instance variable a block grows still reads its pre-call contents (`@buf&.last == 2` after an escaping `@buf&.push(2)` still folds). Nothing earlier decided how a seam should defer a variable kind it cannot yet handle soundly, so this sets a precedent.
+The third option. It keeps the fix for every shape #1208 lists and fires nothing new. The cost is that a nil-able instance variable a block grows still reads its pre-call contents (`@buf&.last == 2` after an escaping `@buf&.push(2)` still folds). #2295 is the closest ratified precedent. It left a shape out of a content floor until a separate fix could keep its element type, and the spec pinned the current answer as a decision. This entry makes the same move for a variable kind the seams cannot yet join soundly.
 
 ## To undo
 

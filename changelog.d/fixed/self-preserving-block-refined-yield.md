@@ -1,0 +1,3 @@
+- **[inference]** A block passed to a method a refinement redefines (`refine Integer` `times`, `refine Object` `tap`) keeps the opaque-`self` mark where a `using` of the refinement is in effect, so a cross-file top-level `def` inside it answers `Dynamic` instead of binding. ([#3140](https://github.com/rigortype/rigor/pull/3140))
+  - `5.times { format(1).upcase }` under `using R` with `refine Integer { def times(&b) = instance_exec(&b) }` no longer reports `undefined method 'upcase' for 42`.
+  - The decline is lexical: the same refinement with no `using` at the call site leaves the block self-preserving.

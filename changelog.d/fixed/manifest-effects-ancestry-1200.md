@@ -1,0 +1,3 @@
+- **[plugin API]** `Rigor::Plugin::Manifest#effects?` now answers true for a manifest whose only effect contribution is `effect_ancestry:` rows, matching `Registry::Contribution#empty?` ([#1200](https://github.com/rigortype/rigor/issues/1200)).
+  - The predicate previously read only `effect_labels:`, `effect_attributions:`, `effect_edges:` and `effect_entry_points:`, so an ancestry-only plugin such as `rigor-devise` answered false.
+  - Its comment no longer claims the compiled per-run tables skip a plugin that answers false; nothing consults the predicate, and the tables filter on `Contribution#empty?` directly.

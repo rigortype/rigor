@@ -7483,13 +7483,13 @@ module Rigor
 
       # The {RewriteMutation} names `root` calls on each local its block admits — `a.map!(&:to_s)` beside an `a << x`.
       # The receiver test is the one the caller's content-mutation walk applies.
-      def local_rewrites(root)
+      def local_rewrites(root, &admit)
         rewrites = {}
         Source::NodeWalker.each_with_ancestors(root) do |node, ancestors|
           next unless node.is_a?(Prism::CallNode) && RewriteMutation.rewriter?(node.name)
 
           receiver = node.receiver
-          next unless rewritten_capture_receiver?(receiver, ancestors) { |r, a| yield(r, a) }
+          next unless rewritten_capture_receiver?(receiver, ancestors, &admit)
 
           (rewrites[receiver.name] ||= []) << node.name
         end
@@ -7559,21 +7559,12 @@ module Rigor
 
         names = []
         Source::NodeWalker.each_with_ancestors(block.body) do |node, ancestors|
-          next unless IVAR_WRITE_NODES.any? { |klass| node.is_a?(klass) }
+          next unless IVAR_WRITE_NODES.include?(node.class)
 
           names << node.name if capturable_ivar?(node.name, ancestors)
         end
         names.uniq
       end
-
-      IVAR_WRITE_NODES = [
-        Prism::InstanceVariableWriteNode,
-        Prism::InstanceVariableOperatorWriteNode,
-        Prism::InstanceVariableOrWriteNode,
-        Prism::InstanceVariableAndWriteNode,
-        Prism::InstanceVariableTargetNode
-      ].freeze
-      private_constant :IVAR_WRITE_NODES
 
       # The locals a store reads to build what it stores. An Array index write's index arguments are left out, and so
       # is any name they read: the join classifies the store as an element or a splice from the index's type, and a
@@ -8217,11 +8208,13 @@ module Rigor
           next if ancestors.any?(Prism::DefNode)
 
           receiver = node.receiver
-          next unless receiver.respond_to?(:name) && receiver.name == name
-          if receiver.is_a?(Prism::LocalVariableReadNode)
-            next unless yield(receiver.depth, scope_nesting(ancestors))
+          case receiver
+          when Prism::LocalVariableReadNode
+            next unless receiver.name == name && yield(receiver.depth, scope_nesting(ancestors))
+          when Prism::InstanceVariableReadNode
+            next unless receiver.name == name
           else
-            next unless receiver.is_a?(Prism::InstanceVariableReadNode)
+            next
           end
 
           seed = MutationWidening.widen_for_mutator(seed, node.name) || seed

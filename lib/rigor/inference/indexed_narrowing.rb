@@ -192,9 +192,10 @@ module Rigor
       # into the hash `h` named before the rvalue ran, so the slot of the hash `h` names afterwards is not the one
       # written. A binding the rvalue left alone is the same object in both scopes.
       def receiver_rebound?(receiver_node, before, after)
+        name = receiver_node.name if receiver_node.respond_to?(:name)
         case receiver_node
-        when Prism::LocalVariableReadNode then !before.local(receiver_node.name).equal?(after.local(receiver_node.name))
-        when Prism::InstanceVariableReadNode then !before.ivar(receiver_node.name).equal?(after.ivar(receiver_node.name))
+        when Prism::LocalVariableReadNode then !before.local(name).equal?(after.local(name))
+        when Prism::InstanceVariableReadNode then !before.ivar(name).equal?(after.ivar(name))
         else false
         end
       end

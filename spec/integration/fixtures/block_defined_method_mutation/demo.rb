@@ -154,6 +154,9 @@ class BlockDefinedMethodMutation
     puts "one" if @sb.last == 1
   end
 
+  # Guard, not a fix: a class variable the block first binds is not
+  # written back to the continuation, so it never read `[0]` there. The
+  # global row at the end of the file is the same.
   def cvar_seeded_in_block
     [1].each do
       @@sb = [0]
@@ -358,7 +361,7 @@ $bdm_cls = [0]
 end
 assert_type("[0]", $bdm_cls)
 
-# --- A global the block itself first binds. ---
+# --- Guard: a global the block itself first binds. ---
 [1].each do
   $bdm_seeded = [0]
   def bdm_seeded_helper

@@ -39,10 +39,11 @@ class Rigor::Plugin::Base
   def self.node_file_context_block: () -> (^(::Prism::ProgramNode root, Rigor::Plugin::_Scope scope) -> untyped)?
 
   # A rule with a static `methods:` Array only ever runs its block on a `CallNode`: the name gate
-  # (`Registry#build_name_gates`, `Base#dynamic_return_rule_applies?`) reads `call_node.name`, which none of the
-  # other nodes in the union below has (#2681). Every other declaration shape is offered the whole union. A callable
-  # `methods:` also only ever sees a `CallNode` at runtime, since the same gate reads `call_node.name`, but RBS
-  # cannot tell a callable from an Array argument by overload alone, so it keeps the union, which is sound.
+  # (`Registry#build_name_gates`, `Base#dynamic_return_rule_applies?`) matches on the call's name, which
+  # none of the other nodes in the union below has, so the gate declines them (#2681, #2764). Every other
+  # declaration shape is offered the whole union. A callable `methods:` also only ever sees a `CallNode`
+  # at runtime, since the same gate declines the nameless nodes, but RBS cannot tell a callable from an
+  # Array argument by overload alone, so it keeps the union, which is sound.
   def self.dynamic_return: (?receivers: (Array[String] | ^() -> Array[String])?, methods: Array[untyped], ?file_methods: (^(String path) -> Array[untyped])?) { (::Prism::CallNode call_node, Rigor::Plugin::_Scope scope) -> Rigor::Type::t? } -> nil
                          | (?receivers: (Array[String] | ^() -> Array[String])?, ?methods: (Array[untyped] | ^() -> Array[untyped])?, ?file_methods: (^(String path) -> Array[untyped])?) { (::Prism::CallNode | ::Prism::CallOperatorWriteNode | ::Prism::CallOrWriteNode | ::Prism::CallAndWriteNode | ::Prism::IndexOperatorWriteNode | ::Prism::IndexOrWriteNode | ::Prism::IndexAndWriteNode | ::Prism::BlockArgumentNode call_node, Rigor::Plugin::_Scope scope) -> Rigor::Type::t? } -> nil
   def self.dynamic_returns: () -> Array[untyped]

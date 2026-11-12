@@ -566,10 +566,16 @@ the block carries logic and runs through `instance_exec`:
   gates on `call_node.name`; `file_methods:` (a callable receiving the
   path, memoised per `(rule, path)`, ADR-52 slice 5a) is its per-file
   specialisation for a name set that varies by analysed file
-  (rigor-rspec's `let` names) and replaces `methods:`. First non-`nil`
-  wins. The engine invokes it through `#dynamic_return_type(call_node:,
-  scope:, receiver_type:)`. `rigor-mangrove` (unwrap → carried
-  `type_args[0]`) is the worked consumer.
+  (rigor-rspec's `let` names) and replaces `methods:`. A plugin the
+  registry could not name-gate (any receivers-only, callable-`methods:`,
+  or `file_methods:` rule) is also offered the nameless nodes of #2717 —
+  the `&:sym` block argument and the compound writes — where only a
+  `CallNode` answers `name`; a `methods:`/`file_methods:` rule declines
+  them, so a rule declared later in the same plugin still runs (#2764).
+  First non-`nil` wins. The engine invokes it through
+  `#dynamic_return_type(call_node:, scope:, receiver_type:)`.
+  `rigor-mangrove` (unwrap → carried `type_args[0]`) is the worked
+  consumer.
   - **A `receivers:` entry names a receiver KIND, not just a class**
     (issue #701). A bare class name — `"Widget"` — matches an INSTANCE
     receiver: `Type::Nominal[Widget]`, and the `Type::Result` /

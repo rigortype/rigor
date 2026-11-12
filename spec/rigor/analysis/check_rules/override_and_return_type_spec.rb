@@ -1003,22 +1003,26 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
 
       # `Mid` includes the project module `PMod` in RBS only, so the Ruby chain never reaches `PMod`: the
       # nearest declaration does not answer, and `PBase` must not answer in its place.
-      it "stays silent when a nearer project owner is off the Ruby chain, on both rules" do
-        ruby = <<~RUBY
+      def off_chain_result
+        analyze(<<~RUBY, sig: { "demo.rbs" => rbs_decls(
           module PMod; def hook = 1; def take(_x) = nil; end
           class PBase; def hook = 1; def take(_x) = nil; end
           class Mid < PBase; end
           class Leaf < Mid; def hook = "s"; def take(_x) = nil; end
         RUBY
-        rbs = rbs_decls(
           "module PMod" => "def hook: () -> Object\n  def take: (String) -> void",
           "class PBase" => "def hook: () -> Integer\n  def take: (Object) -> void",
           "class Mid < PBase" => "include PMod",
           "class Leaf < Mid" => "def hook: () -> String\n  def take: (String) -> void"
-        )
-        result = analyze(ruby, sig: { "demo.rbs" => rbs })
-        expect(widen_diags(result)).to be_empty
-        expect(diags_for(result, "def.override-param-narrowed")).to be_empty
+        ) })
+      end
+
+      it "stays silent on the return when a nearer project owner is off the Ruby chain" do
+        expect(widen_diags(off_chain_result)).to be_empty
+      end
+
+      it "stays silent on the parameter when a nearer project owner is off the Ruby chain" do
+        expect(diags_for(off_chain_result, "def.override-param-narrowed")).to be_empty
       end
 
       it "names a project module whose included interface supplies the signature" do

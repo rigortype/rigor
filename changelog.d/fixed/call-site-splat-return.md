@@ -1,0 +1,2 @@
+- **[engine]** A call with a positional splat (`r.count(*idx)`) no longer types its return from a user method body that bound the splat as one argument, which reported `flow.always-truthy-condition` on correct code. ([#3097](https://github.com/rigortype/rigor/pull/3097))
+  - The instance, singleton, top-level, refinement and overriding-`def` body tiers now decline under a splat, and the call answers `Dynamic[top]` instead.

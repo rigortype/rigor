@@ -93,6 +93,24 @@ module Rigor
       # when the entry is interned.
       Entry = Data.define(:name, :side, :raw, :candidates, :superclass_edge, :last_segment, :owner) do
         def external? = name.nil?
+
+        # Issue #3156 — the class or module the project declares that an external entry names, or nil: the first of
+        # its spellings (the owner-qualified one ahead of the candidates, #1698) that is a `discovered_classes` key,
+        # read in Ruby's lookup order, so a spelling RBS alone knows ahead of it leaves nil. Such an entry is a
+        # declaration whose Ruby body records no method, superclass or include (`module PMod; end`). It files the
+        # entry's negative class edge, which a declaration of the name appearing or vanishing fires.
+        def declared_name(scope)
+          Analysis::DependencyRecorder.read_last_segment(:class, raw.to_s)
+          spelling = raw.to_s
+          spellings = owner && !spelling.start_with?("::") ? ["#{owner}::#{spelling}", *candidates] : candidates
+          spellings.uniq.each do |candidate|
+            return candidate if scope.discovered_classes.key?(candidate)
+            return nil if Rigor::Reflection.rbs_class_known?(candidate, scope: scope)
+          end
+          nil
+        rescue StandardError
+          nil
+        end
       end
 
       # How many project entries a chain may hold before it is cut (ADR-41 WD4). The breadth-first walks

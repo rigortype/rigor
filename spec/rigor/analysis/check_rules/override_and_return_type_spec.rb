@@ -1073,7 +1073,8 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
       # external entry on the resolution chain; the override walk still asks it, from its RBS.
       describe "a body-less project ancestor (#3156)" do
         def widened(line, parent)
-          [line, "return type of `hook' widened from Integer to String (overrides #{parent}#hook); breaks substitutability"]
+          [line, "return type of `hook' widened from Integer to String (overrides #{parent}#hook); " \
+                 "breaks substitutability"]
         end
 
         it "names a body-less project module whose included interface supplies the signature" do
@@ -1112,7 +1113,8 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
             class ALeaf < AMid; def hook = "s"; end
           RUBY
           rbs = rbs_decls(
-            "class AMid" => "def base: () -> Integer\n  alias hook base", "class ALeaf < AMid" => "def hook: () -> String"
+            "class AMid" => "def base: () -> Integer\n  alias hook base",
+            "class ALeaf < AMid" => "def hook: () -> String"
           )
           expect(widen_messages(ruby, rbs)).to eq([widened(3, "AMid")])
         end

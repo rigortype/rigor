@@ -1149,6 +1149,39 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
           expect(widen_messages(ruby, rbs)).to be_empty
         end
 
+        # Ruby resolves `AMid` in `NS` to `NS::AMid`, which only RBS declares: the top-level body-less `AMid`
+        # is not the ancestor, so it does not answer.
+        it "stays silent when an RBS-only spelling resolves the constant ahead of the body-less class" do
+          ruby = <<~RUBY
+            class AMid
+            end
+            module NS
+              class ALeaf < AMid; def hook = "s"; end
+            end
+          RUBY
+          rbs = rbs_decls(
+            "class AMid" => "def hook: () -> Integer", "module NS" => nil,
+            "class NS::AMid" => "def hook: () -> Integer", "class NS::ALeaf < NS::AMid" => "def hook: () -> String"
+          )
+          expect(widen_messages(ruby, rbs)).to be_empty
+        end
+
+        it "names a body-less module nested in the class that includes it" do
+          ruby = <<~RUBY
+            class Mid
+              module Inner
+              end
+              include Inner
+            end
+            class Leaf < Mid; def hook = "s"; end
+          RUBY
+          rbs = rbs_decls(
+            "module Mid::Inner" => "def hook: () -> Integer", "class Mid" => "include Mid::Inner",
+            "class Leaf < Mid" => "def hook: () -> String"
+          )
+          expect(widen_messages(ruby, rbs)).to eq([widened(6, "Mid::Inner")])
+        end
+
         it "stays silent on a correct override through a body-less ancestor" do
           ruby = <<~RUBY
             class AMid

@@ -75,7 +75,9 @@ RSpec.describe "IncrementalSession: a gate-skipped reader is credited with the p
   def cfg = "class Cfg; end\n"
   def w_plain = "class C; def self.w(k) = A.v(k); end\n"
   def w_reads = "class C; def self.w(k) = Cfg.get(k) == 6 ? A.v(k) : 0; end\n"
-  def reader = "puts 'hit' if C.w(1) == 3\n"
+  # `C.w(2)` registers no notice, so only the plugin read can bring the reader back; `C.w(1)` registers one.
+  def reader = "puts 'hit' if C.w(2) == 4\n"
+  def noticing_reader = "puts 'hit' if C.w(1) == 3\n"
 
   # The baseline over `tree` and `policy`, then one recheck per step; each answers as a cold run does.
   def replay(tree, steps)
@@ -104,6 +106,7 @@ RSpec.describe "IncrementalSession: a gate-skipped reader is credited with the p
     expect(basenames(rechecks.first.affected)).to eq(["c.rb"]) # the gate passed
     expect(basenames(rechecks.last.affected)).to include("r.rb")
     expect(rechecks.map { |recheck| truthy?(recheck) }).to eq([true, false])
+    expect(rechecks.map { |recheck| noticed?(recheck) }).to eq([false, false])
   end
 
   # The control: a reader whose own analysis made the read is credited with it without the gate.
@@ -114,7 +117,7 @@ RSpec.describe "IncrementalSession: a gate-skipped reader is credited with the p
   end
 
   it "replays the notice the edited def's plugin call registers for the skipped reader's key" do
-    rechecks = replay(tree(w_plain), [{ "c.rb" => w_reads }, { "a.rb" => "#{a_v}\n" }])
+    rechecks = replay(tree(w_plain).merge("r.rb" => noticing_reader), [{ "c.rb" => w_reads }, { "a.rb" => "#{a_v}\n" }])
     expect(basenames(rechecks.first.affected)).to eq(["c.rb"])
     expect(rechecks.map { |recheck| noticed?(recheck) }).to eq([true, true])
   end

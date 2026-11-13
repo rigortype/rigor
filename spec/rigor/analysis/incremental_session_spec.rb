@@ -3371,6 +3371,7 @@ end
         def reader = "puts 'hit' if C.w(1) == 3\n"
         def w_plain = "class C; def self.w(k) = A.v(k); end\n"
         def w_cross = "class C; def self.w(k) = B::X == 6 ? A.v(k) : 0; end\n"
+        def c_x = "class C; X = 6; def self.w(k) = A.v(k); end\n"
         def w_lexical = "class C; X = 6; def self.w(k) = X == 6 ? A.v(k) : 0; end\n"
         def tree = { "a.rb" => a_v, "b.rb" => "class B; X = 6; end\n", "c.rb" => w_plain, "r.rb" => reader }
 
@@ -3388,7 +3389,7 @@ end
 
         it "re-checks the reader when the edit starts reading a constant of the def's own class" do
           Dir.mktmpdir do |dir|
-            rechecks = replay(dir, [tree, { "c.rb" => w_lexical }])
+            rechecks = replay(dir, [tree.merge("c.rb" => c_x), { "c.rb" => w_lexical }])
             expect(basenames(rechecks.last.affected)).to include("r.rb")
             expect(truthy?(rechecks.last)).to be(false)
           end

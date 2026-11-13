@@ -2385,19 +2385,12 @@ module Rigor
           collect(root, target_class, [])
         end
 
-        # What the target is written with: a rescue reference's exception instance (`StandardError` for a bare
-        # `rescue`, `Dynamic[top]` for a class that does not resolve), a `for` index's `Dynamic[top]` floor.
+        # What an ivar target is written with: a rescue reference's exception instance, as the in-method binding
+        # types it ({ErrorInfo.rescue_exception_type}), a `for` index's `Dynamic[top]` floor.
         def value_type(node, scope)
           return Type::Combinator.untyped unless node.is_a?(Prism::RescueNode)
-          return Type::Combinator.nominal_of("StandardError") if node.exceptions.empty?
 
-          members = node.exceptions.map do |exception|
-            type = scope.type_of(exception)
-            type.is_a?(Type::Singleton) ? Type::Combinator.nominal_of(type.class_name) : Type::Combinator.untyped
-          end
-          Type::Combinator.union(*members)
-        rescue StandardError
-          Type::Combinator.untyped
+          ErrorInfo.rescue_exception_type(node) { |exception_node| scope.type_of(exception_node) }
         end
 
         def collect(target, target_class, acc)
@@ -2570,12 +2563,11 @@ module Rigor
         return unless node.is_a?(Prism::Node)
 
         record_cvar_write(node, scope, class_name, accumulator) if node.is_a?(Prism::ClassVariableWriteNode)
-        # Issue #1217 — `rescue => @@c` / `for @@c in xs` write through a target node, typed as for an ivar.
+        # Issue #1217 — `rescue => @@c` / `for @@c in xs` write through a target node. Each enters as the
+        # `Dynamic[top]` floor, the rescue reference too: this census walks `def` bodies only, so a class-body
+        # `@@c = nil` is not in it, and a typed exception entry would read as non-nil in a sibling method.
         BindingTargets.names(node, Prism::ClassVariableTargetNode).each do |name|
-          type = BindingTargets.value_type(node, scope)
-          entries = (accumulator[class_name] ||= {})
-          existing = entries[name]
-          entries[name] = existing ? Type::Combinator.union(existing, type) : type
+          (accumulator[class_name] ||= {})[name] = Type::Combinator.untyped
         end
         return if IVAR_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
 

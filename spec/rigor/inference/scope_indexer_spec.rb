@@ -2531,45 +2531,54 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     end
 
     # Issue #1217 — `rescue => @err` and `for @x in` write the ivar through a target node; without the census entry a
-    # sibling method read only `@err = nil` and folded `if @err` always-falsey.
+    # sibling method read only `@err = nil` and folded `if @err` always-falsey. A rescue reference enters as the
+    # exception it rescues, a `for` index as the unknown floor; each beside the constructor's `nil`.
     describe "rescue-reference and for-index ivar targets" do
-      {
-        "a rescue reference" => "begin; risky; rescue => @v; end",
-        "a for index" => "for @v in [1, 2]; end",
-        "a splat for index" => "for *@v in [[1, 2]]; end",
-        "a multi-target for index" => "for @v, w in [[1, 2]]; end"
-      }.each do |label, write|
-        it "records #{label} as the unknown floor beside the constructor's nil" do
-          program = parse(<<~RUBY)
-            class F
-              def initialize
-                @v = nil
-                @c = nil
-              end
+      let(:nominal) { ->(name) { Rigor::Type::Combinator.nominal_of(name) } }
+      let(:beside_nil) { ->(type) { Rigor::Type::Combinator.union(Rigor::Type::Combinator.constant_of(nil), type) } }
 
-              def run
-                #{write}
-                @c = nil
-              end
+      def census_for(write)
+        program = parse(<<~RUBY)
+          class AppError < StandardError; end
+          ERRS = [TypeError].freeze
+
+          class F
+            def initialize
+              @v = nil
+              @c = nil
             end
-          RUBY
-          ivars = described_class.index(program, default_scope: default_scope)[program].class_ivars_for("F")
-          expect(ivars[:@v]).not_to eq(Rigor::Type::Combinator.constant_of(nil))
+
+            def run
+              #{write}
+              @c = nil
+            end
+          end
+        RUBY
+        described_class.index(program, default_scope: default_scope)[program].class_ivars_for("F")
+      end
+
+      {
+        "a bare rescue reference" => ["begin; risky; rescue => @v; end", ["StandardError"]],
+        "a one-class rescue reference" => ["begin; risky; rescue TypeError => @v; end", ["TypeError"]],
+        "a multi-class rescue reference" => [
+          "begin; risky; rescue TypeError, ArgumentError => @v; end", %w[TypeError ArgumentError]
+        ],
+        "a project-class rescue reference" => ["begin; risky; rescue AppError => @v; end", ["AppError"]],
+        "a splat-list rescue reference" => ["begin; risky; rescue *ERRS => @v; end", nil],
+        "a for index" => ["for @v in [1, 2]; end", nil],
+        "a splat for index" => ["for *@v in [[1, 2]]; end", nil],
+        "a multi-target for index" => ["for @v, w in [[1, 2]]; end", nil],
+        "a multi-target for index's rest" => ["for w, *@v in [[1, 2]]; end", nil],
+        "a multi-target for index's right slot" => ["for *w, @v in [[1, 2]]; end", nil],
+        "a nested multi-target for index" => ["for w, (x, @v) in [[1, [2, 3]]]; end", nil]
+      }.each do |label, (write, classes)|
+        it "records #{label} beside the constructor's nil" do
+          ivars = census_for(write)
+          written = classes ? Rigor::Type::Combinator.union(*classes.map(&nominal)) : Rigor::Type::Combinator.untyped
+          expect(ivars[:@v]).to eq(beside_nil.call(written))
           expect(ivars[:@c]).to eq(Rigor::Type::Combinator.constant_of(nil))
         end
       end
-    end
-
-    it "records a rescue-reference ivar as the exception class the clause names" do
-      program = parse(<<~RUBY)
-        class F
-          def run
-            begin; risky; rescue TypeError => @v; end
-          end
-        end
-      RUBY
-      ivars = described_class.index(program, default_scope: default_scope)[program].class_ivars_for("F")
-      expect(ivars[:@v]).to eq(Rigor::Type::Combinator.nominal_of("TypeError"))
     end
 
     describe "parallel / multiple-assignment ivar targets (N1)" do
@@ -3394,23 +3403,25 @@ Unrelated
       expect(defs.fetch("X", {})).to be_empty
     end
 
-    # Issue #1217 — the cvar twin of the ivar census entry for a target-node write.
-    it "records a rescue-reference or for-index `@@x` as the unknown floor beside its nil write" do
-      cvars = described_class.build_class_cvar_index(parse(<<~RUBY), Rigor::Scope.empty)
-        class C
-          def a = (@@r = nil)
-          def b = (@@f = nil)
-          def c = (@@n = nil)
-          def d
-            begin; risky; rescue => @@r; end
-            for @@f in [1, 2]; end
+    # Issue #1217 — the cvar twin of the ivar census entry for a target-node write. A rescue reference enters as the
+    # unknown floor too, not the exception: this census walks `def` bodies only, so the class-body (or module-body)
+    # `@@last_error = nil` is missing, and a `StandardError` entry would fold a sibling's `@@last_error.nil?` false.
+    %w[class module].each do |keyword|
+      it "records a rescue-reference or for-index `@@x` in a #{keyword} as the unknown floor" do
+        cvars = described_class.build_class_cvar_index(parse(<<~RUBY), Rigor::Scope.empty)
+          #{keyword} Klass
+            @@last_error = nil
+            @@f = nil
+            def run; yield; rescue => @@last_error; end
+            def loop_over = (for @@f in [1, 2]; end)
+            def plain = (@@n = nil)
           end
-        end
-      RUBY
-      entries = cvars.fetch("C")
-      expect(entries[:@@r]).not_to eq(Rigor::Type::Combinator.constant_of(nil))
-      expect(entries[:@@f]).not_to eq(Rigor::Type::Combinator.constant_of(nil))
-      expect(entries[:@@n]).to eq(Rigor::Type::Combinator.constant_of(nil))
+        RUBY
+        entries = cvars.fetch("Klass")
+        expect(entries[:@@last_error]).to eq(Rigor::Type::Combinator.untyped)
+        expect(entries[:@@f]).to eq(Rigor::Type::Combinator.untyped)
+        expect(entries[:@@n]).to eq(Rigor::Type::Combinator.constant_of(nil))
+      end
     end
 
     it "keeps `@@x` inside a `def` in a meta-new or eval block on the lexical cref" do

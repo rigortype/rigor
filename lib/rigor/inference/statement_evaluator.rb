@@ -4298,7 +4298,7 @@ module Rigor
       # widens with the binder's floor for a rest it cannot decompose, `Dynamic[top]`. `for *x.r in pairs` calls `r=`
       # and widens as `for x.r in` does (issue #2693).
       #
-      # Issue #1217 — a bare `*a` / `*@a` binds the name to the rest {MultiTargetBinder.decompose_slots} reads off the
+      # Issue #1217 — a bare `*a` / `*@a` / `*@@a` / `*$a` binds the name to the rest {MultiTargetBinder.decompose_slots} reads off the
       # element: a `Tuple` element exactly, an `Array[T]` element as `Array[T]`, and anything else — a union, a value
       # Ruby would wrap as `[element]` — the `Dynamic[top]` floor. Left unbound, a read after the loop folded on the
       # pre-loop binding.
@@ -4309,7 +4309,8 @@ module Rigor
           widen_attribute_write(target.receiver, target.name, scope)
         when Prism::IndexTargetNode
           widen_index_target(target, Type::Combinator.untyped, scope, type_scope: scope)
-        when Prism::LocalVariableTargetNode, Prism::InstanceVariableTargetNode
+        when Prism::LocalVariableTargetNode, Prism::InstanceVariableTargetNode,
+             Prism::ClassVariableTargetNode, Prism::GlobalVariableTargetNode
           _, rest, = MultiTargetBinder.decompose_slots(
             element_type, front_count: 0, back_count: 0, rest_present: true, scope: scope
           )
@@ -9803,20 +9804,11 @@ module Rigor
         end
       end
 
-      # Derives the exception instance type for a `RescueNode`. When the exceptions list is empty (bare `rescue`) the
-      # type is `StandardError`. When one or more exception classes are named the types are unioned. A class that
-      # cannot be resolved to a `Singleton` type contributes `Dynamic[top]`.
+      # Derives the exception instance type for a `RescueNode` ({ErrorInfo.rescue_exception_type}): `StandardError` for
+      # a bare `rescue`, else the union of the named classes' instances, with `Dynamic[top]` for one that does not
+      # resolve to a `Singleton`.
       def rescue_exception_type(rescue_node, scope)
-        exceptions = rescue_node.exceptions
-        if exceptions.empty?
-          Type::Combinator.nominal_of("StandardError")
-        else
-          types = exceptions.map do |exc_node|
-            singleton_type, = sub_eval(exc_node, scope)
-            singleton_to_nominal(singleton_type)
-          end
-          Type::Combinator.union(*types)
-        end
+        ErrorInfo.rescue_exception_type(rescue_node) { |exception_node| sub_eval(exception_node, scope).first }
       end
 
       # --------------------------------------------------------------- `case/in` pattern variable binding helpers

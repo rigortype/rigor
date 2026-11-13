@@ -1282,11 +1282,17 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(control.local(:a)).to eq(Rigor::Type::Combinator.constant_of(0))
     end
 
-    it "for-loop with a bare splat ivar index binds the element's rest" do
-      _, post = evaluate("@a = 0\nfor *@a in [[1, 2]]; end")
-      _, control = evaluate("@a = 0\nfor b in [[1, 2]]; end")
-      expect(post.ivar(:@a)).not_to eq(Rigor::Type::Combinator.constant_of(0))
-      expect(control.ivar(:@a)).to eq(Rigor::Type::Combinator.constant_of(0))
+    {
+      "an ivar" => ["@a", :ivar], "a class variable" => ["@@a", :cvar], "a global" => ["$a", :global]
+    }.each do |label, (name, reader)|
+      it "for-loop with a bare splat #{label} index binds the element's rest" do
+        _, post = evaluate("#{name} = 0\nfor *#{name} in [[1, 2]]; end")
+        _, control = evaluate("#{name} = 0\nfor b in [[1, 2]]; end")
+        expect(post.public_send(reader, name.to_sym).members).to include(
+          Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.constant_of(1), Rigor::Type::Combinator.constant_of(2))
+        )
+        expect(control.public_send(reader, name.to_sym)).to eq(Rigor::Type::Combinator.constant_of(0))
+      end
     end
 
     it "for-loop with an ivar index binds the ivar" do

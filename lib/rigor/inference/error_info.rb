@@ -37,6 +37,22 @@ module Rigor
 
       module_function
 
+      # The exception instance type a `RescueNode` binds its reference to: `StandardError` for a bare `rescue`, else
+      # the union over the named exceptions, each the instance of the class the block types it as (`yield`ed the
+      # exception node) or `Dynamic[top]` when that is not a `Singleton` (a splat list, an unresolved constant).
+      # Shared by `StatementEvaluator#rescue_exception_type` and the class-ivar census (issue #1217), so the two
+      # agree.
+      def rescue_exception_type(rescue_node)
+        exceptions = rescue_node.exceptions
+        return Type::Combinator.nominal_of("StandardError") if exceptions.empty?
+
+        types = exceptions.map do |exception_node|
+          type = yield(exception_node)
+          type.is_a?(Type::Singleton) ? Type::Combinator.nominal_of(type.class_name) : Type::Combinator.untyped
+        end
+        Type::Combinator.union(*types)
+      end
+
       # The scope a `rescue` clause, or a rescue modifier's fallback, runs from: `$!` bound to the exception it rescued
       # and `$@` to that exception's backtrace, with `$?` unbound. `exception_type` is what `rescue … => e` binds `e` to
       # (`StatementEvaluator#rescue_exception_type`): the union of the named classes' instances, `StandardError` for a

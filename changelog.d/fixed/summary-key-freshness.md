@@ -1,0 +1,4 @@
+- **[incremental]** `rigor check --incremental` no longer keeps a stale diagnostic in a file that reads a method whose return an edit changed, when that reader was added, edited or left out of a recheck since the method's file was last analysed. ([#3178](https://github.com/rigortype/rigor/pull/3178))
+  - The recheck skips a method's readers when its return is unchanged at every recorded call key, and the recorded keys were only what the last run that analysed the method's file had seen.
+  - The keys are now merged across runs and dropped when they cannot all be listed, so those readers are re-analysed.
+  - An edit that changes no return now skips the readers on every recheck, not on every other one.

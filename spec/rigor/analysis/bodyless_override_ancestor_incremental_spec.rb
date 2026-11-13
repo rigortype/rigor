@@ -6,6 +6,10 @@ require "tmpdir"
 # Issue #3156 — the override walk asks a body-less project ancestor (`class AMid` / `end`) from its RBS, so the
 # override's answer depends on the declaration existing. A warm `IncrementalSession` must re-check the overriding
 # file when that declaration vanishes or appears, and agree with a full `--no-cache` run of the same tree.
+#
+# Guard: `Entry#declared_name` files the entry's `class:` edge, but `def.override-visibility-reduced`'s walk, which
+# runs on every `def` whatever the configuration disables, passes the same entry and files the same edge today, so
+# removing that line alone does not fail this example.
 RSpec.describe "def.override-return-widened through a body-less ancestor — incremental" do
   def configuration(dir)
     Rigor::Configuration.new("paths" => [File.join(dir, "app")], "signature_paths" => [File.join(dir, "sig")])

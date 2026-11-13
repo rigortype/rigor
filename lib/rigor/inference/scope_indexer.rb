@@ -2606,8 +2606,9 @@ module Rigor
         return unless args&.size == 2
 
         name_node, value = args
+        # A name that is not a cvar's never meets a `def` write's entry, so the join drops it.
         name = name_node.unescaped if name_node.is_a?(Prism::SymbolNode) || name_node.is_a?(Prism::StringNode)
-        return unless name&.start_with?("@@")
+        return unless name
 
         record_cvar_write(accumulator, class_name, name.to_sym, EmptySeed.erase(value, scope.type_of(value)),
                           join_only: true)

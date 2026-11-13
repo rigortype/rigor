@@ -1200,6 +1200,25 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
           end
         end
 
+        # The chain holds a `Mid::Inner` WITH a body as external too (it resolves `include Inner` without `Mid`'s
+        # namespace). The body-less read declines it rather than answer for a class the chain should have held.
+        it "does not ask an owner-qualified module that has a body" do
+          ruby = <<~RUBY
+            class Mid
+              module Inner
+                def other = 1
+              end
+              include Inner
+            end
+            class Leaf < Mid; def hook = "s"; end
+          RUBY
+          rbs = rbs_decls(
+            "module Mid::Inner" => "def other: () -> Integer\n  def hook: () -> Integer",
+            "class Mid" => "include Mid::Inner", "class Leaf < Mid" => "def hook: () -> String"
+          )
+          expect(widen_messages(ruby, rbs)).to be_empty
+        end
+
         # `NS::AMid` is a constant alias of `Other`, so `NS::ALeaf < AMid` subclasses `Other`, not the top-level
         # body-less `AMid` the next spelling names.
         it "stays silent when a constant write binds a spelling ahead of the body-less class" do

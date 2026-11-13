@@ -2916,8 +2916,23 @@ module Rigor
         found = [nil, nil] if found.last && dynamic_singleton_definer_ahead?(class_name, method_name, found.last)
         found = [nil, nil] if found.last && singleton_hook_order_split?(class_name, method_name)
         found = [nil, nil] if found.last && singleton_mixin_split?(class_name, method_name, found)
-        found = [nil, nil] if found.last && hidden_hook_split?(class_name, method_name, found.last)
+        found = [nil, nil] if found.last && unseen_definer_split?(class_name, method_name, found)
         found
+      end
+
+      # A definer no def table holds that Ruby may call instead of `found`: a hook-placed one, or a foreign `def C.x`.
+      def unseen_definer_split?(class_name, method_name, found)
+        hidden_hook_split?(class_name, method_name, found.last) || foreign_definer_behind_copy?(method_name, found)
+      end
+
+      # Issue #3155 — a `def C.x` outside C's body (in the extended module, another class or the file) defines C's
+      # own `x`, which no def table holds, only its object-singleton mark. A fold copy found on C may then be a
+      # body Ruby does not call, so the typing read withholds.
+      def foreign_definer_behind_copy?(method_name, found)
+        node, owner = found
+        return false unless singleton_copy_head(owner, node) != owner
+
+        SingletonHookDecline.foreign_singleton_definer?(scope, owner, method_name)
       end
 
       # The hook-placed definers a found singleton `def` may not be the one Ruby calls through.

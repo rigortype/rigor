@@ -214,6 +214,29 @@ RSpec.describe "a def whose receiver is not the lexical self (#3155)", type: :ru
     end
   end
 
+  context "with a foreign `def C.x` beside a fold copy of an extended module's `x`" do
+    def rules(source) = analyze(files: { "code.rb" => source }).diagnostics.map { |d| d.rule.to_s }
+
+    {
+      "in the extended module" => "class C2; end\nmodule X2\n  def w = :sym\n  def C2.w = \"own\"\nend\n",
+      "in an unrelated class" => "class C2; end\nmodule X2\n  def w = :sym\nend\n" \
+                                 "class Unrelated\n  def C2.w = \"own\"\nend\n",
+      "at the top level" => "class C2; end\nmodule X2\n  def w = :sym\nend\ndef C2.w = \"own\"\n"
+    }.each do |label, prefix|
+      it "types the call Dynamic, with no report, when the def is #{label}" do
+        source = "#{prefix}class C2; extend X2; end\nassert_type(\"Dynamic[top]\", C2.w)\nC2.w.center(9)\n"
+        expect(assert_type_mismatches(source)).to eq([])
+        expect(rules(source)).not_to include("call.undefined-method")
+      end
+    end
+
+    it "keeps a plain extend's copy and its arity check (control)" do
+      source = "module X5\n  def x(a) = :from_x\nend\nclass C5; extend X5; end\n"
+      expect(assert_type_mismatches("#{source}assert_type(\":from_x\", C5.x(1))\n")).to eq([])
+      expect(rules("#{source}C5.x\n")).to include("call.wrong-arity")
+    end
+  end
+
   describe "the indexer's tables" do
     let(:program) { Prism.parse("class L\n  def q = 1\n  def String.other = 2\nend\n").value }
 

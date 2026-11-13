@@ -145,6 +145,36 @@ The same failure inside the suite: a green example that would stay green with th
 - **A load-time `Dir[]` that generates examples can generate none**, and zero examples is zero
   failures. Assert non-vacuity explicitly, as `spec/docs/plugin_io_boundary_spec.rb` does. A floor
   with slack (`>= 15` of 20) suits only a corpus that grows; on a static one any file can go green.
+- **The same `Dir[]` can generate too many, and then the gate answers per machine.** Where a tree
+  keeps ignored artifacts beside the content a gate is for, a glob admits them. #3213: a glob over
+  `.pi/` took in 25 pages from `.pi/npm/node_modules/`, five with links their package does not ship,
+  so `make docs-check` failed on a clone that had run the pi install and passed in CI, which checks
+  out without it — two review rounds and a full CI run green on a commit that was red on the author's
+  machine. Take corpus *membership* from the index (`TrackedFiles.call`,
+  `spec/support/tracked_files.rb`, which carries the `-z` / byte-exact / hook-environment reasoning);
+  content still comes from the working tree, which is the point of a pre-push run. For a tree that
+  also holds uncommitted drafts worth catching, the next bullet and #3214 hold the open choice
+  between that and merely excluding ignored paths.
+- **Not every local-only failure is that bug**, and most gates here read the working tree on purpose:
+  `make lint`, `check`, `coverage` and a dozen `spec/docs/` corpora walk a directory, and
+  `bin/verify-changed` checks whitespace on untracked files, so that a new `docs/` page with a dead
+  link is caught before the commit rather than after. Two more that answer differently by design and
+  are not defects: the `references/ruby` examples in `spec/docs/c_effects_raises_gate_spec.rb`, which
+  execute on a clone that has the optional submodule and `skip` in every CI job, and the Nix devShell,
+  which CI never runs at all (it builds the package instead) — `AGENTS.md` § "Validation" answers
+  that one with a local `make verify`. Keep gates only one side can run few, and verify such a gate *executed* before
+  believing it ([`rigor-worktree`](../../.claude/skills/rigor-worktree/SKILL.md)); do not read their
+  asymmetry as the bug below.
+  The bug is narrower: the same gate, on the same content, executing in both places and returning two
+  verdicts. Where a tree holds ignored artifacts beside the content a gate is for, excluding ignored
+  paths says that more precisely than taking only tracked ones, and #3214 holds the corpora where the
+  choice is open.
+- **A gate that cannot build its corpus reports nothing, and a green run looks the same.** Both of
+  these raise at load time, which costs every example in the file, the unrelated ones included:
+  interpolating a byte-exact path into a message holding a non-ASCII character
+  (`Encoding::CompatibilityError`), and `File.read` on a path the index holds and the working tree
+  does not (`ENOENT`). Scrub what a person reads, skip what is not there, and let the floors report
+  the loss.
 - **A guard that keeps breaking is usually a bad proxy**, not a missing case. Replace the proxy with
   the real check (`Prism.parse` for "does it parse") rather than adding one rule per spelling.
 - **A spec rewrite is verified by comparing payloads**, the sources each example analyses, not

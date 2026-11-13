@@ -4298,10 +4298,10 @@ module Rigor
       # widens with the binder's floor for a rest it cannot decompose, `Dynamic[top]`. `for *x.r in pairs` calls `r=`
       # and widens as `for x.r in` does (issue #2693).
       #
-      # Issue #1217 — a bare `*a` / `*@a` / `*@@a` / `*$a` binds the name to the rest {MultiTargetBinder.decompose_slots} reads off the
-      # element: a `Tuple` element exactly, an `Array[T]` element as `Array[T]`, and anything else — a union, a value
-      # Ruby would wrap as `[element]` — the `Dynamic[top]` floor. Left unbound, a read after the loop folded on the
-      # pre-loop binding.
+      # Issue #1217 — a bare `*a` / `*@a` / `*@@a` / `*$a` binds the name to the rest
+      # {MultiTargetBinder.decompose_slots} reads off the element: a `Tuple` element exactly, an `Array[T]` element as
+      # `Array[T]`, and anything else — a union, a value Ruby would wrap as `[element]` — the `Dynamic[top]` floor.
+      # Left unbound, a read after the loop folded on the pre-loop binding.
       def bind_for_splat_index(splat, element_type, scope)
         target = splat.expression
         case target

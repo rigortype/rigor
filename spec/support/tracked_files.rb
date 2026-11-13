@@ -21,15 +21,22 @@ require "open3"
 #   name containing a newline, so the `.md` filter drops it. `-z` hands over exact bytes; `.b` keeps
 #   them matchable, because a UTF-8-tagged invalid string raises on `match?` instead of failing an
 #   example.
-# - **A git hook's environment.** A spec run from inside a hook inherits `GIT_DIR` & friends, which
-#   would point the child `git` at the hook's repository — and a `git add` in a temporary repository
-#   would write to the real index. {GIT_ENV} unsets them for every call.
+# - **A git hook's environment, and the host's.** A spec run from inside a hook inherits `GIT_DIR` &
+#   friends, which would point the child `git` at the hook's repository — and a `git add` in a
+#   temporary repository would write to the real index. {GIT_ENV} unsets them for every call, and
+#   points the global and system config at `/dev/null`, because a caller that builds its own
+#   repository to assert on must not depend on the developer's `core.excludesFile`: a global
+#   `*.md` or `*.json` ignore would silently keep the fixture out of `git add` and the assertion
+#   would then measure the host.
 # - **Exit status.** A failed `git` prints to stderr and returns nothing; without the check the
 #   caller silently gets an empty file list, which reads as "the corpus shrank".
 # - **Unmerged paths.** `ls-files` lists a conflicted path once per stage, so a merge conflict under
 #   a watched root would otherwise duplicate it.
 module TrackedFiles
-  GIT_ENV = { "GIT_DIR" => nil, "GIT_WORK_TREE" => nil, "GIT_INDEX_FILE" => nil }.freeze
+  GIT_ENV = {
+    "GIT_DIR" => nil, "GIT_WORK_TREE" => nil, "GIT_INDEX_FILE" => nil,
+    "GIT_CONFIG_GLOBAL" => File::NULL, "GIT_CONFIG_SYSTEM" => File::NULL
+  }.freeze
 
   class << self
     # Tracked paths under `pathspecs` (all of them when none is given), relative to `root`, as

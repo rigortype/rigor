@@ -12,14 +12,14 @@
 
 ## Options and trade-offs
 
-- **Groups.** Forget them and bind nothing: sound, but it reports the correct code above and the issue's own example. Type them with the existing walk: quiet, but unsound on the sources #2472 lists. Type them with the walk only on an allow-listed "plain" literal and bind nothing otherwise: sound as far as a 300,000-pattern differential check against Ruby found, quiet on the common shapes, and `String?` on every pattern outside the list.
+- **Groups.** Forget them and bind nothing: sound, but it reports the correct code above and the issue's own example. Type them with the existing walk: quiet, but unsound on the sources #2472 lists. Type them with the walk only on an allow-listed "plain" literal and bind nothing otherwise: sound as far as a 1,000,000-source differential check against Ruby found, quiet on the common shapes, and `String?` on every pattern outside the list.
 - **Receivers of `scan` / `gsub` / `sub`.** Act on the name alone: simpler, but it reports a project class's yielding `scan` after a guard, where the block does read the guard's `$1`. Keep #2468's rule (String or untyped): no new report on a receiver known to be something else, at the cost of reading an untyped project object as a String.
-- **`grep` / `grep_v`.** A receiver rule cannot work, since `Enumerable` is mixed into any class. Gate on a regex-literal argument instead, so `grep(Integer)` keeps the enclosing narrowing.
+- **`grep` / `grep_v`.** A rule naming the receivers that count cannot work, since `Enumerable` is mixed into any class. Gate on a regex-literal argument instead, so `grep(Integer)` keeps the enclosing narrowing, and exclude a receiver whose `grep` the project defines, as round 1 of the review asked.
 - **Proc forms.** The issue's four (`-> {}`, `lambda {}`, `proc {}`, `Proc.new {}`), or every call that keeps its block. `Enumerator.new` and `Hash.new` also run later, but an existing unit spec pins that their block keeps the narrowing.
 
 ## Decision
 
-Groups are typed from a plain regex literal only, and are unbound otherwise. `scan` / `gsub` / `sub` keep #2468's receiver rule, which is the precedent for it. `grep` and `grep_v` gate on a regex-literal first argument, on any explicit receiver. Only the issue's four proc forms enter unbound. Each choice takes the side that adds no report on correct code that master leaves quiet, except where the pattern is outside the allow-list or the receiver is untyped; the PR body lists those two as known limits.
+Groups are typed from a plain regex literal only, and are unbound otherwise. `scan` / `gsub` / `sub` keep #2468's receiver rule, which is the precedent for it. `grep` and `grep_v` gate on a regex-literal first argument, on any explicit receiver but one whose `grep` the project defines. Only the issue's four proc forms enter unbound. Each choice takes the side that adds no report on correct code that master leaves quiet, except where the pattern is outside the allow-list or the receiver is untyped; the PR body lists those two as known limits.
 
 ## To undo
 

@@ -66,8 +66,8 @@ RSpec.describe "CI no-code path list (ci.yml `skip_re`)" do
     @repo_files ||= tracked_files
   end
 
-  def git!(dir, *args)
-    TrackedFiles.git!(dir, *args)
+  def git!(dir, *)
+    TrackedFiles.git!(dir, *)
   end
 
   # The workflow's own `skip_re=` ... `non_code=` assignments.

@@ -7,9 +7,11 @@ require "tmpdir"
 # override's answer depends on the declaration existing. A warm `IncrementalSession` must re-check the overriding
 # file when that declaration vanishes or appears, and agree with a full `--no-cache` run of the same tree.
 #
-# Guard: `Entry#declared_name` files the entry's `class:` edge, but `def.override-visibility-reduced`'s walk, which
-# runs on every `def` whatever the configuration disables, passes the same entry and files the same edge today, so
-# removing that line alone does not fail this example.
+# The two vanish/restore rows are guards: `Entry#declared_name` files the entry's `class:` edge, but removing that
+# line does not fail them. Every search over the chain files each external entry's `mixin:` and hook keys
+# (`ResolutionChain#record_hooks`, #1641), and those re-check the reader when the declaration moves. The
+# leaf in the second row does not reach `AMid` through `def.override-visibility-reduced`'s walk, which stops at
+# `Mid`'s `def`. The constant-write row is pinned: it fails without the `constant:` edge.
 RSpec.describe "def.override-return-widened through a body-less ancestor — incremental" do
   def configuration(dir)
     Rigor::Configuration.new("paths" => [File.join(dir, "app")], "signature_paths" => [File.join(dir, "sig")])
@@ -38,15 +40,15 @@ RSpec.describe "def.override-return-widened through a body-less ancestor — inc
   end
 
   # `Mid` holds a Ruby `def hook` but only inherits its RBS declaration, so `def.override-visibility-reduced`'s
-  # walk stops at `Mid` and files nothing for `AMid`: the override walk's own `class:` edge is the only one.
+  # walk stops at `Mid`, and the override walk answers from `AMid` past it.
   it "re-checks the override past a nearer Ruby def when the body-less declaration vanishes" do
     Dir.mktmpdir do |dir|
       mid = write_project(dir, mid_rbs: "class Mid < AMid\nend\nclass ALeaf < Mid\n  def hook: () -> String\nend\n")
-      File.write(File.join(dir, "app", "leaf.rb"),
-                 "class Mid < AMid\n  def hook = 1\nend\nclass ALeaf < Mid\n  def hook = \"s\"\nend\n")
+      File.write(File.join(dir, "app", "between.rb"), "class Mid < AMid\n  def hook = 1\nend\n")
+      File.write(File.join(dir, "app", "leaf.rb"), "class ALeaf < Mid\n  def hook = \"s\"\nend\n")
       File.write(mid, "class AMid\nend\n")
       session = session_for(dir)
-      expect(widened(guarded_baseline(session))).to eq([["leaf.rb", 5]])
+      expect(widened(guarded_baseline(session))).to eq([["leaf.rb", 2]])
 
       File.write(mid, "class Other\nend\n")
       expect(widened(guarded_recheck(session).diagnostics)).to eq(full_run(dir))
@@ -59,7 +61,8 @@ RSpec.describe "def.override-return-widened through a body-less ancestor — inc
   it "re-checks the override when a constant write shadows the body-less class" do
     Dir.mktmpdir do |dir|
       mid = write_project(dir, mid_rbs: "module NS\nend\nclass NS::ALeaf < AMid\n  def hook: () -> String\nend\n")
-      File.write(File.join(dir, "app", "leaf.rb"), "module NS\n  class ALeaf < AMid\n    def hook = \"s\"\n  end\nend\n")
+      File.write(File.join(dir, "app", "leaf.rb"),
+                 "module NS\n  class ALeaf < AMid\n    def hook = \"s\"\n  end\nend\n")
       File.write(mid, "class AMid\nend\n")
       session = session_for(dir)
       expect(widened(guarded_baseline(session))).to eq([["leaf.rb", 3]])

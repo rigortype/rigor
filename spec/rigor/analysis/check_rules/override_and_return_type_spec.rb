@@ -1185,16 +1185,16 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
         # Ruby evaluates a superclass expression outside the class's own body, so `class Leaf < Base` never names
         # the `Leaf::Base` that body declares, whatever the top-level `Base` is.
         {
-          "a body-less project class" => "class Base\nend\n",
-          "RBS-only" => "",
-          "a body-less project class, beside a nested `Base` with a body" => "class Base\nend\n"
-        }.each_with_index do |(top, top_ruby), index|
+          "a body-less project class" => ["class Base\nend\n", "class Base; end", ""],
+          "RBS-only" => ["", "class Base; end", ""],
+          "a body-less project class, beside a nested `Base` with a body" =>
+            ["class Base\nend\n", "class Base; def other = 1; end", "\n  def other: () -> Integer"]
+        }.each do |top, (top_ruby, nested, nested_extra)|
           it "does not read the nested `Leaf::Base` as the superclass when the top-level `Base` is #{top}" do
-            nested = index == 2 ? "class Base; def other = 1; end" : "class Base; end"
             ruby = "#{top_ruby}class Leaf < Base\n  #{nested}\n  def hook = \"s\"\nend\n"
             rbs = rbs_decls(
               "class Base" => "def hook: () -> String", "class Leaf < Base" => "def hook: () -> String",
-              "class Leaf::Base" => "def hook: () -> Integer#{index == 2 ? "\n  def other: () -> Integer" : ""}"
+              "class Leaf::Base" => "def hook: () -> Integer#{nested_extra}"
             )
             expect(widen_messages(ruby, rbs)).to be_empty
           end

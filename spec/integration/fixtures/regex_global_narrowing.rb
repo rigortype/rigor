@@ -2876,6 +2876,11 @@ def own_match_project_grep_unbound
   OwnMatchTok1371.new.grep(/(x)/) { assert_type("String?", $1); assert_type("MatchData?", Regexp.last_match) }
 end
 
+# A receiver whose class cannot be resolved, here an anonymous Struct, keeps the entry too.
+def own_match_unresolved_grep
+  Struct.new(:a).new("a").grep(/(a)/) { assert_type("String?", $1) }
+end
+
 # Issue #1371 — a lambda or proc body runs when it is called, so the narrowing where it is written proves nothing
 # about the `$~` it reads (Ruby: `closure_stale_lambda("a1", "zy")` returns nil).
 def closure_stale_lambda(str, other)

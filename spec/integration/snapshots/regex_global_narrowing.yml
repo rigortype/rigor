@@ -361,31 +361,32 @@ assertions:
   '353': MatchData?
   '354': String?
   '355': String?
-  '356': MatchData?
-  '357': String?
+  '356': String?
+  '357': MatchData?
   '358': String?
   '359': String?
   '360': String?
-  '361': String
+  '361': String?
   '362': String
-  '363': String?
-  '364': String
+  '363': String
+  '364': String?
   '365': String
   '366': String
   '367': String
   '368': String
   '369': String
-  '370': String?
-  '371': String
-  '372': String?
+  '370': String
+  '371': String?
+  '372': String
   '373': String?
   '374': String?
-  '375': String
-  '376': String?
-  '377': String
+  '375': String?
+  '376': String
+  '377': String?
   '378': String
   '379': String
   '380': String
   '381': String
   '382': String
   '383': String
+  '384': String

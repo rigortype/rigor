@@ -31,7 +31,7 @@ Read those before extending the catalogue if you have not already; the decision 
 
 ## Workflow
 
-The flow has six stages. The first four are mechanical; the last two are decision-heavy.
+Stage 0 scaffolds most of the flow. Stages 1–4 are mechanical, stages 5 and 6 are decision-heavy, and stages 7–9 test, verify and document.
 
 ### Stage 0 — Run the scaffold script (recommended)
 

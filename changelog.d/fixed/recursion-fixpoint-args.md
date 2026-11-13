@@ -1,0 +1,3 @@
+- **[inference]** A recursive method no longer answers with its first call's argument values for calls that pass something else, which reported `flow.always-truthy-condition` on correct code. ([#3183](https://github.com/rigortype/rigor/pull/3183))
+  - `def acc(n, k) = n <= 0 ? k : acc(n - 1, k + 1)` called as `acc(rand(10), 1)` was `1` and is now `1 | Dynamic[top]`, so `acc(rand(10), 1) == 5` is silent.
+  - A recursive call whose arguments the outer call's do not cover answers `Dynamic[top]`; one that passes its parameters through, or values of the same type, reads the summary as before.

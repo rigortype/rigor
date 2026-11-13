@@ -4215,7 +4215,11 @@ module Rigor
           # `bot`) instead of bare `untyped`. The fixpoint loop below seeds the entry on the outermost frame;
           # if a re-entry beats it here the entry already exists. The WD4 composition: slice 1's clamp/fuel
           # fallbacks also route here when a summary is active.
-          return consult_summary(summaries, plain_signature)
+          # Issue #3162 — the summary is read only where its frame covers the re-entry's own parameter
+          # bindings and block. A value-keyed re-entry is tested like any other: the unroll frame it
+          # re-enters holds its constants, but the summary it reads is the outermost frame's.
+          floor = uncovered_reentry_floor(summaries[plain_signature], def_node, body_scope, positionals_unknown)
+          return floor || consult_summary(summaries, plain_signature)
         end
 
         # ADR-55 WD1 clamp (governing rule): the constant-arg unroll may only ever surface a fully
@@ -4358,11 +4362,14 @@ module Rigor
         # The outermost frame for this plain signature owns the summary entry and runs the fixpoint loop.
         # ADR-55 WD2.
         outermost = stack.none? { |frame| plain_part(frame) == context.plain_signature }
+        first_unpinned = first_unpinned_frame?(stack, signature, context)
         state = typing_state
         state.push(INFERENCE_GUARD, signature)
         begin
           if outermost
             fixpoint_user_method_return(def_node, body_scope, context)
+          elsif first_unpinned
+            nested_fixpoint_user_method_return(def_node, body_scope, context)
           else
             type, = evaluate_body_with_returns(body_scope, def_node.body)
             clamp_unroll_result(type, context.would_have_been_guarded)
@@ -4376,6 +4383,30 @@ module Rigor
             state.write(TRANSIENT_EVENT_DEPTHS, nil)
           end
         end
+      end
+
+      # Issue #3162 — whether this frame is the first of its signature with an unpinned argument: every
+      # frame of the signature below it is a constant-argument unroll frame, and the recursion has now
+      # passed something that is no constant (`rec(k - 1, *rest)` out of `rec(3, 1)`). The outermost
+      # frame's summary is the return of a body typed for its constants, which does not cover this
+      # frame's re-entries, so this frame owns a summary of its own. A frame that is all constants but
+      # out of unroll fuel is not one: its re-entries keep reading the outermost frame's summary, whose
+      # `bot` sends the outermost frame to the widened retry. Asked before the frame is pushed.
+      def first_unpinned_frame?(stack, signature, context)
+        plain_signature = context.plain_signature
+        signature.equal?(plain_signature) && stack.none?(plain_signature) &&
+          constant_argument_value_key(context.arg_types).nil?
+      end
+
+      # The fixpoint of a {#first_unpinned_frame?} frame, run over its own summary entry; the outermost
+      # frame's entry is put back afterwards.
+      def nested_fixpoint_user_method_return(def_node, body_scope, context)
+        summaries = context.summaries
+        outer = summaries[context.plain_signature]
+        fixpoint_user_method_return(def_node, body_scope, context)
+      ensure
+        summaries[context.plain_signature] = outer
+        LoopValueRecord.advance_generation
       end
 
       # Evaluates a method body and joins the value types of every explicit `return value` reached during
@@ -4406,14 +4437,11 @@ module Rigor
       def fixpoint_user_method_return(def_node, body_scope, context, widened: false)
         plain_signature = context.plain_signature
         summaries = context.summaries
-        depth = seed_fixpoint_summary(summaries, plain_signature)
-        consult_depths = typing_state.acquire(SUMMARY_CONSULT_DEPTHS) { [] }
+        depth = seed_fixpoint_summary(summaries, plain_signature, body_scope, context.receiver)
 
-        RECURSION_FIXPOINT_CAP.times do |iteration|
-          summaries[plain_signature][:consulted] = false
-          consult_mark = consult_depths.size
-          type, = evaluate_body_with_returns(body_scope, def_node.body)
-          computed = clamp_unroll_result(type, context.would_have_been_guarded)
+        iteration = 0
+        while iteration < RECURSION_FIXPOINT_CAP
+          computed, entangled = evaluate_fixpoint_iterate(def_node, body_scope, context, depth)
 
           # Cross-signature mutual recursion (ADR-55 soundness fix, 2026-06-12): the evaluation consulted an
           # ANCESTOR signature's in-flight summary (seed depth shallower than this frame's), so `computed`
@@ -4421,9 +4449,7 @@ module Rigor
           # `Constant[false]`. The per-signature iteration below cannot converge such an entangled pair (each
           # side's iterate is conditioned on the other's unfinished assumption), so degrade this frame to the
           # sound `untyped` floor instead of surfacing a one-sided value.
-          if consult_depths[consult_mark..].any? { |d| d < depth }
-            return degrade_entangled_fixpoint(summaries, plain_signature)
-          end
+          return degrade_entangled_fixpoint(summaries, plain_signature) if entangled
 
           # The summary was never consulted — the method did not recurse on this evaluation, so there is no
           # fixpoint to chase. Return the computed type directly (pre-fixpoint behaviour for non-recursive
@@ -4441,25 +4467,151 @@ module Rigor
             return resolved unless resolved.nil?
           end
 
+          # Issue #3162 — a re-entry read the summary for arguments this frame's parameters do not cover
+          # (`acc(n - 1, k + 1)` against `k = 1`), so `computed` holds this frame's base case as that
+          # call's answer. The evaluation is discarded and the body typed again with such a re-entry
+          # answering `Dynamic[top]`; it is not a Kleene step.
+          next if floored_uncovered_reentries?(summaries[plain_signature])
+
           converged = fixpoint_step(summaries, plain_signature, computed, iteration)
           return converged if converged
+
+          iteration += 1
         end
 
         # Out of iterations and still unstable. The collapse is the loop's own tail rather than a branch
-        # inside `fixpoint_step`: `Integer#times` yields its receiver when no iteration returns, so a
-        # tail-less loop reads as a path that returns an Integer summary (the `def.return-type-mismatch`
-        # on `return_type_for` this shape retired), and the loop, not the step, owns its cap.
+        # inside `fixpoint_step`: the loop, not the step, owns its cap.
         collapse_fixpoint_cap(summaries, plain_signature)
+      end
+
+      # One body evaluation of the fixpoint loop, as `[computed, entangled]`: the clamped return, and
+      # whether the evaluation consulted an ancestor signature's in-flight summary (one seeded shallower
+      # than `depth`). Clears the summary's per-evaluation record first.
+      def evaluate_fixpoint_iterate(def_node, body_scope, context, depth)
+        entry = context.summaries[context.plain_signature]
+        entry[:consulted] = false
+        entry[:uncovered] = false
+        consult_depths = typing_state.acquire(SUMMARY_CONSULT_DEPTHS) { [] }
+        consult_mark = consult_depths.size
+        type, = evaluate_body_with_returns(body_scope, def_node.body)
+        computed = clamp_unroll_result(type, context.would_have_been_guarded)
+        [computed, consult_depths[consult_mark..].any? { |consulted| consulted < depth }]
+      end
+
+      # Switches the summary to its floor after an evaluation in which an uncovered re-entry read it, and
+      # says whether it did. Once on the floor such a re-entry never reads the summary again, so the
+      # switch happens at most once per fixpoint.
+      #
+      # A `bot` iterate has been to the widened retry first. When that retry found no exit either
+      # (`spin`), the entry here is the retry's own, which noted nothing, and the answer stays `bot`.
+      def floored_uncovered_reentries?(entry)
+        return false unless entry[:uncovered] && !entry[:floor]
+
+        entry[:floor] = true
+        LoopValueRecord.advance_generation
+        true
+      end
+
+      # Issue #3162 — the answer of a re-entry the summary's frame does not cover, or nil for one that
+      # reads the summary. The uncovered re-entry is noted on the entry; until the fixpoint owner has
+      # switched the summary to its floor ({#floored_uncovered_reentries?}) it still reads the summary,
+      # so a body whose iterate is `bot` reaches the widened retry as before. On the floor it answers
+      # `untyped`, the pre-slice-2 observable for an in-cycle call.
+      def uncovered_reentry_floor(entry, def_node, body_scope, positionals_unknown)
+        return nil if entry.nil?
+        return nil if summary_covers_reentry?(entry, def_node, body_scope.locals, positionals_unknown)
+
+        entry[:uncovered] = true
+        return nil unless entry[:floor]
+
+        scope.record_dynamic_origin(@typing_node, DynamicOrigin::ANALYZER_BUDGET_CUTOFF) if @typing_node
+        Type::Combinator.untyped
+      end
+
+      # Issue #3162 — whether the summary's frame covers a re-entry's parameter bindings (`locals`, as the
+      # guard site built them): every parameter of the frame holds a type that includes what the re-entry
+      # bound it to. The summary is the return of the frame's body under the frame's bindings, so it is
+      # the re-entry's return only then; a parameter passed through unchanged is the same type object.
+      #
+      # A re-entry through a call-site `*splat` has no positional correspondence, and its binder holds
+      # `Dynamic[top]` for every positional. There the def's own calls are read instead
+      # ({RecursionRebinding}): a positional every one of them passes through unchanged (`*rest` as
+      # `*rest`) is covered, and any other is not.
+      #
+      # The block is part of the frame too: `yield` answers the frame's block ({#reentry_block_covered?}).
+      def summary_covers_reentry?(entry, def_node, locals, positionals_unknown)
+        return false unless reentry_block_covered?(entry, def_node)
+
+        kept = (entry[:kept] ||= kept_positional_parameters(def_node, entry[:receiver])) if positionals_unknown
+        frame = entry[:locals]
+        locals.all? do |name, argument|
+          bound = frame[name]
+          bound.nil? || kept&.include?(name) || binding_covers?(bound, argument)
+        end
+      end
+
+      # Whether the re-entry runs with a block the summary's frame covers. A re-entry with no block, or
+      # one that passes the def's own block parameter on (`&blk`, or the anonymous `&`), does; `&blk` is
+      # the frame's block only while the body never assigns `blk` and no block or lambda in it declares
+      # the name ({RecursionRebinding}'s write and block-local scan, as for a positional). One that
+      # passes another `&expression` does not. A block literal does when the value it yields is covered
+      # by the value the frame's block yields, which is nil on both sides for a def that never `yield`s.
+      # The re-entry's call is the node being typed; with none to read, only the yield values are compared.
+      def reentry_block_covered?(entry, def_node)
+        block = @typing_node.block if @typing_node.is_a?(Prism::CallNode)
+        return true if @typing_node.is_a?(Prism::CallNode) && block.nil?
+        return own_block_passed?(def_node, block) if block.is_a?(Prism::BlockArgumentNode)
+
+        yielded = ExpressionTyper.current_yield_value_type
+        return true if yielded.nil?
+
+        frame_yield = entry[:yield]
+        !frame_yield.nil? && binding_covers?(frame_yield, yielded)
+      end
+
+      def own_block_passed?(def_node, block)
+        params = def_node.parameters
+        own = params.block if params.is_a?(Prism::ParametersNode)
+        return false if own.nil?
+
+        expression = block.expression
+        return own.name.nil? if expression.nil?
+        return false unless expression.is_a?(Prism::LocalVariableReadNode) && expression.name == own.name
+
+        written = RecursionRebinding.rebound_parameters(def_node, Set.new)
+        written != RecursionRebinding::ALL && !written.include?(own.name)
+      end
+
+      # `2` is covered by `Integer` though their union is spelled `2 | Integer`, so the argument is also
+      # tried with its value pins widened.
+      def binding_covers?(bound, argument)
+        return true if argument.equal?(bound) || Type::Combinator.untyped?(bound) || argument == bound
+        return false if Type::Combinator.untyped?(argument)
+        return true if Type::Combinator.union(bound, argument) == bound
+
+        Type::Combinator.union(bound, widen_bound_argument(argument)) == bound
+      end
+
+      def kept_positional_parameters(def_node, receiver)
+        params = def_node.parameters
+        rebound = recursion_rebound_parameters(def_node, receiver)
+        return [] if rebound == RecursionRebinding::ALL || !params.is_a?(Prism::ParametersNode)
+
+        positionals = params.requireds + params.optionals + params.posts + [params.rest]
+        positionals.filter_map { |param| param.name if param.respond_to?(:name) && param.name } - rebound.to_a
       end
 
       # Seeds the thread-local summary entry for a fixpoint owner: the `bot` Kleene seed plus the
       # guard-stack depth at seed time (the frame for this signature is already pushed), which
       # `consult_summary` logs so nested fixpoints can detect a foreign in-flight (ancestor) consult.
       # Returns the seed depth. ADR-55 slice 2.
-      def seed_fixpoint_summary(summaries, plain_signature)
+      def seed_fixpoint_summary(summaries, plain_signature, body_scope, receiver)
         depth = typing_state[INFERENCE_GUARD]&.size || 0
         summaries[plain_signature] = {
-          assumption: Type::Combinator.bot, consulted: false, depth: depth
+          assumption: Type::Combinator.bot, consulted: false, depth: depth,
+          # Issue #3162 — the frame the summary is the return of, for {#summary_covers_reentry?}.
+          locals: body_scope.locals, yield: ExpressionTyper.current_yield_value_type, receiver: receiver,
+          uncovered: false, floor: false
         }
         LoopValueRecord.advance_generation
         depth

@@ -1,0 +1,1 @@
+- **[engine]** `RIGOR_MEMO_AUDIT=1` now catches stale entries in the `def_census` and unrecorded hand-off memos, which an audit recomputation could previously read stored. ([#3144](https://github.com/rigortype/rigor/pull/3144))

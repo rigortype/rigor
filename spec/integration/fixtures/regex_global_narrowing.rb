@@ -2775,10 +2775,20 @@ def own_match_plain(str)
   str.sub(/([a-z]+)|(\d)/) { assert_type("String?", $1); assert_type("String?", $2); "" }
 end
 
+# `\n`, `\r`, `\t` and a `#` outside the `x` flag are plain too (Ruby: `"a\nb#c".sub(/([^\n]+)\n(\w)#\t?/) { [$1, $2] }`
+# reads `["a", "b"]`).
+def own_match_plain_escapes(str)
+  return unless str =~ /(\d+)/
+
+  str.sub(/([^\n]+)\n(\w)#\t?/) { assert_type("String", $1); assert_type("String", $2); "" }
+  str.sub(/\r(a)?/) { assert_type("String?", $1); "" }
+end
+
 # Any other pattern vouches for no group, so each reads `String?` even where Ruby always sets it: the group walk
 # misreads these forms (#2472, #1476). A nested class, a named group, a lookaround, a quantifier on a quantifier
 # (`(a)+{0}`, `(a)+??` and `(a){1}?` match without the group), the `x` flag (`(a) ?` is an optional group there), an
-# interpolation, a String, and a variable.
+# interpolation, a String, a `%r` literal (its source escapes the delimiter: `%r,(a){\,1}b,` is `/(a){,1}b/`), and a
+# variable.
 def own_match_declined(str, re)
   return unless str =~ /(\d+)/
 
@@ -2792,6 +2802,8 @@ def own_match_declined(str, re)
   str.sub(/(a) ?/x) { assert_type("String?", $1); "" }
   str.sub(/(a)#{str}/) { assert_type("String?", $1); "" }
   str.sub("(a)") { assert_type("String?", $1); assert_type("MatchData", $~); "" }
+  str.sub(%r,(a){\,1}b,) { assert_type("String?", $1); "" }
+  str.sub(%r{(a)}) { assert_type("String?", $1); "" }
   str.sub(re) { assert_type("String?", $1); "" }
 end
 
@@ -2840,6 +2852,30 @@ def own_match_grep_class(str, items)
   items.grep(Integer) { |i| assert_type("String", $1); w = $1; i + w.to_i }
 end
 
+# A receiver whose `grep` the project defines keeps the entry, as a project `scan` does: the method matches, if at
+# all, in a frame of its own, so its block reads the caller's `$~` (Ruby: `own_match_project_grep("a1")` returns "1",
+# and `own_match_project_grep_unbound` returns nil).
+class OwnMatchTok1371
+  def grep(_pattern) = yield("x")
+  def grep_v(_pattern) = yield("x")
+end
+
+def own_match_project_grep(str)
+  return unless str =~ /(\d+)/
+
+  OwnMatchTok1371.new.grep(/(x)?/) { assert_type("String", $1); w = $1; w.upcase }
+end
+
+def own_match_project_grep_v(str)
+  return unless str =~ /(\d+)/
+
+  OwnMatchTok1371.new.grep_v(/(x)/) { assert_type("String", $1) }
+end
+
+def own_match_project_grep_unbound
+  OwnMatchTok1371.new.grep(/(x)/) { assert_type("String?", $1); assert_type("MatchData?", Regexp.last_match) }
+end
+
 # Issue #1371 — a lambda or proc body runs when it is called, so the narrowing where it is written proves nothing
 # about the `$~` it reads (Ruby: `closure_stale_lambda("a1", "zy")` returns nil).
 def closure_stale_lambda(str, other)
@@ -2860,6 +2896,16 @@ def closure_forms(str)
   f = -> { w = $1; w.upcase } # GENUINE-NIL
   assert_type("String", $1)
   [a, b, c, d, e, f]
+end
+
+# Gap: a `->` literal written as an operand (an argument, a `<<` operand, an array element, a `return` value) is not
+# entered, so its body still reads the narrowing where it is written; `proc { }` and `lambda { }` there enter unbound
+# (Ruby: `closure_operand_gap("a1", "zy", [])` raises NoMethodError on nil).
+def closure_operand_gap(str, other, callbacks)
+  callbacks << -> { assert_type("String", $1); w = $1; w.upcase } if str =~ /(\d+)/
+  callbacks << proc { assert_type("String?", $1) } if str =~ /(\d+)/
+  other =~ /(x)?y/
+  callbacks.first&.call
 end
 
 # A match the body runs narrows inside it as anywhere else (Ruby: `closure_own_match.call("a1")` returns "1").

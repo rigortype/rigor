@@ -22,9 +22,10 @@ module Rigor
       # The block form of `grep` and `grep_v` runs `pattern === element` in the caller's frame before each yield,
       # which a Regexp pattern answers by setting `$~`: `grep` yields after a match, `grep_v` after a failed one. With
       # a regex literal for the pattern, a `grep` block enters with that match edge and a `grep_v` block with the
-      # globals unbound, on any explicit receiver: `Enumerable` is mixed into classes of every kind, so the
-      # receiver's type does not say whose `grep` runs. Any other pattern (`grep(Integer)`) keeps the frame-wide
-      # entry, since its `===` may leave `$~` alone.
+      # globals unbound. `Enumerable` is mixed into classes of every kind, so any explicit receiver counts but one
+      # whose `grep` the project defines ({ProjectMethodOwnership}): that method matches, if at all, in a frame of
+      # its own, and its block keeps the frame-wide entry as a project `scan`'s does. Any other pattern
+      # (`grep(Integer)`) keeps the frame-wide entry too, since its `===` may leave `$~` alone.
       module YieldingMatch
         NAMES = Set[:scan, :gsub, :gsub!, :sub, :sub!].freeze
         GREP_NAMES = Set[:grep, :grep_v].freeze
@@ -41,7 +42,7 @@ module Rigor
           if NAMES.include?(name)
             string_entry(scope, call_node, operand_scope)
           elsif GREP_NAMES.include?(name)
-            grep_entry(scope, call_node)
+            grep_entry(scope, call_node, operand_scope)
           else
             scope
           end
@@ -53,13 +54,25 @@ module Rigor
           Narrowing.yielded_match_scope(scope, pattern_argument(call_node))
         end
 
-        def grep_entry(scope, call_node)
+        def grep_entry(scope, call_node, operand_scope)
           pattern = pattern_argument(call_node)
           return scope unless pattern.is_a?(Prism::RegularExpressionNode) ||
                               pattern.is_a?(Prism::InterpolatedRegularExpressionNode)
+          return scope if project_method?(call_node, operand_scope)
           return scope.forget_match_globals if call_node.name == :grep_v
 
           Narrowing.yielded_match_scope(scope, pattern)
+        end
+
+        # True when the receiver answers the call with a method the project defines, or is a carrier whose class
+        # cannot be resolved; an untyped receiver is not one.
+        def project_method?(call_node, operand_scope)
+          targets = ProjectMethodOwnership.targets(operand_scope.type_of(call_node.receiver))
+          return true if targets.nil?
+
+          targets.any? do |class_name, kind|
+            ProjectMethodOwnership.defines?(class_name, call_node.name, kind, operand_scope)
+          end
         end
 
         # The call's first argument, which each of these methods takes as its pattern; nil without one.
@@ -71,7 +84,7 @@ module Rigor
           call_node.is_a?(Prism::CallNode) && !call_node.receiver.nil? &&
             block_node.is_a?(Prism::BlockNode) && call_node.block.equal?(block_node)
         end
-        private_class_method :string_entry, :grep_entry, :pattern_argument, :own_block_call?
+        private_class_method :string_entry, :grep_entry, :project_method?, :pattern_argument, :own_block_call?
       end
     end
   end

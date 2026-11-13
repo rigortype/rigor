@@ -121,6 +121,8 @@ module Rigor
       # enters with them unbound ({MatchRebinding.block_entry}). The other calls that keep their block
       # ({StoredBlockCall}) are a definer's or a root's ({.entry}), or run it on a schedule of their own
       # (`Enumerator.new`, `Hash.new`), and keep the ordinary entry, as does a project's own `Proc`.
+      # Only a lambda literal the statement evaluator enters gets this entry: one written as an operand is typed as a
+      # value, and the rule walker reads its body in the enclosing scope.
       def proc_body?(block_node, call_node, scope)
         return true if block_node.is_a?(Prism::LambdaNode)
         return false unless call_node.is_a?(Prism::CallNode) && call_node.block.equal?(block_node)

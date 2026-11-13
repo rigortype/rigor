@@ -680,11 +680,12 @@ module Rigor
       end
 
       # The pattern sources {#yielded_capture_groups} reads groups from: literal characters, `.`, the anchors, the
-      # quantifiers, `|`, plain and `(?:…)` groups, the class escapes, an escaped punctuation character, and a
-      # bracket class holding only those with no bracket inside it. The group walk
+      # quantifiers, `|`, plain and `(?:…)` groups, the class escapes, `\n`, `\r` and `\t`, an escaped punctuation
+      # character, and a bracket class holding only those with no bracket inside it. The group walk
       # ({#unconditional_capture_groups}) reads these right; it misreads sources outside them (#2472, #1476).
-      PLAIN_PATTERN_ATOM = %r{[A-Za-z0-9 _\-.,:;=<>!@%&~'"`/^$+*?|(){}]|\\[wWdDsShH]|\\[^A-Za-z0-9\s]}
-      PLAIN_PATTERN_CLASS = %r{\[\^?(?:[A-Za-z0-9 _\-.,:;=<>!@%~'"`/^$+*?|(){}#]|\\[wWdDsShH]|\\[^A-Za-z0-9\s])+\]}
+      PLAIN_PATTERN_ATOM = %r{[A-Za-z0-9 _\-.,:;=<>!@%&~'"`/^$+*?|(){}#]|\\[wWdDsShHnrt]|\\[^A-Za-z0-9\s]}
+      PLAIN_PATTERN_CLASS =
+        %r{\[\^?(?:[A-Za-z0-9 _\-.,:;=<>!@%~'"`/^$+*?|(){}#]|\\[wWdDsShHnrt]|\\[^A-Za-z0-9\s])+\]}
       PLAIN_PATTERN = /\A(?:#{PLAIN_PATTERN_CLASS}|#{PLAIN_PATTERN_ATOM}|\\[bBAzZG])*\z/
       OTHER_GROUP_FORM = /\(\?(?!:)/
       # A quantifier on a quantifier repeats the quantified atom, so `(a)+{0}` and `(a){2}?` may match without the
@@ -695,11 +696,14 @@ module Rigor
                        :STACKED_QUANTIFIER, :NO_GROUPS
 
       # Issue #1371 — the 1-based indices of the groups every match of `pattern` sets, read only from a regex
-      # literal without interpolation or the `x` flag whose source is a {PLAIN_PATTERN} with no `(?` form but
-      # `(?:` and no {STACKED_QUANTIFIER}. Any other pattern, a String one included, vouches for no group:
-      # declining costs precision, while a misread group would read `String` where Ruby has nil.
+      # literal written between slashes, without interpolation or the `x` flag, whose source is a {PLAIN_PATTERN}
+      # with no `(?` form but `(?:` and no {STACKED_QUANTIFIER}. Any other pattern, a String one included, vouches
+      # for no group: declining costs precision, while a misread group would read `String` where Ruby has nil. A
+      # `%r` literal is declined because its source escapes the delimiter, which hides a quantifier from the walk:
+      # `%r,(a){\,1}b,` is `/(a){,1}b/`.
       def yielded_capture_groups(pattern)
         return NO_GROUPS unless pattern.is_a?(Prism::RegularExpressionNode) && !pattern.extended?
+        return NO_GROUPS unless pattern.opening == "/"
 
         plain_pattern_source?(pattern.content) ? unconditional_capture_groups(pattern.content) : NO_GROUPS
       end

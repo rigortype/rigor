@@ -327,8 +327,8 @@ assertions:
   '319': String
   '320': String?
   '321': String?
-  '322': String?
-  '323': String?
+  '322': String
+  '323': String
   '324': String?
   '325': String?
   '326': String?
@@ -338,43 +338,54 @@ assertions:
   '330': String?
   '331': String?
   '332': String?
-  '333': MatchData
+  '333': String?
   '334': String?
   '335': String?
-  '336': String
-  '337': MatchData
+  '336': MatchData
+  '337': String?
   '338': String?
-  '339': MatchData
+  '339': String?
   '340': String?
-  '341': MatchData?
-  '342': Array[String?]
-  '343': Array[String]
-  '344': String
+  '341': String
+  '342': MatchData
+  '343': String?
+  '344': MatchData
   '345': String?
-  '346': String?
-  '347': MatchData?
-  '348': String?
-  '349': String?
-  '350': String?
-  '351': String?
-  '352': String
-  '353': String
-  '354': String
-  '355': String
-  '356': String
-  '357': String
-  '358': String
+  '346': MatchData?
+  '347': Array[String?]
+  '348': Array[String]
+  '349': String
+  '350': String
+  '351': String
+  '352': String?
+  '353': MatchData?
+  '354': String?
+  '355': String?
+  '356': MatchData?
+  '357': String?
+  '358': String?
   '359': String?
-  '360': String
-  '361': String?
-  '362': String?
+  '360': String?
+  '361': String
+  '362': String
   '363': String?
   '364': String
-  '365': String?
+  '365': String
   '366': String
   '367': String
   '368': String
   '369': String
-  '370': String
+  '370': String?
   '371': String
-  '372': String
+  '372': String?
+  '373': String?
+  '374': String?
+  '375': String
+  '376': String?
+  '377': String
+  '378': String
+  '379': String
+  '380': String
+  '381': String
+  '382': String
+  '383': String

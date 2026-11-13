@@ -255,7 +255,8 @@ module Rigor
       # (Marshal-clean type tuples), their `describe(:short)` return descriptors, the content-mutated
       # parameter positions, and (issue #3186) the published-constant spellings the body reads.
       # A recheck re-evaluates a declaration-stable changed callee at these keys and,
-      # when every return, the effects and the spellings are unchanged, skips its symbol dependents. Issues #3116 / #3160 — an entry
+      # when every return, the effects and the spellings are unchanged, skips its symbol dependents.
+      # Issues #3116 / #3160 — an entry
       # holds every key under which a current symbol dependent observes the def; a def whose keys cannot all be
       # listed (more than the per-def cap, among others) has no entry, and the recheck never skips its dependents.
       # ADR-67 WD6c lift:

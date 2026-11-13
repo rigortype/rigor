@@ -1721,7 +1721,8 @@ module Rigor
       # ADR-89 WD2 — true when the ONLY cross-file body surfaces of `node` a symbol dependent can consume are
       # its return type and its content-mutation effects — so comparing exactly those two is a COMPLETE
       # behavioural check. (Issue #3186: the truthiness rule's one-hop body scan reads a third, the published
-      # constants the body names, which the probe compares too; no node kind makes a def ineligible for it.) A def qualifies when its body writes no instance / class variable (an ivar
+      # constants the body names, which the probe compares too; no node kind makes a def ineligible for it.)
+      # A def qualifies when its body writes no instance / class variable (an ivar
       # definite-assignment a same-class caller consumes), does not `yield` (a block-parameter surface a
       # caller passing a block consumes), and makes no implicit-self call (which could carry a transitive
       # shared-state write). Deliberately conservative + purely syntactic: a def with a self-call or a

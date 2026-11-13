@@ -14,8 +14,14 @@ module Rigor
     #
     # The test is syntactic and reads only the def. A call counts by its method name alone, whatever its
     # receiver (`child.depth(n + 1)` re-enters the same recursion guard), so a same-named method of another
-    # class is read as a recursive call too, which only rebinds more. A call to ANOTHER method that recurses
-    # back (mutual recursion) is not followed: its parameters are judged by the def's own calls alone.
+    # class is read as a recursive call too, which only rebinds more. The caller supplies the def's other
+    # names (`alias`), since the def does not carry them. A call to ANOTHER method that recurses back (mutual
+    # recursion) is not followed: its parameters are judged by the def's own calls alone.
+    #
+    # Two shapes the test cannot read rebind more instead. A body that calls a method by a computed name
+    # ({REFLECTIVE_CALLS}) may recurse with any arguments, so every parameter is rebound ({ALL}). A name a
+    # block or lambda in the body declares (a parameter, a block-local, `it`) is rebound, because a read of
+    # it inside that block is the block's variable, not the parameter.
     module RecursionRebinding
       module_function
 
@@ -25,24 +31,52 @@ module Rigor
       ].freeze
       private_constant :LOCAL_WRITE_NODES
 
-      # The names the body's recursive calls, or its own assignments, rebind, as a Set. It may hold a name that
-      # is no parameter (any assigned local); the caller looks up parameters only.
-      def rebound_parameters(def_node)
-        rebound = Set.new
+      # The calls that reach a method by a name the scan cannot read.
+      REFLECTIVE_CALLS = Set[:send, :__send__, :public_send, :method, :instance_method, :define_method].freeze
+      private_constant :REFLECTIVE_CALLS
+
+      # {.rebound_parameters}'s answer when every parameter is rebound.
+      ALL = :all
+
+      # The names the body's recursive calls, its blocks or its own assignments rebind, as a Set, or {ALL}. The
+      # Set may hold a name that is no parameter (any assigned local); the caller looks up parameters only.
+      # `names` is every name the def answers to: its own and its aliases.
+      def rebound_parameters(def_node, names = Set[def_node.name])
         params = def_node.parameters
-        collect(def_node.body, def_node.name, params, rebound) if params.is_a?(Prism::ParametersNode)
-        rebound
+        return Set.new unless params.is_a?(Prism::ParametersNode)
+
+        rebound = Set.new
+        catch(ALL) { collect(def_node.body, names, params, rebound) } == ALL ? ALL : rebound
       end
 
-      def collect(node, method_name, params, rebound)
+      # Every method name the body calls, for the caller to ask which of them are this def's aliases.
+      def called_names(node, names = Set.new)
+        return names if node.nil?
+
+        names << node.name if node.is_a?(Prism::CallNode)
+        node.rigor_each_child { |child| called_names(child, names) }
+        names
+      end
+
+      def collect(node, names, params, rebound)
         return if node.nil?
 
-        if LOCAL_WRITE_NODES.include?(node.class)
-          rebound << node.name
-        elsif node.is_a?(Prism::CallNode) && node.name == method_name
-          note_call(node, params, rebound)
+        case node
+        when *LOCAL_WRITE_NODES then rebound << node.name
+        when Prism::BlockNode, Prism::LambdaNode then note_block(node, rebound)
+        when Prism::CallNode
+          throw ALL, ALL if REFLECTIVE_CALLS.include?(node.name)
+
+          note_call(node, params, rebound) if names.include?(node.name)
         end
-        node.rigor_each_child { |child| collect(child, method_name, params, rebound) }
+        node.rigor_each_child { |child| collect(child, names, params, rebound) }
+      end
+
+      # A block's `locals` are its parameters, its block-locals and the locals it first assigns; `it` is not
+      # among them.
+      def note_block(block, rebound)
+        rebound.merge(block.locals)
+        rebound << :it if block.parameters.is_a?(Prism::ItParametersNode)
       end
 
       def note_call(call, params, rebound)

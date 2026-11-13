@@ -69,6 +69,22 @@ class KeywordRecursion
   def keyword_rest_grown(n, **kw) = n > 0 ? keyword_rest_grown(n - 1, **kw, z: 1) : kw
   def keyword_rest_replaced(n, **kw) = n > 0 ? keyword_rest_replaced(n - 1, z: 1) : kw
 
+  def positional_send(n, f = false) = n > 0 ? send(:positional_send, n - 1, !f) : f
+  def keyword_send(n:, f: false) = n > 0 ? send(:keyword_send, n: n - 1, f: !f) : f
+  def positional_public_send(n, f = false) = n > 0 ? public_send(:positional_public_send, n - 1, !f) : f
+  def keyword_public_send(n:, f: false) = n > 0 ? public_send(:keyword_public_send, n: n - 1, f: !f) : f
+
+  def positional_aliased(n, f = false) = n > 0 ? positional_alias(n - 1, !f) : f
+  alias positional_alias positional_aliased
+  def keyword_aliased(n:, f: false) = n > 0 ? keyword_alias(n: n - 1, f: !f) : f
+  alias_method :keyword_alias, :keyword_aliased
+
+  def positional_shadowed(n, x = :a) = n > 0 ? [:b].map { |x| positional_shadowed(n - 1, x) }.first : x
+  def keyword_shadowed(n:, x: :a) = n > 0 ? [:b].map { |x| keyword_shadowed(n: n - 1, x:) }.first : x
+
+  def positional_through(other, n, f = false) = n > 0 ? other.positional_through(other, n - 1, !f) : f
+  def keyword_omitted(a, n: 0, m: 5) = n > 0 ? keyword_omitted(a, n: n - 1) : m
+
   # Ruby: neither call returns (SystemStackError). No base case, so `bot` is the answer in both forms. The
   # rows sit in a method body: the code after a `bot` call is unreachable.
   def diverging_rows
@@ -177,3 +193,20 @@ assert_type("Dynamic[top]", subject.rest_grown(some_int, :a))
 assert_type("Dynamic[top]", subject.keyword_rest_grown(some_int, a: 1))
 # Ruby: { z: 1 }. No `**kw` at the recursive call.
 assert_type("Dynamic[top]", subject.keyword_rest_replaced(some_int, a: 1))
+
+# Recursive calls the name-and-argument test cannot read rebind more.
+# Ruby: true for 1, false for 2, in all four. `send` and `public_send` reach the method by a computed name.
+assert_type("Dynamic[top]", subject.positional_send(some_int))
+assert_type("Dynamic[top]", subject.keyword_send(n: some_int))
+assert_type("Dynamic[top]", subject.positional_public_send(some_int))
+assert_type("Dynamic[top]", subject.keyword_public_send(n: some_int))
+# Ruby: true for 1, false for 2. The recursive call is through an alias of the method.
+assert_type("Dynamic[top]", subject.positional_aliased(some_int))
+assert_type("Dynamic[top]", subject.keyword_aliased(n: some_int))
+# Ruby: :b. The `x` the recursive call passes is the block's parameter.
+assert_type("Dynamic[top]", subject.positional_shadowed(some_int))
+assert_type("Dynamic[top]", subject.keyword_shadowed(n: some_int))
+# Ruby: true for 1, false for 2. The recursive call has a receiver.
+assert_type("Dynamic[top]", subject.positional_through(KeywordRecursion.new, some_int))
+# Ruby: 5. The recursive call omits `m:`, so the default replaces the outer call's :x.
+assert_type("Dynamic[top]", subject.keyword_omitted(1, n: some_int, m: :x))

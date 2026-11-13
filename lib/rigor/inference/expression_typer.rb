@@ -4499,7 +4499,30 @@ module Rigor
         widened_args = arg_types.map { |arg_type| widen_bound_argument(arg_type) }
         build_user_method_body_scope(def_node, receiver, widened_args,
                                      self_fold_safe: self_fold_safe, positionals_unknown: positionals_unknown,
-                                     rebound: RecursionRebinding.rebound_parameters(def_node))
+                                     rebound: recursion_rebound_parameters(def_node, receiver))
+      end
+
+      # Issue #3115 — {RecursionRebinding.rebound_parameters} for `def_node`, told the def's other names: a name
+      # the body calls is an alias when `receiver`'s class resolves it to this same def (`alias al2 al1` makes
+      # `al2(n - 1, !f)` a recursive call). A receiver whose class cannot be asked rebinds every parameter.
+      def recursion_rebound_parameters(def_node, receiver)
+        names = Set[def_node.name]
+        RecursionRebinding.called_names(def_node.body).each do |name|
+          next if name == def_node.name
+
+          resolved = recursion_def_for(receiver, name)
+          return RecursionRebinding::ALL if resolved == :unknown
+
+          names << name if resolved.equal?(def_node)
+        end
+        RecursionRebinding.rebound_parameters(def_node, names)
+      end
+
+      def recursion_def_for(receiver, method_name)
+        return scope.singleton_def_for(receiver.class_name, method_name) if receiver.is_a?(Type::Singleton)
+        return :unknown unless user_inference_receiver?(receiver)
+
+        resolve_user_def_through_ancestors(receiver.class_name, method_name)
       end
 
       # Issue #3115 — one argument of the widened retry. A keyword argument reaches the binder inside the call's
@@ -4736,6 +4759,7 @@ module Rigor
           end
         return nil if locals.nil?
 
+        rebound = locals.keys if rebound == RecursionRebinding::ALL
         rebound&.each { |name| locals[name] = dynamic_top if locals.key?(name) }
 
         # Construct the body scope in a SINGLE Scope allocation (plus the issue #1358 frame it carries, whose

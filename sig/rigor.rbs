@@ -165,8 +165,9 @@ module Rigor
       # sig-gen gap: #1008 — `result` is populated by `collect_return_summaries` mutating it by
       # reference from a sibling method; sig-gen folds only the `{}` seed and the empty-memo early
       # return, so it proposes the seed shape instead of the honest, usually-non-empty contract.
-      # Keys are `[path, "Class#method"]` pairs; values are `{ keys:, returns:, effects: }` bundles.
-      def return_summaries: () -> Hash[[String, String], Hash[Symbol, untyped]]
+      # Keys are `[path, "Class#method"]` pairs; values are `{ keys:, returns:, effects: }` bundles, or
+      # nil for a def whose keys the run cannot list. nil for a pool run, which harvests none (#3160).
+      def return_summaries: () -> Hash[[String, String], Hash[Symbol, untyped]?]?
       # ADR-67 — `[class_name, method_name, kind] => { param_name => Type }`.
       def param_inferred_types: () -> Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]]
       def collect_param_inference_table: (untyped files) -> Hash[[String, Symbol, Symbol], Hash[Symbol, Type::t]]

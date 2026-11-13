@@ -64,9 +64,10 @@ module Rigor
 
       # ADR-89 WD2 — bounds on the persisted return summaries (per-def observed call keys, and total defs
       # summarised) so the incremental snapshot stays small. A def observed under more keys than the per-def
-      # cap keeps none of them and is marked `overflow: true` (issue #3116): the keys past the cap are unknown, so
-      # equal returns at the first eight prove nothing about the ninth key's reader. A def past the total cap is
-      # dropped. Either way its symbol dependents always re-check — the conservative direction.
+      # cap keeps none of them (issue #3116): the keys past the cap are unknown, so equal returns at the first
+      # eight prove nothing about the ninth key's reader. A def past the total cap keeps none either. Both are
+      # harvested as nil ({#return_summaries}), which the session stores as no summary at all, so the def's symbol
+      # dependents always re-check — the conservative direction.
       RETURN_SUMMARY_KEYS_PER_DEF = 8
       RETURN_SUMMARY_TOTAL_CAP = 4000
 
@@ -516,6 +517,9 @@ module Rigor
         # The return memo bucket the last `run` filled, kept for {#return_summaries} once the run has released the
         # thread's slot; nil before the first run.
         @return_memo = nil
+        # The `[path, node_id] => Prism::DefNode` table the last `run`'s {Inference::DefNodeResolver} filled, kept for
+        # the same reader.
+        @resolved_def_nodes = nil
         build_collaborators
       end
 
@@ -540,7 +544,12 @@ module Rigor
         # ADR-87 WD1 — `cache.validation` (or the RIGOR_STRICT_VALIDATION env, which wins) selects the
         # freshness path for this run; the `auto` default resolves strict in CI (#190), stat-first elsewhere.
         Cache::FileDigest.with_run(strict: @configuration.cache_validation_strict?) do
-          Inference::DefNodeResolver.with_run { run_analysis(paths) }
+          Inference::DefNodeResolver.with_run do
+            run_analysis(paths)
+          ensure
+            # Issue #3160 — the memo keys an unchanged file's def on the node the resolver minted for its handle.
+            @resolved_def_nodes = Inference::DefNodeResolver.resolved_nodes
+          end
         ensure
           # ADR-89 WD2 — {#return_summaries} reads the return memo after the run, so the runner keeps the bucket the
           # run filled before the thread's run-scoped slots are released (issues #2412, #2399).
@@ -792,16 +801,27 @@ module Rigor
       end
 
       # ADR-89 WD2 — the per-method observed-key return summaries the run's ADR-84 return memo just captured.
-      # For each project method with live memo entries, a bounded `{ keys:, returns:, effects: }` summary the
+      # For each project method the run observed, a bounded `{ keys:, returns:, effects: }` summary the
       # incremental session persists: `keys` the observed `[receiver, arg_types]` type tuples, `returns` their
       # `describe(:short)` descriptors, `effects` the content-mutated parameter positions (a caller-visible
-      # arg-flooring surface), and `overflow: true` in place of the keys when there were too many to keep.
-      # Only meaningful right after a run populated the memo (baseline / recheck),
+      # arg-flooring surface). Only meaningful right after a run populated the memo (baseline / recheck),
       # before the bucket rolls. Keys are held live here; the session Marshals them for the snapshot.
       #
+      # Issue #3160 — the session reads the harvest as EVERY key the files this run analysed observed each def
+      # under, so whatever cannot be that says so instead of looking like a short key list:
+      #
+      # - a def observed under keys this run cannot list maps to nil: more keys than
+      #   {RETURN_SUMMARY_KEYS_PER_DEF} (issue #3116), a call whose result the memo refused to store, or a def
+      #   past {RETURN_SUMMARY_TOTAL_CAP};
+      # - a def absent from the result was observed by no analysed file, wherever it is defined: an unchanged
+      #   file's def is found through the node its {Inference::DefHandle} resolved to;
+      # - the whole result is nil for a pool run, whose workers typed the calls in memos this process never sees.
+      #
       # @return the summaries keyed by `[path, "Class#method"]` (or `"Class.method"`), each holding `keys:`,
-      #   `returns:` and `effects:`.
+      #   `returns:` and `effects:`, or nil; nil for a pool run.
       def return_summaries
+        return nil if pool_mode?
+
         memo = Inference::ExpressionTyper.harvest_return_memo(@return_memo)
         return {} if memo.empty?
 
@@ -817,38 +837,44 @@ module Rigor
       end
 
       # Folds one def-node/def-source table pair's memo entries into the return-summary result under
-      # `separator`. A live def node (a cold / re-walked file) is the identity every cross-file caller
-      # resolved through, so `memo[node]` holds those callers' observed keys; a {DefHandle} (an unchanged
-      # file on the warm path) never keyed a memo entry, so it is skipped (its summary is carried over from
-      # the snapshot). Bounded per def and in total so the snapshot stays small.
+      # `separator`. The node the memo keyed is the identity every cross-file caller resolved through: the live
+      # def node of a cold / re-walked file, or the one the resolver minted for an unchanged file's
+      # {Inference::DefHandle} ({#observed_def_node}).
       def collect_return_summaries(result, nodes, sources, separator, memo, effects_evaluator)
+        summarised = result.count { |_pair, summary| summary }
         nodes.each do |class_name, methods|
-          methods.each do |method_name, node|
-            next if node.is_a?(Inference::DefHandle)
-
-            entries = memo[node]
-            next if entries.nil? || entries.empty?
+          methods.each do |method_name, slot|
+            node = observed_def_node(slot)
+            next unless memo.key?(node)
 
             path_line = sources.dig(class_name, method_name)
             next if path_line.nil?
 
-            break if result.size >= RETURN_SUMMARY_TOTAL_CAP
-
-            result[[path_line.split(":", 2).first, "#{class_name}#{separator}#{method_name}"]] =
-              return_summary(entries, content_effects(effects_evaluator, node))
+            summary = summarised < RETURN_SUMMARY_TOTAL_CAP ? return_summary(memo[node], effects_evaluator, node) : nil
+            summarised += 1 if summary
+            result[[path_line.split(":", 2).first, "#{class_name}#{separator}#{method_name}"]] = summary
           end
         end
       end
 
-      # One def's summary. Issue #3116 — a def observed under more keys than {RETURN_SUMMARY_KEYS_PER_DEF} records
-      # no key and `overflow: true` instead, which the session's gate reads as "not provably return-stable". A
-      # splat call's key (issue #1237) is an entry like any other and counts toward the cap.
-      def return_summary(entries, effects)
-        return { keys: [], returns: [], effects: effects, overflow: true } if entries.size > RETURN_SUMMARY_KEYS_PER_DEF
+      # The node the run's return memo keyed `slot`'s def on, or nil when no call resolved it: the live node, or the
+      # one the run's resolver minted for a {Inference::DefHandle}.
+      def observed_def_node(slot)
+        return slot unless slot.is_a?(Inference::DefHandle)
+
+        @resolved_def_nodes&.[]([slot.path, slot.node_id])
+      end
+
+      # One def's summary, or nil when `entries` are not every key it was observed under: the memo refused to store
+      # a call of it (so `entries` may be empty), or there are more than {RETURN_SUMMARY_KEYS_PER_DEF} (issue
+      # #3116). A splat call's key (issue #1237) is an entry like any other and counts toward the cap.
+      def return_summary(entries, effects_evaluator, node)
+        return nil if entries.empty? || entries.size > RETURN_SUMMARY_KEYS_PER_DEF
+        return nil if Inference::ExpressionTyper.return_memo_refused?(@return_memo, node)
 
         { keys: entries.map { |entry| return_summary_key(entry) },
           returns: entries.map { |entry| entry.result.describe(:short) },
-          effects: effects }
+          effects: content_effects(effects_evaluator, node) }
       end
 
       # One observed call key: `[receiver, arg_types]`, or, for an entry a splat call stored (issue #1237),

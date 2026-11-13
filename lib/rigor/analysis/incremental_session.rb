@@ -263,7 +263,7 @@ module Rigor
         # digest (issue #1536).
         @seed_bundles = source_rbs_gate.stamp(runner.seed_bundles, whole_project: true)
         absorb_dependency_graph(runner)
-        @return_summaries = runner.return_summaries # ADR-89 WD2 — the full-run behavioural surface.
+        @return_summaries = baseline_return_summaries(runner)
         # ADR-67 WD6c lift — the seed table the runner's own pre-pass computed ({} when the gate is off).
         # Reading it back, rather than computing it here, keeps the baseline single-collect.
         @param_table = runner.param_inferred_types
@@ -577,15 +577,15 @@ module Rigor
       # surfaces are its return type and its content-mutation effects (no instance/class variable write, no
       # `yield`, no implicit-self call whose transitive effect a caller could observe). For a candidate the
       # session compares its content-mutation effects (pure AST) then re-evaluates its return at every
-      # persisted key (a runner probe); a pair passes only when BOTH are unchanged. Any missing summary,
-      # summary that overflowed the per-def key cap, ineligible def, changed effect, changed return, or
-      # uncomputable key keeps the pair — the conservative
+      # persisted key (a runner probe); a pair passes only when BOTH are unchanged. Any missing summary (which is
+      # also how a def whose keys could not all be recorded is stored, issues #3116 and #3160), ineligible def,
+      # changed effect, changed return, or uncomputable key keeps the pair — the conservative
       # direction the `--verify-incremental` and byte-identical recheck specs backstop.
       def behaviourally_unstable_pairs(changed_pairs, unstable, scan_index)
         return changed_pairs if @return_summaries.empty? || scan_index.nil?
 
         candidates = changed_pairs.select do |pair|
-          !unstable.include?(pair.first) && complete_return_summary?(pair) &&
+          !unstable.include?(pair.first) && @return_summaries.key?(pair) &&
             gate_eligible_def?(scan_def_node(pair.last, scan_index))
         end
         return changed_pairs if candidates.empty?
@@ -595,14 +595,6 @@ module Rigor
 
         stable = return_stable_pairs(effect_stable, scan_index)
         stable.empty? ? changed_pairs : (changed_pairs - stable)
-      end
-
-      # Issue #3116 — true when `pair` carries a summary that holds every key its def was observed under. A summary
-      # marked `overflow` holds none of them (`Runner#return_summary`), so nothing can be proven from it and the
-      # pair keeps its dependents, exactly as a pair with no summary does.
-      def complete_return_summary?(pair)
-        summary = @return_summaries[pair]
-        !summary.nil? && !summary[:overflow]
       end
 
       # ADR-89 WD1 — the changed files whose ancestry / file-level dependents must STILL be re-checked: those
@@ -1264,21 +1256,79 @@ module Rigor
         @effect_plugin_digest = effect_plugin_digest_of(runner)
       end
 
-      # ADR-89 WD2 — replace the behavioural summaries of every re-analyzed file with THIS run's harvest: drop
-      # the analyzed files' old summaries first, then fold the fresh ones. Dropping first is the soundness
-      # invariant — a summary for a file is valid only if it came from a run that analyzed that file. On the
-      # sequential path (the default + `--verify-incremental`) the harvest is complete, so a re-analyzed def's
-      # summary is simply refreshed. On a pooled recheck the callee bodies are evaluated in worker processes,
-      # so the main-process memo harvest is sparse; dropping first means a re-analyzed file with no fresh
-      # summary loses its stale one (WD2 then conservatively re-checks its dependents) rather than comparing a
-      # later edit against a pre-edit summary. Files NOT re-analyzed keep their (unchanged, valid) summaries.
-      # A def whose symbol dependents WD2 skipped is observed under fewer keys, so its refreshed summary may
-      # shrink — sound (fewer keys = more conservative) and self-correcting (an empty summary stops the gate
-      # firing, so the callers re-analyse and repopulate).
+      # ADR-89 WD2 / issue #3160 — bring the behavioural summaries up to date with THIS run. The invariant the gate
+      # reads them under: a pair's summary holds every key under which a CURRENT direct symbol dependent of the def
+      # observes it, each with the def's current return. A summary that cannot be shown to is deleted, and a pair
+      # with no summary keeps its dependents, so every doubt below resolves to "no summary".
+      #
+      # A run's harvest ({Runner#return_summaries}) is what the files it analysed observed, so per pair:
+      #
+      # - the run cannot list the keys it observed (a pool run, a def past the per-def or total cap, a call the
+      #   memo refused to store): delete;
+      # - every dependent was analysed: the harvest is the whole key set, and replaces the summary (deleting it
+      #   when no analysed file observed the def, which is where a def with no dependent left ends up);
+      # - otherwise the summary keeps the keys of the dependents that were not analysed, and gains this run's
+      #   ({#merged_return_summary}), which are none when no dependent was analysed. The kept returns are current:
+      #   a dependent stays out of the closure of its callee's edit only when the gate proved the returns unmoved
+      #   at every kept key, or when the def's own text did not change. With no summary to keep, the other
+      #   dependents' keys are unknown.
+      #
+      # Fewer keys are never the conservative direction: each key protects the readers that observe the def under
+      # it, so a summary missing one skips a reader whose answer the edit moved.
+      #
+      # The invariant covers DIRECT symbol dependents only. A dependent that reaches the def through another def
+      # is not covered: a gate-passing edit of that middle def can change the key such a skipped reader observes
+      # here, or give it a new callee, and no summary records that (issue #3180).
       def refresh_return_summaries(runner, analyze_set)
+        harvest = runner.return_summaries
         analyzed = analyze_set.to_set
-        @return_summaries.reject! { |(path, _symbol), _| analyzed.include?(path) }
-        @return_summaries.merge!(runner.return_summaries)
+        (@return_summaries.keys | (harvest || {}).keys).each do |pair|
+          dependents = @symbol_dependents[pair] || Set.new
+          summary = refreshed_return_summary(pair, harvest, dependents.subset?(analyzed))
+          summary.nil? ? @return_summaries.delete(pair) : @return_summaries[pair] = summary
+        end
+        @return_summaries = capped_return_summaries(@return_summaries)
+      end
+
+      # ADR-89 WD2 — the full-run behavioural surface: every file was analysed, so the harvest is every reader's.
+      # A def the run could not list the keys of (nil in the harvest) and a pool run (no harvest) record nothing.
+      def baseline_return_summaries(runner)
+        capped_return_summaries((runner.return_summaries || {}).compact)
+      end
+
+      # `pair`'s summary after a run whose harvest is `harvest` (nil for a run that has none), or nil for none.
+      # `complete` says every dependent of the def was analysed by that run.
+      def refreshed_return_summary(pair, harvest, complete)
+        return nil if harvest.nil?
+
+        fresh = harvest[pair]
+        return nil if fresh.nil? && harvest.key?(pair)
+        return fresh if complete
+
+        merged_return_summary(@return_summaries[pair], fresh)
+      end
+
+      # Issue #3160 — `kept` (the summary of a def some of whose dependents this run did not analyse) with the
+      # keys `fresh` (this run's harvest for the def, or nil) adds. A kept key stays unless `fresh` holds the same
+      # key with the same return; one whose return differs stays beside it, which no re-evaluation can satisfy, so
+      # the gate keeps the def's dependents. nil when there is nothing to keep or the keys pass the per-def cap.
+      def merged_return_summary(kept, fresh)
+        return nil if kept.nil?
+        return kept if fresh.nil?
+
+        rows = fresh[:keys].zip(fresh[:returns])
+        rows += kept[:keys].zip(kept[:returns]).reject { |row| rows.include?(row) }
+        return nil if rows.size > Runner::RETURN_SUMMARY_KEYS_PER_DEF
+
+        { keys: rows.map(&:first), returns: rows.map(&:last), effects: fresh[:effects] }
+      end
+
+      # The first {Runner::RETURN_SUMMARY_TOTAL_CAP} of `summaries`, so the snapshot stays small however many runs
+      # fed it. A def past the cap has no summary, which keeps its dependents.
+      def capped_return_summaries(summaries)
+        return summaries if summaries.size <= Runner::RETURN_SUMMARY_TOTAL_CAP
+
+        summaries.first(Runner::RETURN_SUMMARY_TOTAL_CAP).to_h
       end
 
       # Evict a removed file from every per-file map so its stale diagnostics are never served and it drops

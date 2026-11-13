@@ -398,11 +398,25 @@ module Rigor
       #
       # `bucket` defaults to the calling thread's current one; `Runner#run` keeps the bucket its run filled
       # ({.current_return_memo}) and passes it, since the run releases the thread's slot when it ends.
+      #
+      # Issue #3160 — the entries are what the memo STORED. A def one of whose calls it refused to store was observed
+      # under a key no entry lists; {.return_memo_refused?} says which.
       def self.harvest_return_memo(bucket = current_return_memo)
         return {} if bucket.nil?
 
-        bucket.transform_values(&:values)
+        bucket.transform_values { |per_def| per_def.except(RETURN_MEMO_REFUSED).values }
       end
+
+      # Issue #3160 — whether `bucket` served a result of `def_node` that it refused to store (ADR-84 WD3). That
+      # result reached its caller, so the def's stored entries are not every key it was observed under.
+      def self.return_memo_refused?(bucket, def_node)
+        bucket&.[](def_node)&.key?(RETURN_MEMO_REFUSED) || false
+      end
+
+      # Issue #3160 — the per-def key under which {#consult_and_store_return_memo} notes that it served a result it
+      # did not store. No call descriptor is a Symbol, so it never meets a real key.
+      RETURN_MEMO_REFUSED = :refused
+      private_constant :RETURN_MEMO_REFUSED
 
       # The calling thread's return memo bucket (`{ def_node => { descriptor => MemoEntry } }`), or nil.
       def self.current_return_memo = TypingState.current[RETURN_MEMO]&.last
@@ -4064,6 +4078,7 @@ module Rigor
 
         if context_tainted?(event_mark, entry_depth) && !top_result?(result)
           BudgetTrace.hit(BudgetTrace::MEMO_REFUSE_TRANSIENT)
+          per_def[RETURN_MEMO_REFUSED] = true
         else
           store_return_memo(per_def, def_node, memo_key,
                             MemoEntry.new(result: result, read_set: read_set, receiver: receiver, arg_types: arg_types,

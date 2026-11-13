@@ -1565,12 +1565,37 @@ Two persisted summaries prove "nothing changed":
   the memo; all-equal returns **and** equal effects drop the def's symbol
   dependents. Any mismatch, a changed signature, a missing def, an
   ineligible def (one that also exposes ivar/cvar writes or `yield` values),
-  or a cap overflow keeps the dependents — the conservative direction.
-  A def observed under more than `RETURN_SUMMARY_KEYS_PER_DEF` (8) keys MUST
-  be stored with `overflow: true` and no key, and the recheck MUST keep its
-  symbol dependents: equal returns at the keys that fit prove nothing about a
-  key that did not ([#3116](https://github.com/rigortype/rigor/issues/3116));
-  snapshot SCHEMA 49. A def at exactly the cap keeps all of its keys.
+  or a missing summary keeps the dependents — the conservative direction.
+  A stored summary MUST hold every key under which a current direct symbol
+  dependent of the def observes it, each with the def's current return
+  ([#3160](https://github.com/rigortype/rigor/issues/3160)). The invariant
+  does not cover a dependent that reaches the def through another def: a
+  gate-passing edit of that middle def can change the key a skipped reader
+  observes on this one, or give it a new callee
+  ([#3180](https://github.com/rigortype/rigor/issues/3180)). A def for which
+  that cannot be shown MUST have no summary, and a def with no summary keeps
+  its symbol dependents. Fewer keys are not the conservative direction: a
+  missing key skips the reader that observes the def under it. A recheck
+  therefore updates each summary from what the files it analysed observed:
+  - every symbol dependent was analysed: replaced by this run's keys (an
+    unchanged file's def is harvested through the node its handle resolved
+    to), and removed when no analysed file observed the def, as for a def
+    with no symbol dependent left;
+  - otherwise: the stored keys are kept and this run's are added (none, when
+    no dependent was analysed). The kept returns are current because a
+    dependent stays out of its callee's closure only when the gate proved
+    every stored return unmoved or the def's text did not change. With no
+    stored summary there is nothing to add to, and the def stays without one.
+
+  A run that cannot list the keys it observed for a def records none for it: a
+  def observed under more than `RETURN_SUMMARY_KEYS_PER_DEF` (8) keys in one
+  run or across the merge
+  ([#3116](https://github.com/rigortype/rigor/issues/3116); a def at exactly
+  the cap keeps all of its keys), a def one of whose calls the ADR-84 memo
+  refused to store, a def past `RETURN_SUMMARY_TOTAL_CAP`, and every def
+  after a pool run (its workers' memos never reach the session, so a pooled
+  run leaves no summary and the gate is inert under `--workers`). Snapshot
+  SCHEMA 50.
   A key a splat call observed ([#1237](https://github.com/rigortype/rigor/issues/1237)) is stored as
   `(receiver, args, true)` and re-evaluated the way that call bound it, with no
   positional correspondence ([`inference-engine.md`](inference-engine.md)); snapshot SCHEMA 48.

@@ -6,13 +6,21 @@ module Rigor
   module Inference
     module ScopeIndexer
       # The `class_cvars` discovery table (slice 7 phase 6) as a {DeclarationWalk} collector: every
-      # `@@x = …` a `def` body writes, typed under the census scope and unioned per class. Ruby cvars are
-      # shared by the instance and singleton facets, so every `def` counts, `def self.x` included.
+      # `@@x = …` a `def` body or a `class` / `module` body writes, typed under the census scope and unioned
+      # per class. Ruby cvars are shared by the instance and singleton facets, so every `def` counts,
+      # `def self.x` included.
       class ClassCvarsCollector
         include DeclarationWalk::Collector
 
         def initialize
           @table = {}
+        end
+
+        # Issue #3204 — a `class` / `module` body's own writes, outside its `def`s, under the body's context.
+        # An unnameable cref (a header below `class << expr`) leaves the prefix empty, and the gather skips it.
+        def on_declaration(node, _context, body)
+          ScopeIndexer.collect_body_cvar_writes(node.body, body.prefix, body.scope, @table)
+          DeclarationWalk::DESCEND
         end
 
         # `@@x` in a `def` resolves through the LEXICAL cref: `Module.nesting` is the same inside a meta-new or

@@ -2507,6 +2507,8 @@ module Rigor
         _self_decl, child_prefix, child_cref = ctx
         return true unless node.body
 
+        collect_body_cvar_writes(node.body, child_cref ? [] : child_prefix,
+                                 scope_entering_declaration(default_scope, node.constant_path), accumulator)
         walk_class_cvars(node.body, child_cref ? [] : child_prefix,
                          scope_entering_declaration(default_scope, node.constant_path), accumulator,
                          singleton_cref: child_cref)
@@ -2559,27 +2561,61 @@ module Rigor
         gather_cvar_writes(def_node.body, body_scope, class_name, accumulator)
       end
 
+      # Issue #3204 — the writes a `class` / `module` body makes outside its `def`s (`@@x = nil` at the top of
+      # the body, in a block or a `class << self` there): Ruby resolves each through the body's lexical cref,
+      # so it is the same cvar a sibling `def` reads, and it joins the census through the same seam as a
+      # `def` body's write. `self` there is the class itself. The gather stops at `def`, `class` and `module`,
+      # which their own events enter.
+      def collect_body_cvar_writes(body, qualified_prefix, default_scope, accumulator)
+        return if body.nil? || qualified_prefix.empty?
+
+        class_name = qualified_prefix.join("::")
+        body_scope = census_body_scope(default_scope, qualified_prefix,
+                                       Type::Combinator.singleton_of(class_name))
+        gather_cvar_writes(body, body_scope, class_name, accumulator)
+      end
+
       def gather_cvar_writes(node, scope, class_name, accumulator)
         return unless node.is_a?(Prism::Node)
 
-        record_cvar_write(node, scope, class_name, accumulator) if node.is_a?(Prism::ClassVariableWriteNode)
+        if node.is_a?(Prism::ClassVariableWriteNode)
+          record_cvar_write(accumulator, class_name, node.name, EmptySeed.erase(node.value, scope.type_of(node.value)))
+        end
+        record_reflective_cvar_write(node, scope, class_name, accumulator) if node.is_a?(Prism::CallNode)
         # Issue #1217 — `rescue => @@c` / `for @@c in xs` write through a target node. Each enters as the
-        # `Dynamic[top]` floor, the rescue reference too: this census walks `def` bodies only, so a class-body
-        # `@@c = nil` is not in it, and a typed exception entry would read as non-nil in a sibling method.
+        # `Dynamic[top]` floor, the rescue reference too. Issue #3204 put the class body's `@@c = nil` in the
+        # census, but a typed exception entry would still read as non-nil where the `nil` is a superclass's
+        # write: the census keys each class alone, and a cvar is shared down the hierarchy.
         BindingTargets.names(node, Prism::ClassVariableTargetNode).each do |name|
-          (accumulator[class_name] ||= {})[name] = Type::Combinator.untyped
+          record_cvar_write(accumulator, class_name, name, Type::Combinator.untyped)
         end
         return if IVAR_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
 
         node.rigor_each_child { |c| gather_cvar_writes(c, scope, class_name, accumulator) }
       end
 
-      def record_cvar_write(node, scope, class_name, accumulator)
-        rvalue_type = EmptySeed.erase(node.value, scope.type_of(node.value))
-        accumulator[class_name] ||= {}
-        existing = accumulator[class_name][node.name]
-        accumulator[class_name][node.name] =
-          existing ? Type::Combinator.union(existing, rvalue_type) : rvalue_type
+      # Issue #3204 — `class_variable_set(:@@x, v)` on the body's own `self` writes the cvar a sibling `def`
+      # reads, as `@@x = v` does. A receiver other than `self` names another class, which this entry does not
+      # key.
+      def record_reflective_cvar_write(node, scope, class_name, accumulator)
+        return unless node.name == :class_variable_set && (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
+
+        args = node.arguments&.arguments
+        return unless args&.size == 2
+
+        name_node, value = args
+        name = name_node.unescaped if name_node.is_a?(Prism::SymbolNode) || name_node.is_a?(Prism::StringNode)
+        return unless name&.start_with?("@@")
+
+        record_cvar_write(accumulator, class_name, name.to_sym, EmptySeed.erase(value, scope.type_of(value)))
+      end
+
+      # Every census write joins the entry it finds rather than replacing it, so the seed is the same in
+      # whatever order the class's bodies write the cvar.
+      def record_cvar_write(accumulator, class_name, name, type)
+        entries = (accumulator[class_name] ||= {})
+        existing = entries[name]
+        entries[name] = existing ? Type::Combinator.union(existing, type) : type
       end
 
       # The program-global pre-pass's tables on the seeded scope's discovery index, and each global materialised into

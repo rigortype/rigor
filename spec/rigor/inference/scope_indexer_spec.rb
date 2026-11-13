@@ -3406,14 +3406,12 @@ Unrelated
     end
 
     # Issue #1217 — the cvar twin of the ivar census entry for a target-node write. A rescue reference enters as the
-    # unknown floor too, not the exception: this census walks `def` bodies only, so the class-body (or module-body)
-    # `@@last_error = nil` is missing, and a `StandardError` entry would fold a sibling's `@@last_error.nil?` false.
+    # unknown floor too, not the exception: the census keys each class alone, so a superclass's `@@last_error = nil`
+    # is not in a subclass's entry, and a `StandardError` entry would fold a sibling's `@@last_error.nil?` false.
     %w[class module].each do |keyword|
       it "records a rescue-reference or for-index `@@x` in a #{keyword} as the unknown floor" do
         cvars = described_class.build_class_cvar_index(parse(<<~RUBY), Rigor::Scope.empty)
           #{keyword} Klass
-            @@last_error = nil
-            @@f = nil
             def run; yield; rescue => @@last_error; end
             def loop_over = (for @@f in [1, 2]; end)
             def plain = (@@n = nil)
@@ -3424,6 +3422,83 @@ Unrelated
         expect(entries[:@@f]).to eq(Rigor::Type::Combinator.untyped)
         expect(entries[:@@n]).to eq(Rigor::Type::Combinator.constant_of(nil))
       end
+
+      # Issue #3204 — a class-body or module-body write joins the census through the seam a `def` body's does, and
+      # every entry joins the one it finds, the rescue floor included, so the seed does not depend on write order.
+      it "joins a #{keyword}-body `@@x` write with its `def` writes" do
+        cvars = described_class.build_class_cvar_index(parse(<<~RUBY), Rigor::Scope.empty)
+          #{keyword} Klass
+            def set = (@@plain = 1)
+            @@plain = nil
+            [1].each { @@blocked = :b }
+            def only_def = (@@d = 1)
+          end
+        RUBY
+        entries = cvars.fetch("Klass")
+        expect(entries[:@@plain]).to eq(Rigor::Type::Combinator.union(Rigor::Type::Combinator.constant_of(1), Rigor::Type::Combinator.constant_of(nil)))
+        expect(entries[:@@blocked]).to eq(Rigor::Type::Combinator.constant_of(:b))
+        expect(entries[:@@d]).to eq(Rigor::Type::Combinator.constant_of(1))
+      end
+    end
+
+    it "types a class-body write with the class itself as `self`" do
+      cvars = described_class.build_class_cvar_index(parse(<<~RUBY), Rigor::Scope.empty)
+        class Klass
+          @@me = self
+        end
+      RUBY
+      expect(cvars.fetch("Klass")[:@@me]).to eq(Rigor::Type::Combinator.singleton_of("Klass"))
+    end
+
+    it "joins the rescue-reference floor with the class-body write in either order" do
+      before = described_class.build_class_cvar_index(parse(<<~RUBY), Rigor::Scope.empty)
+        class Klass
+          def run; yield; rescue => @@c; end
+          @@c = nil
+        end
+      RUBY
+      after = described_class.build_class_cvar_index(parse(<<~RUBY), Rigor::Scope.empty)
+        class Klass
+          @@c = nil
+          def run; yield; rescue => @@c; end
+        end
+      RUBY
+      expected = Rigor::Type::Combinator.union(Rigor::Type::Combinator.constant_of(nil), Rigor::Type::Combinator.untyped)
+      expect([before.fetch("Klass")[:@@c], after.fetch("Klass")[:@@c]]).to eq([expected, expected])
+    end
+
+    it "files a nested class's and a `class << self` body's writes on their own cref" do
+      cvars = described_class.build_class_cvar_index(parse(<<~RUBY), Rigor::Scope.empty)
+        class Outer
+          class Inner
+            @@i = nil
+          end
+          class << self
+            @@s = nil
+            class Bare
+              @@unnamed = nil
+            end
+          end
+        end
+      RUBY
+      expect(cvars.fetch("Outer::Inner")).to eq(:@@i => Rigor::Type::Combinator.constant_of(nil))
+      expect(cvars.fetch("Outer")).to eq(:@@s => Rigor::Type::Combinator.constant_of(nil))
+      expect(cvars.keys).to contain_exactly("Outer", "Outer::Inner")
+    end
+
+    it "records `class_variable_set` on an implicit or `self` receiver, and nothing else" do
+      cvars = described_class.build_class_cvar_index(parse(<<~RUBY), Rigor::Scope.empty)
+        class Other; end
+        class Klass
+          class_variable_set(:@@a, nil)
+          self.class_variable_set("@@b", 1)
+          Other.class_variable_set(:@@c, nil)
+          class_variable_set(:not_a_cvar, nil)
+          class_variable_set(name, nil)
+        end
+      RUBY
+      expect(cvars.fetch("Klass")).to eq(:@@a => Rigor::Type::Combinator.constant_of(nil), :@@b => Rigor::Type::Combinator.constant_of(1))
+      expect(cvars).not_to have_key("Other")
     end
 
     it "keeps `@@x` inside a `def` in a meta-new or eval block on the lexical cref" do

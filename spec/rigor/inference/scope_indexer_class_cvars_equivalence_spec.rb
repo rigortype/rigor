@@ -127,11 +127,32 @@ module ClassCvarsEquivalenceCases
         end
       end
     RUBY
-    "a body-less header and a block-argument class_eval" => <<~RUBY
+    "a body-less header and a block-argument class_eval" => <<~RUBY,
       class Empty < Base; end
       module M
         X.class_eval(&block)
         def ae = (@@ae = 1)
+      end
+    RUBY
+    "class, module and class << self body writes (#3204)" => <<~RUBY
+      class C
+        @@cb = nil
+        class_variable_set(:@@cs, 1)
+        class << self
+          @@sb = :s
+          class Bare
+            @@unnamed = nil
+          end
+        end
+        class Inner
+          @@ib = nil
+          def ib = (@@ib = 1)
+        end
+        K = Class.new { @@kb = 2.0 }
+      end
+      module M
+        @@mb = nil
+        def mb = (@@mb = 1)
       end
     RUBY
   }.freeze
@@ -182,6 +203,9 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       expect(tables(cases["eval-family blocks and their receivers"]).last.keys)
         .to eq(%w[M X::Reopened M::Y::Local X::Single M::Bare M::Z::W])
       expect(tables(cases["eval blocks under class << self and inside a factory"]).last.keys).to eq(%w[X::B])
+      expect(described(tables(cases["class, module and class << self body writes (#3204)"]).last))
+        .to eq("C" => { :@@cb => "nil", :@@cs => "1", :@@sb => ":s", :@@kb => "2.0" },
+               "C::Inner" => { :@@ib => "1?" }, "M" => { :@@mb => "1?" })
       expect(described(tables(cases["def barriers and operator writes"]).last))
         .to eq("Census" => { :@@ab => "1?", :@@ac => "[1, 2]" })
     end

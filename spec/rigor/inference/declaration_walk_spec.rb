@@ -340,8 +340,8 @@ RSpec.describe Rigor::Inference::DeclarationWalk do
 
     it "names the events a collector class overrides, inherited overrides included" do
       collector = Rigor::Inference::ScopeIndexer::ClassCvarsCollector
-      expect(described_class::Collector.events_of(collector)).to eq(%i[on_def])
-      expect(described_class::Collector.events_of(Class.new(collector))).to eq(%i[on_def])
+      expect(described_class::Collector.events_of(collector)).to eq(%i[on_declaration on_def])
+      expect(described_class::Collector.events_of(Class.new(collector))).to eq(%i[on_declaration on_def])
       expect(described_class::Collector.events_of(only_class(:on_call))).to eq(%i[on_call])
     end
 

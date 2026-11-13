@@ -119,11 +119,12 @@ module Rigor
         private
 
         # Whether a project constant write other than a class declaration binds `name` exactly (the census keeps a
-        # write as spelled, a `*::` wildcard for one it cannot place).
+        # write as spelled, a `*::` wildcard for one it cannot place), or a literal `const_set` in this file does
+        # (`LastLine::SelfEvidence#const_set_spellings`; the census files none).
         def constant_written?(scope, name)
           (scope.bound_constant_names(name) + scope.shadowing_constant_names(name)).any? do |written|
             written == name || written.start_with?("*::")
-          end
+          end || scope.discovery.implicit_self_evidence&.const_set_spellings&.include?(name) || false
         end
       end
 

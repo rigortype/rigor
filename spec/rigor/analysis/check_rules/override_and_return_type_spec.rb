@@ -1238,6 +1238,31 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
           expect(widen_messages(ruby, rbs)).to be_empty
         end
 
+        # A literal `const_set` on the namespace body binds `NS::AMid` as the write above does; one of another name
+        # leaves the body-less `AMid` the ancestor.
+        {
+          "stays silent past `const_set(:AMid, …)`" => ["const_set(:AMid, ::Other)", "Other", []],
+          "stays silent past `self.const_set(\"AMid\", …)`" => ["self.const_set('AMid', ::Other)", "Other", []],
+          "still fires past a `const_set` of another name" => ["const_set(:Unrelated, ::Other)", "AMid", [6]]
+        }.each do |shape, (write, rbs_parent, lines)|
+          it "#{shape} in the namespace body" do
+            ruby = <<~RUBY
+              class AMid
+              end
+              class Other; def hook = "s"; end
+              module NS
+                #{write}
+                class ALeaf < AMid; def hook = "s"; end
+              end
+            RUBY
+            rbs = rbs_decls(
+              "class AMid" => "def hook: () -> Integer", "class Other" => "def hook: () -> String",
+              "module NS" => nil, "class NS::ALeaf < #{rbs_parent}" => "def hook: () -> String"
+            )
+            expect(widen_messages(ruby, rbs)).to eq(lines.map { widened(it, "AMid") })
+          end
+        end
+
         # `k::AMid = ::Other` writes through a base no name reaches, so the census files it as `*::AMid`, which may be
         # `NS::AMid`.
         it "stays silent when a constant write through a computed base may bind the spelling" do

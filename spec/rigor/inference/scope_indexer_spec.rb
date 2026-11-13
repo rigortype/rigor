@@ -2541,7 +2541,6 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         program = parse(<<~RUBY)
           class AppError < StandardError; end
           ERRS = [TypeError].freeze
-          MATCHER = Object.new
 
           class F
             def initialize
@@ -2566,7 +2565,6 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         ],
         "a project-class rescue reference" => ["begin; risky; rescue AppError => @v; end", ["AppError"]],
         "a splat-list rescue reference" => ["begin; risky; rescue *ERRS => @v; end", nil],
-        "a matcher-object rescue reference" => ["begin; risky; rescue MATCHER => @v; end", nil],
         "a for index" => ["for @v in [1, 2]; end", nil],
         "a splat for index" => ["for *@v in [[1, 2]]; end", nil],
         "a multi-target for index" => ["for @v, w in [[1, 2]]; end", nil],

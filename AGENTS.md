@@ -45,7 +45,11 @@ traps that fail silently (zsh, `grep -q` under `pipefail`) are in
 
 ## Validation
 
-Local runs are targeted; the full gate is CI on the pull request.
+Local runs are targeted; the full gate is CI on the pull request. That only holds while a gate gives
+the same answer in both places: a gate reads what the repository tracks, never what a directory
+happens to hold, so that an installed artifact or an uncommitted draft cannot decide its verdict.
+Where one does diverge, the gate is the defect — do not add a local gate to compensate
+([`measurement.md`](docs/agents/measurement.md) § "Specs and gates that pass without checking").
 
 - Before pushing: `make verify-changed` — whitespace, RuboCop, the affected specs, `spec/docs/`, and
   `rigor check` over what the branch changed, in under a minute. It lists what it cannot cover; CI

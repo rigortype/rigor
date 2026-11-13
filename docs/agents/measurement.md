@@ -145,6 +145,23 @@ The same failure inside the suite: a green example that would stay green with th
 - **A load-time `Dir[]` that generates examples can generate none**, and zero examples is zero
   failures. Assert non-vacuity explicitly, as `spec/docs/plugin_io_boundary_spec.rb` does. A floor
   with slack (`>= 15` of 20) suits only a corpus that grows; on a static one any file can go green.
+- **The same `Dir[]` can generate too many, and then the gate answers per machine.** A corpus globbed
+  from the working tree admits whatever a contributor has installed or not yet committed. #3213: a
+  glob over `.pi/` took in 25 pages from `.pi/npm/node_modules/`, five with links their package does
+  not ship, so `make docs-check` failed on a clone that had run the pi install and passed in CI,
+  which checks out without it — two review rounds and a full CI run all green on a commit that was
+  red on the author's machine. A gate only one side can see is worse than no gate, and the repair is
+  the gate, not a second gate run locally to catch it: CI is the full gate (`AGENTS.md`
+  § "Validation") only because a gate's verdict does not depend on where it runs. Build the corpus
+  from the repository (`TrackedFiles.call`, `spec/support/tracked_files.rb`, which also carries the
+  `-z` / byte-exact / hook-environment reasoning). Where an *uncommitted draft* should still be
+  caught — a new `docs/` page with a dead link is worth hearing about before the commit, not after —
+  exclude ignored paths rather than taking only tracked ones; #3214 holds the three corpora that
+  still glob. Two sibling traps, both of which cost a whole spec file at load time: interpolating a
+  byte-exact path into a message that holds a non-ASCII character raises
+  `Encoding::CompatibilityError`, and `File.read` on a path the index holds but the working tree does
+  not raises `ENOENT`. A gate that cannot run its corpus reports nothing, and nothing is what a
+  reader of a green run sees.
 - **A guard that keeps breaking is usually a bad proxy**, not a missing case. Replace the proxy with
   the real check (`Prism.parse` for "does it parse") rather than adding one rule per spelling.
 - **A spec rewrite is verified by comparing payloads**, the sources each example analyses, not

@@ -49,8 +49,11 @@ Read-only unless a later fix step is entered. Never merge.
 
 **Output**
 
-- Exactly one of: `Approved` or `Needs fix` (checklist the next lane
-  step can act on)
+- The fixed report of [`rigor-reviewer`](../../../.claude/skills/rigor-reviewer/SKILL.md)
+  § Report, read from `origin/master`: severity counts, the head SHA, and each finding with its
+  severity and its repro — the command, its output, and the output correct behaviour requires
+- Then exactly one of: `Approved` (only with `Severe remaining: no`) or `Needs fix`; no severe
+  finding does not force `Approved`
 - Prefer a concrete counterexample over trusting green CI alone when
   behaviour is claimed
 - **On final approval review** (the pass that may produce `Approved`):

@@ -40,14 +40,23 @@ Expect a PR / diff / head SHA plus Acceptance bullets (or a `ReviewInput`).
 
 ## Output
 
-End with exactly one verdict:
+Report in the fixed shape of
+[`rigor-reviewer`](../../.claude/skills/rigor-reviewer/SKILL.md) § Report, read from `origin/master`
+and not from the head you are reviewing: the `Severe N | Moderate N | Minor N | Nit N` line, the verdict line
+naming the head SHA you reviewed, `Severe remaining`, and each finding with its severity, its failure
+scenario, introduced or pre-existing, and its repro — the command, its output, and the output correct
+behaviour requires. A suspicion that did not reproduce goes on the `Not reproduced` line, never in the
+findings.
 
-- `Approved`
-- `Needs fix` (with a concrete checklist)
+Then end with exactly one verdict:
+
+- `Approved` — only with `Severe remaining: no`. A moderate, minor or nit finding does **not** force
+  `Approved`: returning `Needs fix` for a finding the PR should fix first is yours to judge, and
+  ADR-115 WD6 §5's fix loop is reached that way.
+- `Needs fix`
 
 Prefer counterexamples and evidence over trusting green CI alone when behaviour
 is claimed.
-
 
 ## Final approval artifacts (required when ending with `Approved`)
 
@@ -66,10 +75,10 @@ misleading PR text unaddressed).
 
 ## Review shape
 
+The fixed report above, then this harness's additions:
+
 ```
-## Review (Grok:xhigh)
-- Correct: …
-- Finding: P0/P1/P2, location, evidence, smallest fix
+<the fixed report>
 - Verdict: Approved | Needs fix
 - PR body draft: …
 - PR comment drafts: […]

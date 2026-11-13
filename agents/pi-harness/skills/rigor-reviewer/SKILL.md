@@ -46,7 +46,7 @@ finding with its severity, its failure scenario, introduced or pre-existing, and
 this harness's fields:
 
 ```text
-verdict:           "Approved" | "Needs fix"   # Approved iff `Severe remaining: no`
+verdict:           "Approved" | "Needs fix"   # Approved only with `Severe remaining: no`
 pr_body_draft:     |                # required when this is the final approval pass
   ## Summary
   …
@@ -74,5 +74,7 @@ applies or posts those drafts (reviewer stays read-only / never merges).
 
 Both follow the fixed report, never replace it:
 
-- `Approved` (only with `Severe remaining: no`; must include `pr_body_draft` + `pr_comment_drafts`)
+- `Approved` (only with `Severe remaining: no`; must include `pr_body_draft` + `pr_comment_drafts`).
+  No severe finding does not make `Approved` mandatory: `Needs fix` stays yours to return for a
+  finding the PR should fix first, which is how ADR-115 WD6 §5's fix loop is reached.
 - `Needs fix`

@@ -155,8 +155,9 @@ Once the change is implemented and `make verify-changed` passes:
    one PR or a batch, tells the agent to load the
    [`rigor-reviewer`](../../.claude/skills/rigor-reviewer/SKILL.md) skill, which holds that contract.
    Its § Report is the one report shape, whichever harness reviews: the Pi harness
-   (`agents/pi-harness/contracts/README.md` § Reviewer) and the takt adversary
-   (`.takt/facets/instructions/adversarial-review.md`) return it and add their own fields after it, so
+   ([`contracts/README.md`](../../agents/pi-harness/contracts/README.md) § Reviewer) and the takt
+   adversary ([`adversarial-review.md`](../../.takt/facets/instructions/adversarial-review.md))
+   return it and add their own fields after it, so
    a review satisfies this step wherever it ran, and whoever lands reads the same fields. A review that
    comes back without that shape — no severity, no repro per finding — has not been triaged by anyone
    yet, and step 3 cannot be applied to it: ask for the report, rather than reviewing the PR again.
@@ -180,14 +181,21 @@ Once the change is implemented and `make verify-changed` passes:
    (a merge, a push, a publish, a skipped gate). Imprecise or unclear wording is not severe.
 
    **When nobody is coordinating.** An unattended loop — takt, the Pi harness, a scripted heartbeat —
-   may land a PR by itself only where this step asks it for no judgment: the review reported
-   `Severe remaining: no`, what it fixed was wording or specs, and no advisory job warned. Everything
-   else stops at Draft with the review report posted as a PR comment, which is the handover: a severe
-   finding, a finding the loop would reject, an allocation hold, or any decision § "Decisions and the
-   approval queue" calls serious. Parking costs a wait; the alternatives cost a wrong landing, or a
-   review nobody can act on. Two things the loop never does: mark a PR ready that no review has read
-   (CI runners bound the throughput, so a ready PR that fails costs a full run — `.takt/README.md`),
-   and decide by itself that a finding is not severe.
+   may land a PR by itself only where every condition in step 6 holds (the `waza` comment on a skill
+   PR included) and this step asks it for no judgment: every review step 2 requires reported
+   `Severe remaining: no` — for the Pi harness, each of the co-primary pair ADR-115 WD6 names — the
+   round's fixes changed wording or specs rather than behaviour, and no advisory job warned.
+   Everything else stops at Draft with the review report posted as a PR comment, which is the
+   handover: a severe finding, a finding the loop would reject, an allocation hold, or any decision
+   § "Decisions and the approval queue" covers — the serious ones, and a non-serious one with no
+   entry written yet. Parking costs a wait; the alternatives cost a wrong landing, or a review nobody
+   can act on. Three things the loop never does: mark a PR ready that no review has read (CI runners
+   bound the throughput, so a ready PR that fails costs a full run —
+   [`.takt/README.md`](../../.takt/README.md)), decide by itself that a finding is not severe, and
+   review an unchanged head again to get a cleaner answer. A severe finding is cleared by a fix and a
+   delta review that confirms it, never by another review of the same head: reviewers differ run to
+   run, which is why step 2 can ask for a pair, and a loop that re-rolls until one report comes back
+   clean has skipped the gate rather than passed it.
 4. **Another round only if this round's fixes addressed a severe defect or changed behaviour.** Make it a
    delta review of the fix commits: re-check each prior finding and hunt for regressions the fix
    introduced. In the September 2026 review logs (167 PRs), 63% of the severe defects found in

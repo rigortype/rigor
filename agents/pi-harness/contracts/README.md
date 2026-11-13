@@ -42,6 +42,9 @@ CiWatchOutput:
 
 ## Reviewer
 
+The report shape is [`rigor-reviewer`](../../../.claude/skills/rigor-reviewer/SKILL.md) § Report,
+read from `origin/master`.
+
 ```text
 ReviewInput:
   pr:              #<n> | URL
@@ -54,7 +57,8 @@ ReviewOutput:
                     the parsed `Severe N | Moderate N | Minor N | Nit N` line, the verdict line with
                     the head SHA, `Severe remaining`, and each finding with its severity, its failure
                     scenario, introduced-or-pre-existing, and its repro>
-  verdict:         "Approved" | "Needs fix"   # Approved iff `Severe remaining: no`
+  verdict:         "Approved" | "Needs fix"   # Approved only with `Severe remaining: no`;
+                                              # a non-severe finding may still be `Needs fix`
   pr_body_draft:   |                # required when this is the final approval pass
     …
   pr_comment_drafts:                # required on final approval pass (may be [])
@@ -65,7 +69,6 @@ ReviewOutput:
 `checklist` is gone: a finding's severity and its repro are what the next step needs, and a flat
 checklist carried neither. One report shape means a review run here can be landed by a coordinator
 reading the same fields, and a review run under Claude Code can be landed by this harness.
-
 
 ## Interactive queues (QueueTurn)
 

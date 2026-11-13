@@ -61,8 +61,9 @@ Triage the output with the adversarial review's findings:
   fifteen do it. What `waza` reports under Links for such a link is only that it leaves the skill's
   directory — it stops there and never resolves the target, so a renamed ADR reads exactly like a
   healthy link. `spec/docs/link_integrity_spec.rb` resolves them instead — over `.claude/skills/`,
-  `skills/` and the Pi harness's `agents/pi-harness/`, whose skills, roles and contracts are internal
-  too and carry the same exemption — and `make docs-check` runs it. A link that stays inside the skill directory is `waza`'s to check, and
+  `skills/`, and the three internal trees that carry the same exemption because they point into this
+  repository for the same reason (`agents/pi-harness/`, `.pi/`, `.takt/`) — and `make docs-check`
+  runs it. A link that stays inside the skill directory is `waza`'s to check, and
   a missing target there is a defect. In `skills/`, a `SKILL.md` or its `references/` may not link
   into the repository at all, for the reason at the top of this file, whether or not `waza` flags
   it.

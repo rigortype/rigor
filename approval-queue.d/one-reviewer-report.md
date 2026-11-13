@@ -2,7 +2,7 @@
 
 - **PR:** [#3212](https://github.com/rigortype/rigor/pull/3212)
 - **Issue:** none
-- **Class:** open-choice
+- **Class:** process
 - **Precedent:** [#2138](https://github.com/rigortype/rigor/pull/2138)
 - **Decided:** 2026-11-13
 
@@ -11,8 +11,9 @@
 The maintainer asked for this rule while designing a flow that keeps running when no Claude session
 is attending it. The takt lane ends at a Draft PR; waiting for CI, the adversarial review and the landing belong to a
 coordinator. That makes the review the one step that needs a Claude session, and the intake gate
-(`TAKT_MAX_UNLANDED`, default 5) stops new lanes once that many PRs are unlanded — so an absent
-coordinator stops the implementers too, not just the reviews.
+(`TAKT_MAX_UNLANDED`, default 5) refuses to enqueue while open `takt/` PRs plus unfinished tasks plus
+the new ones would exceed it — so an absent coordinator stops the implementers too, not just the
+reviews.
 
 Moving the review into the unattended loop raises the question this entry answers: with the review
 run by a harness and the landing run by a script, who applies § "Landing a pull request" step 3, and

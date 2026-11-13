@@ -28,6 +28,8 @@ require "yaml"
 RSpec.describe "Declaration producers" do
   let(:snapshot) { File.join(__dir__, "producers.yml") }
   # The closed grandfathered list. Lower it when an entry goes; never raise it for a new producer.
+  # Moves so far: 367 → 366 (#3014), when `concern_module_body?` stopped deriving a declaration context and
+  # became a consumer. Name the entry and the reason here, since the pin itself carries no history.
   let(:grandfathered_pin) do
     { count: 366, digest: "882cefc43358f4206d76a9f01b4d38fb2203b9923af9a9ac7f41a95ead0f39ab" }
   end

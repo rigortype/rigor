@@ -483,6 +483,7 @@ members:
   implicit_self_evidence:
     reads:
     - lib/rigor/inference/last_line/implicit_self.rb
+    - lib/rigor/scope/resolution_chain.rb
     copies: []
   in_effect_refinements:
     reads:

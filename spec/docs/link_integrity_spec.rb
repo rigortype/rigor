@@ -132,11 +132,26 @@ LINK_INTEGRITY_LINKED_DOCS = begin
   end
 end.freeze
 
-# The same, for the two skill trees. Separate from LINK_INTEGRITY_LINKED_DOCS because the floors below
+# The same, for the skill trees. Separate from LINK_INTEGRITY_LINKED_DOCS because the floors below
 # describe a much smaller corpus, and because a skill is reached by its own tree, not by `docs/`.
+#
+# Tracked files, not a glob of the working tree. Two of these roots hold installed artifacts beside the
+# instructions — `.gitignore` keeps `.pi/*` out except `settings.json` and `agents/`, and `.takt/tasks/`
+# and `.takt/events/` likewise — so a glob picks up whatever a contributor has installed. It did: `.pi/npm/
+# node_modules/` put 29 vendored READMEs in the corpus and five of them link to files their package does not
+# ship, so `make docs-check` failed on a contributor's clone and passed in CI, which checks out without
+# them. A gate that only one side can see is worse than no gate. `git ls-files` is also the honest
+# definition of the corpus: these trees are instructions this repository ships, not what sits in the
+# directory.
+LINK_INTEGRITY_SKILL_TRACKED = begin
+  rels = LINK_INTEGRITY_SKILL_ROOTS.map { |root| root.delete_prefix("#{LINK_INTEGRITY_REPO_ROOT}/") }
+  out = IO.popen(["git", "-C", LINK_INTEGRITY_REPO_ROOT, "ls-files", "-z", "--", *rels], &:read)
+  out.split("\0").grep(/\.md\z/).map { |rel| File.join(LINK_INTEGRITY_REPO_ROOT, rel) }.sort
+end.freeze
+
 LINK_INTEGRITY_LINKED_SKILL_DOCS = begin
   helper = Object.new.extend(LinkIntegrityHelpers)
-  LINK_INTEGRITY_SKILL_ROOTS.flat_map { |root| Dir[File.join(root, "**", "*.md")] }.sort.select do |md_path|
+  LINK_INTEGRITY_SKILL_TRACKED.select do |md_path|
     helper.extract_relative_links(File.read(md_path, encoding: "utf-8"), File.dirname(md_path)).any?
   end
 end.freeze
@@ -247,6 +262,22 @@ RSpec.describe "documentation link integrity" do
     it "sets a floor for every tree in the corpus" do
       expect(LINK_INTEGRITY_SKILL_FLOORS.keys.map { |rel| File.join(LINK_INTEGRITY_REPO_ROOT, rel) })
         .to match_array(LINK_INTEGRITY_SKILL_ROOTS)
+    end
+
+    # `git ls-files` is what keeps an installed artifact out of the corpus (see the constant's comment).
+    # Reading the working tree instead was the defect: the same commit was red on a clone with
+    # `.pi/npm/node_modules/` and green in CI. So pin that the filter is doing something — a path this
+    # repository ignores must not be in the corpus even when the file is there.
+    it "takes only tracked files, so an installed artifact cannot enter the corpus" do
+      ignored = IO.popen(
+        ["git", "-C", LINK_INTEGRITY_REPO_ROOT, "ls-files", "-z", "--others", "--ignored",
+         "--exclude-standard", "--", *LINK_INTEGRITY_SKILL_FLOORS.keys], &:read
+      ).split("\0").grep(/\.md\z/).map { |rel| File.join(LINK_INTEGRITY_REPO_ROOT, rel) }
+
+      expect(LINK_INTEGRITY_SKILL_TRACKED & ignored).to be_empty
+      expect(LINK_INTEGRITY_SKILL_TRACKED).to include(
+        File.join(LINK_INTEGRITY_REPO_ROOT, ".claude/skills/rigor-reviewer/SKILL.md")
+      )
     end
   end
 

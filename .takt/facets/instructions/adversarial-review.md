@@ -15,6 +15,14 @@ For this tidy/engine follow-up class:
   Do not Approve while leaving misleading PR text unaddressed — either
   `Needs fix` or Approve with corrected drafts.
 
-Finish with exactly one of:
-- "Approved" (include PR body draft + comment drafts)
-- "Needs fix" (list findings as a checklist the next step can act on)
+Report in the fixed shape of `.claude/skills/rigor-reviewer/SKILL.md` § Report: the parsed
+`Severe N | Moderate N | Minor N | Nit N` line, the verdict line naming the head SHA you reviewed,
+`Severe remaining`, and each finding with its severity, its failure scenario, introduced or
+pre-existing, and its repro — the command, its output, and the output correct behaviour requires. A
+suspicion that did not reproduce goes on the `Not reproduced` line, not in the findings. The step
+after this one acts on the report without reviewing again, which it can only do if the findings carry
+that much.
+
+Then finish with exactly one of:
+- "Approved" (only with `Severe remaining: no`; include PR body draft + comment drafts)
+- "Needs fix"

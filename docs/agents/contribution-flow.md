@@ -154,6 +154,12 @@ Once the change is implemented and `make verify-changed` passes:
    a concrete failure scenario, and scope expansion labelled separately. Every reviewer brief, for
    one PR or a batch, tells the agent to load the
    [`rigor-reviewer`](../../.claude/skills/rigor-reviewer/SKILL.md) skill, which holds that contract.
+   Its § Report is the one report shape, whichever harness reviews: the Pi harness
+   (`agents/pi-harness/contracts/README.md` § Reviewer) and the takt adversary
+   (`.takt/facets/instructions/adversarial-review.md`) return it and add their own fields after it, so
+   a review satisfies this step wherever it ran, and whoever lands reads the same fields. A review that
+   comes back without that shape — no severity, no repro per finding — has not been triaged by anyone
+   yet, and step 3 cannot be applied to it: ask for the report, rather than reviewing the PR again.
    A PR that changes a skill also runs the `waza` review in [`skill-authoring.md`](skill-authoring.md)
    at the same time; its findings join this triage.
 3. **Triage.** For a PR that changes the engine, read the "Engine allocations (advisory)" job's
@@ -172,6 +178,16 @@ Once the change is implemented and `make verify-changed` passes:
    weighs: a diagnostic on correct code, a wrong inferred type, a crash, a gate that passes without
    checking, or guidance that would lead an agent into a wrong irreversible or gate-skipping action
    (a merge, a push, a publish, a skipped gate). Imprecise or unclear wording is not severe.
+
+   **When nobody is coordinating.** An unattended loop — takt, the Pi harness, a scripted heartbeat —
+   may land a PR by itself only where this step asks it for no judgment: the review reported
+   `Severe remaining: no`, what it fixed was wording or specs, and no advisory job warned. Everything
+   else stops at Draft with the review report posted as a PR comment, which is the handover: a severe
+   finding, a finding the loop would reject, an allocation hold, or any decision § "Decisions and the
+   approval queue" calls serious. Parking costs a wait; the alternatives cost a wrong landing, or a
+   review nobody can act on. Two things the loop never does: mark a PR ready that no review has read
+   (CI runners bound the throughput, so a ready PR that fails costs a full run — `.takt/README.md`),
+   and decide by itself that a finding is not severe.
 4. **Another round only if this round's fixes addressed a severe defect or changed behaviour.** Make it a
    delta review of the fix commits: re-check each prior finding and hunt for regressions the fix
    introduced. In the September 2026 review logs (167 PRs), 63% of the severe defects found in

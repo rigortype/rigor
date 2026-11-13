@@ -24,7 +24,8 @@ require "spec_helper"
 LINK_INTEGRITY_DOCS_ROOT = File.expand_path("../../docs", __dir__)
 LINK_INTEGRITY_REPO_ROOT = File.expand_path("../..", __dir__)
 
-# The two skill trees (`.claude/skills/` contributor workflows, `skills/` user-facing ones) link into this
+# The three skill trees (`.claude/skills/` contributor workflows, `skills/` user-facing ones, and the Pi
+# harness's `agents/pi-harness/` roles, contracts and skills) link into this
 # repository the way any document here does, and nothing resolved those links before: `waza check`, the only
 # tool that reads them, stops at "link escapes skill directory" and never looks at an ESCAPING link's
 # target, so a renamed ADR leaves output byte-identical to the healthy case (`docs/agents/skill-authoring.md`
@@ -34,12 +35,16 @@ LINK_INTEGRITY_REPO_ROOT = File.expand_path("../..", __dir__)
 # A placeholder link an instruction teaches the author to WRITE (`rigor-adr-author`'s `[Title](N-slug.md)`
 # row) resolves to nothing, so it belongs in a code span or a fenced block, which the extractor strips.
 # There is no per-link exemption here.
-LINK_INTEGRITY_SKILL_ROOTS = %w[.claude/skills skills].map { |rel| File.join(LINK_INTEGRITY_REPO_ROOT, rel) }.freeze
+LINK_INTEGRITY_SKILL_ROOTS = %w[.claude/skills skills agents/pi-harness]
+                             .map { |rel| File.join(LINK_INTEGRITY_REPO_ROOT, rel) }.freeze
 
 # A floor per tree, not one for the pair: a floor on the total cannot see one tree drop out when the other
 # is large enough to carry it. Each is sized just under the current counts — `.claude/skills/` 13 files /
-# 97 links, `skills/` 21 / 88 — tight enough that a weakened extractor goes red on both trees (the greedy
-# fenced-code stripper the `docs/` corpus names above takes them to 78 and 56 links).
+# 97 links, `skills/` 21 / 88, `agents/pi-harness/` 8 / 24 — tight enough that a weakened extractor goes
+# red on the first two trees (the greedy fenced-code stripper the `docs/` corpus names above takes them to
+# 78 and 56 links). `agents/pi-harness/` is the tree the corpus was extended to AFTER it was built, and it
+# held a dead link the whole time (`rigor-lane`'s note pointer was one `..` short), which is the argument
+# for a tree joining this corpus the day it starts linking into the repository.
 #
 # They move with the set in BOTH directions. ADR-81 is a skill-set optimization ADR, so retiring a skill
 # legitimately lowers a count — the largest single skill carries 5 linked files and 42 links — and the
@@ -47,7 +52,8 @@ LINK_INTEGRITY_SKILL_ROOTS = %w[.claude/skills skills].map { |rel| File.join(LIN
 # slack so that neither is visible.
 LINK_INTEGRITY_SKILL_FLOORS = {
   ".claude/skills" => { files: 11, links: 90 },
-  "skills" => { files: 18, links: 80 }
+  "skills" => { files: 18, links: 80 },
+  "agents/pi-harness" => { files: 6, links: 20 }
 }.freeze
 
 # The `references/` git submodules hold vendored upstream sources. Contributors check them out, but CI

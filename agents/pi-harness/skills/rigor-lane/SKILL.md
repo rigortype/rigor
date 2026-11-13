@@ -14,7 +14,7 @@ Load and follow:
 - Role: [`../../roles/lane.md`](../../roles/lane.md)
 - Contracts: [`../../contracts/README.md`](../../contracts/README.md)
 - Process note (v0.4.0 batch traps):
-  [`../../../docs/notes/20260921-queue-release-lane-experience.md`](../../../docs/notes/20260921-queue-release-lane-experience.md)
+  [`../../../../docs/notes/20260921-queue-release-lane-experience.md`](../../../../docs/notes/20260921-queue-release-lane-experience.md)
   (when present on the branch)
 
 ## Hard constraints (always)

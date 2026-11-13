@@ -3135,7 +3135,7 @@ RSpec.describe "Rigor type construction (integration)" do
       end
 
       it "does not fold a comparison against a value only a deeper call returns" do
-        flow = harness.diagnostics.select { |d| d.rule.to_s == "flow.always-truthy-condition" }
+        flow = Timeout.timeout(60) { harness.diagnostics.select { |d| d.rule.to_s == "flow.always-truthy-condition" } }
         expect(flow.map(&:line)).to eq([])
       end
     end

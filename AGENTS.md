@@ -45,12 +45,7 @@ traps that fail silently (zsh, `grep -q` under `pipefail`) are in
 
 ## Validation
 
-Local runs are targeted; the full gate is CI on the pull request. A gate that walks a tree where this
-repository keeps files it does not ship takes its corpus from the index, so an ignored artifact cannot
-enter it; content still comes from the working tree, which is how a local run catches an edit before
-it is committed. Where a gate answers *differently* in the two places, the gate is the defect — not a
-reason for a second gate to compensate ([`measurement.md`](docs/agents/measurement.md) § "Specs and
-gates that pass without checking", which also says which local-only failures are worth keeping).
+Local runs are targeted; the full gate is CI on the pull request.
 
 - Before pushing: `make verify-changed` — whitespace, RuboCop, the affected specs, `spec/docs/`, and
   `rigor check` over what the branch changed, in under a minute. It lists what it cannot cover; CI

@@ -162,7 +162,10 @@ The same failure inside the suite: a green example that would stay green with th
   are not defects: the `references/ruby` examples in `spec/docs/c_effects_raises_gate_spec.rb`, which
   execute on a clone that has the optional submodule and `skip` in every CI job, and the Nix devShell,
   which CI never runs at all (it builds the package instead) — `AGENTS.md` § "Validation" answers
-  that one with a local `make verify`. Keep gates only one side can run few, and verify such a gate *executed* before
+  that one with a local `make verify`. Shell scripts are gated on neither side: nothing runs
+  `shellcheck`, and `ci.yml`'s `skip_re` puts `.sh` outside code detection, as it does `tool/steep/`
+  and `tool/sorbet/`. That is accepted, not an oversight; it is also the reason a `.sh` change is
+  reviewed by reading it. Keep gates only one side can run few, and verify such a gate *executed* before
   believing it ([`rigor-worktree`](../../.claude/skills/rigor-worktree/SKILL.md)); do not read their
   asymmetry as the bug below.
   The bug is narrower: the same gate, on the same content, executing in both places and returning two

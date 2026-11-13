@@ -188,6 +188,7 @@ are N/A is healthy, not failing.
 | Stakes as an independent scored axis | Rejected | Stakes are a property of the *decision*, not the *document's quality*; double-counting them distorts the score. They belong as a reading modifier on axes 1–2 and 8. |
 | Absolute length limits (e.g. "≤ N words") | Rejected | Economy is proportional, not absolute — ADR-46's length is correct, ADR-40's brevity is correct. A fixed cap would punish the right long ADR and reward a hollow short one. |
 | Auto-penalize any ADR lacking explicit intent | Rejected | Directly contradicts the goal: many ADRs are correctly thin. Thin intent is a defect *only* at `high` stakes (§2), which the modifier captures without a blanket penalty. |
+| A structural gate on ADR bodies (a regomark-style `deny` / `warn` split) | Deferred | The reading hazards below are a diagnostic aid, and a gate on them would dock the corpus's own conventions: of 128 ADRs, 77 cite a `#NN`+ issue or PR and roughly 30–45 carry `file:line` anchors, which the hazards table exempts by hand. Revisit only with a rule set the corpus already satisfies. |
 | Fold intent into the existing "Context" expectation | Deferred | Intent (the goal/why) and Context (the problem/background) are distinct and worth scoring apart; merging them hides the most common gap in load-bearing ADRs. Revisit only if the two axes prove to move together in practice. |
 
 ## Consequences

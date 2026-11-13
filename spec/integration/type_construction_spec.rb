@@ -3108,6 +3108,18 @@ RSpec.describe "Rigor type construction (integration)" do
       end
     end
 
+    describe "fixtures/recursive_keyword_parity.rb — issue #3115 keyword recursion answers as its positional twin" do
+      let(:harness) { harness_for("recursive_keyword_parity") }
+
+      # Every keyword row has the positional form beside it, asserted to the same type. Before the fix the
+      # keyword rows read `bot` (or `Dynamic[top]` for the mutual pair), which marks the code after the call
+      # unreachable.
+      it "types a recursion through a keyword argument as the positional form" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+    end
+
     describe "fixtures/recursive_unroll_clamp.rb — ADR-55 WD1 precision-envelope clamps" do
       let(:harness) { harness_for("recursive_unroll_clamp") }
 

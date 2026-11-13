@@ -44,6 +44,7 @@ require_relative "mutation_widening"
 require_relative "narrowing"
 require_relative "optimistic_origin"
 require_relative "receiver_alias"
+require_relative "recursion_rebinding"
 require_relative "repeated_or_writes"
 require_relative "singleton_object_constant"
 require_relative "refined_dispatch"
@@ -2703,6 +2704,9 @@ module Rigor
         case type
         when Type::Constant then true
         when Type::Tuple then type.elements.all? { |element| fully_value_pinned?(element) }
+        when Type::HashShape
+          # Issue #3115 — the shape {#pinned_shape_descriptor} keys an unroll on is as pinned as a result.
+          type.closed? && type.optional_keys.empty? && type.pairs.each_value.all? { |value| fully_value_pinned?(value) }
         else false
         end
       end
@@ -4502,13 +4506,60 @@ module Rigor
       # Rebuilds the user-method body scope with every bound positional parameter widened to its nominal
       # base (`1 | 2 | 3` → `Integer`, `Constant[:x]` → `Symbol`). Used by the bot-collapse retry in
       # `fixpoint_user_method_return`: call-site argument narrowing can prune a recursive method's base
-      # case, and widening restores the declared-type view under which the base case is reachable. Returns
-      # `nil` when the parameter shape is not inferable (mirrors `build_user_method_body_scope`).
+      # case, and widening restores the declared-type view under which the base case is reachable. A
+      # parameter the def's own recursive calls rebind is bound `Dynamic[top]` instead ({RecursionRebinding}).
+      # Returns `nil` when the parameter shape is not inferable (mirrors `build_user_method_body_scope`).
       def widened_user_method_body_scope(def_node, receiver, arg_types, self_fold_safe: false,
                                          positionals_unknown: false)
-        widened_args = arg_types.map { |arg_type| widen_value_pinned(arg_type) }
-        build_user_method_body_scope(def_node, receiver, widened_args, self_fold_safe: self_fold_safe,
-                                                                       positionals_unknown: positionals_unknown)
+        widened_args = arg_types.map { |arg_type| widen_bound_argument(arg_type) }
+        build_user_method_body_scope(def_node, receiver, widened_args,
+                                     self_fold_safe: self_fold_safe, positionals_unknown: positionals_unknown,
+                                     rebound: recursion_rebound_parameters(def_node, receiver))
+      end
+
+      # Issue #3115 — {RecursionRebinding.rebound_parameters} for `def_node`, told the def's other names: a name
+      # the body calls is an alias when `receiver`'s class resolves it to this same def (`alias al2 al1` makes
+      # `al2(n - 1, !f)` a recursive call). A receiver whose class cannot be asked rebinds every parameter.
+      def recursion_rebound_parameters(def_node, receiver)
+        names = Set[def_node.name]
+        RecursionRebinding.called_names(def_node.body).each do |name|
+          next if name == def_node.name
+
+          resolved = recursion_def_for(receiver, name)
+          return RecursionRebinding::ALL if resolved == :unknown
+
+          names << name if resolved.equal?(def_node)
+        end
+        RecursionRebinding.rebound_parameters(def_node, names)
+      end
+
+      def recursion_def_for(receiver, method_name)
+        return scope.singleton_def_for(receiver.class_name, method_name) if receiver.is_a?(Type::Singleton)
+        return :unknown unless user_inference_receiver?(receiver)
+
+        resolve_user_def_through_ancestors(receiver.class_name, method_name)
+      end
+
+      # Issue #3115 — one argument of the widened retry. A keyword argument reaches the binder inside the call's
+      # trailing `HashShape`, which {#widen_value_pinned} leaves as it is (a shape is not a value pin), so a
+      # keyword parameter kept its call-site pin through the retry and the base case stayed pruned: the body
+      # then converged on the `bot` seed. A shape carrier keeps its keys, policy and arity, and the values it
+      # holds widen at every depth: a `HashShape`'s values, a `Tuple`'s elements and a `Union`'s members.
+      def widen_bound_argument(arg_type)
+        case arg_type
+        when Type::HashShape
+          Type::HashShape.new(
+            arg_type.pairs.transform_values { |value| widen_bound_argument(value) },
+            required_keys: arg_type.required_keys, optional_keys: arg_type.optional_keys,
+            read_only_keys: arg_type.read_only_keys, extra_keys: arg_type.extra_keys
+          )
+        when Type::Tuple
+          Type::Combinator.tuple_of(*arg_type.elements.map { |element| widen_bound_argument(element) })
+        when Type::Union
+          Type::Combinator.union(*arg_type.members.map { |member| widen_bound_argument(member) })
+        else
+          widen_value_pinned(arg_type)
+        end
       end
 
       # ADR-55 slice 2 bot-collapse resolution (2026-06-11). Called when a fixpoint iteration computed `bot`
@@ -4664,7 +4715,26 @@ module Rigor
             total += descriptor.last
           end
           [["t", parts], total]
+        when Type::HashShape then pinned_shape_descriptor(arg)
         end
+      end
+
+      # Issue #3115 — a call's keyword arguments arrive as one closed `HashShape`, so `m(n: 2)` is as
+      # value-pinned as `m(2)` when every entry is. An open shape, or one with an optional key, does not name
+      # one argument list and stays on the type-keyed path.
+      def pinned_shape_descriptor(shape)
+        return nil unless shape.closed? && shape.optional_keys.empty?
+
+        parts = []
+        total = 1
+        shape.pairs.each do |key, value|
+          descriptor = pinned_value_descriptor(value)
+          return nil if descriptor.nil?
+
+          parts << [key.inspect, descriptor.first]
+          total += descriptor.last
+        end
+        [["h", parts], total]
       end
 
       # Builds the body scope for a user-defined instance method call: a fresh `Scope` with `self_type` set
@@ -4688,7 +4758,13 @@ module Rigor
       # through it. Record a per-file write kind in the census instead, as {ScopeIndexer::CONSTANT_MEMO} does
       # (#1276). Setting `source_path` here was rejected: plugins read it, and the return memo would become
       # caller-dependent.
-      def build_user_method_body_scope(def_node, receiver, arg_types, self_fold_safe: false, positionals_unknown: false)
+      #
+      # Issue #3115 — `rebound:` is the widened retry's set ({#widened_user_method_body_scope}): the parameters
+      # the def's own recursive calls rebind ({RecursionRebinding}), each bound `Dynamic[top]` whether the call
+      # wrote the slot or a default filled it. The retry types the body for every call the recursion makes,
+      # and such a slot holds whatever a recursive call passes (`tog(n: n - 1, f: !f)` against `f: false`).
+      def build_user_method_body_scope(def_node, receiver, arg_types, self_fold_safe: false,
+                                       positionals_unknown: false, rebound: nil)
         params = def_node.parameters
         locals =
           if positionals_unknown
@@ -4697,6 +4773,9 @@ module Rigor
             bind_params_from_call_types(params, arg_types)
           end
         return nil if locals.nil?
+
+        rebound = locals.keys if rebound == RecursionRebinding::ALL
+        rebound&.each { |name| locals[name] = dynamic_top if locals.key?(name) }
 
         # Construct the body scope in a SINGLE Scope allocation (plus the issue #1358 frame it carries, whose
         # scans run only on demand) — the previous `Scope.empty.with_*.with_*…` chain

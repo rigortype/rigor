@@ -1,0 +1,74 @@
+---
+locals:
+  subject: Dynamic[top]
+assertions:
+  '1': bot
+  '2': bot
+  '3': Integer
+  '4': Integer
+  '5': '1'
+  '6': '1'
+  '7': ":done"
+  '8': ":done"
+  '9': ":done"
+  '10': ":done"
+  '11': ":done"
+  '12': ":done"
+  '13': '1'
+  '14': '1'
+  '15': '1'
+  '16': '1'
+  '17': Integer
+  '18': Integer
+  '19': ":base"
+  '20': ":base"
+  '21': ":blk"
+  '22': ":blk"
+  '23': ":blk"
+  '24': ":blk"
+  '25': Dynamic[top]
+  '26': Dynamic[top]
+  '27': Dynamic[top]
+  '28': Dynamic[top]
+  '29': 'false'
+  '30': 'false'
+  '31': Dynamic[top]
+  '32': Dynamic[top]
+  '33': Dynamic[top]
+  '34': Dynamic[top]
+  '35': "[2, 1]"
+  '36': "[2, 1]"
+  '37': Integer
+  '38': Integer
+  '39': "{ x: 1 }"
+  '40': "{ x: 1 }"
+  '41': "{ x: 1 }"
+  '42': "{}"
+  '43': "[1, 2]"
+  '44': ":base"
+  '45': ":base"
+  '46': ":base"
+  '47': Integer
+  '48': ":fast"
+  '49': ":fast"
+  '50': '1'
+  '51': '1'
+  '52': "[Symbol]"
+  '53': "{ a: Integer }"
+  '54': Dynamic[top]
+  '55': Dynamic[top]
+  '56': Dynamic[top]
+  '57': ":slow | Dynamic[top]"
+  '58': Dynamic[top]
+  '59': Dynamic[top]
+  '60': Dynamic[top]
+  '61': Dynamic[top]
+  '62': Dynamic[top]
+  '63': Dynamic[top]
+  '64': Dynamic[top]
+  '65': Dynamic[top]
+  '66': Dynamic[top]
+  '67': Dynamic[top]
+  '68': Dynamic[top]
+  '69': Dynamic[top]
+  '70': Dynamic[top]

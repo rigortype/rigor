@@ -20,6 +20,8 @@
 # `main` branch this repository has never had. Every one of them 404ed for as long as it shipped.
 
 require "spec_helper"
+require "fileutils"
+require "tmpdir"
 
 LINK_INTEGRITY_DOCS_ROOT = File.expand_path("../../docs", __dir__)
 LINK_INTEGRITY_REPO_ROOT = File.expand_path("../..", __dir__)
@@ -36,7 +38,8 @@ LINK_INTEGRITY_REPO_ROOT = File.expand_path("../..", __dir__)
 # A placeholder link an instruction teaches the author to WRITE (`rigor-adr-author`'s `[Title](N-slug.md)`
 # row) resolves to nothing, so it belongs in a code span or a fenced block, which the extractor strips.
 # There is no per-link exemption here.
-LINK_INTEGRITY_SKILL_ROOTS = %w[.claude/skills skills agents/pi-harness .pi .takt]
+LINK_INTEGRITY_SKILL_ROOT_RELS = %w[.claude/skills skills agents/pi-harness .pi .takt].freeze
+LINK_INTEGRITY_SKILL_ROOTS = LINK_INTEGRITY_SKILL_ROOT_RELS
                              .map { |rel| File.join(LINK_INTEGRITY_REPO_ROOT, rel) }.freeze
 
 # A floor per tree, not one for the pair: a floor on the total cannot see one tree drop out when the other
@@ -135,26 +138,28 @@ end.freeze
 # The same, for the skill trees. Separate from LINK_INTEGRITY_LINKED_DOCS because the floors below
 # describe a much smaller corpus, and because a skill is reached by its own tree, not by `docs/`.
 #
-# Tracked files, not a glob of the working tree. Two of these roots hold installed artifacts beside the
-# instructions — `.gitignore` keeps `.pi/*` out except `settings.json` and `agents/`, and `.takt/tasks/`
-# and `.takt/events/` likewise — so a glob picks up whatever a contributor has installed. It did: `.pi/npm/
-# node_modules/` put 29 vendored READMEs in the corpus and five of them link to files their package does not
-# ship, so `make docs-check` failed on a contributor's clone and passed in CI, which checks out without
-# them. A gate that only one side can see is worse than no gate. `git ls-files` is also the honest
-# definition of the corpus: these trees are instructions this repository ships, not what sits in the
-# directory.
-LINK_INTEGRITY_SKILL_TRACKED = begin
-  rels = LINK_INTEGRITY_SKILL_ROOTS.map { |root| root.delete_prefix("#{LINK_INTEGRITY_REPO_ROOT}/") }
-  out = IO.popen(["git", "-C", LINK_INTEGRITY_REPO_ROOT, "ls-files", "-z", "--", *rels], &:read)
-  out.split("\0").grep(/\.md\z/).map { |rel| File.join(LINK_INTEGRITY_REPO_ROOT, rel) }.sort
-end.freeze
-
-LINK_INTEGRITY_LINKED_SKILL_DOCS = begin
+# Tracked files, not a glob of the working tree: two of these roots keep installed artifacts beside the
+# instructions, and `spec/support/tracked_files.rb` records what a glob read there and why `git ls-files` is
+# also the honest definition of the corpus (these trees are instructions this repository ships, not what
+# sits in the directory).
+#
+# A path in the index that is not in the working tree — a half-finished `rm`, an interrupted rebase, a
+# contributor who moved `.pi/` aside — is skipped rather than read: `File.read` would raise at load time and
+# take all 300-odd examples of this file with it, including the `docs/` corpus, which has nothing to do with
+# that state. The per-tree floors below report the loss instead, in their own words.
+LINK_INTEGRITY_SKILL_CORPUS = lambda do |root, rels|
   helper = Object.new.extend(LinkIntegrityHelpers)
-  LINK_INTEGRITY_SKILL_TRACKED.select do |md_path|
+  TrackedFiles.call(root, *rels).grep(/\.md\z/).sort
+              .map { |rel| File.join(root, rel) }
+              .select do |md_path|
+    next false unless File.file?(md_path)
+
     helper.extract_relative_links(File.read(md_path, encoding: "utf-8"), File.dirname(md_path)).any?
   end
-end.freeze
+end
+
+LINK_INTEGRITY_LINKED_SKILL_DOCS = LINK_INTEGRITY_SKILL_CORPUS
+                                   .call(LINK_INTEGRITY_REPO_ROOT, LINK_INTEGRITY_SKILL_ROOT_RELS).freeze
 
 RSpec.describe "documentation link integrity" do
   extend LinkIntegrityHelpers
@@ -260,24 +265,47 @@ RSpec.describe "documentation link integrity" do
     # The floors above are per tree, so they only hold while the table names every tree in the corpus:
     # dropping a root from LINK_INTEGRITY_SKILL_ROOTS would otherwise retire its floor with it.
     it "sets a floor for every tree in the corpus" do
-      expect(LINK_INTEGRITY_SKILL_FLOORS.keys.map { |rel| File.join(LINK_INTEGRITY_REPO_ROOT, rel) })
-        .to match_array(LINK_INTEGRITY_SKILL_ROOTS)
+      expect(LINK_INTEGRITY_SKILL_FLOORS.keys).to match_array(LINK_INTEGRITY_SKILL_ROOT_RELS)
     end
 
-    # `git ls-files` is what keeps an installed artifact out of the corpus (see the constant's comment).
-    # Reading the working tree instead was the defect: the same commit was red on a clone with
-    # `.pi/npm/node_modules/` and green in CI. So pin that the filter is doing something — a path this
-    # repository ignores must not be in the corpus even when the file is there.
+    # `git ls-files` is what keeps an installed artifact out of the corpus. Reading the working tree
+    # instead was the defect, and it is this gate's own failure mode: red on a clone with
+    # `.pi/npm/node_modules/`, green in CI.
+    #
+    # So the pin builds the condition rather than hoping to find it. Asserting against this clone
+    # would be vacuous wherever the defect matters — CI has no ignored files to exclude, so the
+    # assertion would pass on a corpus built either way — and asserting on the tracked list alone
+    # would leave the corpus free to go back to a glob underneath it. This runs the corpus builder
+    # itself, over a throwaway repository that has both an instruction and an installed artifact.
     it "takes only tracked files, so an installed artifact cannot enter the corpus" do
-      ignored = IO.popen(
-        ["git", "-C", LINK_INTEGRITY_REPO_ROOT, "ls-files", "-z", "--others", "--ignored",
-         "--exclude-standard", "--", *LINK_INTEGRITY_SKILL_FLOORS.keys], &:read
-      ).split("\0").grep(/\.md\z/).map { |rel| File.join(LINK_INTEGRITY_REPO_ROOT, rel) }
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "skills/demo"))
+        FileUtils.mkdir_p(File.join(dir, "skills/npm/node_modules/pkg"))
+        File.write(File.join(dir, ".gitignore"), "skills/npm/\n")
+        File.write(File.join(dir, "skills/demo/SKILL.md"), "# demo\n\n[ignore file](../../.gitignore)\n")
+        File.write(File.join(dir, "skills/npm/node_modules/pkg/README.md"), "# pkg\n\n[src](src/index.ts)\n")
+        TrackedFiles.git!(dir, "init", "--quiet")
+        TrackedFiles.git!(dir, "add", "--", ".gitignore", "skills")
 
-      expect(LINK_INTEGRITY_SKILL_TRACKED & ignored).to be_empty
-      expect(LINK_INTEGRITY_SKILL_TRACKED).to include(
-        File.join(LINK_INTEGRITY_REPO_ROOT, ".claude/skills/rigor-reviewer/SKILL.md")
-      )
+        expect(LINK_INTEGRITY_SKILL_CORPUS.call(dir, %w[skills]))
+          .to eq([File.join(dir, "skills/demo/SKILL.md")])
+      end
+    end
+
+    # The same builder, on a path the index holds and the working tree does not: skipped, so the file's
+    # 300-odd examples still run and the floors are what report the loss.
+    it "skips a tracked file that is not in the working tree" do
+      Dir.mktmpdir do |dir|
+        FileUtils.mkdir_p(File.join(dir, "skills/demo"))
+        File.write(File.join(dir, "skills/demo/SKILL.md"), "# demo\n\n[gone](../gone.md)\n")
+        File.write(File.join(dir, "skills/gone.md"), "# gone\n\n[demo](demo/SKILL.md)\n")
+        TrackedFiles.git!(dir, "init", "--quiet")
+        TrackedFiles.git!(dir, "add", "--", "skills")
+        File.delete(File.join(dir, "skills/gone.md"))
+
+        expect(LINK_INTEGRITY_SKILL_CORPUS.call(dir, %w[skills]))
+          .to eq([File.join(dir, "skills/demo/SKILL.md")])
+      end
     end
   end
 

@@ -3,8 +3,8 @@ name: rigor-lane
 description: >-
   Implement one Rigor issue under a fixed architect LaneInput contract in a
   worktree, push, print head SHA, and stop. Do not CI-watch, run parallel host
-  make verify, or burn the session on full corpus checks. Finish with Head SHA
-  <sha> — lane done or Blocked — need human.
+  make verify, or burn the session on full corpus checks. Finish with the head
+  SHA and "lane done", or "Blocked — need human".
 ---
 
 # Rigor lane (ADR-115)

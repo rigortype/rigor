@@ -94,22 +94,36 @@ module Rigor
       Entry = Data.define(:name, :side, :raw, :candidates, :superclass_edge, :last_segment, :owner) do
         def external? = name.nil?
 
-        # Issue #3156 — the class or module the project declares that an external entry names, or nil: the first of
-        # its spellings (the owner-qualified one ahead of the candidates, #1698) that is a `discovered_classes` key,
-        # read in Ruby's lookup order, so a spelling RBS alone knows ahead of it leaves nil. Such an entry is a
-        # declaration whose Ruby body records no method, superclass or include (`module PMod; end`). It files the
-        # entry's negative class edge, which a declaration of the name appearing or vanishing fires.
+        # Issue #3156 — the BODY-LESS class or module the project declares that an external entry names, or nil: the
+        # first of its spellings that is a `discovered_classes` key, read in Ruby's lookup order. Such a declaration
+        # records no method, superclass or include (`module PMod; end`), which is why the chain holds it as external.
+        # The owner-qualified spelling (#1698) leads only on a mixin edge: Ruby evaluates a superclass expression
+        # outside the class's own body, so `class Leaf < Base` never names `Leaf::Base`. Any spelling up to the match
+        # that RBS alone knows, that a project constant write binds (`AMid = ::Other` in `NS`), or that names a class
+        # with a body leaves nil, since Ruby may resolve the constant there or the chain should have held it. It files
+        # the entry's negative class and constant edges, which a declaration or write of the name appearing or
+        # vanishing fires.
         def declared_name(scope)
-          Analysis::DependencyRecorder.read_last_segment(:class, raw.to_s)
           spelling = raw.to_s
-          spellings = owner && !spelling.start_with?("::") ? ["#{owner}::#{spelling}", *candidates] : candidates
-          spellings.uniq.each do |candidate|
-            return candidate if scope.discovered_classes.key?(candidate)
+          Analysis::DependencyRecorder.read_last_segment(:class, spelling)
+          Analysis::DependencyRecorder.read_last_segment(:constant, spelling)
+          own = owner && !superclass_edge && !spelling.start_with?("::")
+          (own ? ["#{owner}::#{spelling}", *candidates] : candidates).uniq.each do |candidate|
+            return nil if constant_written?(scope, candidate)
+            return (scope.known_user_class?(candidate) ? nil : candidate) if scope.discovered_classes.key?(candidate)
             return nil if Rigor::Reflection.rbs_class_known?(candidate, scope: scope)
           end
           nil
-        rescue StandardError
-          nil
+        end
+
+        private
+
+        # Whether a project constant write other than a class declaration binds `name` exactly (the census keeps a
+        # write as spelled, a `*::` wildcard for one it cannot place).
+        def constant_written?(scope, name)
+          (scope.bound_constant_names(name) + scope.shadowing_constant_names(name)).any? do |written|
+            written == name || written.start_with?("*::")
+          end
         end
       end
 

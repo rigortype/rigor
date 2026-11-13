@@ -1182,6 +1182,61 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
           expect(widen_messages(ruby, rbs)).to eq([widened(6, "Mid::Inner")])
         end
 
+        # Ruby evaluates a superclass expression outside the class's own body, so `class Leaf < Base` never names
+        # the `Leaf::Base` that body declares, whatever the top-level `Base` is.
+        {
+          "a body-less project class" => "class Base\nend\n",
+          "RBS-only" => "",
+          "a body-less project class, beside a nested `Base` with a body" => "class Base\nend\n"
+        }.each_with_index do |(top, top_ruby), index|
+          it "does not read the nested `Leaf::Base` as the superclass when the top-level `Base` is #{top}" do
+            nested = index == 2 ? "class Base; def other = 1; end" : "class Base; end"
+            ruby = "#{top_ruby}class Leaf < Base\n  #{nested}\n  def hook = \"s\"\nend\n"
+            rbs = rbs_decls(
+              "class Base" => "def hook: () -> String", "class Leaf < Base" => "def hook: () -> String",
+              "class Leaf::Base" => "def hook: () -> Integer#{index == 2 ? "\n  def other: () -> Integer" : ""}"
+            )
+            expect(widen_messages(ruby, rbs)).to be_empty
+          end
+        end
+
+        # `NS::AMid` is a constant alias of `Other`, so `NS::ALeaf < AMid` subclasses `Other`, not the top-level
+        # body-less `AMid` the next spelling names.
+        it "stays silent when a constant write binds a spelling ahead of the body-less class" do
+          ruby = <<~RUBY
+            class AMid
+            end
+            class Other; def hook = "s"; end
+            module NS
+              AMid = ::Other
+              class ALeaf < AMid; def hook = "s"; end
+            end
+          RUBY
+          rbs = rbs_decls(
+            "class AMid" => "def hook: () -> Integer", "class Other" => "def hook: () -> String",
+            "module NS" => nil, "class NS::ALeaf < Other" => "def hook: () -> String"
+          )
+          expect(widen_messages(ruby, rbs)).to be_empty
+        end
+
+        # Pre-existing and outside #3156: with a body, `AMid` is a project entry the chain resolves past the alias
+        # itself, so this still fires. Flip it when the resolver reads constant aliases.
+        it "still fires through the constant alias when the top-level class has a body (resolver blind spot)" do
+          ruby = <<~RUBY
+            class AMid; def hook = 1; end
+            class Other; def hook = "s"; end
+            module NS
+              AMid = ::Other
+              class ALeaf < AMid; def hook = "s"; end
+            end
+          RUBY
+          rbs = rbs_decls(
+            "class AMid" => "def hook: () -> Integer", "class Other" => "def hook: () -> String",
+            "module NS" => nil, "class NS::ALeaf < Other" => "def hook: () -> String"
+          )
+          expect(widen_messages(ruby, rbs)).to eq([widened(5, "AMid")])
+        end
+
         it "stays silent on a correct override through a body-less ancestor" do
           ruby = <<~RUBY
             class AMid

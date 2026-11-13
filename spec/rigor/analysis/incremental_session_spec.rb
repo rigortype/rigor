@@ -3502,6 +3502,21 @@ end
           end
         end
 
+        # The precision control: the probe's edges reach the readers of the pair it passed, not every dependent of the
+        # edited file, so `r.rb`, which reads only the untouched `w`, is not re-analysed when `B::X` is published.
+        it "re-checks only the readers of the def that newly probes the constant" do
+          two = "class C; def self.w(k); A.v(k); end; def self.w2(k); %sA.v(k); end; end\n"
+          Dir.mktmpdir do |dir|
+            base = unpublished.merge("c.rb" => format(two, ""), "r2.rb" => "puts 'hit' if C.w2(1) == 3\n")
+            rechecks = replay(dir, [base,
+                                    { "c.rb" => format(two, "defined?(B::X); ") },
+                                    { "b.rb" => "class B; X = 6; end\n" }])
+            expect(basenames(rechecks.first.affected)).to eq(["c.rb"])
+            expect(basenames(rechecks.last.affected)).to include("r2.rb")
+            expect(basenames(rechecks.last.affected)).not_to include("r.rb")
+          end
+        end
+
         # The control: an edit to `b.rb` that leaves `B::X`'s publication where it was re-checks no reader.
         it "still skips the reader when the edit leaves the probed constant's publication alone" do
           Dir.mktmpdir do |dir|

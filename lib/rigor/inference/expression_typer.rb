@@ -2438,18 +2438,23 @@ module Rigor
       # other call leaves the keywords unknown (an open empty shape), because a splatted array's last element
       # is passed as keywords when it is a `ruby2_keywords` hash.
       #
-      # Issue #3157 — a call whose every splat is a `Tuple` {#expand_tuple_splats} can expand is bound as the
-      # equivalent positional call. Issue #3099 — an empty closed double splat passes no argument
-      # ({#drop_empty_double_splat}).
+      # Issue #3157 — a call whose every splat {#expand_tuple_splats} can expand is bound as the equivalent
+      # positional call. Issue #3099 — a literal `**{}` passes no argument and is dropped; any other lone double
+      # splat typed as an empty closed shape (`f(**h)`, `h = {}`) is bound with no positional correspondence,
+      # since the shape may be a stale read of a hash a callee filled.
       def positional_correspondence(call_node, arg_types)
+        arguments = call_node.arguments&.arguments
         unless splat_arguments?(call_node)
-          return [drop_empty_double_splat(call_node.arguments&.arguments, arg_types), false]
+          return [arg_types[0...-1], false] if literal_empty_double_splat?(arguments&.last)
+          return [[UNKNOWN_KEYWORDS], true] if empty_double_splat?(arguments&.last, arg_types.last)
+
+          return [arg_types, false]
         end
 
-        expanded = expand_tuple_splats(call_node.arguments.arguments, arg_types)
+        expanded = expand_tuple_splats(arguments, arg_types)
         return [expanded, false] if expanded
 
-        last = call_node.arguments.arguments.last
+        last = arguments.last
         keywords = arg_types.last if last.is_a?(Prism::KeywordHashNode) && arg_types.last.is_a?(Type::HashShape)
         [[keywords || UNKNOWN_KEYWORDS], true]
       end
@@ -2457,50 +2462,69 @@ module Rigor
       UNKNOWN_KEYWORDS = Type::Combinator.hash_shape_of({}, extra_keys: :open)
       private_constant :UNKNOWN_KEYWORDS
 
-      # Issue #3099 — `arg_types` without its last entry when the call's last argument is a lone double splat
-      # (`f(**h)`, `f(**{})`) {#call_arg_type} typed as a closed `HashShape` with no pairs. Ruby passes no
-      # argument for it, so binding it left a positional `{}`: `def count(*keys) = keys.size` called
-      # `r.count(**h)` with `h = {}` folded to `1`. Any other list is returned as it is. `arguments` and
-      # `arg_types` share their last entry on every path that reaches here.
-      def drop_empty_double_splat(arguments, arg_types)
-        return arg_types unless empty_double_splat?(arguments&.last, arg_types.last)
-
-        arg_types[0...-1]
+      # Issue #3099 — whether `argument` is a keyword hash built only of literal empty double splats (`**{}`),
+      # which Ruby passes as no argument at all.
+      def literal_empty_double_splat?(argument)
+        argument.is_a?(Prism::KeywordHashNode) &&
+          argument.elements.all? do |element|
+            element.is_a?(Prism::AssocSplatNode) && element.value.is_a?(Prism::HashNode) &&
+              element.value.elements.empty?
+          end
       end
 
+      # Issue #3099 — whether `argument` is a keyword hash {#call_arg_type} typed (as `type`) to a shape with no
+      # pairs. Only a lone double splat of a closed shape is typed so ({#double_splat_hash_shape}). Bound as
+      # given, it left a positional `{}`: `def count(*keys) = keys.size` called `r.count(**h)` with `h = {}`
+      # folded to `1`.
       def empty_double_splat?(argument, type)
-        argument.is_a?(Prism::KeywordHashNode) && argument.elements.size == 1 &&
-          argument.elements.first.is_a?(Prism::AssocSplatNode) &&
-          type.is_a?(Type::HashShape) && type.closed? && type.pairs.empty?
+        argument.is_a?(Prism::KeywordHashNode) && type.is_a?(Type::HashShape) && type.pairs.empty?
       end
 
       # Issue #3157 — the argument list with each `*splat` replaced by its elements, or nil to keep the
-      # no-correspondence binding. It expands only when every splat's value is a `Tuple` (fixed arity) whose
-      # every element is {#provably_not_hash?}: a splatted array's last element is passed as keywords when it
-      # is a `ruby2_keywords` hash, so an element that may be a `Hash` leaves the keywords unknown. A list
-      # holding `...` is not expanded. An empty closed double splat written last is dropped
-      # ({#drop_empty_double_splat}).
-      #
-      # Only a call outside every re-typed body frame expands (the main walk's call sites). Inside a frame a rest
-      # parameter is bound to the caller's Tuple, so a chain `m1(*a) = m2(*a) + m2(1, *a)` handed each level a
-      # longer Tuple and walked every arity of every level (spec/rigor/inference/splat_chain_growth_spec.rb).
+      # no-correspondence binding. It expands only when every splat's operand is an array literal with no splat
+      # of its own, so its arity is syntactic, and every element is {#provably_not_hash?}: a splatted array's
+      # last element is passed as keywords when it is a `ruby2_keywords` hash. A splat of a local or any other
+      # expression is not expanded, because a `Tuple` read there may be a stale fold of an array that has since
+      # grown or shrunk. A trailing keyword hash must be a literal `**{}` (dropped) or a non-empty closed shape;
+      # an open, mixed or empty non-literal one leaves the keywords unknown. A list holding `...` is not
+      # expanded: its argument types do not line up with its argument nodes. The splat's own entry in
+      # `arg_types` is `Dynamic[top]` ({#type_of_non_value}), so the operand is typed here.
       def expand_tuple_splats(arguments, arg_types)
         return nil if forwards_arguments?(arguments)
-        return nil unless typing_state.stack(INFERENCE_GUARD).empty?
+
+        last = arguments.last
+        trailing_keywords = last.is_a?(Prism::KeywordHashNode)
+        return nil if trailing_keywords && !literal_empty_double_splat?(last) && !keyword_shape?(arg_types.last)
 
         expanded = []
         arguments.each_with_index do |argument, index|
+          next if argument.equal?(last) && trailing_keywords && literal_empty_double_splat?(last)
           next expanded << arg_types[index] unless argument.is_a?(Prism::SplatNode)
-          return nil if argument.expression.nil?
 
-          tuple = type_of(argument.expression)
-          return nil unless tuple.is_a?(Type::Tuple) && tuple.elements.all? { |element| provably_not_hash?(element) }
+          elements = literal_splat_elements(argument)
+          return nil if elements.nil?
 
-          expanded.concat(tuple.elements)
+          expanded.concat(elements)
         end
-        return expanded unless empty_double_splat?(arguments.last, arg_types.last)
+        expanded
+      end
 
-        expanded[0...-1]
+      # Whether a trailing keyword-hash argument's type is a closed shape with at least one pair.
+      def keyword_shape?(type)
+        type.is_a?(Type::HashShape) && type.closed? && !type.pairs.empty?
+      end
+
+      # The element types of `*[a, b]`, or nil unless the operand is an array literal with no splat element whose
+      # every element is {#provably_not_hash?}.
+      def literal_splat_elements(splat)
+        literal = splat.expression
+        return nil unless literal.is_a?(Prism::ArrayNode) && literal.elements.none?(Prism::SplatNode)
+
+        tuple = type_of(literal)
+        return nil unless tuple.is_a?(Type::Tuple) && tuple.elements.size == literal.elements.size
+        return nil unless tuple.elements.all? { |element| provably_not_hash?(element) }
+
+        tuple.elements
       end
 
       # Classes no instance of which is a `Hash`. A `Nominal` of any other class may be a `Hash` subclass.
@@ -2513,7 +2537,7 @@ module Rigor
       def provably_not_hash?(type)
         case type
         when Type::Constant then !type.value.is_a?(Hash)
-        when Type::Tuple, Type::IntegerRange, Type::FloatRange then true
+        when Type::Tuple, Type::IntegerRange then true
         when Type::Nominal then NON_HASH_CLASSES.include?(type.class_name)
         when Type::Union then type.members.all? { |member| provably_not_hash?(member) }
         when Type::Refined, Type::Difference then provably_not_hash?(type.base)

@@ -930,10 +930,12 @@ binding cannot manufacture a diagnostic inside the callee's body.
   with Symbol keys MUST be typed at the call site as that shape, so `f(**h)` binds the callee's named keyword
   parameters by name exactly as the literal form `f(a: 1, b: 2)` does. The shape MUST be carried in the argument list
   itself rather than passed alongside it, because the ADR-84 return memo keys on `(def_node, receiver, arg_types)`.
-  When that shape has no pairs (`f(**h)` with `h = {}`, `f(**{})`) and the double splat is the call's last argument,
-  Ruby passes no argument for it, and the body tiers MUST bind the list without it (issue
-  [#3099](https://github.com/rigortype/rigor/issues/3099)): bound as one positional `{}`, `def count(*keys) =
-  keys.size` called `r.count(**h)` folded to `1`.
+  A call whose last argument is that shape with no pairs was bound as one positional `{}` (issue
+  [#3099](https://github.com/rigortype/rigor/issues/3099)): `def count(*keys) = keys.size` called `r.count(**h)`
+  with `h = {}` folded to `1`. Ruby passes no argument for an empty double splat, so the body tiers MUST bind
+  the list without a last argument built only of literal `**{}`. Any other such argument (`**h` with `h = {}`)
+  MUST bind with no positional correspondence, as for a positional splat below, because an empty shape read
+  from a local or a call may be stale: `h = {}; Box.new(h).fill; r.count(**h)` is `1` in Ruby.
 - Every other keyword-hash argument MUST keep its own pre-existing type, and so keep the pre-#1125 answer: a MIXED hash
   (`f(a: 1, **h)` — the literal pairs and the splatted shape are not merged), an OPEN shape (unknown extras make every
   missing-keyword answer a guess rather than a read), a shape with a non-Symbol key (Ruby itself rejects those as
@@ -964,16 +966,21 @@ binding cannot manufacture a diagnostic inside the callee's body.
   summary key carries the same mark, and the incremental session MUST re-drive that key with no positional
   correspondence too. It installs no `...` forwarding list.
 
-  When every splat's value is a `Tuple` whose every element provably is not a `Hash` (a constant that is not a
-  Hash, a nested `Tuple`, an integer or float range, a nominal of a core class such as `Integer`, `String`,
-  `Symbol` or `Array`, or a union of these), the body tiers MUST instead expand each splat into its elements and
-  bind the result as the equivalent positional call (issue [#3157](https://github.com/rigortype/rigor/issues/3157)):
-  `first(*[1, 2])` with `def first(*xs) = xs.first` answers `1`. With no `Hash` element no `ruby2_keywords` hash
-  can supply the keywords, so they bind as for that positional call. Any other splat, a list holding `...`, and a
-  `Tuple` with an element that may be a `Hash` (a `HashShape`, a `Hash` nominal, a nominal of any class outside
-  that core set, `Dynamic`) keep the no-correspondence binding above. So does a Tuple splat at a call typed
-  inside a body re-typed for another call: there a rest parameter holds the caller's Tuple, and a chain
-  `m1(*a) = m2(*a) + m2(1, *a)` would hand each level a longer one and walk every arity of every level.
+  When every splat's operand is an array literal with no splat element (`*[1, 2]`), and every element's type
+  provably is not a `Hash` (a constant that is not a Hash, a `Tuple`, an integer range, a nominal of a core class
+  such as `Integer`, `String`, `Symbol` or `Array`, a union of these, or a refinement or difference over one), the
+  body tiers MUST instead expand each splat into its elements and bind the result as the equivalent positional
+  call (issue [#3157](https://github.com/rigortype/rigor/issues/3157)): `first(*[1, 2])` with
+  `def first(*xs) = xs.first` answers `1`. With no `Hash` element no `ruby2_keywords` hash can supply the
+  keywords, so they bind as for that positional call. A trailing literal `**{}` is dropped as above. These MUST
+  keep the no-correspondence binding:
+  - a splat of any other operand, a local or a call included, even one typed as a `Tuple`: such a Tuple may be
+    a stale fold (`t = [1, 2]; [3].each { t << _1 }; r.count(*t)` is `3` in Ruby);
+  - an element that may be a `Hash` (a `HashShape`, a `Hash` nominal, a nominal of any class outside that core
+    set, `Dynamic`);
+  - a trailing keyword hash that is neither literal `**{}` nor a non-empty closed shape: an open or shapeless
+    double splat, a mixed `k: 2, **h`, or an empty shape read from a local;
+  - a list holding `...`.
 - `def m(...)` MUST NOT be declined by the call-site binder. Its NAMED parameters (a leading `def m(a, ...)`
   required) bind as before, and nothing is bound for the forwarding slot, which is not a binding at all.
 - A `f(...)` call inside a `def m(...)` body MUST expand to the argument types of the call that entered the frame, so

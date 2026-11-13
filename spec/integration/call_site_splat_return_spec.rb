@@ -7,8 +7,8 @@
 # splat: each positional parameter is `Dynamic[top]` and the rest parameter `Array[untyped]`. The body still
 # answers, so a callee that always raises keeps its `bot` and an argument-independent return is kept.
 #
-# `idx` is an `Array[Integer]`, not a `Tuple`: a Tuple splat whose elements cannot be a `Hash` is expanded into
-# positionals (issue #3157, spec/integration/call_site_tuple_splat_return_spec.rb).
+# `idx` is an `Array[Integer]`, not an array literal: a splat of a literal whose elements cannot be a `Hash` is
+# expanded into positionals (issue #3157, spec/integration/call_site_tuple_splat_return_spec.rb).
 require "spec_helper"
 
 RSpec.describe "a call-site splat does not bind as one positional argument (#1237)", type: :runner do

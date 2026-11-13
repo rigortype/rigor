@@ -35,6 +35,7 @@ RSpec.describe "a call-site literal splat or empty double splat binds as Ruby pa
         def two(a, b = 2) = b
         def pair(a, b) = b
         def kw(*a, k: 1) = k
+        def lit(**o) = false
         def self.sfirst(*xs) = xs.first
       end
       class Box
@@ -280,6 +281,16 @@ RSpec.describe "a call-site literal splat or empty double splat binds as Ruby pa
 
     it "through a top-level def" do
       expect(mismatches("tcount(1, **o2)", "non-negative-int")).to eq([])
+    end
+
+    # The binder used to decline this call (a non-shape keyword hash into a keyword-taking callee); the body is
+    # now typed with every parameter `Dynamic`, and its return reads none of them.
+    it "types a body the binder used to decline" do
+      expect(mismatches("Row.new.lit(**o2)", "false")).to eq([])
+    end
+
+    it "control: the same body with literal keywords" do
+      expect(mismatches("Row.new.lit(k: 1)", "false")).to eq([])
     end
   end
 

@@ -3081,10 +3081,12 @@ end
       it "keeps a kept row beside a fresh row with the same key and another return" do
         session = session_for(configuration(Dir.tmpdir))
         kept = { keys: [[:recv, [1]], [:recv, [2]]], returns: [":a", ":b"], effects: [] }
-        fresh = { keys: [[:recv, [1]], [:recv, [2]]], returns: [":a", "Dynamic[top]"], effects: [0] }
+        fresh = { keys: [[:recv, [1]], [:recv, [2]]], returns: [":a", "Dynamic[top]"], effects: [0],
+                  guard_constants: ["X"] }
 
         expect(session.send(:merged_return_summary, kept, fresh))
-          .to eq(keys: [[:recv, [1]], [:recv, [2]], [:recv, [2]]], returns: [":a", "Dynamic[top]", ":b"], effects: [0])
+          .to eq(keys: [[:recv, [1]], [:recv, [2]], [:recv, [2]]], returns: [":a", "Dynamic[top]", ":b"], effects: [0],
+                 guard_constants: ["X"])
       end
 
       it "holds the stored summaries to the total cap" do
@@ -3212,7 +3214,8 @@ end
               symbol_sources: { File.join(dir, "b.rb") => Set["B.u"] }, ancestry_sources: Set.new
             )
             reads = { [File.join(dir, "c.rb"), "<toplevel>#w"] => stray }
-            observations = described_class.const_get(:GateObservations).new(reads: reads, summaries: nil)
+            observations = described_class.const_get(:GateObservations).new(reads: reads, summaries: nil,
+                                                                            plugin_reads: {})
             session.instance_variable_set(:@gate_observations, observations)
 
             guarded_recheck(session)
@@ -3356,6 +3359,68 @@ end
             expect(basenames(rechecks.first.affected)).to eq(["c.rb"])
             expect(basenames(rechecks.last.affected)).to include("r.rb")
             expect(falsey?(rechecks.last)).to be(true)
+          end
+        end
+      end
+
+      # Issue #3186 — `flow.always-truthy-condition` withholds on `C.w(1) == 3` once `w`'s body reads a constant
+      # another file published (`PublishedConstantGuard`'s one hop), whatever `w` returns. An edit that keeps every
+      # return but adds or drops such a read moves the reader's answer, so the gate must keep the reader.
+      describe "a return-preserving edit that changes the published constants the def reads" do
+        def a_v = "class A; def self.v(k) = k == 5 ? k + 1 : k + 2; end\n"
+        def reader = "puts 'hit' if C.w(1) == 3\n"
+        def w_plain = "class C; def self.w(k) = A.v(k); end\n"
+        def w_cross = "class C; def self.w(k) = B::X == 6 ? A.v(k) : 0; end\n"
+        def c_x = "class C; X = 6; def self.w(k) = A.v(k); end\n"
+        def w_lexical = "class C; X = 6; def self.w(k) = X == 6 ? A.v(k) : 0; end\n"
+        def tree = { "a.rb" => a_v, "b.rb" => "class B; X = 6; end\n", "c.rb" => w_plain, "r.rb" => reader }
+
+        def truthy?(recheck)
+          recheck.diagnostics.any? { |d| File.basename(d.path) == "r.rb" && d.message.include?("always truthy") }
+        end
+
+        it "re-checks the reader when the edit starts reading another file's constant" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [tree, { "c.rb" => w_cross }])
+            expect(basenames(rechecks.last.affected)).to include("r.rb")
+            expect(truthy?(rechecks.last)).to be(false)
+          end
+        end
+
+        it "re-checks the reader when the edit starts reading a constant of the def's own class" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [tree.merge("c.rb" => c_x), { "c.rb" => w_lexical }])
+            expect(basenames(rechecks.last.affected)).to include("r.rb")
+            expect(truthy?(rechecks.last)).to be(false)
+          end
+        end
+
+        it "re-checks the reader when the edit stops reading the constant" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [tree.merge("c.rb" => w_cross), { "c.rb" => w_plain }])
+            expect(basenames(rechecks.last.affected)).to include("r.rb")
+            expect(truthy?(rechecks.last)).to be(true)
+          end
+        end
+
+        # A pooled recheck passes the gate on the summaries a sequential run stored, so it compares them too.
+        it "re-checks the reader in a pooled recheck over a sequential baseline" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [tree, { "c.rb" => w_cross }],
+                              session: session_for(configuration(dir)), recheck_workers: 2)
+            expect(basenames(rechecks.last.affected)).to include("r.rb")
+            expect(truthy?(rechecks.last)).to be(false)
+          end
+        end
+
+        # The control: an edit that keeps the published read and adds a callee, whose class name no file writes as
+        # a constant, still passes the gate.
+        it "still skips the reader when the edit keeps the published read and adds a callee" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [tree.merge("c.rb" => w_cross, "d.rb" => "class D; def self.d(k) = k; end\n"),
+                                    { "c.rb" => "class C; def self.w(k) = B::X == 6 ? A.v(D.d(k)) : 0; end\n" }])
+            expect(basenames(rechecks.last.affected)).to eq(["c.rb"])
+            expect(truthy?(rechecks.last)).to be(false)
           end
         end
       end

@@ -124,7 +124,8 @@ module Rigor
         # Diffed on a recheck to find every constant whose PUBLISHED answer could have moved, which satisfies
         # the `constant:` edges a reader records at every reference, resolved or not.
         @constant_decls = {}
-        # ADR-89 WD2 — per-def observed-key return summaries: [path, symbol] => { keys:, returns:, effects: }.
+        # ADR-89 WD2 — per-def observed-key return summaries: [path, symbol] => { keys:, returns:, effects:,
+        # guard_constants: }.
         # Harvested from the ADR-84 return memo after each run; drives the behavioural-stability gate.
         @return_summaries = {}
         # Issue #3180 — what the ADR-89 WD2 gate's probe read for the pairs it passed, from the closure decision
@@ -582,7 +583,8 @@ module Rigor
       # surfaces are its return type and its content-mutation effects (no instance/class variable write, no
       # `yield`, no implicit-self call whose transitive effect a caller could observe). For a candidate the
       # session compares its content-mutation effects (pure AST) then re-evaluates its return at every
-      # persisted key (a runner probe); a pair passes only when BOTH are unchanged. Any missing summary (which is
+      # persisted key (a runner probe), with the published-constant spellings its body reads (issue #3186,
+      # {#guard_constants_unmoved?}); a pair passes only when all three are unchanged. Any missing summary (which is
       # also how a def whose keys could not all be recorded is stored, issues #3116 and #3160), ineligible def,
       # changed effect, changed return, or uncomputable key keeps the pair — the conservative
       # direction the `--verify-incremental` and byte-identical recheck specs backstop.
@@ -1268,13 +1270,28 @@ module Rigor
         return if observations.nil?
 
         analyzed = analyze_set.to_set
-        folds = observations.reads.flat_map do |pair, record|
-          ((@symbol_dependents[pair] || Set.new) - analyzed).map { |reader| [reader, record] }
+        skipped = observations.reads.keys.to_h do |pair|
+          [pair, ((@symbol_dependents[pair] || Set.new) - analyzed).to_a]
         end
-        return if folds.empty?
+        return if skipped.each_value.all?(&:empty?)
 
-        folds.each { |reader, record| add_recorded_reads(reader, record) }
+        credit_probe_plugin_rows(observations, skipped)
+        skipped.each { |pair, readers| readers.each { |reader| add_recorded_reads(reader, observations.reads[pair]) } }
         invert_dependency_graph
+      end
+
+      # Issue #3187 — the plugin reads the probe made while evaluating a passed pair's def, credited to each reader of
+      # the pair it skipped, as an analysis of that reader would have credited them: a later edit of what the plugin
+      # read re-analyses the reader ({#plugin_read_affected}). Like the edges, a reader may gain a row it does not
+      # need, which costs a re-analysis. Run-scoped registrations are not credited: a pair whose probe registered one
+      # does not pass ({#readers_hold_disclosures?}).
+      def credit_probe_plugin_rows(observations, skipped)
+        skipped.each do |pair, readers|
+          rows = observations.plugin_reads[pair]
+          next if rows.nil?
+
+          readers.each { |reader| @plugin_reads[reader] = ((@plugin_reads[reader] || []) | rows).freeze }
+        end
       end
 
       # `record`'s reads added to `reader`'s, less the reads of `reader`'s own file (a file records no edge to
@@ -1323,10 +1340,7 @@ module Rigor
       #
       # A run's harvest ({Runner#return_summaries}) is what the files it analysed observed. The keys the gate's
       # probe observed for the pairs it passed (`observations`, {#gate_observations}) count as this run's too: they
-      # are what the readers the gate skipped observe through the edited def. Two things a skipped reader reaches
-      # are outside this, and outside the invariant: the probe folds a value constant the reader's own analysis
-      # does not, so the gate can pass on a return the reader never sees (issue #3186), and the plugin reads and
-      # run disclosures of the def are credited to no skipped reader (issue #3187). So per pair:
+      # are what the readers the gate skipped observe through the edited def. So per pair:
       #
       # - the run cannot list the keys it observed (a pool run, a def past the per-def or total cap, a call the
       #   memo refused to store): delete;
@@ -1399,7 +1413,8 @@ module Rigor
         rows += kept[:keys].zip(kept[:returns]).reject { |row| rows.include?(row) }
         return nil if rows.size > Runner::RETURN_SUMMARY_KEYS_PER_DEF
 
-        { keys: rows.map(&:first), returns: rows.map(&:last), effects: fresh[:effects] }
+        { keys: rows.map(&:first), returns: rows.map(&:last), effects: fresh[:effects],
+          guard_constants: fresh[:guard_constants] }
       end
 
       # The first {Runner::RETURN_SUMMARY_TOTAL_CAP} of `summaries`, so the snapshot stays small however many runs
@@ -1701,7 +1716,9 @@ module Rigor
 
       # ADR-89 WD2 — true when the ONLY cross-file body surfaces of `node` a symbol dependent can consume are
       # its return type and its content-mutation effects — so comparing exactly those two is a COMPLETE
-      # behavioural check. A def qualifies when its body writes no instance / class variable (an ivar
+      # behavioural check. (Issue #3186: the truthiness rule's one-hop body scan reads a third, the published
+      # constants the body names, which the probe compares too; no node kind makes a def ineligible for it.)
+      # A def qualifies when its body writes no instance / class variable (an ivar
       # definite-assignment a same-class caller consumes), does not `yield` (a block-parameter surface a
       # caller passing a block consumes), and makes no implicit-self call (which could carry a transitive
       # shared-state write). Deliberately conservative + purely syntactic: a def with a self-call or a
@@ -1777,22 +1794,42 @@ module Rigor
       # descriptor is present (not a memo refusal) and equal to the persisted one. A probe failure yields an
       # empty set (keep everything).
       def return_stable_pairs(pairs, scan_index)
-        specs = pairs.filter_map { |pair| return_spec_for(pair, scan_index) }
+        specs = pairs.reject { |pair| readers_hold_disclosures?(pair) }.filter_map do |pair|
+          return_spec_for(pair, scan_index)
+        end
         return Set.new if specs.empty?
 
         runner, results = probe_return_types(specs)
-        reads = {}
-        stable = specs.each_with_object(Set.new) do |spec, passed|
+        passed = specs.each_with_object({}) do |spec, pairs|
           triple = [spec[:class_name], spec[:method_name], spec[:singleton]]
           next unless returns_unmoved?(spec[:pair], results[triple])
+          next unless guard_constants_unmoved?(spec[:pair], runner.probe_guard_constants[triple])
+          # Issue #3187 — a run-scoped row the probe registered keeps the readers ({#readers_hold_disclosures?}).
+          next if runner.probe_disclosures.key?(triple)
 
-          # Issue #3180 — the probe recorded reads for every def it evaluated, and it evaluated this one: a
-          # summary holds at least one key, so a def the probe could not find answered nil and did not pass.
-          reads[spec[:pair]] = runner.probe_reads[triple]
-          passed << spec[:pair]
+          pairs[spec[:pair]] = triple
         end
-        @gate_observations = gate_observations(runner, reads) unless stable.empty?
-        stable
+        @gate_observations = gate_observations(runner, passed) unless passed.empty?
+        passed.keys.to_set
+      end
+
+      # Issue #3187 — whether a symbol dependent of `pair` holds a run-scoped plugin row ({RunDisclosureLedger}), which
+      # keeps the pair's readers, as a probe that registers one does. A skipped reader replays the rows its last
+      # analysis registered, and which of them came through the edited def, under which key, is not recorded; nor
+      # can rows the probe registers be credited to a reader without that key, or ever be retracted once its def
+      # stops registering them. So a reader holding any row is re-analysed, which settles its rows afresh.
+      def readers_hold_disclosures?(pair)
+        (@symbol_dependents[pair] || Set.new).any? { |reader| @plugin_disclosures.files.key?(reader) }
+      end
+
+      # Issue #3186 — whether the probe's `current` constant spellings ({Runner#guard_constants}) are `pair`'s stored
+      # ones. A reader's `flow.always-truthy-condition` withholds when a def it calls reads a constant another file
+      # published, whatever the def returns, so a return-preserving edit that adds or drops such a read moves the
+      # reader's diagnostics. nil on either side (a list the runner could not make, a summary stored before the list
+      # existed) reads as moved.
+      def guard_constants_unmoved?(pair, current)
+        stored = @return_summaries[pair][:guard_constants]
+        !current.nil? && !stored.nil? && current == stored
       end
 
       # Whether the probe's `descriptors` are `pair`'s stored returns, key for key, none of them a memo refusal.
@@ -1810,15 +1847,28 @@ module Rigor
       # another def. `reads` is each passing pair's {DependencyRecorder::Record}; `summaries` is the probe's own
       # harvest ({Runner#return_summaries}: nil for a def it cannot list the keys of, nil as a whole in pool mode),
       # cut down to the defs a passing pair read. A failing pair's observations are left out: its readers are all
-      # re-analysed, and the run's harvest speaks for them.
-      GateObservations = Data.define(:reads, :summaries)
+      # re-analysed, and the run's harvest speaks for them. Issue #3187 — `plugin_reads` is each passing pair's plugin
+      # boundary rows ({Runner#probe_plugin_reads}); a pair whose evaluation read none has no key.
+      GateObservations = Data.define(:reads, :summaries, :plugin_reads)
       private_constant :GateObservations
 
-      def gate_observations(runner, reads)
+      # `passed` maps each passing pair to its spec triple. The probe recorded reads for every def it evaluated, and
+      # it evaluated each of these: a summary holds at least one key, so a def the probe could not find answered nil
+      # and did not pass.
+      def gate_observations(runner, passed)
+        reads = passed.transform_values { |triple| runner.probe_reads[triple] }
         observed = reads.each_value.with_object(Set.new) do |record, pairs|
           record.symbol_sources.each { |path, symbols| symbols.each { |symbol| pairs << [path, symbol] } }
         end
-        GateObservations.new(reads: reads, summaries: runner.return_summaries&.slice(*observed))
+        GateObservations.new(reads: reads, summaries: runner.return_summaries&.slice(*observed),
+                             plugin_reads: probe_rows(passed, runner.probe_plugin_reads))
+      end
+
+      # `table` (spec triple => rows) re-keyed by each passing pair, leaving out a pair with no rows.
+      def probe_rows(passed, table)
+        passed.each_with_object({}) do |(pair, triple), rows|
+          rows[pair] = table[triple] if table.key?(triple)
+        end
       end
 
       def return_spec_for(pair, scan_index)

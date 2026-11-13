@@ -514,57 +514,6 @@ RSpec.describe Rigor::Analysis::Runner::ProjectPrePasses do
     end
   end
 
-  describe "#trusted_gem_name (private)" do
-    it "returns a String entry unchanged" do
-      expect(build_pre_passes.send(:trusted_gem_name, "rigor-x")).to eq("rigor-x")
-    end
-
-    it "reads the \"gem\" key from a Hash entry" do
-      expect(build_pre_passes.send(:trusted_gem_name, { "gem" => "rigor-x", "id" => "x" })).to eq("rigor-x")
-    end
-
-    it "falls back to the \"id\" key when a Hash entry has no \"gem\" key" do
-      expect(build_pre_passes.send(:trusted_gem_name, { "id" => "rigor-x" })).to eq("rigor-x")
-    end
-
-    it "returns nil for an entry that is neither a String nor a Hash" do
-      expect(build_pre_passes.send(:trusted_gem_name, 42)).to be_nil
-    end
-  end
-
-  describe "#trusted_gem_root (private)" do
-    it "returns nil for a nil gem_name" do
-      expect(build_pre_passes.send(:trusted_gem_root, nil)).to be_nil
-    end
-
-    it "returns nil for an empty gem_name" do
-      expect(build_pre_passes.send(:trusted_gem_root, "")).to be_nil
-    end
-
-    it "returns the loaded spec's full_gem_path for an installed gem" do
-      fake_spec = instance_double(Gem::Specification, full_gem_path: "/gems/rigor-x")
-      allow(Gem).to receive(:loaded_specs).and_return({ "rigor-x" => fake_spec })
-
-      expect(build_pre_passes.send(:trusted_gem_root, "rigor-x")).to eq("/gems/rigor-x")
-    end
-
-    it "returns nil for a gem_name Gem.loaded_specs has never heard of" do
-      allow(Gem).to receive(:loaded_specs).and_return({})
-
-      expect(build_pre_passes.send(:trusted_gem_root, "rigor-unknown")).to be_nil
-    end
-
-    # Mutant: dropping the `rescue StandardError` would propagate a spec lookup failure straight out of
-    # trust-policy construction, aborting the whole run over one misbehaving gemspec.
-    it "returns nil rather than raising when reading full_gem_path itself raises" do
-      fake_spec = instance_double(Gem::Specification)
-      allow(fake_spec).to receive(:full_gem_path).and_raise(StandardError, "corrupt gemspec")
-      allow(Gem).to receive(:loaded_specs).and_return({ "rigor-x" => fake_spec })
-
-      expect(build_pre_passes.send(:trusted_gem_root, "rigor-x")).to be_nil
-    end
-  end
-
   describe "#plugin_prepare_diagnostics / #invoke_plugin_prepare (private)" do
     it "returns an empty Array for an empty registry" do
       expect(build_pre_passes.send(:plugin_prepare_diagnostics, Rigor::Plugin::Registry::EMPTY)).to eq([])

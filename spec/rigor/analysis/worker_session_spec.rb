@@ -635,58 +635,8 @@ RSpec.describe Rigor::Analysis::WorkerSession do
     end
   end
 
-  describe "#trusted_gem_name / #trusted_gem_root (private, build_trust_policy)" do
-    it "resolves a String plugin entry to itself" do
-      session = described_class.new(
-        configuration: Rigor::Configuration.new("paths" => []), cache_store: nil
-      )
-      expect(session.send(:trusted_gem_name, "rigor-example")).to eq("rigor-example")
-    end
-
-    it "resolves a Hash plugin entry via the `gem` key, falling back to `id`" do
-      session = described_class.new(
-        configuration: Rigor::Configuration.new("paths" => []), cache_store: nil
-      )
-      expect(session.send(:trusted_gem_name, { "gem" => "foo", "id" => "bar" })).to eq("foo")
-      expect(session.send(:trusted_gem_name, { "id" => "bar" })).to eq("bar")
-      expect(session.send(:trusted_gem_name, { "gem" => nil, "id" => "bar" })).to eq("bar")
-    end
-
-    it "returns nil for a plugin entry of an unrecognised shape" do
-      session = described_class.new(
-        configuration: Rigor::Configuration.new("paths" => []), cache_store: nil
-      )
-      expect(session.send(:trusted_gem_name, 42)).to be_nil
-    end
-
-    it "resolves trusted_gem_root to the loaded spec's full_gem_path" do
-      session = described_class.new(
-        configuration: Rigor::Configuration.new("paths" => []), cache_store: nil
-      )
-      fake_spec = instance_double(Gem::Specification, full_gem_path: "/fake/gem/path")
-      allow(Gem).to receive(:loaded_specs).and_return({ "myfakegem" => fake_spec })
-
-      expect(session.send(:trusted_gem_root, "myfakegem")).to eq("/fake/gem/path")
-    end
-
-    it "returns nil for trusted_gem_root when gem_name is nil or empty" do
-      session = described_class.new(
-        configuration: Rigor::Configuration.new("paths" => []), cache_store: nil
-      )
-      expect(session.send(:trusted_gem_root, nil)).to be_nil
-      expect(session.send(:trusted_gem_root, "")).to be_nil
-    end
-
-    it "returns nil for trusted_gem_root when the gem is not loaded" do
-      session = described_class.new(
-        configuration: Rigor::Configuration.new("paths" => []), cache_store: nil
-      )
-      allow(Gem).to receive(:loaded_specs).and_return({})
-
-      expect(session.send(:trusted_gem_root, "totally-unloaded-gem")).to be_nil
-    end
-
-    it "threads a trusted gem's root into TrustPolicy#allowed_read_roots via build_trust_policy" do
+  describe "#build_trust_policy (private)" do
+    it "threads a trusted gem's root into TrustPolicy#allowed_read_roots" do
       fake_spec = instance_double(Gem::Specification, full_gem_path: "/fake/gem/root")
       allow(Gem).to receive(:loaded_specs).and_return({ "myfakegem" => fake_spec })
 

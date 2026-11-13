@@ -134,9 +134,14 @@ plugins_io:
 `Array<String>` of the user-supplied extras (relative paths are
 expanded to absolute by the runner when building the policy).
 
-## Analyzer wiring (`Analysis::Runner`)
+## Analyzer wiring
 
-Slice 2's runner builds a `TrustPolicy` once per run:
+`Rigor::Plugin::TrustPolicy.for_configuration` is the single
+derivation of the per-run policy. `rigor check`'s
+`Analysis::Runner`, pooled `Analysis::WorkerSession`s and `rigor
+unused`'s `Analysis::Reachability::PluginRoots` all build their
+`Plugin::Services` through it, so every plugin container enforces
+the same scope (#2586):
 
 1. `trusted_gems` ← gem-name half of every `Configuration#plugins`
    entry.

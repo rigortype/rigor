@@ -45,6 +45,52 @@ module Rigor
         freeze
       end
 
+      # Builds the run's policy from the project configuration — the one derivation `rigor check`
+      # ({Analysis::Runner}), pooled workers ({Analysis::WorkerSession}) and `rigor unused`'s plugin roots
+      # ({Analysis::Reachability::PluginRoots}) share, so every `Plugin::Services` container enforces the
+      # same scope (#2586).
+      #
+      # `trusted_gems` is the gem-name half of every `Configuration#plugins` entry. `allowed_read_roots`
+      # is the project root (CWD), every `signature_paths` entry, each trusted gem's
+      # `Gem.loaded_specs` `full_gem_path` (silently skipped when the gem has no loaded spec), and every
+      # `plugins_io.allowed_paths` entry. `network_policy` / `allowed_url_hosts` come from
+      # `plugins_io.network` / `plugins_io.allowed_url_hosts`.
+      def self.for_configuration(configuration)
+        trusted_gems = configuration.plugins.map { |entry| trusted_gem_name(entry) }.uniq
+        roots = [Dir.pwd]
+        Array(configuration.signature_paths).each { |sp| roots << File.absolute_path(sp) }
+        trusted_gems.each do |gem_name|
+          path = trusted_gem_root(gem_name)
+          roots << path if path
+        end
+        configuration.plugins_io_allowed_paths.each { |p| roots << File.absolute_path(p) }
+
+        new(
+          trusted_gems: trusted_gems,
+          allowed_read_roots: roots,
+          network_policy: configuration.plugins_io_network,
+          allowed_url_hosts: configuration.plugins_io_allowed_url_hosts
+        )
+      end
+
+      def self.trusted_gem_name(entry)
+        case entry
+        when String then entry
+        when Hash then entry["gem"] || entry["id"]
+        end
+      end
+      private_class_method :trusted_gem_name
+
+      def self.trusted_gem_root(gem_name)
+        return nil if gem_name.nil? || gem_name.empty?
+
+        spec = Gem.loaded_specs[gem_name]
+        spec&.full_gem_path
+      rescue StandardError
+        nil
+      end
+      private_class_method :trusted_gem_root
+
       # @return true when the absolute path falls inside any allowed read root. Symlinks are
       #   resolved through `File.absolute_path` only (no `realpath`); plugins with adversarial intent are out of
       #   scope per ADR-2.

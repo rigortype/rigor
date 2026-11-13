@@ -38,13 +38,30 @@ module Rigor
     # it always did. An absolute one is split into its own directory and a literal basename: `File.join(".", "/abs")`
     # reads `./abs`, so an absolute path joined under `"."` matched nothing.
     #
+    # A `~`-prefixed path is expanded before the split (#2586): the readers apply `File.expand_path`, so `~/x.yml`
+    # reads `$HOME/x.yml` and the watch must be split from that spelling — `[".", "~/x.yml"]` would watch
+    # `./~/x.yml` and never fire. Only the `~` form is expanded; expanding every path would change how relative
+    # entries are watched.
+    #
     # @param path — a file path, taken literally
     # @return `[root, pattern]`: `"."` and the literal path when relative, else the directory and the literal basename
     def split_file(path)
-      path = path.to_s
+      path = expand_home(path.to_s)
       return [".", literal(path)] unless File.absolute_path?(path)
 
       [File.dirname(path), literal(File.basename(path))]
     end
+
+    # `File.expand_path`'s `~` handling, kept literal on failure: `~nouser/x` (or an unset HOME) names no home
+    # directory and raises `ArgumentError`; the readers fail on the same path, so the unexpanded spelling —
+    # watched under `"."` like any other relative entry — is the consistent answer.
+    def expand_home(path)
+      return path unless path.start_with?("~")
+
+      File.expand_path(path)
+    rescue ArgumentError
+      path
+    end
+    private_class_method :expand_home
   end
 end

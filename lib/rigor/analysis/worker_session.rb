@@ -450,40 +450,10 @@ module Rigor
         Prism.parse(File.read(physical), filepath: path, version: @configuration.target_ruby)
       end
 
-      # Mirrors {Runner#build_trust_policy}. Deriving trust inside the session keeps the substrate decoupled
-      # from the coordinator; configuration is already Ractor-shareable.
+      # {Rigor::Plugin::TrustPolicy.for_configuration} is the single derivation `rigor check`, pooled
+      # workers and `rigor unused`'s plugin roots share (#2586); configuration is already Ractor-shareable.
       def build_trust_policy
-        trusted_gems = @configuration.plugins.map { |entry| trusted_gem_name(entry) }.uniq
-        roots = [Dir.pwd]
-        Array(@configuration.signature_paths).each { |sp| roots << File.absolute_path(sp) }
-        trusted_gems.each do |gem_name|
-          path = trusted_gem_root(gem_name)
-          roots << path if path
-        end
-        @configuration.plugins_io_allowed_paths.each { |p| roots << File.absolute_path(p) }
-
-        Plugin::TrustPolicy.new(
-          trusted_gems: trusted_gems,
-          allowed_read_roots: roots,
-          network_policy: @configuration.plugins_io_network,
-          allowed_url_hosts: @configuration.plugins_io_allowed_url_hosts
-        )
-      end
-
-      def trusted_gem_name(entry)
-        case entry
-        when String then entry
-        when Hash then entry["gem"] || entry["id"]
-        end
-      end
-
-      def trusted_gem_root(gem_name)
-        return nil if gem_name.nil? || gem_name.empty?
-
-        spec = Gem.loaded_specs[gem_name]
-        spec&.full_gem_path
-      rescue StandardError
-        nil
+        Plugin::TrustPolicy.for_configuration(@configuration)
       end
 
       def run_plugin_prepare

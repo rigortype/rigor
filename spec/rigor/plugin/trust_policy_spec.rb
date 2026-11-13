@@ -27,6 +27,95 @@ RSpec.describe Rigor::Plugin::TrustPolicy do
     end
   end
 
+  # #2586 — the single derivation `rigor check`, pooled workers and `rigor unused`'s plugin roots share.
+  describe ".for_configuration" do
+    it "derives trusted gems, read roots, and the network policy from the configuration" do
+      Dir.mktmpdir do |dir|
+        sig_dir = File.join(dir, "sig")
+        FileUtils.mkdir_p(sig_dir)
+        extra_dir = File.join(dir, "extra")
+        FileUtils.mkdir_p(extra_dir)
+        configuration = Rigor::Configuration.new(
+          "signature_paths" => [sig_dir],
+          "plugins" => ["rigor-a", { "gem" => "rigor-b" }, { "id" => "rigor-c" }],
+          "plugins_io" => { "allowed_paths" => [extra_dir], "network" => "allowlist",
+                            "allowed_url_hosts" => ["example.com"] }
+        )
+        allow(Gem).to receive(:loaded_specs).and_return({})
+
+        expected_pwd = nil
+        policy = Dir.chdir(dir) do
+          expected_pwd = Dir.pwd
+          described_class.for_configuration(configuration)
+        end
+
+        expect(policy.trusted_gems).to eq(%w[rigor-a rigor-b rigor-c])
+        expect(policy.allowed_read_roots).to include(
+          expected_pwd, File.expand_path(sig_dir), File.expand_path(extra_dir)
+        )
+        expect(policy.network_policy).to eq(:allowlist)
+        expect(policy.allowed_url_hosts).to eq(["example.com"])
+      end
+    end
+
+    it "appends a trusted gem's own full_gem_path to the allowed read roots when it is actually installed" do
+      configuration = Rigor::Configuration.new("plugins" => ["rigor-installed"])
+      fake_spec = instance_double(Gem::Specification, full_gem_path: "/gems/rigor-installed")
+      allow(Gem).to receive(:loaded_specs).and_return({ "rigor-installed" => fake_spec })
+
+      policy = described_class.for_configuration(configuration)
+
+      expect(policy.allowed_read_roots).to include("/gems/rigor-installed")
+    end
+
+    describe "the private entry/gem-name helpers" do
+      it "trusted_gem_name returns a String entry unchanged" do
+        expect(described_class.send(:trusted_gem_name, "rigor-x")).to eq("rigor-x")
+      end
+
+      it "trusted_gem_name reads the \"gem\" key from a Hash entry" do
+        expect(described_class.send(:trusted_gem_name, { "gem" => "rigor-x", "id" => "x" })).to eq("rigor-x")
+      end
+
+      it "trusted_gem_name falls back to the \"id\" key when a Hash entry has no \"gem\" key" do
+        expect(described_class.send(:trusted_gem_name, { "id" => "rigor-x" })).to eq("rigor-x")
+        expect(described_class.send(:trusted_gem_name, { "gem" => nil, "id" => "rigor-x" })).to eq("rigor-x")
+      end
+
+      it "trusted_gem_name returns nil for an entry that is neither a String nor a Hash" do
+        expect(described_class.send(:trusted_gem_name, 42)).to be_nil
+      end
+
+      it "trusted_gem_root returns nil for a nil or empty gem_name" do
+        expect(described_class.send(:trusted_gem_root, nil)).to be_nil
+        expect(described_class.send(:trusted_gem_root, "")).to be_nil
+      end
+
+      it "trusted_gem_root returns the loaded spec's full_gem_path for an installed gem" do
+        fake_spec = instance_double(Gem::Specification, full_gem_path: "/gems/rigor-x")
+        allow(Gem).to receive(:loaded_specs).and_return({ "rigor-x" => fake_spec })
+
+        expect(described_class.send(:trusted_gem_root, "rigor-x")).to eq("/gems/rigor-x")
+      end
+
+      it "trusted_gem_root returns nil for a gem_name Gem.loaded_specs has never heard of" do
+        allow(Gem).to receive(:loaded_specs).and_return({})
+
+        expect(described_class.send(:trusted_gem_root, "rigor-unknown")).to be_nil
+      end
+
+      # Mutant: dropping the `rescue StandardError` would propagate a spec lookup failure straight out of
+      # trust-policy construction, aborting the whole run over one misbehaving gemspec.
+      it "trusted_gem_root returns nil rather than raising when reading full_gem_path itself raises" do
+        fake_spec = instance_double(Gem::Specification)
+        allow(fake_spec).to receive(:full_gem_path).and_raise(StandardError, "corrupt gemspec")
+        allow(Gem).to receive(:loaded_specs).and_return({ "rigor-x" => fake_spec })
+
+        expect(described_class.send(:trusted_gem_root, "rigor-x")).to be_nil
+      end
+    end
+  end
+
   describe "#allow_read?" do
     let(:policy) do
       Dir.mktmpdir do |dir|

@@ -163,6 +163,73 @@ RSpec.describe Rigor::Analysis::Reachability::PluginRoots do
     end
   end
 
+  # #2586 — `rigor unused`'s plugin roots read through the same trust policy `rigor check` builds, so a
+  # `plugins_io.allowed_paths` entry reaches the plugin's io_boundary. Without it the default policy allows
+  # only `Dir.pwd`, and a root published from a file outside the project is refused — `rigor unused` then
+  # reports the constant the file names as unused.
+  describe "the run's trust policy" do
+    # Reads the configured schedule file through the boundary and publishes the worker it names — the trust
+    # question, not the YAML: does the read get through `plugins_io.allowed_paths`?
+    let(:outside_reader) do
+      klass = Class.new(Rigor::Plugin::Base) do
+        manifest(id: "outside-reader", version: "0.1.0", produces: [:reachability_roots],
+                 config_schema: { "schedule_path" => :string })
+
+        def prepare(services)
+          contents = services.io_boundary_for(manifest.id).read_file(config.fetch("schedule_path"))
+          return unless contents.include?("NightlyWorker")
+
+          services.fact_store.publish(plugin_id: manifest.id, name: :reachability_roots,
+                                      value: ["NightlyWorker"])
+        rescue Rigor::Plugin::AccessDeniedError
+          nil
+        end
+      end
+      stub_const("PluginRootsSpecOutsideReader", klass)
+      klass
+    end
+
+    def collect_schedule_reader(outside_dir, allowed_paths: nil)
+      schedule = File.join(outside_dir, "sidekiq.yml")
+      File.write(schedule, "nightly:\n  class: \"NightlyWorker\"\n")
+      data = { "plugins" => [{ "gem" => "rigor-outside-reader",
+                               "config" => { "schedule_path" => schedule } }] }
+      data["plugins_io"] = { "allowed_paths" => allowed_paths } if allowed_paths
+      described_class.collect(
+        configuration: Rigor::Configuration.new(Rigor::Configuration::DEFAULTS.merge(data)),
+        plugin_requirer: requirer_for("rigor-outside-reader" => outside_reader)
+      )
+    end
+
+    it "collects a root a plugin publishes from a file under plugins_io.allowed_paths outside the project" do
+      Dir.mktmpdir do |outside|
+        contribution = collect_schedule_reader(outside, allowed_paths: [outside])
+
+        expect(contribution.roots).to eq(["NightlyWorker"])
+      end
+    end
+
+    it "collects nothing when the same file sits outside every allowed read root" do
+      Dir.mktmpdir do |outside|
+        contribution = collect_schedule_reader(outside)
+
+        expect(contribution.roots).to be_empty
+      end
+    end
+
+    it "builds the plugins' services through the same trust-policy factory `rigor check` uses" do
+      allow(Rigor::Plugin::TrustPolicy).to receive(:for_configuration).and_call_original
+      configuration = configuration_for("rigor-roots-a")
+
+      described_class.collect(
+        configuration: configuration,
+        plugin_requirer: requirer_for("rigor-roots-a" => root_publisher)
+      )
+
+      expect(Rigor::Plugin::TrustPolicy).to have_received(:for_configuration).with(configuration)
+    end
+  end
+
   # #350 — the sibling fact. A reference carries its referrer's ROLE, which is the whole reason it is not a
   # root: a plugin that knows a class is named from the test tree must be able to say so without promoting it
   # to production-reachable and erasing ADR-102 WD8's answer.

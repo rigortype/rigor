@@ -399,12 +399,18 @@ module Rigor
       # `bucket` defaults to the calling thread's current one; `Runner#run` keeps the bucket its run filled
       # ({.current_return_memo}) and passes it, since the run releases the thread's slot when it ends.
       #
-      # Issue #3160 — a def one of whose calls the memo refused to store ({RETURN_MEMO_REFUSED}) maps to nil: that
-      # call's result reached its caller, so the stored entries are not every key the def was observed under.
+      # Issue #3160 — the entries are what the memo STORED. A def one of whose calls it refused to store was observed
+      # under a key no entry lists; {.return_memo_refused?} says which.
       def self.harvest_return_memo(bucket = current_return_memo)
         return {} if bucket.nil?
 
-        bucket.transform_values { |per_def| per_def.key?(RETURN_MEMO_REFUSED) ? nil : per_def.values }
+        bucket.transform_values { |per_def| per_def.except(RETURN_MEMO_REFUSED).values }
+      end
+
+      # Issue #3160 — whether `bucket` served a result of `def_node` that it refused to store (ADR-84 WD3). That
+      # result reached its caller, so the def's stored entries are not every key it was observed under.
+      def self.return_memo_refused?(bucket, def_node)
+        bucket&.[](def_node)&.key?(RETURN_MEMO_REFUSED) || false
       end
 
       # Issue #3160 — the per-def key under which {#consult_and_store_return_memo} notes that it served a result it

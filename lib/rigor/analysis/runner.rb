@@ -865,11 +865,12 @@ module Rigor
         @resolved_def_nodes&.[]([slot.path, slot.node_id])
       end
 
-      # One def's summary, or nil when `entries` are not every key it was observed under: the memo refused one
-      # (`entries` is nil, or empty because it stored none), or there are more than {RETURN_SUMMARY_KEYS_PER_DEF}
-      # (issue #3116). A splat call's key (issue #1237) is an entry like any other and counts toward the cap.
+      # One def's summary, or nil when `entries` are not every key it was observed under: the memo refused to store
+      # a call of it (so `entries` may be empty), or there are more than {RETURN_SUMMARY_KEYS_PER_DEF} (issue
+      # #3116). A splat call's key (issue #1237) is an entry like any other and counts toward the cap.
       def return_summary(entries, effects_evaluator, node)
-        return nil if entries.nil? || entries.empty? || entries.size > RETURN_SUMMARY_KEYS_PER_DEF
+        return nil if entries.empty? || entries.size > RETURN_SUMMARY_KEYS_PER_DEF
+        return nil if Inference::ExpressionTyper.return_memo_refused?(@return_memo, node)
 
         { keys: entries.map { |entry| return_summary_key(entry) },
           returns: entries.map { |entry| entry.result.describe(:short) },

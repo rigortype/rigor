@@ -3002,8 +3002,8 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     # A clause may name an object with its own `===` rather than a class; what it matches is unknown, so the reference
     # binds the floor, not an instance of the object's class.
     it "binds the floor for a clause naming an object that is not a class" do
-      _, post = evaluate("MATCHER = Object.new\nbegin\n  risky\nrescue MATCHER => e\nend")
-      _, control = evaluate("MATCHER = Object.new\nbegin\n  risky\nrescue TypeError => e\nend")
+      _, post = evaluate("begin\n  risky\nrescue Object.new => e\nend")
+      _, control = evaluate("begin\n  risky\nrescue TypeError => e\nend")
       expect(post.local(:e).members).to include(Rigor::Type::Combinator.untyped)
       expect(post.local(:e).members).not_to include(Rigor::Type::Combinator.nominal_of("Object"))
       expect(control.local(:e).members).to include(Rigor::Type::Combinator.nominal_of("TypeError"))

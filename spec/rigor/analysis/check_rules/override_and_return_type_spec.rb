@@ -1238,6 +1238,28 @@ RSpec.describe "return-type and Liskov override rules", type: :runner do
           expect(widen_messages(ruby, rbs)).to be_empty
         end
 
+        # `k::AMid = ::Other` writes through a base no name reaches, so the census files it as `*::AMid`, which may be
+        # `NS::AMid`.
+        it "stays silent when a constant write through a computed base may bind the spelling" do
+          ruby = <<~RUBY
+            class AMid
+            end
+            class Other; def hook = "s"; end
+            module NS
+            end
+            target = NS
+            target::AMid = ::Other
+            module NS
+              class ALeaf < AMid; def hook = "s"; end
+            end
+          RUBY
+          rbs = rbs_decls(
+            "class AMid" => "def hook: () -> Integer", "class Other" => "def hook: () -> String",
+            "module NS" => nil, "class NS::ALeaf < Other" => "def hook: () -> String"
+          )
+          expect(widen_messages(ruby, rbs)).to be_empty
+        end
+
         # Pre-existing and outside #3156: with a body, `AMid` is a project entry the chain resolves past the alias
         # itself, so this still fires. Flip it when the resolver reads constant aliases.
         it "still fires through the constant alias when the top-level class has a body (resolver blind spot)" do

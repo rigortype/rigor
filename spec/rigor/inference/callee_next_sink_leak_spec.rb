@@ -22,10 +22,8 @@ RSpec.describe "a callee's `next` inside a recursive call", type: :runner do
       dump_type(P.new.f(1))
     RUBY
 
-    # Issue #3162: `f(:sym)`'s own return (`[:sym | Dynamic[top]]`, once the unroll fuel is spent) is an
-    # element of the outer block's value. The leaked arm was a bare `:sym` beside the `1`.
-    expect(type).to eq("[1 | [:sym | Dynamic[top]]]")
-    expect(type).not_to match(/\A\[1 \| :sym/)
+    expect(type).to eq("[1 | Dynamic[top]]")
+    expect(type).not_to include(":sym")
   end
 
   it "keeps a `next` carrying an array out of it too" do

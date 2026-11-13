@@ -76,6 +76,21 @@ class ArgumentRecursion
     assert_type("bot", spin_kw(n: some_int))
   end
 
+  def nested(k, t) = t == :a ? [nested(some_int, :b)] : (coin ? :base : nested(3, :a))
+  def nested_kw(k:, t:) = t == :a ? [nested_kw(k: some_int, t: :b)] : (coin ? :base : nested_kw(k: 3, t: :a))
+
+  def first_of(n) = n == 1 ? first_of(:sym).first : (coin ? [n] : [first_of(n)])
+  def first_of_kw(n:) = n == 1 ? first_of_kw(n: :sym).first : (coin ? [n] : [first_of_kw(n: n)])
+
+  def blk_literal(x, &b) = coin ? yield : blk_literal(x) { :other }
+  def blk_literal_kw(x:, &b) = coin ? yield : blk_literal_kw(x: x) { :other }
+  def blk_unnamed(x) = coin ? yield : blk_unnamed(x) { :other }
+  def blk_unnamed_kw(x:) = coin ? yield : blk_unnamed_kw(x: x) { :other }
+  def blk_passed(x, &b) = coin ? yield : blk_passed(x, &b)
+  def blk_passed_kw(x:, &b) = coin ? yield : blk_passed_kw(x: x, &b)
+  def blk_foreign(x, o, &b) = coin ? yield : blk_foreign(x, o, &o)
+  def blk_foreign_kw(x:, o:, &b) = coin ? yield : blk_foreign_kw(x: x, o: o, &o)
+
   def fib(n) = n < 2 ? n : fib(n - 1) + fib(n - 2)
   def fib_kw(n:) = n < 2 ? n : fib_kw(n: n - 1) + fib_kw(n: n - 2)
 
@@ -136,10 +151,34 @@ assert_type("1 | Dynamic[top]", subject.asg_kw(n: rand(10), k: 1))
 assert_type("1 | Dynamic[top]", subject.blk(rand(10), 1))
 assert_type("1 | Dynamic[top]", subject.blk_kw(n: rand(10), k: 1))
 
-# Ruby: :sym. The `same(:sym)` frame calls itself with the constant it already holds: a value-keyed
-# re-entry is not held against the outer frame's `n = 1`.
-assert_type(":sym", subject.same(1))
-assert_type(":sym", subject.same_kw(n: 1))
+# Ruby: :sym. The `same(:sym)` unroll frame calls itself with the constant it holds, but the summary it
+# would read is the outer `same(1)`'s, which `n = 1` does not cover: a value-keyed re-entry is tested too.
+assert_type("Dynamic[top]", subject.same(1))
+assert_type("Dynamic[top]", subject.same_kw(n: 1))
+
+# Ruby: an Array holding :base or a deeper Array. The `(some_int, :b)` frame under the constant call owns
+# a summary of its own, and the outer summary is back in place for the `(3, :a)` re-entry inside it.
+assert_type("[:base | Dynamic[top]]", subject.nested(3, :a))
+assert_type("[:base | Dynamic[top]]", subject.nested_kw(k: 3, t: :a))
+
+# Ruby: :sym or an Array. The `first_of(:sym)` unroll frame's own re-entry does not read `first_of(1)`'s
+# summary.
+assert_type("Dynamic[top]", subject.first_of(1))
+assert_type("Dynamic[top]", subject.first_of_kw(n: 1))
+
+# Ruby: 1 or :other. The re-entry runs with a block of its own, so `yield` there is not the frame's.
+assert_type("1 | Dynamic[top]", subject.blk_literal(1) { 1 })
+assert_type("1 | Dynamic[top]", subject.blk_literal_kw(x: 1) { 1 })
+assert_type("1 | Dynamic[top]", subject.blk_unnamed(1) { 1 })
+assert_type("1 | Dynamic[top]", subject.blk_unnamed_kw(x: 1) { 1 })
+
+# Ruby: 1. The def's own block parameter passed on is the frame's block.
+assert_type("1", subject.blk_passed(1) { 1 })
+assert_type("1", subject.blk_passed_kw(x: 1) { 1 })
+
+# Ruby: 1 or :o. `&o` is another block.
+assert_type("1 | Dynamic[top]", subject.blk_foreign(1, -> { :o }) { 1 })
+assert_type("1 | Dynamic[top]", subject.blk_foreign_kw(x: 1, o: -> { :o }) { 1 })
 
 # Ruby: [], [[]], [[[]]], ... A parameter one level deeper each call.
 assert_type("Dynamic[top] | []", subject.nest(rand(10)))
@@ -161,3 +200,7 @@ assert_type("1 | Dynamic[top]", subject.ping_kw(n: rand(10), k: 1))
 deep = subject.acc(rand(10), 1)
 puts "deep" if deep == 5 # reachable: acc
 puts "int" if subject.un(coin ? some_int : :sym) == :int # reachable: un
+puts "deeper" if subject.nested(3, :a).first != :base # reachable: nested
+puts "sym" if subject.first_of(1).is_a?(Symbol) # reachable: first_of
+puts "other" if (subject.blk_literal(1) { 1 }) == :other # reachable: blk_literal
+puts "other" if (subject.blk_unnamed(1) { 1 }) == :other # reachable: blk_unnamed

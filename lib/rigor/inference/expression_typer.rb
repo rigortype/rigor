@@ -4216,13 +4216,10 @@ module Rigor
           # if a re-entry beats it here the entry already exists. The WD4 composition: slice 1's clamp/fuel
           # fallbacks also route here when a summary is active.
           # Issue #3162 — the summary is read only where its frame covers the re-entry's own parameter
-          # bindings. A value-keyed re-entry is not tested: it is the unroll frame already on the stack
-          # called again with the same constants, as before.
-          unless extended
-            floor = uncovered_reentry_floor(summaries[plain_signature], def_node, body_scope, positionals_unknown)
-            return floor if floor
-          end
-          return consult_summary(summaries, plain_signature)
+          # bindings and block. A value-keyed re-entry is tested like any other: the unroll frame it
+          # re-enters holds its constants, but the summary it reads is the outermost frame's.
+          floor = uncovered_reentry_floor(summaries[plain_signature], def_node, body_scope, positionals_unknown)
+          return floor || consult_summary(summaries, plain_signature)
         end
 
         # ADR-55 WD1 clamp (governing rule): the constant-arg unroll may only ever surface a fully
@@ -4540,13 +4537,43 @@ module Rigor
       # `Dynamic[top]` for every positional. There the def's own calls are read instead
       # ({RecursionRebinding}): a positional every one of them passes through unchanged (`*rest` as
       # `*rest`) is covered, and any other is not.
+      #
+      # The block is part of the frame too: `yield` answers the frame's block ({#reentry_block_covered?}).
       def summary_covers_reentry?(entry, def_node, locals, positionals_unknown)
+        return false unless reentry_block_covered?(entry, def_node)
+
         kept = (entry[:kept] ||= kept_positional_parameters(def_node, entry[:receiver])) if positionals_unknown
         frame = entry[:locals]
         locals.all? do |name, argument|
           bound = frame[name]
           bound.nil? || kept&.include?(name) || binding_covers?(bound, argument)
         end
+      end
+
+      # Whether the re-entry runs with a block the summary's frame covers. A re-entry with no block, or
+      # one that passes the def's own block parameter on (`&blk`, or the anonymous `&`), does. One that
+      # passes another `&expression` does not. A block literal does when the value it yields is covered
+      # by the value the frame's block yields, which is nil on both sides for a def that never `yield`s.
+      # The re-entry's call is the node being typed; with none to read, only the yield values are compared.
+      def reentry_block_covered?(entry, def_node)
+        block = @typing_node.block if @typing_node.is_a?(Prism::CallNode)
+        return true if @typing_node.is_a?(Prism::CallNode) && block.nil?
+        return own_block_passed?(def_node, block) if block.is_a?(Prism::BlockArgumentNode)
+
+        yielded = ExpressionTyper.current_yield_value_type
+        return true if yielded.nil?
+
+        frame_yield = entry[:yield]
+        !frame_yield.nil? && binding_covers?(frame_yield, yielded)
+      end
+
+      def own_block_passed?(def_node, block)
+        params = def_node.parameters
+        own = params.block if params.is_a?(Prism::ParametersNode)
+        return false if own.nil?
+
+        expression = block.expression
+        expression.nil? ? own.name.nil? : expression.is_a?(Prism::LocalVariableReadNode) && expression.name == own.name
       end
 
       # `2` is covered by `Integer` though their union is spelled `2 | Integer`, so the argument is also
@@ -4577,7 +4604,8 @@ module Rigor
         summaries[plain_signature] = {
           assumption: Type::Combinator.bot, consulted: false, depth: depth,
           # Issue #3162 — the frame the summary is the return of, for {#summary_covers_reentry?}.
-          locals: body_scope.locals, receiver: receiver, uncovered: false, floor: false
+          locals: body_scope.locals, yield: ExpressionTyper.current_yield_value_type, receiver: receiver,
+          uncovered: false, floor: false
         }
         LoopValueRecord.advance_generation
         depth

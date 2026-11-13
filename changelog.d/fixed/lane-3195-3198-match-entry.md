@@ -1,0 +1,4 @@
+- **[inference]** The block of `Enumerator.new` or `Hash.new` no longer reads the `$1` an earlier match in the method narrowed, and a lambda, proc or either of those blocks no longer reads a narrowed `$_`. ([#3220](https://github.com/rigortype/rigor/pull/3220))
+  - After `return unless s =~ /(\d+)/`, `$1` reads `String?` in `Enumerator.new { |y| … }` and `Hash.new { |h, k| … }`, so a copy of it used unguarded there is reported: the block runs when the enumerator is read or a key is missing, after any later match.
+  - After `return unless $stdin.gets`, `$_` reads `Dynamic[top]` in those blocks and in `-> { … }`, `lambda { … }`, `proc { … }` and `Proc.new { … }`.
+  - A project class named `Enumerator` or `Hash`, and `new` on any other receiver, keep reading the narrowing.

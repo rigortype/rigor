@@ -36,6 +36,11 @@ ratified only by the batch that restores this one. The field keeps the PR it cit
 `none — sets one` on a `gate-row` by design — that value is what makes it serious — so there is no way
 to spell "the precedent was not yet ratified" in the field itself. This note is that spelling.
 
+The maintainer's call on 2026-11-14, now the standing rule in [`contribution-flow.md`](../docs/agents/contribution-flow.md) § "Decisions and the approval queue": a
+landed decision whose only defect is procedural is held rather than reverted, and reconciled by the next
+release. Reverting this row would take the `producers.yml` row and the code under it with it, for a defect
+in the record.
+
 What is being asked is therefore the row on its merits, not the chain: whether this classification is
 right, independently of the row it followed. The review of #3230 read five of the batch's
 classifications against the code, three of them consumer-classified, and found all five correct; that

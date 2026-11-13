@@ -4277,6 +4277,8 @@ module Rigor
           scope.with_ivar(index_node.name, element_type).without_ivar_guard(index_node.name)
         when Prism::GlobalVariableTargetNode
           scope.with_global(index_node.name, element_type)
+        when Prism::ClassVariableTargetNode
+          scope.with_cvar(index_node.name, element_type)
         when Prism::IndexTargetNode
           widen_index_target(index_node, element_type, scope, type_scope: scope)
         when Prism::CallTargetNode
@@ -4285,7 +4287,7 @@ module Rigor
           bound = MultiTargetBinder.bind_marked(index_node, element_type, scope: scope)
           widen_attribute_targets(index_node, widen_index_targets(bound, bound.apply_to(scope), type_scope: scope))
         when Prism::SplatNode
-          bind_for_splat_index(index_node, scope)
+          bind_for_splat_index(index_node, element_type, scope)
         else
           scope
         end
@@ -4293,14 +4295,29 @@ module Rigor
 
       # `for *h[:a] in pairs` — Prism gives a bare splat index as a `SplatNode`, not a `MultiTargetNode`, so the
       # binder never sees it. The store is `*h[:a] = element`, an array of the element's `to_ary` parts; the receiver
-      # widens with the binder's floor for a rest it cannot decompose, `Dynamic[top]`. A bare `*name` target stays
-      # unbound here, as before. `for *x.r in pairs` calls `r=` and widens as `for x.r in` does (issue #2693).
-      def bind_for_splat_index(splat, scope)
+      # widens with the binder's floor for a rest it cannot decompose, `Dynamic[top]`. `for *x.r in pairs` calls `r=`
+      # and widens as `for x.r in` does (issue #2693).
+      #
+      # Issue #1217 — a bare `*a` / `*@a` / `*@@a` / `*$a` binds the name to the rest
+      # {MultiTargetBinder.decompose_slots} reads off the element: a `Tuple` element exactly, an `Array[T]` element as
+      # `Array[T]`, and anything else — a union, a value Ruby would wrap as `[element]` — the `Dynamic[top]` floor.
+      # Left unbound, a read after the loop folded on the pre-loop binding.
+      def bind_for_splat_index(splat, element_type, scope)
         target = splat.expression
-        return widen_attribute_write(target.receiver, target.name, scope) if target.is_a?(Prism::CallTargetNode)
-        return scope unless target.is_a?(Prism::IndexTargetNode)
-
-        widen_index_target(target, Type::Combinator.untyped, scope, type_scope: scope)
+        case target
+        when Prism::CallTargetNode
+          widen_attribute_write(target.receiver, target.name, scope)
+        when Prism::IndexTargetNode
+          widen_index_target(target, Type::Combinator.untyped, scope, type_scope: scope)
+        when Prism::LocalVariableTargetNode, Prism::InstanceVariableTargetNode,
+             Prism::ClassVariableTargetNode, Prism::GlobalVariableTargetNode
+          _, rest, = MultiTargetBinder.decompose_slots(
+            element_type, front_count: 0, back_count: 0, rest_present: true, scope: scope
+          )
+          bind_for_index(target, rest, scope)
+        else
+          scope
+        end
       end
 
       # Extracts the per-iteration element type from a collection carrier. `Tuple[T1..Tn]` yields the union of its
@@ -9778,6 +9795,8 @@ module Rigor
           scope.with_ivar(ref.name, exception_type).without_ivar_guard(ref.name)
         when Prism::GlobalVariableTargetNode
           scope.with_global(ref.name, exception_type)
+        when Prism::ClassVariableTargetNode
+          scope.with_cvar(ref.name, exception_type)
         when Prism::IndexTargetNode
           widen_index_target(ref, exception_type, scope, type_scope: scope)
         else
@@ -9785,20 +9804,11 @@ module Rigor
         end
       end
 
-      # Derives the exception instance type for a `RescueNode`. When the exceptions list is empty (bare `rescue`) the
-      # type is `StandardError`. When one or more exception classes are named the types are unioned. A class that
-      # cannot be resolved to a `Singleton` type contributes `Dynamic[top]`.
+      # Derives the exception instance type for a `RescueNode` ({ErrorInfo.rescue_exception_type}): `StandardError` for
+      # a bare `rescue`, else the union of the named classes' instances, with `Dynamic[top]` for one that does not
+      # resolve to a `Singleton`.
       def rescue_exception_type(rescue_node, scope)
-        exceptions = rescue_node.exceptions
-        if exceptions.empty?
-          Type::Combinator.nominal_of("StandardError")
-        else
-          types = exceptions.map do |exc_node|
-            singleton_type, = sub_eval(exc_node, scope)
-            singleton_to_nominal(singleton_type)
-          end
-          Type::Combinator.union(*types)
-        end
+        ErrorInfo.rescue_exception_type(rescue_node) { |exception_node| sub_eval(exception_node, scope).first }
       end
 
       # --------------------------------------------------------------- `case/in` pattern variable binding helpers

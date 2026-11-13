@@ -966,7 +966,7 @@ binding cannot manufacture a diagnostic inside the callee's body.
   summary key carries the same mark, and the incremental session MUST re-drive that key with no positional
   correspondence too. It installs no `...` forwarding list.
 
-  When every splat's operand is an array literal with no splat element (`*[1, 2]`), and every element's type
+  When every splat's operand is an array literal (`*[1, 2]`, `*[]`), and every element's type, each typed on its own,
   provably is not a `Hash` (a constant that is not a Hash, a `Tuple`, an integer range, a nominal of a core class
   such as `Integer`, `String`, `Symbol` or `Array`, a union of these, or a refinement or difference over one), the
   body tiers MUST instead expand each splat into its elements and bind the result as the equivalent positional
@@ -977,8 +977,8 @@ binding cannot manufacture a diagnostic inside the callee's body.
   - a splat of any other operand, a local or a call included, even one typed as a `Tuple`: such a Tuple may be
     a stale fold (`t = [1, 2]; [3].each { t << _1 }; r.count(*t)` is `3` in Ruby);
   - an element that may be a `Hash` (a `HashShape`, a `Hash` nominal, a nominal of any class outside that core
-    set, `Dynamic`);
-  - a trailing keyword hash that is neither literal `**{}` nor a non-empty closed shape: an open or shapeless
+    set, `Dynamic`, or a splat element such as `*[*t]`);
+  - a trailing keyword hash that is neither literal `**{}` nor a non-empty shape: an open or shapeless
     double splat, a mixed `k: 2, **h`, or an empty shape read from a local;
   - a list holding `...`.
 - `def m(...)` MUST NOT be declined by the call-site binder. Its NAMED parameters (a leading `def m(a, ...)`

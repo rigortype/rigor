@@ -62,6 +62,10 @@ RSpec.describe "a call-site literal splat or empty double splat binds as Ruby pa
       expect(mismatches("Row.new.first(*[1, 2])", "1")).to eq([])
     end
 
+    it "an empty literal" do
+      expect(mismatches("Row.new.count(*[])", "0")).to eq([])
+    end
+
     it "a literal between positionals" do
       expect(mismatches("Row.new.count(0, *[1], 2)", "3")).to eq([])
     end

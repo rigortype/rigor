@@ -2481,14 +2481,14 @@ module Rigor
       end
 
       # Issue #3157 — the argument list with each `*splat` replaced by its elements, or nil to keep the
-      # no-correspondence binding. It expands only when every splat's operand is an array literal with no splat
-      # of its own, so its arity is syntactic, and every element is {#provably_not_hash?}: a splatted array's
-      # last element is passed as keywords when it is a `ruby2_keywords` hash. A splat of a local or any other
-      # expression is not expanded, because a `Tuple` read there may be a stale fold of an array that has since
-      # grown or shrunk. A trailing keyword hash must be a literal `**{}` (dropped) or a non-empty closed shape;
-      # an open, mixed or empty non-literal one leaves the keywords unknown. A list holding `...` is not
-      # expanded: its argument types do not line up with its argument nodes. The splat's own entry in
-      # `arg_types` is `Dynamic[top]` ({#type_of_non_value}), so the operand is typed here.
+      # no-correspondence binding. It expands only when every splat's operand is an array literal, so its arity is
+      # syntactic, and every element is {#provably_not_hash?}: a splatted array's last element is passed as
+      # keywords when it is a `ruby2_keywords` hash. A splat of a local or any other expression is not expanded,
+      # because a `Tuple` read there may be a stale fold of an array that has since grown or shrunk. A trailing
+      # keyword hash must be a literal `**{}` (dropped) or a non-empty shape; an open, mixed or empty non-literal
+      # one leaves the keywords unknown. A list holding `...` is not expanded: its argument types do not line up
+      # with its argument nodes. The splat's own entry in `arg_types` is `Dynamic[top]` ({#type_of_non_value}),
+      # so the literal's elements are typed here.
       def expand_tuple_splats(arguments, arg_types)
         return nil if forwards_arguments?(arguments)
 
@@ -2509,22 +2509,21 @@ module Rigor
         expanded
       end
 
-      # Whether a trailing keyword-hash argument's type is a closed shape with at least one pair.
+      # Whether a trailing keyword-hash argument's type is a shape with at least one pair. {#call_arg_type} types a
+      # keyword hash as a shape only when it is closed.
       def keyword_shape?(type)
-        type.is_a?(Type::HashShape) && type.closed? && !type.pairs.empty?
+        type.is_a?(Type::HashShape) && !type.pairs.empty?
       end
 
-      # The element types of `*[a, b]`, or nil unless the operand is an array literal with no splat element whose
-      # every element is {#provably_not_hash?}.
+      # The element types of `*[a, b]`, each typed on its own, or nil unless the operand is an array literal whose
+      # every element is {#provably_not_hash?}. A splat element (`*[*t]`) types `Dynamic[top]`
+      # ({#type_of_non_value}), so it declines too.
       def literal_splat_elements(splat)
         literal = splat.expression
-        return nil unless literal.is_a?(Prism::ArrayNode) && literal.elements.none?(Prism::SplatNode)
+        return nil unless literal.is_a?(Prism::ArrayNode)
 
-        tuple = type_of(literal)
-        return nil unless tuple.is_a?(Type::Tuple)
-        return nil unless tuple.elements.all? { |element| provably_not_hash?(element) }
-
-        tuple.elements
+        types = literal.elements.map { |element| type_of(element) }
+        types if types.all? { |type| provably_not_hash?(type) }
       end
 
       # Classes no instance of which is a `Hash`. A `Nominal` of any other class may be a `Hash` subclass.

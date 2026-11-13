@@ -159,7 +159,13 @@ module Rigor
     # renames the foreign declaration. `published_constant_alias_names` holds the last segments of exactly
     # those aliases, and matching on the last segment over-answers in the WITHHOLDING direction, which is the
     # safe one.
+    #
+    # Issue #3199 — the answer turns on another file's publication of the last segment, so the question records
+    # the ADR-46 `constant:<segment>` name edge itself, whatever it answers. The guard asks it about spellings no
+    # typing step reads (a `defined?(B::X)` probe, a callee body the one hop scans), and an edge left to the read
+    # would let an `--incremental` run keep a verdict the moved publication no longer earns.
     def published_constant?(name)
+      Analysis::DependencyRecorder.read_last_segment(:constant, name) if Analysis::DependencyRecorder.active?
       names = @discovery.published_constant_names
       return true if published_constant_alias?(name)
       return false if names.empty?

@@ -3424,6 +3424,56 @@ end
           end
         end
       end
+
+      # Issue #3199 — the one hop also withholds on a constant the callee's body only probes (`defined?(B::X)`),
+      # which no typing step reads, so `Scope#published_constant?` records the `constant:` edge itself. A change to
+      # `B::X`'s publication alone (`c.rb` and `r.rb` untouched) must then re-check the reader; `replay` holds every
+      # recheck equal to a cold run.
+      describe "a callee that only probes another file's constant" do
+        def w_probe = "class C; def self.w(k); defined?(B::X); A.v(k); end; end\n"
+        def tree(x) = { "a.rb" => "class A; def self.v(k) = k == 5 ? k + 1 : k + 2; end\n",
+                        "b.rb" => "class B; X = #{x}; end\n", "c.rb" => w_probe,
+                        "r.rb" => "puts 'hit' if C.w(1) == 3\n" }
+
+        def truthy?(recheck)
+          recheck.diagnostics.any? { |d| File.basename(d.path) == "r.rb" && d.message.include?("always truthy") }
+        end
+
+        it "re-checks the reader when the probed constant becomes published, with nothing published before" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [tree("rand(9)"), { "b.rb" => "class B; X = 6; end\n" }])
+            expect(basenames(rechecks.last.affected)).to include("r.rb")
+            expect(truthy?(rechecks.last)).to be(false)
+          end
+        end
+
+        # Another file already publishes a constant, so the guard's empty-table shortcut is not what hides the edge.
+        it "re-checks the reader when the probed constant becomes published beside another published one" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [tree("rand(9)").merge("d.rb" => "class D; Y = 1; end\n"),
+                                    { "b.rb" => "class B; X = 6; end\n" }])
+            expect(basenames(rechecks.last.affected)).to include("r.rb")
+            expect(truthy?(rechecks.last)).to be(false)
+          end
+        end
+
+        it "re-checks the reader when the probed constant stops being published" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [tree("6"), { "b.rb" => "class B; X = rand(9); end\n" }])
+            expect(basenames(rechecks.last.affected)).to include("r.rb")
+            expect(truthy?(rechecks.last)).to be(true)
+          end
+        end
+
+        # The control: an edit to `b.rb` that leaves `B::X`'s publication where it was re-checks no reader.
+        it "still skips the reader when the edit leaves the probed constant's publication alone" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [tree("6"), { "b.rb" => "class B; X = 6; Z = rand(9); end\n" }])
+            expect(basenames(rechecks.last.affected)).not_to include("r.rb")
+            expect(truthy?(rechecks.last)).to be(false)
+          end
+        end
+      end
     end
 
     it "propagates a return-visible body edit to symbol dependents (return moved at observed key)" do

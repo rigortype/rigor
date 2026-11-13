@@ -32,7 +32,6 @@ The `record_concern_class_methods` row gained a clause saying its hook blocks ar
 The first option. #3003 (rows for the hook recorders) and `c579f8015` (the pin lowered when a grandfathered entry
 went) are the precedents.
 
-
 **Unratified, and not by precedent (restored 2026-11-14).** The `Precedent:` field above names a PR
 whose own approval-queue entry was still queued when this row landed, and
 [`approval-queue.d/README.md`](README.md) says an entry still in the queue is not a precedent. So this
@@ -41,9 +40,10 @@ row named no valid precedent at the time, which by
 makes it the serious case — ask the maintainer first — rather than a decision to land and record. It
 landed anyway.
 
-It was briefly deleted in #3230, which ratified the `gate-row` class in a batch and so ratified the
-cited precedent and this row in one act; the maintainer asked for the four entries in that position to
-come back, and this is one of them. The field keeps the PR it cited, because the queue's gate refuses
+It was briefly deleted in #3230, which ratified the `gate-row` class in a batch; the maintainer asked
+for the four entries in that position to come back, and this is one of them. For #3003 and #3011 the
+chain did not close at #3230 either: each of those PRs still had an `open-choice` entry queued after it,
+ratified only by the batch that restores this one. The field keeps the PR it cited, because the queue's gate refuses
 `none — sets one` on a `gate-row` by design — that value is what makes it serious — so there is no way
 to spell "the precedent was not yet ratified" in the field itself. This note is that spelling.
 
@@ -51,6 +51,7 @@ What is being asked is therefore the row on its merits, not the chain: whether t
 right, independently of the row it followed. The review of #3230 read five of the batch's
 classifications against the code, three of them consumer-classified, and found all five correct; that
 is evidence, not ratification.
+
 ## To undo
 
 Delete the two rows and restore the `concern_module_body?` row and the 367 pin, together with the code.

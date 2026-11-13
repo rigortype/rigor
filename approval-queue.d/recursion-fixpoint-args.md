@@ -31,17 +31,21 @@ build was left to the lane.
   more evaluation with the outer bindings on top of the cost.
 - **Leave the frame as the outer call built it, and let a re-entry read the summary only when the
   frame's bindings cover its own; one that is not covered answers `Dynamic[top]`.** No parameter
-  is widened, so the summary never gains a member the outer call cannot produce, and the only new
-  thing in an answer is `Dynamic[top]`. The answer for `acc` is `1 | Dynamic[top]`. It costs one
+  is widened, so the frame is not typed for arguments the outer call never passed. The answer for
+  `acc` is `1 | Dynamic[top]`. It costs one
   more body evaluation, only for a recursion that has such a re-entry.
 
 ## Decision
 
 The third. ADR-5 and the false-positive rule in `AGENTS.md` weigh a wrong report above a lost
-type, and this is the one option that cannot add a member to an answer. It is sound because the
+type, and this is the one option that does not type the frame for arguments the outer call never
+passed. An answer can still gain a member beside its `Dynamic[top]`: a floored call's value flows
+on through the body (`def ksp(k:) = k > 1 ? k : ksp(k: k + 1)` called with `k: 1` can list a `2`
+Ruby never returns from that call). It is sound because the
 summary is the return of the frame's body under the frame's bindings, which is the re-entry's
 return exactly when those bindings include the re-entry's; it is bounded because the switch to
-the floor happens once per fixpoint. It follows #3158 in what it gives up: that PR binds
+the floor happens once per fixpoint. A value-keyed re-entry and the re-entry's block are held
+against the frame like any argument (review round 1). It follows #3158 in what it gives up: that PR binds
 `Dynamic[top]` where the recursion changes a slot, and this one answers `Dynamic[top]` where it
 does.
 
@@ -52,14 +56,36 @@ whose binder has no positional correspondence. And the first frame with an unpin
 under a constant-argument unroll owns its own summary, which keeps #3158's
 `positional_before_rest(3, 1)` row at `:done`.
 
-One existing example changed: `callee_next_sink_leak_spec`'s first type is
-`[1 | [:sym | Dynamic[top]]]` (was `[1 | Dynamic[top]]`); the inner array is `f(:sym)`'s own
-return. No row of `recursive_keyword_parity.rb` or of the ADR-55 fixtures moved.
+No row of `recursive_keyword_parity.rb` or of the ADR-55 fixtures moved, and no existing spec
+was edited.
+
+### Cost, pending the maintainer
+
+`tool/engine_alloc_ab.rb` over `lib` against the merge base `a1bb73d1c`: 84,831,673 to 85,816,402
+allocations, +1.16%, above the 1.0% per-PR band (`pr_allocations_pct`). The diagnostics over
+`lib` are identical. The rise is the discarded evaluations: a recursion with an uncovered re-entry
+types its body once reading the summary, throws that evaluation away and types it again on the
+floor, and a first unpinned frame under an unroll runs a fixpoint where it ran one evaluation.
+
+One cut was considered and rejected: answering `Dynamic[top]` at the first uncovered re-entry,
+with no discarded evaluation. A body whose only exits are through such a re-entry would then
+never compute `bot`, so `spin` (no base case) would answer `Dynamic[top]` instead of `bot`, and
+the bodies #3158's widened retry recovers (`keyword(1, n: some_int)`) would bypass the retry and
+answer `Dynamic[top]` instead of `Integer`.
+
+Accepting the rise above the band is the maintainer's call and has not been made.
+
+The floor also gives up true positives the wrong answer happened to report:
+
+- `acc(rand(10), 1).upcase` reported `undefined method 'upcase' for 1`; the receiver is now
+  `1 | Dynamic[top]` and nothing is reported.
+- `count(some_int).no_such` for `def count(n) = n <= 0 ? 0 : 1 + count(n - 1)` reported
+  `undefined method 'no_such' for Integer`; the receiver is now a `Dynamic` over the numeric
+  classes and nothing is reported.
 
 ## To undo
 
-Remove the cover test in `consult_summary` and the floor switch in
+Remove `uncovered_reentry_floor` at the recursion guard and the floor switch in
 `fixpoint_user_method_return` (`lib/rigor/inference/expression_typer.rb`), and take the second
 option with a final evaluation under the outer bindings if the precision is wanted: #3162's rows
-have to stay sound. The second option is recoverable from this PR's first description of it in
-the entry above; nothing else reads the summary entry's new fields.
+have to stay sound. Nothing else reads the summary entry's new fields.

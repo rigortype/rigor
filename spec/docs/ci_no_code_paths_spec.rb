@@ -26,10 +26,6 @@ require "yaml"
 CI_NO_CODE_REPO_ROOT = File.expand_path("../..", __dir__)
 CI_NO_CODE_WORKFLOW = File.join(CI_NO_CODE_REPO_ROOT, ".github", "workflows", "ci.yml")
 
-# A spec run from inside a git hook inherits GIT_DIR & friends, which would point the child `git` at the hook's
-# repository — and `git add` in a temporary repo would write to the real index. Unset them for every call.
-CI_NO_CODE_GIT_ENV = { "GIT_DIR" => nil, "GIT_WORK_TREE" => nil, "GIT_INDEX_FILE" => nil }.freeze
-
 # `.sh` files under these directories can be fixtures a spec reads; anywhere else a shell script is run by a
 # workflow or a developer and never opened by the suite.
 CI_NO_CODE_SH_SOURCE_DIRS = %w[spec/ lib/ sig/ exe/ plugins/ examples/ bin/ schemas/ data/].freeze
@@ -60,24 +56,18 @@ CI_NO_CODE_UNREAD = [
 ].freeze
 
 RSpec.describe "CI no-code path list (ci.yml `skip_re`)" do
-  # `git ls-files -z` hands every tracked path over as its exact byte name; the default quoting would return
-  # `"na\303\257ve.json"` for a non-ASCII path, which matches none of the anchors (#3060). Binary strings keep
-  # byte-exact names safe to match: a name that is not valid UTF-8 would make a UTF-8-tagged string raise on
-  # `match?`.
+  # One instrument, shared with `link_integrity_spec.rb`: `spec/support/tracked_files.rb` holds the
+  # `-z` / binary-string / hook-environment / exit-status reasoning, #3060 among it.
   def tracked_files(root = CI_NO_CODE_REPO_ROOT)
-    out, err, status = Open3.capture3(CI_NO_CODE_GIT_ENV, "git", "ls-files", "-z", chdir: root)
-    raise "`git ls-files -z` failed in #{root} (exit #{status.exitstatus}): #{err.strip}" unless status.success?
-
-    out.b.split("\0")
+    TrackedFiles.call(root)
   end
 
   def repo_files
     @repo_files ||= tracked_files
   end
 
-  def git!(dir, *args)
-    _out, err, status = Open3.capture3(CI_NO_CODE_GIT_ENV, "git", *args, chdir: dir)
-    raise "git #{args.join(' ')} failed in #{dir} (exit #{status.exitstatus}): #{err.strip}" unless status.success?
+  def git!(dir, *)
+    TrackedFiles.git!(dir, *)
   end
 
   # The workflow's own `skip_re=` ... `non_code=` assignments.

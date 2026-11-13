@@ -805,9 +805,52 @@ RSpec.describe Rigor::Inference::MatchRebinding do
         expect(described_class.block_entry(narrowed, call.block, call).global(:$1))
           .to eq(Rigor::Type::Combinator.untyped), source
       end
-      %w[items.each Enumerator.new MyThread.new].each do |receiver|
+      %w[items.each MyThread.new].each do |receiver|
         call = last_statement("#{receiver} { $1 }")
         expect(described_class.block_entry(narrowed, call.block, call)).to equal(narrowed), receiver
+      end
+    end
+
+    # Issue #1371 — a proc's body runs when the proc is called, so it enters with the globals unbound even when it
+    # cannot match.
+    it "unbinds them for a proc's body" do
+      ["Proc.new { $1 }", "lambda { $1 }", "proc { $1 }"].each do |source|
+        call = last_statement(source)
+
+        expect(described_class.block_entry(narrowed, call.block, call).global(:$1)).to be_nil, source
+        expect(described_class.block_entry(narrowed, call.block)).to equal(narrowed), source
+      end
+      lambda_node = last_statement("-> { $1 }")
+      expect(described_class.block_entry(narrowed, lambda_node).global(:$1)).to be_nil
+    end
+
+    # Issue #3195 — #1361 pinned `Enumerator.new` here as keeping the narrowing, since its block shares the creator's
+    # slot. It does, but it reads that slot when the enumerator is read, which may be in the same statement or after
+    # a later match, so a narrowed global reads untyped there and an unbound one stays unbound.
+    it "untypes a narrowed global for the block of the core `Enumerator.new` or `Hash.new`" do
+      ["Enumerator.new { |y| y << $1 }", "::Enumerator.new { |y| y << $1 }", "Hash.new { |h, k| $1 }",
+       "::Hash.new(capacity: 2) { |h, k| $1 }"].each do |source|
+        call = last_statement(source)
+        entry = described_class.block_entry(narrowed, call.block, call)
+
+        expect(entry.global(:$1)).to eq(Rigor::Type::Combinator.untyped), source
+        expect(entry.global(:$2)).to be_nil, source
+        expect(described_class.block_entry(narrowed, call.block)).to equal(narrowed), source
+        expect(described_class.block_entry(scope, call.block, call)).to equal(scope), source
+      end
+    end
+
+    it "forgets them for such a block whose body may match, as for any block" do
+      call = last_statement("Enumerator.new { |y| y << $1; s =~ /(z)/ }")
+
+      expect(described_class.block_entry(narrowed, call.block, call).global(:$1)).to be_nil
+    end
+
+    it "keeps them for another receiver's `new`, and for another method of `Enumerator` or `Hash`" do
+      ["klass.new { $1 }", "Enumerator::Lazy.new(items) { $1 }", "Enumerator.produce { $1 }", "Hash.fetch(:k) { $1 }",
+       "Set.new(items) { $1 }"].each do |source|
+        call = last_statement(source)
+        expect(described_class.block_entry(narrowed, call.block, call)).to equal(narrowed), source
       end
     end
   end

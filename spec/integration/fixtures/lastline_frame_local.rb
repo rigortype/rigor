@@ -486,4 +486,24 @@ if ARGV.first == "read"
   DelegatedSource.new(File.open(__FILE__)).instance_exec { assert_type("Dynamic[top]", $_) if gets }
   assert_type("String", $_) if $stdin.gets
 end
+
+# Issue #3195 — a closure's body reads `$_` as the slot holds it when the closure is called, so it enters with `$_`
+# unbound (Ruby with a line on stdin: `deferred_last_line` returns `[nil, nil, nil]`).
+def deferred_last_line
+  return unless $stdin.gets
+
+  f = -> { assert_type("Dynamic[top]", $_) }
+  g = proc { assert_type("Dynamic[top]", $_) }
+  e = Enumerator.new { |y| y << assert_type("Dynamic[top]", $_) }
+  assert_type("String", $_)
+  $_ = nil
+  [f.call, g.call, e.first]
+end
+
+# Control: a plain iterator's block reads the line the frame holds.
+def deferred_last_line_control(items)
+  return unless $stdin.gets
+
+  items.each { assert_type("String", $_) }
+end
 # rubocop:enable Style/SpecialGlobalVars, Style/GlobalStdStream, Lint/UselessAssignment

@@ -343,6 +343,24 @@ RSpec.describe Rigor::Inference::LastLine do
     end
   end
 
+  describe ".block_entry", "for a body that runs later (issue #3195)" do
+    it "forgets `$_` for a proc's body and for the block of `Enumerator.new` or `Hash.new`, whatever the body does" do
+      ["lambda { $_ }", "proc { $_ }", "Proc.new { $_ }", "Enumerator.new { |y| y << $_ }", "Hash.new { |h, k| $_ }"]
+        .each do |source|
+          call = last_statement(source)
+          expect(described_class.block_entry(line, call.block, call).global(:$_)).to be_nil, source
+        end
+      expect(described_class.block_entry(line, last_statement("-> { $_ }")).global(:$_)).to be_nil
+    end
+
+    it "keeps `$_` for an iterator's block and for another receiver's `new`" do
+      ["items.each { $_ }", "klass.new { $_ }"].each do |source|
+        call = last_statement(source)
+        expect(described_class.block_entry(line, call.block, call).global(:$_)).to eq(string), source
+      end
+    end
+  end
+
   describe ".forget_if_set" do
     it "forgets a bound `$_` when the body may set it" do
       expect(described_class.forget_if_set(line, last_statement("x = gets")).global(:$_)).to be_nil

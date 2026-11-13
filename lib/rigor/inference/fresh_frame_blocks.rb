@@ -23,7 +23,8 @@ module Rigor
     #   what it reads. Unlike a root block it shares that slot, so a match in it still rebinds the definer's `$~`.
     #
     # `Enumerator.new` is neither: its block runs on an internal fiber whose root is not the block, so it reads and
-    # rebinds the creator's slot like any other block.
+    # rebinds the creator's slot. It reads that slot when the enumerator is read, though, not where the block is
+    # written ({.deferred_body?}, issue #3195).
     #
     # The receiver of a root call must be the literal constant, and must resolve to the core class where a scope is
     # at hand, so a project's own `Thread` (`module Pool; class Thread; …`) keeps the ordinary block rules.
@@ -115,12 +116,26 @@ module Rigor
         scope.forget_error_info.forget_last_status
       end
 
+      # The core constructors that keep their block and run it on a schedule of their own: an enumerator's generator
+      # runs when the enumerator is first read, and a hash's default proc on a missing key.
+      DEFERRED_CONSTRUCTORS = Set[:Enumerator, :Hash].freeze
+      private_constant :DEFERRED_CONSTRUCTORS
+
+      # Issue #1371, #3195 — true when `block_node` is a body that runs later than where it is written, on the slot of
+      # the frame that wrote it: a proc's ({.proc_body?}), or the block of `Enumerator.new` or `Hash.new` on the core
+      # class ({.deferred_constructor?}). Such a body runs whenever the proc is called, the enumerator is read or a
+      # key is missing, so the frame-local specials narrowed where it is written prove nothing about the slot it
+      # reads then. It enters with `$_` unbound ({LastLine.block_entry}), and with the match globals as
+      # {MatchRebinding.block_entry} gives each kind. It still shares the slot, so a match or a reader it runs
+      # rebinds the frame's as any block's does. The other calls that keep their block ({StoredBlockCall}) are a
+      # definer's or a root's ({.entry}).
+      def deferred_body?(block_node, call_node, scope)
+        proc_body?(block_node, call_node, scope) || deferred_constructor?(block_node, call_node, scope)
+      end
+
       # Issue #1371 — true when `block_node` is the body of a proc made where it is written: a lambda literal, or the
-      # block of Kernel's `lambda` / `proc` or of `Proc.new` on the core class. Such a body runs whenever the proc is
-      # called, so the match globals narrowed where it is written prove nothing about the slot it reads then, and it
-      # enters with them unbound ({MatchRebinding.block_entry}). The other calls that keep their block
-      # ({StoredBlockCall}) are a definer's or a root's ({.entry}), or run it on a schedule of their own
-      # (`Enumerator.new`, `Hash.new`), and keep the ordinary entry, as does a project's own `Proc`.
+      # block of Kernel's `lambda` / `proc` or of `Proc.new` on the core class. It enters with the match globals
+      # unbound; a project's own `Proc` keeps the ordinary entry.
       # Only a lambda literal the statement evaluator enters gets this entry: one written as an operand is typed as a
       # value, and the rule walker reads its body in the enclosing scope.
       def proc_body?(block_node, call_node, scope)
@@ -133,6 +148,22 @@ module Rigor
         when :new then StoredBlockCall.root_constant_name(receiver) == :Proc && core_class?(receiver, :Proc, scope)
         else false
         end
+      end
+
+      # Issue #3195 — true when `block_node` is the block of `Enumerator.new` or `Hash.new` on the literal constant
+      # naming the core class. The block often runs right away, in the statement that makes it
+      # (`Enumerator.new { … }.to_a`, `Hash.new { … }[key]`), and reads the narrowing then; it may as well run after a
+      # later match. The analyzer does not follow which, so the body enters with a narrowed match global untyped, as
+      # a definer body does ({.entry}): neither narrowed nor flagged. A project's own `Enumerator` or `Hash` keeps
+      # the ordinary entry, and so does every other spelling of the core class: a subclass (`Class.new(Hash)`), an
+      # alias (`E = Enumerator`), `Object::Enumerator`, or a receiver that is not a constant (`klass.new { … }`).
+      def deferred_constructor?(block_node, call_node, scope)
+        return false unless call_node.is_a?(Prism::CallNode) && call_node.name == :new &&
+                            call_node.block.equal?(block_node)
+
+        receiver = call_node.receiver
+        constant = StoredBlockCall.root_constant_name(receiver)
+        DEFERRED_CONSTRUCTORS.include?(constant) && core_class?(receiver, constant, scope)
       end
 
       def core_class?(receiver, constant, scope)

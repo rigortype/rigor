@@ -1016,6 +1016,7 @@ module Rigor
         @probe_guard_constants[triple] = guard_constants(node)
         returns = nil
         attributed_probe(triple) do
+          record_guard_spelling_edges(node)
           returns = spec[:keys].map do |(receiver, arg_types, positionals_unknown)|
             result = scope.user_method_return(node, receiver, arg_types,
                                               positionals_unknown: positionals_unknown || false)
@@ -1023,6 +1024,17 @@ module Rigor
           end
         end
         returns
+      end
+
+      # Issue #3199 — the `constant:` edge for every spelling the truthiness guard's hop would scan in `node`'s body,
+      # recorded into the probe's reads, which every reader the gate skips receives. {#guard_constants} leaves out a
+      # spelling whose last segment no file writes, so an edit that starts probing one (`defined?(B::X)` before any
+      # file assigns `B::X`) passes the gate; the skipped reader's guard never asks about it, and without this edge a
+      # file that later publishes the constant would re-check nobody.
+      def record_guard_spelling_edges(node)
+        CheckRules::PublishedConstantGuard.body_constant_spellings(node.body).each do |spelling|
+          DependencyRecorder.read_last_segment(:constant, spelling)
+        end
       end
 
       # Runs one spec's evaluation with its dependency reads recorded ({#probe_reads}) and its plugin reads and

@@ -3468,6 +3468,40 @@ end
           end
         end
 
+        # A reader the ADR-89 WD2 gate skips is not re-analysed, so its guard never asks about a spelling the edited
+        # callee newly probes. The gate compares only the spellings whose last segment some file writes, and no file
+        # writes `X` yet, so the edit passes. The gate probe's edges give the skipped reader the `constant:` edge.
+        def w_plain = "class C; def self.w(k); A.v(k); end; end\n"
+        def unpublished = tree("6").except("b.rb").merge("c.rb" => w_plain)
+
+        it "re-checks a reader the gate skipped when a constant its callee newly probes is published later" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [unpublished, { "c.rb" => w_probe }, { "b.rb" => "class B; X = 6; end\n" }])
+            expect(basenames(rechecks.first.affected)).to eq(["c.rb"]) # the gate passed
+            expect(basenames(rechecks.last.affected)).to include("r.rb")
+            expect(truthy?(rechecks.last)).to be(false)
+          end
+        end
+
+        it "re-checks such a reader beside an unrelated published constant" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [unpublished.merge("d.rb" => "class D; Y = 1; end\n"), { "c.rb" => w_probe },
+                                    { "b.rb" => "class B; X = 6; end\n" }])
+            expect(basenames(rechecks.first.affected)).to eq(["c.rb"])
+            expect(truthy?(rechecks.last)).to be(false)
+          end
+        end
+
+        it "re-checks such a reader when the newly probed constant is a bare top-level one" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [unpublished,
+                                    { "c.rb" => "class C; def self.w(k); defined?(LIMIT); A.v(k); end; end\n" },
+                                    { "l.rb" => "LIMIT = 6\n" }])
+            expect(basenames(rechecks.first.affected)).to eq(["c.rb"])
+            expect(truthy?(rechecks.last)).to be(false)
+          end
+        end
+
         # The control: an edit to `b.rb` that leaves `B::X`'s publication where it was re-checks no reader.
         it "still skips the reader when the edit leaves the probed constant's publication alone" do
           Dir.mktmpdir do |dir|

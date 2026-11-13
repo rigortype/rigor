@@ -1584,8 +1584,11 @@ Two persisted summaries prove "nothing changed":
   observe it under, so what the probe read and observed bounds what they do.
   That includes a constant the body only probes (`defined?(B::X)`): the
   reader's own truthiness guard records the `constant:` edge for every
-  spelling it asks about, so a move in the publication of `B::X`
-  re-analyses the reader
+  spelling it asks about, and the probe records it for every spelling the
+  guard's one hop would scan in the edited body, including one whose last
+  segment no file writes yet (which `guard_constants` below leaves out). So
+  a later move in the publication of `B::X` re-analyses the reader, whether
+  it was analysed or skipped
   ([#3199](https://github.com/rigortype/rigor/issues/3199)).
   For each pair the gate passed, a recheck therefore MUST:
   - add every dependency edge the probe recorded for the pair (symbol,

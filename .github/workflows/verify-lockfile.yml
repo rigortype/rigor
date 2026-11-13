@@ -8,6 +8,10 @@ on:
   push:
     branches:
       - master
+  # The merge queue runs only workflows that listen for merge_group. Without
+  # this trigger a required verify-lockfile check would never report there,
+  # and every queued PR would wait on it forever (#2620).
+  merge_group:
 
 # A new push to a PR head supersedes the previous head's run, so cancel it instead of leaving it
 # to hold a runner. master push runs keep a per-commit group and run to completion, like ci.yml's.
@@ -19,7 +23,9 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  # Named for the workflow: a ruleset requires a check by its context name, and
+  # a bare `verify` would also be satisfied by any later job of that name.
+  verify-lockfile:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}

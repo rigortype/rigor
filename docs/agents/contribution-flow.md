@@ -121,8 +121,9 @@ silently".
   run reuses that result and finishes in about a minute
   ([ADR-123](../adr/123-merge-queue-and-post-hoc-approval.md), amended 2026-10-19); otherwise it
   runs the full CI. A dropped PR stays `OPEN` exactly as a queued one does: read the failed run in
-  `gh run list --event merge_group`, or the new push or manual removal that took it out, and fix it
-  on the branch. Never `gh pr merge --admin`: it skips the queue and its check.
+  `gh run list --event merge_group` (each group starts two workflows, `CI` and `verify-lockfile`, so
+  check both), or the new push or manual removal that took it out, and fix it on the branch. Never
+  `gh pr merge --admin`: it skips the queue and its check.
 - **Mergeability lags a push.** When `git merge-base --is-ancestor origin/master origin/<branch>`
   confirms the branch contains master, a "Head branch is out of date" refusal clears on its own;
   retry with backoff rather than merging `master` in again.

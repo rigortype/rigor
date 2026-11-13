@@ -306,27 +306,72 @@ assertions:
   '298': String
   '299': String
   '300': MatchData
-  '301': String?
-  '302': String?
+  '301': String
+  '302': String
   '303': MatchData
   '304': String
   '305': MatchData
   '306': MatchData
   '307': MatchData?
-  '308': String?
+  '308': String
   '309': String
   '310': MatchData?
   '311': String?
-  '312': String
+  '312': String?
   '313': String?
   '314': String?
   '315': String?
-  '316': String
-  '317': String?
+  '316': Dynamic[top] | String | nil
+  '317': String
   '318': String
   '319': String
-  '320': String
-  '321': String
-  '322': String
-  '323': String
-  '324': String
+  '320': String?
+  '321': String?
+  '322': String?
+  '323': String?
+  '324': String?
+  '325': String?
+  '326': String?
+  '327': String?
+  '328': String?
+  '329': String?
+  '330': String?
+  '331': String?
+  '332': MatchData
+  '333': String?
+  '334': String?
+  '335': String
+  '336': MatchData
+  '337': String?
+  '338': MatchData?
+  '339': Array[String?]
+  '340': Array[String]
+  '341': String
+  '342': String?
+  '343': String?
+  '344': MatchData?
+  '345': String?
+  '346': String?
+  '347': String?
+  '348': String?
+  '349': String
+  '350': String
+  '351': String
+  '352': String
+  '353': String
+  '354': String
+  '355': String
+  '356': String?
+  '357': String
+  '358': String?
+  '359': String?
+  '360': String?
+  '361': String
+  '362': String?
+  '363': String
+  '364': String
+  '365': String
+  '366': String
+  '367': String
+  '368': String
+  '369': String

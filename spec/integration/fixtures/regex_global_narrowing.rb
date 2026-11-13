@@ -2612,20 +2612,19 @@ def match_block_methods(str)
   str&.scan(/x/) { assert_type("MatchData", $~) }
 end
 
-# The entry binds only what every match binds: `$~`, `$&` and the pre- and post-match. Every numbered group keeps the
-# binding it had before the block, the RBS `String?` where nothing bound it, even an unconditional one, until the
-# group walk reads every source right (#2472) (Ruby: `"ab".scan(/(\w)(\d)?/) { p $2 }` prints nil).
+# The numbered groups read the call's own pattern (#1371): a group every match sets is a `String`, and one a match
+# may leave unset reads the RBS `String?` (Ruby: `"ab".scan(/(\w)(\d)?/) { p $2 }` prints nil).
 def match_block_groups(str)
   str.scan(/(\w)(\d)?/) do
     second = $2
-    assert_type("String?", $1)
-    assert_type("String?", Regexp.last_match(1))
+    assert_type("String", $1)
+    assert_type("String", Regexp.last_match(1))
     assert_type("MatchData", Regexp.last_match)
     second.upcase # GENUINE-NIL
   end
 end
 
-# A group an earlier match in the method narrowed keeps that binding in the block, as it did before #2443 (Ruby:
+# After an earlier match in the method, the block still reads its own call's groups, here ones every match sets (Ruby:
 # `match_block_prior_group("a1")` and `match_block_prior_group_last_match("a1")` return "A1", and
 # `match_block_prior_group_scan("ab1")` returns "ab1").
 def match_block_prior_group(str)
@@ -2658,13 +2657,12 @@ class MatchBlockString2443 < String
   def first_group = gsub(/(x)/) { assert_type("MatchData?", Regexp.last_match) }
 end
 
-# Past the `=~`'s falsey edge the `gsub` block keeps the `$1` binding the frame-wide entry gives it, as before #2443,
-# though Ruby reads the block's own group there (#1371); `$~` and `$&` read the block's own match (Ruby:
+# Issue #1371 — past the `=~`'s falsey edge the `gsub` block reads its own group, not the edge's nil (Ruby:
 # `match_block_stale_edge("ab cd")` returns "Ab Cd").
 def match_block_stale_edge(line)
   return if line =~ /^(#)/
 
-  line.gsub(/(\w+)/) { assert_type("String?", $1); $&.capitalize }
+  line.gsub(/(\w+)/) { assert_type("String", $1); w = $1; w.capitalize }
 end
 
 # Control: a match the body runs rebinds `$~` past the entry (Ruby: nil after the failed match).
@@ -2732,6 +2730,163 @@ class MatchBlockStr2443 < String; end
 def match_block_string_subclass(raw)
   ms = MatchBlockStr2443.new(raw.to_s)
   ms.scan(/(a)/) { m = Regexp.last_match; m.begin(0) }
+end
+
+# Issue #1371 — a block of `scan`, `gsub`, `gsub!`, `sub` or `sub!` does not read a group the enclosing frame
+# narrowed: Ruby rebinds `$~` to the call's own match before every yield (Ruby: `own_match_optional_group("a1b")`
+# raises NoMethodError on nil, and each `$1` in `own_match_names(+"a1b")` reads nil).
+def own_match_optional_group(str)
+  return unless str =~ /(\d+)/
+
+  str.gsub(/(a)?b/) { assert_type("String?", $1); w = $1; w.upcase } # GENUINE-NIL
+end
+
+def own_match_names(str)
+  return unless str =~ /(\d+)/
+
+  str.sub(/(x)?b/) { assert_type("String?", $1); "" }
+  return unless str =~ /(\d+)/
+
+  str.scan(/(x)?b/) { assert_type("String?", $1) }
+  return unless str =~ /(\d+)/
+
+  str.gsub!(/(x)?b/) { assert_type("String?", $1); "b" }
+  return unless str =~ /(\d+)/
+
+  str.sub!(/(x)?b/) { assert_type("String?", $1); "b" }
+end
+
+# The typing pass that reads a block's value enters it the same way (Ruby: `own_match_value("a1b")` returns nil).
+def own_match_value(str)
+  return unless str =~ /(\d+)/
+
+  v = str.scan(/(x)?b/) { break $1 }
+  assert_type("Dynamic[top] | String | nil", v)
+  v
+end
+
+# A group is read as always set only from a regex literal whose source is plain: literals, `.`, anchors, quantifiers,
+# `|`, plain and `(?:…)` groups, class escapes and a bracket class with no bracket inside (Ruby: "a" for
+# `own_match_plain("a1")`).
+def own_match_plain(str)
+  return unless str =~ /(\d+)/
+
+  str.gsub(/(?:x|y)?([a-z_]+)(\d){1,2}/) { assert_type("String", $1); assert_type("String", $2); assert_type("String", $+); "" }
+  str.sub(/([a-z]+)|(\d)/) { assert_type("String?", $1); assert_type("String?", $2); "" }
+end
+
+# Any other pattern vouches for no group, so each reads `String?` even where Ruby always sets it: the group walk
+# misreads these forms (#2472, #1476). A nested class, a named group, a lookaround, a quantifier on a quantifier
+# (`(a)+{0}`, `(a)+??` and `(a){1}?` match without the group), the `x` flag, an interpolation, a String, and a variable.
+def own_match_declined(str, re)
+  return unless str =~ /(\d+)/
+
+  str.sub(/[a[b](c)]/) { assert_type("String?", $1); "" }
+  str.sub(/(?<n>a)/) { assert_type("String?", $1); "" }
+  str.sub(/(?!(x))(a)/) { assert_type("String?", $1); assert_type("String?", $2); "" }
+  str.sub(/(a)+{0}/) { assert_type("String?", $1); "" }
+  str.sub(/(a)+??/) { assert_type("String?", $1); "" }
+  str.sub(/(a){1}?/) { assert_type("String?", $1); "" }
+  str.sub(/(a) # (b)/x) { assert_type("String?", $1); "" }
+  str.sub(/(a)#{str}/) { assert_type("String?", $1); "" }
+  str.sub("(a)") { assert_type("String?", $1); assert_type("MatchData", $~); "" }
+  str.sub(re) { assert_type("String?", $1); "" }
+end
+
+# The block form of `grep` runs `pattern === element` in the caller's frame before each yield, so with a regex literal
+# its block reads that match; a `grep_v` block runs after a failed one and enters with the globals unbound (Ruby:
+# `own_match_grep("a1", ["bc", "x"])` returns `[[nil, "c"]]`, `own_match_grep_v("a1", ["x"])` returns `[nil]`).
+def own_match_grep(str, items)
+  return unless str =~ /(\d+)/
+
+  items.grep(/(a)?b(c)/) do
+    assert_type("String?", $1)
+    assert_type("String", $2)
+    assert_type("MatchData", $~)
+    [$1, $2]
+  end
+end
+
+def own_match_grep_v(str, items)
+  return unless str =~ /(\d+)/
+
+  items.grep_v(/(a)b/) { assert_type("String?", $1); assert_type("MatchData?", Regexp.last_match); $1 }
+end
+
+def own_match_grep_value(str)
+  return unless str =~ /(\d+)/
+
+  assert_type("Array[String?]", ["ab"].grep(/(x)?b/) { $1 })
+  return unless str =~ /(\d+)/
+
+  assert_type("Array[String]", ["ab"].grep(/(a)b/) { $1 })
+end
+
+# Control: a pattern that is not a regex literal keeps the entry, since its `===` may leave `$~` alone (Ruby:
+# `own_match_grep_class("a1", [2])` returns `[3]`).
+def own_match_grep_class(str, items)
+  return unless str =~ /(\d+)/
+
+  items.grep(Integer) { |i| assert_type("String", $1); w = $1; i + w.to_i }
+end
+
+# Issue #1371 — a lambda or proc body runs when it is called, so the narrowing where it is written proves nothing
+# about the `$~` it reads (Ruby: `closure_stale_lambda("a1", "zy")` returns nil).
+def closure_stale_lambda(str, other)
+  f = nil
+  f = -> { assert_type("String?", $1); $1 } if str =~ /(\d+)/
+  other =~ /(x)?y/
+  f&.call
+end
+
+def closure_forms(str)
+  return unless str =~ /(\d+)/
+
+  a = -> { assert_type("String?", $1); assert_type("MatchData?", Regexp.last_match) }
+  b = lambda { assert_type("String?", $1) }
+  c = proc { assert_type("String?", $1) }
+  d = Proc.new { assert_type("String?", $1) }
+  e = Kernel.lambda { assert_type("String?", $1) }
+  f = -> { w = $1; w.upcase } # GENUINE-NIL
+  assert_type("String", $1)
+  [a, b, c, d, e, f]
+end
+
+# A match the body runs narrows inside it as anywhere else (Ruby: `closure_own_match.call("a1")` returns "1").
+def closure_own_match
+  ->(s) { s =~ /(\d+)/ ? assert_type("String", $1) : nil }
+end
+
+# Controls: a plain iterator's block still reads the enclosing narrowing, and so do the block of a project class that
+# only shares `Proc`'s name, a project method named `lambda` on another receiver, and the block of `Enumerator.new`
+# or `Hash.new`, which is not one of the proc forms (Ruby: "1" for `ClosurePool1371.entry("a1")`).
+module ClosurePool1371
+  class Proc
+    def self.new = yield
+  end
+
+  def self.lambda = yield
+
+  def self.entry(str)
+    return unless str =~ /(\d+)/
+
+    Proc.new { assert_type("String", $1) }
+    ClosurePool1371.lambda { assert_type("String", $1) }
+  end
+end
+
+def closure_control_other_keepers(str)
+  return unless str =~ /(\d+)/
+
+  e = Enumerator.new { |y| assert_type("String", $1); y << 1 }
+  h = Hash.new { |_h, _k| assert_type("String", $1) }
+  [e, h]
+end
+
+def closure_control_each(str, items)
+  return unless str =~ /(\d+)/
+
+  items.each { assert_type("String", $1); w = $1; w.upcase }
 end
 
 # Issue #1475 — `{,n}` permits zero repetitions like `?` and `*`, so a group it quantifies, and any group

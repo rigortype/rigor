@@ -24,6 +24,13 @@ require "spec_helper"
 LINK_INTEGRITY_DOCS_ROOT = File.expand_path("../../docs", __dir__)
 LINK_INTEGRITY_REPO_ROOT = File.expand_path("../..", __dir__)
 
+# The two skill trees (`.claude/skills/` contributor workflows, `skills/` user-facing ones) link into this
+# repository the way any document here does, and nothing resolved those links before: `waza check`, the only
+# tool that reads them, stops at "link escapes skill directory" and never looks at the target, so a renamed
+# ADR leaves output byte-identical to the healthy case (`docs/agents/skill-authoring.md` § "The `waza`
+# review" says so, which is why the escape itself is not a defect there).
+LINK_INTEGRITY_SKILL_ROOTS = %w[.claude/skills skills].map { |rel| File.join(LINK_INTEGRITY_REPO_ROOT, rel) }.freeze
+
 # The `references/` git submodules hold vendored upstream sources. Contributors check them out, but CI
 # does not (the test job runs without submodules), so a link into `references/` is legitimately present
 # locally yet absent in CI — never gate it here.
@@ -86,6 +93,15 @@ LINK_INTEGRITY_LINKED_DOCS = begin
   Dir[File.join(LINK_INTEGRITY_DOCS_ROOT, "**", "*.md")].select do |md_path|
     next false if md_path.delete_prefix("#{LINK_INTEGRITY_DOCS_ROOT}/").match?(LINK_INTEGRITY_EXCLUDE)
 
+    helper.extract_relative_links(File.read(md_path, encoding: "utf-8"), File.dirname(md_path)).any?
+  end
+end.freeze
+
+# The same, for the two skill trees. Separate from LINK_INTEGRITY_LINKED_DOCS because the floors below
+# describe a much smaller corpus, and because a skill is reached by its own tree, not by `docs/`.
+LINK_INTEGRITY_LINKED_SKILL_DOCS = begin
+  helper = Object.new.extend(LinkIntegrityHelpers)
+  LINK_INTEGRITY_SKILL_ROOTS.flat_map { |root| Dir[File.join(root, "**", "*.md")] }.sort.select do |md_path|
     helper.extract_relative_links(File.read(md_path, encoding: "utf-8"), File.dirname(md_path)).any?
   end
 end.freeze
@@ -155,6 +171,44 @@ RSpec.describe "documentation link integrity" do
                           "LINK_INTEGRITY_EXCLUDE has grown past the two surfaces it documents, so " \
                           "these documents' links are no longer checked by anything:\n" +
                           unexpected.map { |rel| "  → #{rel}" }.join("\n")
+  end
+
+  describe "the skill trees" do
+    LINK_INTEGRITY_LINKED_SKILL_DOCS.each do |md_path|
+      rel = md_path.delete_prefix("#{LINK_INTEGRITY_REPO_ROOT}/")
+
+      it "#{rel} — all relative links exist" do
+        broken = extract_relative_links(
+          File.read(md_path, encoding: "utf-8"),
+          File.dirname(md_path)
+        ).reject { |t| File.exist?(t) }
+        expect(broken).to be_empty,
+                          "Broken links in #{md_path.delete_prefix("#{LINK_INTEGRITY_REPO_ROOT}/")}:\n" +
+                          broken.map { |t| "  → #{t.delete_prefix("#{LINK_INTEGRITY_REPO_ROOT}/")}" }.join("\n")
+      end
+    end
+
+    # Same vacuity guard as the `docs/` corpus above, and the same reason: these examples are generated at
+    # load time, so a tree that moves or a glob that stops matching reports green having checked nothing.
+    # Floors sized just under the current 34 files / 185 links; both corpora grow with every skill.
+    it "generates examples for a plausible number of skill documents and links" do
+      total = LINK_INTEGRITY_LINKED_SKILL_DOCS.sum do |md_path|
+        extract_relative_links(File.read(md_path, encoding: "utf-8"), File.dirname(md_path)).size
+      end
+
+      expect(LINK_INTEGRITY_LINKED_SKILL_DOCS.size).to be >= 30
+      expect(total).to be >= 170
+    end
+
+    # A count alone cannot see that one whole tree dropped out: `skills/` carries far fewer linked documents
+    # than `.claude/skills/`, so losing it stays inside the slack above.
+    it "covers both trees" do
+      covered = LINK_INTEGRITY_SKILL_ROOTS.reject do |root|
+        LINK_INTEGRITY_LINKED_SKILL_DOCS.none? { |md_path| md_path.start_with?("#{root}/") }
+      end
+
+      expect(covered).to match_array(LINK_INTEGRITY_SKILL_ROOTS)
+    end
   end
 
   # #438: a self-referential GitHub URL names a ref in THIS repository, so it is checkable offline — and it is

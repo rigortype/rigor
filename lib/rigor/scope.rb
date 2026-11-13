@@ -1515,12 +1515,16 @@ module Rigor
     def user_instance_def_owners(method_name)
       Analysis::DependencyRecorder.read_name(:defines, method_name) if Analysis::DependencyRecorder.active?
       name = method_name.to_sym
-      owners = @discovery.discovered_def_nodes.filter_map do |class_name, defs|
+      # `each` with a lazily built array, not `filter_map`: this runs once per call on every discovered class, and
+      # `Hash#filter_map` allocates a `[key, value]` pair per entry (#2895 cost 3.35% of the release gate's
+      # allocations that way).
+      owners = nil
+      @discovery.discovered_def_nodes.each do |class_name, defs|
         next unless defs.key?(name) && class_name != Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY
 
-        [class_name, open_to_override?(class_name)].freeze
+        (owners ||= []) << [class_name, open_to_override?(class_name)].freeze
       end
-      owners.empty? ? EMPTY_OWNERS : owners.freeze
+      owners.nil? ? EMPTY_OWNERS : owners.freeze
     end
 
     EMPTY_OWNERS = [].freeze

@@ -50,7 +50,9 @@ to spell "the precedent was not yet ratified" in the field itself. This note is 
 What is being asked is therefore the row on its merits, not the chain: whether this classification is
 right, independently of the row it followed.
 
-The entry was restored rather than the rows reverted, under [ADR-123's 2026-11-14 amendment](../docs/adr/123-merge-queue-and-post-hoc-approval.md). What was read, and by whom: both
+The entry was restored rather than the rows reverted, under
+[ADR-123's 2026-11-14 amendment](../docs/adr/123-merge-queue-and-post-hoc-approval.md).
+What was read, and by whom: both
 rows were read against the code on 2026-11-14 by the session that restored this entry —
 `ScopeIndexer#record_hook_block_singleton_defs`, which files declarations and is recorded as a
 producer with its reason, and `SyntheticMethodScanner#concern_extend_arguments`, which reads one

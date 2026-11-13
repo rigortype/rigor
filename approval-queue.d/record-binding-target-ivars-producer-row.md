@@ -37,7 +37,9 @@ to spell "the precedent was not yet ratified" in the field itself. This note is 
 What is being asked is therefore the row on its merits, not the chain: whether this classification is
 right, independently of the row it followed.
 
-The entry was restored rather than the row reverted, under [ADR-123's 2026-11-14 amendment](../docs/adr/123-merge-queue-and-post-hoc-approval.md). What was read, and by whom: the
+The entry was restored rather than the row reverted, under
+[ADR-123's 2026-11-14 amendment](../docs/adr/123-merge-queue-and-post-hoc-approval.md).
+What was read, and by whom: the
 row's subject was read against the code on 2026-11-14 by the session that restored this entry —
 `ScopeIndexer#record_binding_target_ivars` calls `accumulate_ivar_type` once per name, so it writes
 the census and is recorded as a producer, and the row's stated reason (a `rescue` reference or `for`

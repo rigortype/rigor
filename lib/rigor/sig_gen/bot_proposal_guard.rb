@@ -7,6 +7,12 @@ module Rigor
   module SigGen
     # Issue #3029 — decides which emittable `-> bot` proposals are skipped instead.
     #
+    # Its discovery-table reads are recorded in `spec/rigor/declaration_facts/admission_census.yml` as
+    # `existence` / `identity` (#3037). The justification belongs here rather than at those rows, because that
+    # file is re-dumped from the index and keeps no hand-written reason: a contested slot this guard does not
+    # see only means a `bot` proposal is kept, which is what master already does, so the guard never reads a
+    # fact the census could let it get wrong in the unsafe direction.
+    #
     # A `bot` return is right when it is the method's final behaviour: a `throw`, or a deliberate error nothing
     # overrides. It is wrong when the raising body is a base the program replaces. Every override returns a value,
     # so a `bot` declaration breaks Liskov compatibility with each of them, and a collection author reading the

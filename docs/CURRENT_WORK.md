@@ -20,8 +20,11 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 
 - **v0.4.7 shipped** (tag `v0.4.7`, 2026-11-03). The perf-gate corpus is advanced to it
   (`bench/baseline.json`, `bench-corpus-v0.4.7`). The v0.4.8 milestone holds the open follow-ups.
-- **The approval queue is not empty**: `approval-queue.d/` holds 23 entries (ADR-128/129/130,
-  typing-state, VS Code and others). The maintainer ratifies them at `/rigor-release-prep`, not before.
+- **The approval queue is being ratified in batches**: the maintainer ratified the `process`, `scope`
+  and `gate-row` classes on 2026-11-14 (#3226, #3228, #3230), which leaves 58 entries — 57
+  `open-choice` and one `process` (`adr129-s3-ci-shadow.md`, held back because nothing carries its
+  promise that the type_of shadow becomes a gate). Batch ratification before a release is the
+  `approval-queue.d/README.md` path for a long window; `/rigor-release-prep` ratifies whatever is left.
 - **ADR-129 (typing state) is the active engine campaign**: stage 3 slices are landing as `adr129-s3-*`
   PRs. Its open follow-ups are the `ADR-129` issues (for example #2798, #2805, #2813, #2853).
 - **The Pi harness (ADR-115)** now routes reviews to a co-primary pair, Grok:xhigh and

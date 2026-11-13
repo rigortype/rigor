@@ -3,7 +3,7 @@ name: rigor-reviewer
 description: >-
   Adversarial review of a Rigor draft PR against architect Acceptance.
   Default Grok:xhigh; add Opus:high when complex; reserve Fable:medium for
-  complex design. Never merge. Finish Approved or Needs fix.
+  complex design. Never merge. Returns the shared fixed report, then Approved or Needs fix.
 ---
 
 # Rigor reviewer (ADR-115)
@@ -39,21 +39,30 @@ Load and follow:
 
 ## Output
 
-Exactly one verdict, plus final-approval artifacts when judging for Approve:
+The report shape is not this harness's own. Return the fixed report of
+[`rigor-reviewer`](../../../../.claude/skills/rigor-reviewer/SKILL.md) § Report, read from
+`origin/master` when the PR under review edits it (this harness loads a skill from the checkout, so
+the head's copy is what you would otherwise get) — the parsed
+`Severe N | …` line, the verdict line naming the head SHA you reviewed, `Severe remaining`, and each
+finding with its severity, its failure scenario, introduced or pre-existing, and its repro — then add
+this harness's fields:
 
 ```text
-ReviewOutput:
-  verdict:         "Approved" | "Needs fix"
-  checklist:       [finding, ...]   # required when Needs fix
-  pr_body_draft:   |                # required when this is the final approval pass
-    ## Summary
-    …
-    ## Test plan
-    …
-  pr_comment_drafts:                # required on final approval pass (may be [])
-    - where: "PR conversation" | "file:path:line"
-      body:  "…"
+verdict:           "Approved" | "Needs fix"   # Approved only with `Severe remaining: no`
+pr_body_draft:     |                # required when this is the final approval pass
+  ## Summary
+  …
+  ## Test plan
+  …
+pr_comment_drafts:                  # required on final approval pass (may be [])
+  - where: "PR conversation" | "file:path:line"
+    body:  "…"
 ```
+
+A finding needs a repro: the command, its output, and the output correct behaviour requires. Severity
+is defined in `docs/agents/contribution-flow.md` § "Landing a pull request", and a suspicion that did
+not reproduce goes on the report's `Not reproduced` line, never in the findings. That is what lets the
+step after this one act without reviewing again — the whole reason the shape is shared.
 
 Prefer a concrete counterexample when behaviour is claimed.
 
@@ -65,5 +74,9 @@ applies or posts those drafts (reviewer stays read-only / never merges).
 
 ## Finish phrases (exact)
 
-- `Approved` (must include `pr_body_draft` + `pr_comment_drafts` on final pass)
-- `Needs fix` (include actionable checklist)
+Both follow the fixed report, never replace it:
+
+- `Approved` (only with `Severe remaining: no`; must include `pr_body_draft` + `pr_comment_drafts`).
+  No severe finding does not make `Approved` mandatory: `Needs fix` stays yours to return for a
+  finding the PR should fix first, which is how ADR-115 WD6 §5's fix loop is reached.
+- `Needs fix`

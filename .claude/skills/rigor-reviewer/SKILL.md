@@ -68,9 +68,22 @@ bullet under Set up, which no brief loosens.
 
 ## Report
 
-Every round, the first round and each delta round alike, uses this shape. The first line is parsed,
-so keep it exactly as shown even when every count is zero. The coordinator lands the head SHA the
-verdict names, never one read back from the PR:
+Every round, the first round and each delta round alike, uses this shape, and so does a review run by
+any other harness: the Pi harness
+([`contracts/README.md`](../../../agents/pi-harness/contracts/README.md) § Reviewer) and the takt
+adversary ([`adversarial-review.md`](../../../.takt/facets/instructions/adversarial-review.md))
+return this report and add their own fields after it. Whoever lands reads one shape, whether a
+coordinator is there or not.
+
+**Read this section from `origin/master` when the PR edits it.** A harness loads a skill from the
+tree it runs in, which on a PR that rewrites this section is the PR's own copy — so the contract
+would be whatever the change under review says it is. Nothing enforces that for you: the brief owes
+you the instruction (`docs/agents/parallel-lanes.md` § "Reviewer contract"), and on such a PR you
+read the contract with `git show origin/master:.claude/skills/rigor-reviewer/SKILL.md` and say in the
+verdict line that you did.
+
+The first line is parsed, so keep it exactly as shown even when every count is zero. The coordinator
+lands the head SHA the verdict names, never one read back from the PR:
 
 ```
 Severe N | Moderate N | Minor N | Nit N

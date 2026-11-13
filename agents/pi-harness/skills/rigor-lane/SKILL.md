@@ -3,8 +3,8 @@ name: rigor-lane
 description: >-
   Implement one Rigor issue under a fixed architect LaneInput contract in a
   worktree, push, print head SHA, and stop. Do not CI-watch, run parallel host
-  make verify, or burn the session on full corpus checks. Finish with Head SHA
-  <sha> — lane done or Blocked — need human.
+  make verify, or burn the session on full corpus checks. Finish with the head
+  SHA and "lane done", or "Blocked — need human".
 ---
 
 # Rigor lane (ADR-115)
@@ -14,7 +14,7 @@ Load and follow:
 - Role: [`../../roles/lane.md`](../../roles/lane.md)
 - Contracts: [`../../contracts/README.md`](../../contracts/README.md)
 - Process note (v0.4.0 batch traps):
-  [`../../../docs/notes/20260921-queue-release-lane-experience.md`](../../../docs/notes/20260921-queue-release-lane-experience.md)
+  [`../../../../docs/notes/20260921-queue-release-lane-experience.md`](../../../../docs/notes/20260921-queue-release-lane-experience.md)
   (when present on the branch)
 
 ## Hard constraints (always)

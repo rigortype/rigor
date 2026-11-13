@@ -29,9 +29,8 @@ makes it the serious case — ask the maintainer first — rather than a decisio
 landed anyway.
 
 It was briefly deleted in #3230, which ratified the `gate-row` class in a batch; the maintainer asked
-for the four entries in that position to come back, and this is one of them. For #3003 and #3011 the
-chain did not close at #3230 either: each of those PRs still had an `open-choice` entry queued after it,
-ratified only by the batch that restores this one. The field keeps the PR it cited, because the queue's gate refuses
+for the four entries in that position to come back, and this is one of them. #3094's own two entries
+were both gone before that — one in #3228, one in #3230 — so for this row the chain did close there. The field keeps the PR it cited, because the queue's gate refuses
 `none — sets one` on a `gate-row` by design — that value is what makes it serious — so there is no way
 to spell "the precedent was not yet ratified" in the field itself. This note is that spelling.
 

@@ -3120,6 +3120,23 @@ RSpec.describe "Rigor type construction (integration)" do
       end
     end
 
+    describe "fixtures/recursive_argument_join.rb — issue #3162 a summary answers only the calls it covers" do
+      let(:harness) { harness_for("recursive_argument_join") }
+
+      # Before the fix the base case answered with the first frame's arguments: `acc(rand(10), 1)` was `1`,
+      # and a branch only a deeper call reaches (`:int`, `:zero`) was missing from the answer with nothing
+      # beside it to say so.
+      it "answers `Dynamic[top]` for an in-cycle call the outer call's arguments do not cover" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+
+      it "does not fold a comparison against a value only a deeper call returns" do
+        flow = harness.diagnostics.select { |d| d.rule.to_s == "flow.always-truthy-condition" }
+        expect(flow.map(&:line)).to eq([])
+      end
+    end
+
     describe "fixtures/recursive_unroll_clamp.rb — ADR-55 WD1 precision-envelope clamps" do
       let(:harness) { harness_for("recursive_unroll_clamp") }
 

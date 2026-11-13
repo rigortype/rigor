@@ -1,0 +1,41 @@
+---
+locals:
+  deep: Dynamic[top]
+  subject: Dynamic[top]
+assertions:
+  '1': bot
+  '2': bot
+  '3': 1 | Dynamic[top]
+  '4': 1 | Dynamic[top]
+  '5': '4'
+  '6': '4'
+  '7': Dynamic[top]
+  '8': 1 | 2 | Dynamic[top]
+  '9': Dynamic[top]
+  '10': Dynamic[top]
+  '11': ":other | Dynamic[top]"
+  '12': ":other | Dynamic[top]"
+  '13': ":none | Dynamic[top]"
+  '14': ":none | Dynamic[top]"
+  '15': '1'
+  '16': '1'
+  '17': Dynamic[top] | false
+  '18': Dynamic[top] | false
+  '19': ":fast | Dynamic[top]"
+  '20': ":fast | Dynamic[top]"
+  '21': '"" | Dynamic[top]'
+  '22': '"" | Dynamic[top]'
+  '23': 1 | Dynamic[top]
+  '24': 1 | Dynamic[top]
+  '25': 1 | Dynamic[top]
+  '26': 1 | Dynamic[top]
+  '27': ":sym"
+  '28': ":sym"
+  '29': Dynamic[top] | []
+  '30': Dynamic[top] | []
+  '31': Integer
+  '32': Integer
+  '33': Dynamic[top]
+  '34': Dynamic[top]
+  '35': 1 | Dynamic[top]
+  '36': 1 | Dynamic[top]

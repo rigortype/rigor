@@ -3495,6 +3495,7 @@ Unrelated
           Other.class_variable_set(:@@c, nil)
           class_variable_set(:not_a_cvar, nil)
           class_variable_set(name, nil)
+          class_variable_set(:@@arity)
         end
       RUBY
       expect(cvars.fetch("Klass")).to eq(:@@a => Rigor::Type::Combinator.constant_of(nil), :@@b => Rigor::Type::Combinator.constant_of(1))

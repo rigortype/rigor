@@ -122,8 +122,12 @@ module Rigor
         # The one hop. Resolves the callee through the ordinary `Scope` accessors (so the ADR-46 recorder sees
         # the read and the caller gains an edge to the callee — the conservative direction) and scans its
         # body. Fails soft to false: a resolution this cannot make is not a reason to withhold.
+        #
+        # Issue #3199 — the empty-table shortcut is taken only when no ADR-46 recorder is watching: the scan's
+        # `Scope#published_constant?` questions are what record the `constant:` edges, and a reader that skipped
+        # them would not be re-checked when another file publishes a constant the callee's body names.
         def callee_reads_published_constant?(node, scope)
-          return false if scope.published_constant_names.empty?
+          return false if scope.published_constant_names.empty? && !Analysis::DependencyRecorder.recording?
 
           def_node = resolve_callee(node, scope)
           return false if def_node.nil?

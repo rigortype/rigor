@@ -1571,8 +1571,7 @@ Two persisted summaries prove "nothing changed":
   dependent of the def observes it, directly or through other defs, each with
   the def's current return
   ([#3160](https://github.com/rigortype/rigor/issues/3160)), and every file
-  that observes a def MUST be one of its symbol dependents (both up to the
-  two exceptions named below). A def for which
+  that observes a def MUST be one of its symbol dependents. A def for which
   that cannot be shown MUST have no summary, and a def with no summary keeps
   its symbol dependents. Fewer keys are not the conservative direction: a
   missing key skips the reader that observes the def under it.
@@ -1582,10 +1581,15 @@ Two persisted summaries prove "nothing changed":
   before, or one it calls under another key
   ([#3180](https://github.com/rigortype/rigor/issues/3180)). The gate's probe
   evaluated the def at every stored key, which is every key its readers
-  observe it under, so what the probe read and observed bounds what they do,
-  with one exception: a `defined?(B::X)` in the def's body records no
-  `constant:` edge, so a skipped reader is not re-analysed when the census
-  of `B::X` moves ([#3199](https://github.com/rigortype/rigor/issues/3199)).
+  observe it under, so what the probe read and observed bounds what they do.
+  That includes a constant the body only probes (`defined?(B::X)`): the
+  reader's own truthiness guard records the `constant:` edge for every
+  spelling it asks about, and the probe records it for every spelling the
+  guard's one hop would scan in the edited body, including one whose last
+  segment no file writes yet (which `guard_constants` below leaves out). So
+  a later move in the publication of `B::X` re-analyses the reader, whether
+  it was analysed or skipped
+  ([#3199](https://github.com/rigortype/rigor/issues/3199)).
   For each pair the gate passed, a recheck therefore MUST:
   - add every dependency edge the probe recorded for the pair (symbol,
     ancestry and name-keyed alike, the def's own file included) to each

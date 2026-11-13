@@ -3424,6 +3424,108 @@ end
           end
         end
       end
+
+      # Issue #3199 — the one hop also withholds on a constant the callee's body only probes (`defined?(B::X)`),
+      # which no typing step reads, so `Scope#published_constant?` records the `constant:` edge itself. A change to
+      # `B::X`'s publication alone (`c.rb` and `r.rb` untouched) must then re-check the reader; `replay` holds every
+      # recheck equal to a cold run.
+      describe "a callee that only probes another file's constant" do
+        def w_probe = "class C; def self.w(k); defined?(B::X); A.v(k); end; end\n"
+
+        def tree(value)
+          { "a.rb" => "class A; def self.v(k) = k == 5 ? k + 1 : k + 2; end\n",
+            "b.rb" => "class B; X = #{value}; end\n", "c.rb" => w_probe,
+            "r.rb" => "puts 'hit' if C.w(1) == 3\n" }
+        end
+
+        def truthy?(recheck)
+          recheck.diagnostics.any? { |d| File.basename(d.path) == "r.rb" && d.message.include?("always truthy") }
+        end
+
+        it "re-checks the reader when the probed constant becomes published, with nothing published before" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [tree("rand(9)"), { "b.rb" => "class B; X = 6; end\n" }])
+            expect(basenames(rechecks.last.affected)).to include("r.rb")
+            expect(truthy?(rechecks.last)).to be(false)
+          end
+        end
+
+        # Another file already publishes a constant, so the guard's empty-table shortcut is not what hides the edge.
+        it "re-checks the reader when the probed constant becomes published beside another published one" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [tree("rand(9)").merge("d.rb" => "class D; Y = 1; end\n"),
+                                    { "b.rb" => "class B; X = 6; end\n" }])
+            expect(basenames(rechecks.last.affected)).to include("r.rb")
+            expect(truthy?(rechecks.last)).to be(false)
+          end
+        end
+
+        it "re-checks the reader when the probed constant stops being published" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [tree("6"), { "b.rb" => "class B; X = rand(9); end\n" }])
+            expect(basenames(rechecks.last.affected)).to include("r.rb")
+            expect(truthy?(rechecks.last)).to be(true)
+          end
+        end
+
+        # A reader the ADR-89 WD2 gate skips is not re-analysed, so its guard never asks about a spelling the edited
+        # callee newly probes. The gate compares only the spellings whose last segment some file writes, and no file
+        # writes `X` yet, so the edit passes. The gate probe's edges give the skipped reader the `constant:` edge.
+        def w_plain = "class C; def self.w(k); A.v(k); end; end\n"
+        def unpublished = tree("6").except("b.rb").merge("c.rb" => w_plain)
+
+        it "re-checks a reader the gate skipped when a constant its callee newly probes is published later" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [unpublished, { "c.rb" => w_probe }, { "b.rb" => "class B; X = 6; end\n" }])
+            expect(basenames(rechecks.first.affected)).to eq(["c.rb"]) # the gate passed
+            expect(basenames(rechecks.last.affected)).to include("r.rb")
+            expect(truthy?(rechecks.last)).to be(false)
+          end
+        end
+
+        it "re-checks such a reader beside an unrelated published constant" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [unpublished.merge("d.rb" => "class D; Y = 1; end\n"), { "c.rb" => w_probe },
+                                    { "b.rb" => "class B; X = 6; end\n" }])
+            expect(basenames(rechecks.first.affected)).to eq(["c.rb"])
+            expect(truthy?(rechecks.last)).to be(false)
+          end
+        end
+
+        it "re-checks such a reader when the newly probed constant is a bare top-level one" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [unpublished,
+                                    { "c.rb" => "class C; def self.w(k); defined?(LIMIT); A.v(k); end; end\n" },
+                                    { "l.rb" => "LIMIT = 6\n" }])
+            expect(basenames(rechecks.first.affected)).to eq(["c.rb"])
+            expect(truthy?(rechecks.last)).to be(false)
+          end
+        end
+
+        # The precision control: the probe's edges reach the readers of the pair it passed, not every dependent of the
+        # edited file, so `r.rb`, which reads only the untouched `w`, is not re-analysed when `B::X` is published.
+        it "re-checks only the readers of the def that newly probes the constant" do
+          two = "class C; def self.w(k); A.v(k); end; def self.w2(k); %sA.v(k); end; end\n"
+          Dir.mktmpdir do |dir|
+            base = unpublished.merge("c.rb" => format(two, ""), "r2.rb" => "puts 'hit' if C.w2(1) == 3\n")
+            rechecks = replay(dir, [base,
+                                    { "c.rb" => format(two, "defined?(B::X); ") },
+                                    { "b.rb" => "class B; X = 6; end\n" }])
+            expect(basenames(rechecks.first.affected)).to eq(["c.rb"])
+            expect(basenames(rechecks.last.affected)).to include("r2.rb")
+            expect(basenames(rechecks.last.affected)).not_to include("r.rb")
+          end
+        end
+
+        # The control: an edit to `b.rb` that leaves `B::X`'s publication where it was re-checks no reader.
+        it "still skips the reader when the edit leaves the probed constant's publication alone" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [tree("6"), { "b.rb" => "class B; X = 6; Z = rand(9); end\n" }])
+            expect(basenames(rechecks.last.affected)).not_to include("r.rb")
+            expect(truthy?(rechecks.last)).to be(false)
+          end
+        end
+      end
     end
 
     it "propagates a return-visible body edit to symbol dependents (return moved at observed key)" do

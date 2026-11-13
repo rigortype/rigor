@@ -1,0 +1,2 @@
+- **[engine]** `rigor check --incremental` now re-checks a `flow.always-truthy-condition` reader when the publication of a constant its callee only probes (`defined?(B::X)`) changes, instead of serving the stale verdict. ([#3217](https://github.com/rigortype/rigor/pull/3217))
+  - The published-constant guard now records the `constant:` dependency edge for every spelling it consults, including the spellings its one-hop scan of a callee body visits.

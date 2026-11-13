@@ -1263,11 +1263,10 @@ module Rigor
       #
       # A run's harvest ({Runner#return_summaries}) is what the files it analysed observed, so per pair:
       #
-      # - the def has no dependent left (which is also where a def that left its file ends up): delete;
       # - the run cannot list the keys it observed (a pool run, a def past the per-def or total cap, a call the
       #   memo refused to store): delete;
       # - every dependent was analysed: the harvest is the whole key set, and replaces the summary (deleting it
-      #   when no analysed file observed the def);
+      #   when no analysed file observed the def, which is where a def with no dependent left ends up);
       # - otherwise the summary keeps the keys of the dependents that were not analysed, and gains this run's
       #   ({#merged_return_summary}), which are none when no dependent was analysed. The kept returns are current:
       #   a dependent stays out of the closure of its callee's edit only when the gate proved the returns unmoved
@@ -1281,7 +1280,7 @@ module Rigor
         analyzed = analyze_set.to_set
         (@return_summaries.keys | (harvest || {}).keys).each do |pair|
           dependents = @symbol_dependents[pair] || Set.new
-          summary = refreshed_return_summary(pair, harvest, dependents.subset?(analyzed)) unless dependents.empty?
+          summary = refreshed_return_summary(pair, harvest, dependents.subset?(analyzed))
           summary.nil? ? @return_summaries.delete(pair) : @return_summaries[pair] = summary
         end
         @return_summaries = capped_return_summaries(@return_summaries)

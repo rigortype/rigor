@@ -1575,22 +1575,23 @@ Two persisted summaries prove "nothing changed":
   therefore updates each summary from what the files it analysed observed:
   - every symbol dependent was analysed: replaced by this run's keys (an
     unchanged file's def is harvested through the node its handle resolved
-    to), and removed when no analysed file observed the def;
+    to), and removed when no analysed file observed the def, as for a def
+    with no symbol dependent left;
   - otherwise: the stored keys are kept and this run's are added (none, when
-    no dependent was analysed). The kept returns are current because a dependent stays out of its
-    callee's closure only when the gate proved every stored return unmoved or
-    the def's text did not change. With no stored summary there is nothing to
-    add to, and the def stays without one;
-  - the def has no symbol dependent: removed.
+    no dependent was analysed). The kept returns are current because a
+    dependent stays out of its callee's closure only when the gate proved
+    every stored return unmoved or the def's text did not change. With no
+    stored summary there is nothing to add to, and the def stays without one.
 
   A run that cannot list the keys it observed for a def records none for it: a
   def observed under more than `RETURN_SUMMARY_KEYS_PER_DEF` (8) keys in one
   run or across the merge
   ([#3116](https://github.com/rigortype/rigor/issues/3116); a def at exactly
   the cap keeps all of its keys), a def one of whose calls the ADR-84 memo
-  refused to store, a def past `RETURN_SUMMARY_TOTAL_CAP`, and every def a
-  pool run touched (its workers' memos never reach the session, so the gate is
-  inert under `--workers`). Snapshot SCHEMA 50.
+  refused to store, a def past `RETURN_SUMMARY_TOTAL_CAP`, and every def
+  after a pool run (its workers' memos never reach the session, so a pooled
+  run leaves no summary and the gate is inert under `--workers`). Snapshot
+  SCHEMA 50.
   A key a splat call observed ([#1237](https://github.com/rigortype/rigor/issues/1237)) is stored as
   `(receiver, args, true)` and re-evaluated the way that call bound it, with no
   positional correspondence ([`inference-engine.md`](inference-engine.md)); snapshot SCHEMA 48.

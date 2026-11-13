@@ -207,6 +207,11 @@ maintenance line gets no new diagnostic.
 | Promise narrowed (no longer public, still callable) | `Scope`'s 207 pinned methods → `_Scope` | a minor, with a `changed` fragment | a major |
 | Runtime break | a hook renamed or removed, its block arity changed | deprecate in minor N, remove in minor N+1 | deprecate in a minor, remove in the next major |
 
+> **Owner ruling, 2026-11-14.** v0.4.8 ships slice 3 (#2822), and with it the signature precision of #2714 and
+> #2768, as a patch, not the minor this table asks for once slice 3 makes that precision observable. The
+> maintainer kept the version at 0.4.8 when the approval queue raised the question. `plugin.api-surface` ships in the
+> bleeding-edge overlay with `since: "0.4.8"`. The table stands for later changes.
+
 ADR-50 Decision 1 pledges "minor-non-break" on the enumerated surface. A narrowed promise keeps that
 pledge for running plugins, because nothing they call changes at runtime. What changes is what Rigor
 promises to keep.

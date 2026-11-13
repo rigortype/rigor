@@ -805,9 +805,32 @@ RSpec.describe Rigor::Inference::MatchRebinding do
         expect(described_class.block_entry(narrowed, call.block, call).global(:$1))
           .to eq(Rigor::Type::Combinator.untyped), source
       end
-      %w[items.each Enumerator.new MyThread.new].each do |receiver|
+      %w[items.each MyThread.new].each do |receiver|
         call = last_statement("#{receiver} { $1 }")
         expect(described_class.block_entry(narrowed, call.block, call)).to equal(narrowed), receiver
+      end
+    end
+
+    # Issue #1371, #3195 — a body that runs later than where it is written enters with the globals unbound even when
+    # it cannot match. #1361 pinned `Enumerator.new` here as keeping the narrowing, since its block shares the
+    # creator's slot; it does, but it reads that slot when the enumerator is read.
+    it "unbinds them for a proc's body and for the block of the core `Enumerator.new` or `Hash.new`" do
+      ["Proc.new { $1 }", "lambda { $1 }", "Enumerator.new { |y| y << $1 }", "::Enumerator.new { |y| y << $1 }",
+       "Hash.new { |h, k| $1 }", "::Hash.new(capacity: 2) { |h, k| $1 }"].each do |source|
+        call = last_statement(source)
+
+        expect(described_class.block_entry(narrowed, call.block, call).global(:$1)).to be_nil, source
+        expect(described_class.block_entry(narrowed, call.block)).to equal(narrowed), source
+      end
+      lambda_node = last_statement("-> { $1 }")
+      expect(described_class.block_entry(narrowed, lambda_node).global(:$1)).to be_nil
+    end
+
+    it "keeps them for another receiver's `new`, and for another method of `Enumerator` or `Hash`" do
+      ["klass.new { $1 }", "Enumerator::Lazy.new(items) { $1 }", "Enumerator.produce { $1 }", "Hash.fetch(:k) { $1 }",
+       "Set.new(items) { $1 }"].each do |source|
+        call = last_statement(source)
+        expect(described_class.block_entry(narrowed, call.block, call)).to equal(narrowed), source
       end
     end
   end

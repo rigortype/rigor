@@ -165,4 +165,48 @@ RSpec.describe Rigor::Inference::FreshFrameBlocks do
       expect(described_class.closure_entry(rescuing, call("items.each { }").block, nil)).to equal(rescuing)
     end
   end
+
+  # Issue #1371, #3195 — the bodies that run later than where they are written, on the slot of the frame that wrote
+  # them.
+  describe ".deferred_body?" do
+    def deferred?(source, in_scope = scope)
+      node = call(source)
+      described_class.deferred_body?(node.block, node, in_scope)
+    end
+
+    it "names a lambda literal, Kernel's `lambda` / `proc`, and the core `Proc.new`, `Enumerator.new` and `Hash.new`" do
+      expect(described_class.deferred_body?(call("-> { }"), nil, scope)).to be(true)
+      ["lambda { }", "proc { }", "Kernel.proc { }", "Proc.new { }", "Enumerator.new { |y| y << 1 }",
+       "::Enumerator.new { }", "Hash.new { |h, k| k }", "::Hash.new(capacity: 2) { }"].each do |source|
+        expect(deferred?(source)).to be(true), source
+      end
+    end
+
+    it "does not name another receiver's `new`, another method of those classes, or a block with no owning call" do
+      ["klass.new { }", "Enumerator::Lazy.new(items) { }", "Enumerator.produce { }", "Hash.fetch(:k) { }",
+       "Thread.new { }", "obj.lambda { }", "items.each { }"].each do |source|
+        expect(deferred?(source)).to be(false), source
+      end
+      expect(described_class.deferred_body?(call("Enumerator.new { }").block, nil, scope)).to be(false)
+    end
+
+    # A project class that only shares the name runs its block as its own `new` does.
+    it "does not name a constant that resolves to another class" do
+      source = <<~RUBY
+        module Pool
+          class Enumerator
+            def self.new = yield
+          end
+
+          def self.run = Enumerator.new { 1 }
+        end
+      RUBY
+      root = Prism.parse(source).value
+      index = Rigor::Inference::ScopeIndexer.index(root, default_scope: scope)
+      node = root.breadth_first_search { |n| n.is_a?(Prism::CallNode) && n.name == :new && !n.block.nil? }
+
+      expect(described_class.deferred_body?(node.block, node, index[node])).to be(false)
+      expect(described_class.deferred_body?(node.block, node, scope)).to be(true)
+    end
+  end
 end

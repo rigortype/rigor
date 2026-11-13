@@ -2919,8 +2919,8 @@ def closure_own_match
 end
 
 # Controls: a plain iterator's block still reads the enclosing narrowing, and so do the block of a project class that
-# only shares `Proc`'s name, a project method named `lambda` on another receiver, and the block of `Enumerator.new`
-# or `Hash.new`, which is not one of the proc forms (Ruby: "1" for `ClosurePool1371.entry("a1")`).
+# only shares `Proc`'s name and a project method named `lambda` on another receiver (Ruby: "1" for
+# `ClosurePool1371.entry("a1")`).
 module ClosurePool1371
   class Proc
     def self.new = yield
@@ -2936,11 +2936,13 @@ module ClosurePool1371
   end
 end
 
+# Issue #3195 — the block of `Enumerator.new` or `Hash.new` runs later too, when the enumerator is read or a key is
+# missing, so it enters unbound as a proc body does. #1371 pinned both as `String` here.
 def closure_control_other_keepers(str)
   return unless str =~ /(\d+)/
 
-  e = Enumerator.new { |y| assert_type("String", $1); y << 1 }
-  h = Hash.new { |_h, _k| assert_type("String", $1) }
+  e = Enumerator.new { |y| assert_type("String?", $1); y << 1 }
+  h = Hash.new { |_h, _k| assert_type("String?", $1) }
   [e, h]
 end
 
@@ -3004,6 +3006,86 @@ def literal_brace_after_group(line)
 
   assert_type("String", $1)
   assert_type("String", $2)
+end
+
+# Issue #3195 — an enumerator's generator runs when the enumerator is read, and a hash's default proc on a missing
+# key, so the narrowing where either is written proves nothing about the `$~` it reads (Ruby:
+# `deferred_stale_enumerator("a1", "zy")` and `deferred_stale_hash("a1", "zy")` return nil).
+def deferred_stale_enumerator(str, other)
+  e = nil
+  e = Enumerator.new { |y| assert_type("String?", $1); y << $1 } if str =~ /(\d+)/
+  other =~ /(x)?y/
+  e&.first
+end
+
+def deferred_stale_hash(str, other)
+  h = nil
+  h = Hash.new { |_h, _k| assert_type("String?", $1); $1 } if str =~ /(\d+)/
+  other =~ /(x)?y/
+  h && h[:missing]
+end
+
+def deferred_forms(str)
+  return unless str =~ /(\d+)/
+
+  a = ::Enumerator.new { |y| assert_type("String?", $1); assert_type("MatchData?", Regexp.last_match); y << 1 }
+  b = ::Hash.new { |_h, _k| assert_type("String?", $1) }
+  c = Hash.new(capacity: 4) { |_h, _k| assert_type("String?", $&) }
+  d = Enumerator.new { |y| w = $1; y << w.upcase } # GENUINE-NIL
+  assert_type("String", $1)
+  [a, b, c, d]
+end
+
+# A match the block runs narrows inside it as anywhere else, and still rebinds the frame's slot.
+def deferred_own_match(str, other)
+  return unless str =~ /(\d+)/
+
+  e = Enumerator.new { |y| y << (other =~ /(\d+)/ ? assert_type("String", $1) : nil) }
+  assert_type("String?", $1)
+  e
+end
+
+# Controls: a project class that only shares the name runs its block as its own method does, a receiver that is not
+# the literal constant is not read as the core class, and a plain iterator's block shares the frame, so each still
+# reads the enclosing narrowing (Ruby: "1" for `DeferredPool3195.entry("a1", Array)`).
+module DeferredPool3195
+  class Enumerator
+    def self.new = yield
+  end
+
+  class Hash
+    def self.new = yield
+  end
+
+  def self.entry(str, klass)
+    return unless str =~ /(\d+)/
+
+    Enumerator.new { assert_type("String", $1) }
+    Hash.new { assert_type("String", $1) }
+    klass.new(1) { assert_type("String", $1) }
+    [1].each { assert_type("String", $1); w = $1; w.upcase }
+  end
+end
+
+# Issue #3198 — a refinement in effect that defines `grep` is the method the call runs: it matches, if at all, in a
+# frame of its own, so its block keeps the frame-wide entry (Ruby: nil for `RefinedGrep3198.run`, where the frame's
+# last match failed). The control's receiver has no refinement in effect and enters with the call's own match.
+module RefinedGrepRange3198
+  refine Range do
+    def grep(_pattern) = yield("x")
+  end
+end
+
+def unrefined_grep_control
+  (1..3).grep(/(a)/) { assert_type("String", $1) }
+end
+
+module RefinedGrep3198
+  using RefinedGrepRange3198
+
+  def self.run
+    (1..3).grep(/(a)/) { assert_type("String?", $1); $1 }
+  end
 end
 
 # rubocop:enable Style/PerlBackrefs

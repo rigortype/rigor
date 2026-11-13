@@ -373,8 +373,8 @@ assertions:
   '365': String
   '366': String
   '367': String
-  '368': String
-  '369': String
+  '368': String?
+  '369': String?
   '370': String
   '371': String?
   '372': String
@@ -390,3 +390,18 @@ assertions:
   '382': String
   '383': String
   '384': String
+  '385': String?
+  '386': String?
+  '387': String?
+  '388': MatchData?
+  '389': String?
+  '390': String?
+  '391': String
+  '392': String
+  '393': String?
+  '394': String
+  '395': String
+  '396': String
+  '397': String
+  '398': String
+  '399': String?

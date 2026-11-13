@@ -261,10 +261,13 @@ module Rigor
       # The scope a block or lambda body enters with, as {MatchRebinding.block_entry} gives the match globals': `$_`
       # forgotten when the body may set it, which a later iteration then reads, when the frame makes a closure that
       # may, or when the owning call may: its receiver chain and arguments run before the method yields, and
-      # `IO.foreach` sets `$_` to each line it yields.
+      # `IO.foreach` sets `$_` to each line it yields. Issue #3195 — and whatever the body does when it runs later
+      # than where it is written ({FreshFrameBlocks.deferred_body?}): a proc's body, an enumerator's or a hash's
+      # default proc reads the `$_` the slot holds when it runs.
       def block_entry(scope, block_node, call_node = nil)
         return scope unless scope.last_line_bound?
-        return scope unless scope.last_line_closure? || may_set?(block_node.body, scope) || call_sets?(call_node, scope)
+        return scope unless FreshFrameBlocks.deferred_body?(block_node, call_node, scope) ||
+                            scope.last_line_closure? || may_set?(block_node.body, scope) || call_sets?(call_node, scope)
 
         scope.forget_last_line
       end

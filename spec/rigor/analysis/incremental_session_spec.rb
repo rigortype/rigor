@@ -3211,8 +3211,8 @@ end
               consumer: "", sources: Set[File.join(dir, "b.rb")], missing: Set.new,
               symbol_sources: { File.join(dir, "b.rb") => Set["B.u"] }, ancestry_sources: Set.new
             )
-            observations = described_class.const_get(:GateObservations)
-                                          .new(reads: { [File.join(dir, "c.rb"), "<toplevel>#w"] => stray }, summaries: nil)
+            reads = { [File.join(dir, "c.rb"), "<toplevel>#w"] => stray }
+            observations = described_class.const_get(:GateObservations).new(reads: reads, summaries: nil)
             session.instance_variable_set(:@gate_observations, observations)
 
             guarded_recheck(session)

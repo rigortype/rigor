@@ -1278,7 +1278,9 @@ module Rigor
       end
 
       # `record`'s reads added to `reader`'s, less the reads of `reader`'s own file (a file records no edge to
-      # itself). Builds new sets: a restored snapshot's are not this session's to mutate.
+      # itself). Builds new sets: a restored snapshot's are not this session's to mutate. The self-filter on the
+      # ancestry edges is a guard no spec pins: it mirrors the two that are pinned, and no row was built in which
+      # the edited def comes to read the ancestry of a class its skipped reader's file declares.
       def add_recorded_reads(reader, record)
         symbols = (@symbol_sources[reader] || {}).dup
         record.symbol_sources.each do |path, names|

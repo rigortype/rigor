@@ -28,6 +28,11 @@ lib/rigor/analysis/check_rules/lexical_method_sites.rb:
     Rigor::Analysis::CheckRules::LexicalMethodSites#defines_on_self?: 'issue #1722, finds the calls that give one local''s object singleton methods (o.extend, o.define_singleton_method, an instance_eval block that writes a def) for call.undefined-method''s per-file local-scope decline; it derives no declaration context'
     Rigor::Analysis::CheckRules::LexicalMethodSites#opened_method_name: 'issue #1722, finds the calls that give one local''s object singleton methods (o.extend, o.define_singleton_method, an instance_eval block that writes a def) for call.undefined-method''s per-file local-scope decline; it derives no declaration context'
     Rigor::Analysis::CheckRules::LexicalMethodSites#walk: grandfathered
+lib/rigor/analysis/check_rules/replaced_singleton_defs.rb:
+  computes: the singleton defs a later certain def of the same class body replaces
+  producers:
+    Rigor::Analysis::CheckRules::ReplacedSingletonDefs#certain_singleton_defs: 'issue #3155, groups the certain direct singleton defs of each class or module body node so def.return-type-mismatch can skip one a later def replaces; whether a constant receiver names the class comes from the def''s Scope self_type, so it derives no declaration context'
+    Rigor::Analysis::CheckRules::ReplacedSingletonDefs#each_class_body: 'issue #3155, groups the certain direct singleton defs of each class or module body node so def.return-type-mismatch can skip one a later def replaces; whether a constant receiver names the class comes from the def''s Scope self_type, so it derives no declaration context'
 lib/rigor/analysis/check_rules/rule_walk.rb:
   computes: the single AST walk that hosts the check-rule collectors
   producers:

@@ -5,6 +5,7 @@ require "prism"
 require_relative "../../inference/scope_indexer"
 require_relative "../../source/node_children"
 require_relative "rebinding_block_callees"
+require_relative "replaced_singleton_defs"
 
 module Rigor
   module Analysis
@@ -41,6 +42,11 @@ module Rigor
         end
 
         def refinements = (@refinements ||= Inference::InEffectRefinements.new(@root))
+
+        # Issue #3155 — the file's singleton defs a later certain def replaces, for `def.return-type-mismatch`.
+        def replaced_singleton_defs(scope_index)
+          @replaced_singleton_defs ||= ReplacedSingletonDefs.new(@root, scope_index)
+        end
 
         # Issue #1817 — the file's block-passing calls, for `call.unresolved-toplevel`'s rebinding-callee decline.
         def block_calls = (@block_calls ||= RebindingBlockCallees::Sites.new(@root))

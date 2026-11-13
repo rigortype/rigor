@@ -1038,7 +1038,9 @@ module Rigor
         when Prism::ClassNode, Prism::ModuleNode
           return if descend_into_namespace?(node, prefix, out)
         when Prism::SingletonClassNode
-          if node.expression.is_a?(Prism::SelfNode) && node.body
+          # `class << M` inside `module M` opens the same singleton as `class << self` (#3155).
+          if node.body && (node.expression.is_a?(Prism::SelfNode) ||
+                           Inference::ScopeIndexer.def_receiver_targets_lexical_self?(node.expression, prefix))
             mark_certain_body(node.body)
             walk_defs(node.body, prefix, true, false, out)
             return
@@ -1335,8 +1337,10 @@ module Rigor
           return
         end
 
-        # `def Foo.x` inside `module Foo` is `def self.x` (#2950); the rule is the one check indexes defs by.
-        kind = Inference::ScopeIndexer.def_singleton?(node, prefix, in_singleton_class) ? :singleton : :instance
+        # `def Foo.x` inside `module Foo` is `def self.x` (#2950), and a def on another object's singleton is no method
+        # of this class (#3155); the rule is the one check indexes defs by.
+        kind = Inference::ScopeIndexer.def_side(node, prefix, in_singleton_class)
+        return if kind.nil?
         return if kind == :singleton && @hook_block_prefixes.last == prefix
 
         class_name = prefix.join("::")

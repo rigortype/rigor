@@ -94,12 +94,20 @@ module Rigor
       # Whether the class's singleton `def` is the very node `head`'s instance table holds, the one the fold
       # copied: a receiverless `def`. A `def C.x` or `class << C; def x; end` written inside `head`'s body has the
       # same nesting head and is the class's own, not a copy. (The walk records a `def C.x` written in `module X`
-      # as `X#x` too, so identity alone does not tell it from a copy; its receiver does.)
+      # as `X#x` too, so identity alone does not tell it from a copy; its receiver does.) Issue #3155 — the walk no
+      # longer files that `def C.x` anywhere, so the copy is all the table holds; the definer's mark on the class
+      # (`ENVELOPE_OBJECT_SINGLETON_KIND`, {ScopeIndexer#record_object_singleton}) still says the class has its own.
       def copied_from?(scope, head, method_name, owner)
         node = scope.singleton_def_for(owner, method_name)
         return false if node.nil? || !node.receiver.nil?
+        return false if foreign_singleton_definer?(scope, owner, method_name)
 
         scope.user_def_for(head, method_name).equal?(node)
+      end
+
+      def foreign_singleton_definer?(scope, owner, method_name)
+        key = [Scope::DiscoveryIndex::ENVELOPE_OBJECT_SINGLETON_KIND, method_name.to_sym]
+        scope.parameter_envelopes_of(owner).key?(key)
       end
 
       # The innermost `Module.nesting` entry `owner`'s singleton `def` of the name was written in, or nil.

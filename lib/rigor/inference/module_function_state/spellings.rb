@@ -41,8 +41,8 @@ module Rigor
           any = arguments.empty?
           arguments.each do |arg|
             if arg.is_a?(Prism::DefNode)
-              kind = ScopeIndexer.def_singleton?(arg, qualified_prefix, in_singleton_class) ? :singleton : :both
-              ranges << [arg.location.start_offset, arg.location.end_offset, arg.name, kind, owner]
+              ranges << [arg.location.start_offset, arg.location.end_offset, arg.name,
+                         *ModuleFunctionState.def_row_side(arg, qualified_prefix, in_singleton_class, owner)]
             elsif (name = Source::Literals.symbol_or_string(arg))
               ranges << [*call_span, name, :singleton, owner]
             else

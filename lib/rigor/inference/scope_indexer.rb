@@ -1097,6 +1097,8 @@ module Rigor
                                   read_before_write = nil, init_writes = nil, method_assign_effects = nil,
                                   singleton_self: false)
         return if def_node.body.nil? || qualified_prefix.empty?
+        # Issue #3155 — `def String.q` writes the ivars of another object.
+        return if foreign_def?(def_node, qualified_prefix, false)
 
         class_name = qualified_prefix.join("::")
         singleton = singleton_self || def_node.receiver.is_a?(Prism::SelfNode) ||
@@ -4375,7 +4377,7 @@ module Rigor
 
           unless def_owner_prefix&.empty? || defs_singleton == :unnameable ||
                  (singleton_cref && owner_prefix.empty?)
-            singleton_def = in_singleton_class || defs_singleton
+            singleton_def = def_context(in_singleton_class, defs_singleton)
             record_def_method(node, owner_prefix, singleton_def, methods_acc.at(node))
             record_def_body_evidence(node, owner_prefix, methods_acc, singleton_def ? :singleton : :instance)
             record_def_node(node, owner_prefix, singleton_def, def_nodes_acc, methods_acc)
@@ -5060,8 +5062,9 @@ module Rigor
         return if qualified_prefix.empty?
 
         class_name = qualified_prefix.join("::")
-        singleton = def_singleton?(def_node, qualified_prefix, in_singleton_class)
-        kind = singleton ? :singleton : :instance
+        kind = def_side(def_node, qualified_prefix, in_singleton_class)
+        return if kind.nil?
+
         record_method(accumulator, class_name, def_node.name, kind, Source::ParameterEnvelope.of(def_node))
       end
 
@@ -5842,17 +5845,44 @@ module Rigor
         end
       end
 
-      # `def Foo.bar` inside `module Foo` (or `def Meta.init` inside `module Meta`) is semantically equivalent to `def
-      # self.bar`: at the def-site, the runtime value of the constant `Foo` is the module itself (== `self`). Recognise
-      # the form so the method registers as singleton on the enclosing class.
+      # The side of the enclosing class `qualified_prefix` a `def` defines its method on: `:instance`, `:singleton`, or
+      # nil when the def defines no method of that class.
       #
-      # The cross-class form `def Bar.baz` inside `module Foo` — where the receiver names a constant other than the
-      # enclosing class — is not supported at this slice; falls through to `:instance` (current behaviour) rather than
-      # silently re-routing the registration.
-      def def_singleton?(def_node, qualified_prefix, in_singleton_class)
-        return true if def_node.receiver.is_a?(Prism::SelfNode) || in_singleton_class
+      # `in_singleton_class` is true in a `class << self` body and `:eval` in an `instance_eval` block on the class
+      # ({#def_context}), whose `self` is the class itself.
+      #
+      # - A receiverless def lands on the instance side, or on the singleton side in either body.
+      # - `def self.x` is a singleton method. `def Foo.x` inside `module Foo` (or `def Meta.init` inside `module Meta`)
+      #   is the same: at the def-site the constant `Foo` is the module itself (== `self`).
+      # - Issue #3155 — any other receiver (`def String.q`, `def A.z` in `A::B`, `def obj.q` on a local or a constant
+      #   holding an object) is a singleton method of that object, not the enclosing class, and `def self.x` in a
+      #   `class << self` body is a method of the singleton class's own singleton: nil. The def's body is still
+      #   walked; only the method is not filed on the enclosing class. A constant receiver's own singleton is
+      #   {#record_foreign_singleton_def}'s.
+      def def_side(def_node, qualified_prefix, in_singleton_class)
+        receiver = def_node.receiver
+        if receiver.nil?
+          in_singleton_class ? :singleton : :instance
+        elsif receiver.is_a?(Prism::SelfNode)
+          in_singleton_class == true ? nil : :singleton
+        elsif def_receiver_targets_lexical_self?(receiver, qualified_prefix)
+          :singleton
+        end
+      end
 
-        def_receiver_targets_lexical_self?(def_node.receiver, qualified_prefix)
+      # The `in_singleton_class` {#def_side} reads for a def under a walk's two flags: an `instance_eval` block's
+      # `defs_singleton` (`self` is the receiver, so `def self.x` is its singleton method) unless the def is also in
+      # a `class << self` body.
+      def def_context(in_singleton_class, defs_singleton)
+        in_singleton_class || (defs_singleton ? :eval : false)
+      end
+
+      def def_singleton?(def_node, qualified_prefix, in_singleton_class)
+        def_side(def_node, qualified_prefix, in_singleton_class) == :singleton
+      end
+
+      def foreign_def?(def_node, qualified_prefix, in_singleton_class)
+        def_side(def_node, qualified_prefix, in_singleton_class).nil?
       end
 
       # Only `Prism::ConstantReadNode` is observed in real Ruby — Prism mis-parses `def C::P.method` as `def C.P` (Ruby
@@ -5885,7 +5915,7 @@ module Rigor
       # ADR-119 WD3 — the slot follows its writer (later-wins): a certain write clears the key from
       # `contested_discovered_def_nodes` and a possible one adds it ({MethodTables#certain}, set for `def_node`).
       def record_def_node(def_node, qualified_prefix, in_singleton_class, accumulator, tables = nil)
-        return if def_singleton?(def_node, qualified_prefix, in_singleton_class)
+        return unless def_side(def_node, qualified_prefix, in_singleton_class) == :instance
 
         class_name = qualified_prefix.empty? ? TOP_LEVEL_DEF_KEY : qualified_prefix.join("::")
         accumulator[class_name] ||= {}
@@ -6204,7 +6234,7 @@ module Rigor
                                  mf_offsets, ranges, def_owner_prefix, singleton_cref,
                                  defs_singleton)
         owner = defs_singleton == :unnameable ? EMPTY_PREFIX : (def_owner_prefix || qualified_prefix)
-        record_deferred_def(node, owner, in_singleton_class || defs_singleton, inside_deferred,
+        record_deferred_def(node, owner, def_context(in_singleton_class, defs_singleton), inside_deferred,
                             mf_offsets, ranges)
         walk_deferred_children(node, qualified_prefix, in_singleton_class, true, mf_offsets,
                                ranges, def_owner_prefix, singleton_cref: singleton_cref,
@@ -6730,7 +6760,11 @@ module Rigor
           return
         end
 
-        kind = if def_singleton?(def_node, qualified_prefix, in_singleton_class)
+        side = def_side(def_node, qualified_prefix, in_singleton_class)
+        # Issue #3155 — a def on another object's singleton claims no owner or side, as a deferred one.
+        return ranges << [start, def_node.location.end_offset, def_node.name, nil, nil] if side.nil?
+
+        kind = if side == :singleton
                  :singleton
                elsif ModuleFunctionState.deferred_module_function?(mf_offsets, start)
                  :both
@@ -6802,7 +6836,7 @@ module Rigor
           return if accumulator.hook_block_self_def?(node, owner)
 
           unless defs_singleton == :unnameable
-            record_singleton_def_node(node, owner, in_singleton_class || defs_singleton, false, accumulator)
+            record_singleton_def_node(node, owner, def_context(in_singleton_class, defs_singleton), false, accumulator)
           end
           return
         end
@@ -7060,7 +7094,7 @@ module Rigor
             # `:unnameable` is the `class <<` + `instance_eval` definee — the singleton's own
             # singleton — which this table cannot name either.
             unless defs_singleton == :unnameable
-              record_singleton_def_node(stmt, owner_prefix, in_singleton_class || defs_singleton,
+              record_singleton_def_node(stmt, owner_prefix, def_context(in_singleton_class, defs_singleton),
                                         module_function_on, accumulator)
             end
             next
@@ -7102,8 +7136,9 @@ module Rigor
       # function's copy as possible, so the slot holds the later def, contested, rather than the def the
       # slot held before (#1968).
       def record_singleton_def_node(def_node, qualified_prefix, in_singleton_class, module_function_on, accumulator)
-        declared = def_singleton?(def_node, qualified_prefix, in_singleton_class)
-        return unless declared || module_function_on
+        side = def_side(def_node, qualified_prefix, in_singleton_class)
+        declared = side == :singleton
+        return unless declared || (module_function_on && side == :instance)
         return if qualified_prefix.empty?
 
         class_name = qualified_prefix.join("::")

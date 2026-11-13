@@ -802,10 +802,11 @@ module Rigor
       end
 
       # ADR-89 WD2 — the per-method observed-key return summaries the run's ADR-84 return memo just captured.
-      # For each project method the run observed, a bounded `{ keys:, returns:, effects: }` summary the
-      # incremental session persists: `keys` the observed `[receiver, arg_types]` type tuples, `returns` their
+      # For each project method the run observed, a bounded `{ keys:, returns:, effects:, guard_constants: }` summary
+      # the incremental session persists: `keys` the observed `[receiver, arg_types]` type tuples, `returns` their
       # `describe(:short)` descriptors, `effects` the content-mutated parameter positions (a caller-visible
-      # arg-flooring surface). Only meaningful right after a run populated the memo (baseline / recheck),
+      # arg-flooring surface), `guard_constants` the published-constant spellings its body reads ({#guard_constants}).
+      # Only meaningful right after a run populated the memo (baseline / recheck),
       # before the bucket rolls. Keys are held live here; the session Marshals them for the snapshot.
       #
       # Issue #3160 — the session reads the harvest as EVERY key the files this run analysed observed each def
@@ -875,7 +876,37 @@ module Rigor
 
         { keys: entries.map { |entry| return_summary_key(entry) },
           returns: entries.map { |entry| entry.result.describe(:short) },
-          effects: content_effects(effects_evaluator, node) }
+          effects: content_effects(effects_evaluator, node),
+          guard_constants: guard_constants(node) }
+      end
+
+      # Issue #3186 — the constant spellings in `node`'s body that the truthiness rule's one interprocedural hop
+      # ({CheckRules::PublishedConstantGuard}) could answer true for, or nil when they cannot be listed. A reader's
+      # `flow.always-truthy-condition` withholds when a def it calls reads a constant another file published,
+      # whatever the def returns, so the ADR-89 WD2 gate compares these as well as the returns; nil never compares
+      # equal, so it keeps the def's readers.
+      #
+      # The hop asks `Scope#published_constant?`, which answers true only for a spelling whose last segment the
+      # project publishes or the reader's own file assigns from a published constant, and each of those is a segment
+      # some project file writes. So the spellings whose last segment no file writes (a class name, as a rule) are
+      # left out: they answer false for every reader, and keeping them would fail the gate on every edit that adds a
+      # callee. The filter is this run's write census, so a census that moved fails the comparison.
+      def guard_constants(node)
+        written = constant_write_segments
+        CheckRules::PublishedConstantGuard.body_constant_spellings(node.body).select do |spelling|
+          written.include?(spelling.split("::").last)
+        end
+      rescue StandardError
+        nil
+      end
+
+      # The last segments of every constant name the run's write census holds, a wildcard key's included.
+      def constant_write_segments
+        unless @constant_write_segments_of.equal?(@project_constant_writes)
+          @constant_write_segments_of = @project_constant_writes
+          @constant_write_segments = @project_constant_writes.each_key.to_set { |name| name.split("::").last }
+        end
+        @constant_write_segments
       end
 
       # One observed call key: `[receiver, arg_types]`, or, for an entry a splat call stored (issue #1237),
@@ -908,6 +939,9 @@ module Rigor
         return {} if specs.empty?
 
         @probe_reads = {}
+        @probe_plugin_reads = {}
+        @probe_disclosures = {}
+        @probe_guard_constants = {}
         Cache::FileDigest.with_run(strict: @configuration.cache_validation_strict?) do
           Inference::DefNodeResolver.with_run do
             evaluate_return_types_setup(paths, specs)
@@ -926,6 +960,17 @@ module Rigor
       # file included (nothing is filtered as a self-read). The incremental session gives these edges to the readers
       # a passing gate skips, since they now reach whatever the edited def reaches. Empty before the first probe.
       attr_reader :probe_reads
+
+      # Issue #3187 — what the plugins did while the last {#evaluate_return_types} re-evaluated each spec's def, as
+      # {#analysis_reads} and {#analysis_disclosures} hold for an analysed file: the spec triple => the boundary rows
+      # its evaluation read ({Plugin::IoBoundary.attributing}), and => the run-scoped rows it registered
+      # ({RunDisclosureCredit}). A triple whose evaluation read or registered nothing has no key. The incremental
+      # session credits them to the readers a passing gate skips, as it does {#probe_reads}.
+      attr_reader :probe_plugin_reads, :probe_disclosures
+
+      # Issue #3186 — the spec triple => {#guard_constants} of the def the last {#evaluate_return_types} re-evaluated,
+      # under that probe's write census. A triple whose def the probe did not find has no key.
+      attr_reader :probe_guard_constants
 
       # The consumer {#evaluate_spec_returns} records under. It is no file's path, so no read is dropped as a self-read.
       PROBE_CONSUMER = ""
@@ -966,16 +1011,31 @@ module Rigor
         return spec[:keys].map { nil } if node.nil?
 
         scope = seed_project_scope(Scope.empty(environment: environment, source_path: spec[:path]))
+        triple = [spec[:class_name], spec[:method_name], spec[:singleton]]
+        @probe_guard_constants[triple] = guard_constants(node)
         returns = nil
-        @probe_reads[[spec[:class_name], spec[:method_name], spec[:singleton]]] =
-          DependencyRecorder.record_for(PROBE_CONSUMER) do
-            returns = spec[:keys].map do |(receiver, arg_types, positionals_unknown)|
-              result = scope.user_method_return(node, receiver, arg_types,
-                                                positionals_unknown: positionals_unknown || false)
-              result&.describe(:short)
-            end
+        attributed_probe(triple) do
+          returns = spec[:keys].map do |(receiver, arg_types, positionals_unknown)|
+            result = scope.user_method_return(node, receiver, arg_types,
+                                              positionals_unknown: positionals_unknown || false)
+            result&.describe(:short)
           end
+        end
         returns
+      end
+
+      # Runs one spec's evaluation with its dependency reads recorded ({#probe_reads}) and its plugin reads and
+      # run-scoped registrations attributed to it ({#probe_plugin_reads}, {#probe_disclosures}), as
+      # {#analyze_file_attributed} does for a file.
+      def attributed_probe(triple, &)
+        reads = []
+        disclosures = RunDisclosureCredit.collect do
+          @probe_reads[triple] = Plugin::IoBoundary.attributing(reads) do
+            DependencyRecorder.record_for(PROBE_CONSUMER, &)
+          end
+        end
+        @probe_plugin_reads[triple] = reads.uniq.freeze unless reads.empty?
+        @probe_disclosures[triple] = disclosures unless disclosures.empty?
       end
 
       # ADR-45 — unchanged-project fast path. Serves the whole run's (pre-severity-profile) diagnostics

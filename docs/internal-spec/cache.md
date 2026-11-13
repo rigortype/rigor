@@ -1560,10 +1560,11 @@ Two persisted summaries prove "nothing changed":
   file-level dependents from the closure.
 - **Observed-key return summaries** — per-def `(receiver, args) → return`
   descriptors harvested from the ADR-84 memo, plus the ADR-56 content-mutation
-  effect set (the callee-visible surface beyond the return). On a recheck a
+  effect set (the callee-visible surface beyond the return) and the
+  published-constant spellings the def's body reads (below). On a recheck a
   declaration-stable changed def is re-evaluated at each stored key through
-  the memo; all-equal returns **and** equal effects drop the def's symbol
-  dependents. Any mismatch, a changed signature, a missing def, an
+  the memo; all-equal returns, equal effects **and** equal spellings drop the
+  def's symbol dependents. Any mismatch, a changed signature, a missing def, an
   ineligible def (one that also exposes ivar/cvar writes or `yield` values),
   or a missing summary keeps the dependents — the conservative direction.
   A stored summary MUST hold every key under which a current symbol
@@ -1581,9 +1582,8 @@ Two persisted summaries prove "nothing changed":
   before, or one it calls under another key
   ([#3180](https://github.com/rigortype/rigor/issues/3180)). The gate's probe
   evaluated the def at every stored key, which is every key its readers
-  observe it under, so what the probe read and observed bounds what they do,
-  with the two exceptions below. For each pair the gate passed, a recheck
-  therefore MUST:
+  observe it under, so what the probe read and observed bounds what they do.
+  For each pair the gate passed, a recheck therefore MUST:
   - add every dependency edge the probe recorded for the pair (symbol,
     ancestry and name-keyed alike, the def's own file included) to each
     symbol dependent of the pair it did not analyse. This holds in pool mode
@@ -1591,24 +1591,37 @@ Two persisted summaries prove "nothing changed":
     stored;
   - count every key the probe's return memo holds for a def the pair's
     evaluation read as observed by this run, in the update below. A def the
-    probe cannot list the keys of has no summary.
+    probe cannot list the keys of has no summary;
+  - credit each such skipped reader with the plugin reads
+    (`Plugin::IoBoundary`) and run-scoped registrations (`disclose_once`,
+    `emit_once`) the probe made while evaluating the pair's def, as an
+    analysis of the reader would have credited them
+    ([#3187](https://github.com/rigortype/rigor/issues/3187)): a later edit
+    of what the plugin read re-analyses the reader, and the reader replays the
+    registrations while it is served, the recheck that passed the gate
+    included.
 
   A skipped reader may gain an edge or a key it does not need (the probe ran
   the def at all of its keys, the reader observes some); that costs a
   re-analysis, never an answer. A pair the gate did not pass contributes
   nothing: its dependents are all re-analysed.
 
-  Two things are not covered, by this rule or by the invariant above, and
-  each leaves a skipped reader stale:
-  - the probe folds a value constant that the reader's own analysis does
-    not, so its return at a stored key can differ from the one the reader
-    sees and the gate can pass on it
-    ([#3186](https://github.com/rigortype/rigor/issues/3186));
-  - the plugin reads (`Plugin::IoBoundary`) and run-scoped disclosures made
-    while typing the edited def are credited to the file being analysed, and
-    the probe credits none to a skipped reader, so a later change of what a
-    plugin read does not re-analyse it
-    ([#3187](https://github.com/rigortype/rigor/issues/3187)).
+  A reader consumes one surface of a def it calls besides the return and
+  the effects: `flow.always-truthy-condition` withholds on a predicate that
+  calls a project method whose body reads a constant another file
+  published, whatever the method returns (the one interprocedural hop of
+  [`inference-engine.md`](inference-engine.md) § "The truthiness
+  withholding"). So a return-preserving edit that adds or drops such a read
+  moves the reader's answer
+  ([#3186](https://github.com/rigortype/rigor/issues/3186)). A summary
+  therefore MUST also hold the def's `guard_constants`: the constant
+  spellings the hop's body scan visits within its node budget, sorted and
+  de-duplicated, keeping only those whose last segment some project file
+  writes as a constant (any other spelling answers no for every reader, and
+  keeping it would fail the gate on every edit that names a new class). The
+  probe computes the edited def's list under its own write census, and a
+  pair whose list differs from the stored one, or either list missing, does
+  not pass.
 
   A recheck updates each summary from what the files it analysed, and the
   probe for the pairs the gate passed, observed. "Every symbol dependent"
@@ -1633,7 +1646,8 @@ Two persisted summaries prove "nothing changed":
   refused to store, a def past `RETURN_SUMMARY_TOTAL_CAP`, and every def
   after a pool run (its workers' memos never reach the session, so a pooled
   run leaves no summary and the gate is inert under `--workers`). Snapshot
-  SCHEMA 51 (50 for the key rule; 51 for the skipped readers' edges and keys).
+  SCHEMA 52 (50 for the key rule; 51 for the skipped readers' edges and keys;
+  52 for `guard_constants` and the skipped readers' plugin rows).
   A key a splat call observed ([#1237](https://github.com/rigortype/rigor/issues/1237)) is stored as
   `(receiver, args, true)` and re-evaluated the way that call bound it, with no
   positional correspondence ([`inference-engine.md`](inference-engine.md)); snapshot SCHEMA 48.

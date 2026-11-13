@@ -115,7 +115,7 @@ module Rigor
         # exemption exactly rather than on the last segment. A path that renders no qualified name falls back
         # to its own last segment, which is all there is to ask about.
         def published_path?(node, scope)
-          rendered = Source::ConstantPath.qualified_name_or_nil(node) || node.name&.to_s
+          rendered = constant_spelling(node)
           !rendered.nil? && scope.published_constant?(rendered)
         end
 
@@ -172,10 +172,30 @@ module Rigor
           end
         end
 
-        # An explicit worklist rather than recursion, so the node budget is one loop-carried local instead of
-        # a shared mutable cell (the engine value-pins a one-element Array counter and then self-flags the
-        # guard's own `negative?` as an always-falsey condition — this rule's own medicine).
         def body_reads_published_constant?(root, scope)
+          scan_body(root) { |node| return true if published_constant_node?(node, scope) }
+          false
+        end
+
+        # Issue #3186 — the constant spellings the one hop's body scan would ask `Scope#published_constant?` about,
+        # sorted and de-duplicated: every node {#body_reads_published_constant?} visits within its budget, in its
+        # order. The hop's answer for any reader is a function of this list and of that reader's publication
+        # tables, so the ADR-89 WD2 gate stores it beside a def's return summary and compares it on an edit: a
+        # reader the gate skips would otherwise keep a withholding (or a firing) the edited body no longer earns.
+        def body_constant_spellings(root)
+          spellings = []
+          scan_body(root) do |node|
+            spelling = constant_spelling(node)
+            spellings << spelling unless spelling.nil?
+          end
+          spellings.uniq.sort
+        end
+
+        # Yields each node of `root` the hop's scan visits, stopping once {BODY_SCAN_BUDGET} is spent. An explicit
+        # worklist rather than recursion, so the node budget is one loop-carried local instead of a shared mutable
+        # cell (the engine value-pins a one-element Array counter and then self-flags the guard's own `negative?`
+        # as an always-falsey condition — this rule's own medicine).
+        def scan_body(root)
           stack = [root]
           budget = BODY_SCAN_BUDGET
           until stack.empty?
@@ -183,19 +203,24 @@ module Rigor
             next unless node.is_a?(Prism::Node)
 
             budget -= 1
-            return false if budget.negative?
-            return true if published_constant_node?(node, scope)
+            return if budget.negative?
 
+            yield node
             node.rigor_each_child { |child| stack << child }
           end
-          false
         end
 
         def published_constant_node?(node, scope)
+          spelling = constant_spelling(node)
+          !spelling.nil? && scope.published_constant?(spelling)
+        end
+
+        # The name a constant reference asks the publication tables about ({#published_path?}'s rendering for a
+        # path), or nil for any other node and for a path that renders no name.
+        def constant_spelling(node)
           case node
-          when Prism::ConstantReadNode then scope.published_constant?(node.name.to_s)
-          when Prism::ConstantPathNode then published_path?(node, scope)
-          else false
+          when Prism::ConstantReadNode then node.name.to_s
+          when Prism::ConstantPathNode then Source::ConstantPath.qualified_name_or_nil(node) || node.name&.to_s
           end
         end
 

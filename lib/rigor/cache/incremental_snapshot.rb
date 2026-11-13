@@ -215,7 +215,11 @@ module Rigor
       # 51: issue #3180 — a reader the ADR-89 WD2 gate skipped holds the dependency edges the gate's probe recorded
       # for the def it passed, and the summaries hold the keys that probe observed. A pre-51 snapshot's skipped
       # readers lack the edges and keys of whatever a gate-passed def came to reach, so a warm run would skip them.
-      SCHEMA = 51
+      # 52: issues #3186 / #3187 — a `return_summaries` entry also holds `guard_constants`, the published-constant
+      # spellings the truthiness rule's one hop reads in the def's body, and a gate-skipped reader holds the plugin
+      # reads and run-scoped registrations the gate's probe made. A pre-52 snapshot's skipped readers lack those
+      # plugin rows, so a warm run would serve them past an edit of what the plugin read.
+      SCHEMA = 52
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.
@@ -246,11 +250,12 @@ module Rigor
       # fingerprint cannot see.
       # ADR-89 WD2:
       # `return_summaries` maps a `[path, "Class#method" | "Class.method"]` to the callee's persisted
-      # behavioural surface `{ keys:, returns:, effects: }` — the observed `[receiver, arg_types]` call keys (issue
-      # #1237: `[receiver, arg_types, true]` for a key a splat call observed)
-      # (Marshal-clean type tuples), their `describe(:short)` return descriptors, and the content-mutated
-      # parameter positions. A recheck re-evaluates a declaration-stable changed callee at these keys and,
-      # when every return + the effects are unchanged, skips its symbol dependents. Issues #3116 / #3160 — an entry
+      # behavioural surface `{ keys:, returns:, effects:, guard_constants: }` — the observed `[receiver, arg_types]`
+      # call keys (issue #1237: `[receiver, arg_types, true]` for a key a splat call observed)
+      # (Marshal-clean type tuples), their `describe(:short)` return descriptors, the content-mutated
+      # parameter positions, and (issue #3186) the published-constant spellings the body reads.
+      # A recheck re-evaluates a declaration-stable changed callee at these keys and,
+      # when every return, the effects and the spellings are unchanged, skips its symbol dependents. Issues #3116 / #3160 — an entry
       # holds every key under which a current symbol dependent observes the def; a def whose keys cannot all be
       # listed (more than the per-def cap, among others) has no entry, and the recheck never skips its dependents.
       # ADR-67 WD6c lift:

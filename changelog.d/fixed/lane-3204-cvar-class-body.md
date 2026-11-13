@@ -1,0 +1,1 @@
+- **[engine]** A class variable a `class` or `module` body sets, directly, in a `class << self` body or through `class_variable_set`, now reaches its sibling methods' reads, so `@@x.nil?` no longer folds on the methods' writes alone. ([#3218](https://github.com/rigortype/rigor/pull/3218))

@@ -77,15 +77,17 @@ Severe N | Moderate N | Minor N | Nit N
 Verdict (head <sha reviewed>): <one line>
 Severe remaining: yes | no
 Findings: <ranked severe, moderate, minor, nit; each with a concrete failure scenario (for an engine
-  change, the input and the wrong output), introduced or pre-existing, and its repro>
+  change, the input and the wrong output), introduced or pre-existing, and its repro; or "none">
 Earlier findings: <delta rounds only: each one fixed, or still open with its repro>
 Scope expansion: <one line each with its repro, or "none">
 Not reproduced: <the count, then one line each with what you tried; or "none">
 ```
 
 A repro is the exact command you ran, the output it printed, and the output correct behaviour
-requires; for a spec that survived a removal, the removal and the rspec command. The lane turns it
-into the regression spec, and the coordinator files only scope expansion that has one. Where no run
-can show the defect (wording, guidance), write `read, not run` in its place.
+requires; for a spec that survived a removal, the removal and the rspec command. The lane turns the
+repro of a finding it fixes into the regression spec. Where no run could show the defect even in
+principle (wording, guidance), write `read, not run` in its place; a probe that was blocked belongs
+under "When something blocks" instead. `read, not run` is not a repro: the coordinator files only
+scope expansion that carries one, and the rest stays a comment on the PR.
 
 Done when the report above is sent and the review worktree is removed.

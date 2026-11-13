@@ -163,7 +163,8 @@ lives in the PR body and the issues, which the coordinator reads only when a dec
 8. **File the review's scope expansion** as issues outside the milestone, but only what was
    reproduced: a finding the reviewer ran (a command and its output, or a mutation that left the
    specs green) becomes an issue. One the reviewer only read off the code, or marked unverified,
-   stays a comment on the PR until someone reproduces it. Six reviews on 2026-11-12 produced five
+   stays a comment on the PR until someone reproduces it, and the report's `Not reproduced` line
+   goes in the same comment. Six reviews on 2026-11-12 produced five
    issues for six fixes, several of them unreproduced, so the backlog grew as fast as the lanes
    closed it. When a merged commit carried a `Fixes #N` for an issue the PR only partly fixed,
    reopen #N with what remains.

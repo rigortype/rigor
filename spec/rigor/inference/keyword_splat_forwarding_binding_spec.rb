@@ -55,9 +55,11 @@ RSpec.describe "issue #1125 — keyword-splat and `...` call-site binding" do
       RUBY
     end
 
-    it "keeps the pre-#1125 answer for a shapeless Hash[Symbol, V] and for an opaque value" do
-      # The acceptance's declined shapes: a keyword hash whose keys are unknown is not a shape, so the
-      # binder must NOT guess which key feeds which parameter — `Dynamic[top]` stands.
+    it "binds no parameter by name for a shapeless Hash[Symbol, V] or an opaque value" do
+      # A keyword hash whose keys are unknown is not a shape, so the binder must NOT guess which key feeds
+      # which parameter (#1125). Before #3191 the call was declined (`Dynamic[top]`); it is now bound with
+      # no positional correspondence, every parameter `Dynamic[top]`, so the body's arity still folds.
+      # Ruby 4.0.5 returns `[1, 2, {}]` for the first and raises `ArgumentError` for an empty opaque hash.
       expect_binds(<<~RUBY)
         require "rigor/testing"
         include Rigor::Testing
@@ -65,8 +67,17 @@ RSpec.describe "issue #1125 — keyword-splat and `...` call-site binding" do
         shapeless = { a: 1 }
         shapeless[:b] = 2
         opaque = JSON.parse("{}")
-        assert_type("Dynamic[top]", target(**shapeless))
-        assert_type("Dynamic[top]", target(**opaque))
+        assert_type("[Dynamic[top], Dynamic[top], Dynamic[top]]", target(**shapeless))
+        assert_type("[Dynamic[top], Dynamic[top], Dynamic[top]]", target(**opaque))
+      RUBY
+    end
+
+    it "control: a closed shape still binds by name" do
+      expect_binds(<<~RUBY)
+        require "rigor/testing"
+        include Rigor::Testing
+        def target(a:, b:, **rest) = [a, b, rest]
+        assert_type("[1, 2, Dynamic[top]]", target(**{ a: 1, b: 2 }))
       RUBY
     end
 
@@ -82,14 +93,25 @@ RSpec.describe "issue #1125 — keyword-splat and `...` call-site binding" do
       RUBY
     end
 
-    it "declines a mixed keyword hash" do
-      # `target(a: 1, **h)` merges a literal pair with a splatted shape; that merge is not attempted.
+    it "binds no parameter by name for a mixed keyword hash" do
+      # `target(a: 1, **h)` merges a literal pair with a splatted shape; that merge is not attempted (#1125).
+      # Before #3191 the call was declined (`Dynamic[top]`); it is now bound with every parameter
+      # `Dynamic[top]`. Ruby 4.0.5 returns `[1, 2]`.
       expect_binds(<<~RUBY)
         require "rigor/testing"
         include Rigor::Testing
         def target(a:, b:) = [a, b]
         h = { b: 2 }
-        assert_type("Dynamic[top]", target(a: 1, **h))
+        assert_type("[Dynamic[top], Dynamic[top]]", target(a: 1, **h))
+      RUBY
+    end
+
+    it "control: literal keywords still bind by name" do
+      expect_binds(<<~RUBY)
+        require "rigor/testing"
+        include Rigor::Testing
+        def target(a:, b:) = [a, b]
+        assert_type("[1, 2]", target(a: 1, b: 2))
       RUBY
     end
   end

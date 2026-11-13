@@ -1,0 +1,3 @@
+- **[engine]** A call passing an open or shapeless double splat (`r.count(1, 2, **opts)`) no longer types its return from a user method body that bound the hash as one positional argument. ([#3216](https://github.com/rigortype/rigor/pull/3216))
+  - Ruby passes such a hash as a positional only when it is non-empty, so `def count(*keys) = keys.size` folded to `3` where Ruby may answer `2`.
+  - Such a call, a mixed `k: 1, **opts`, `**h, **h` and `**nil` included, now binds every positional parameter `untyped` and leaves the keywords unknown; a non-empty closed shape still binds as before.

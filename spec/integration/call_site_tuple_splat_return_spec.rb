@@ -13,6 +13,10 @@
 # (`h = {}`) was bound as one positional `{}`, so `count(**h)` folded to `1`; it now binds with no positional
 # correspondence, because the shape may be a stale read of a hash a callee filled.
 #
+# Issue #3191 — the same holds for every other trailing keyword hash holding a double splat that is not a
+# non-empty closed shape: an open or shapeless `**o2`, a mixed `k: 2, **o2`, `**h, **h`, `**nil`. Ruby passes it
+# as a positional `Hash` only when it is non-empty, so `count(1, 2, **o2)` folded to `3` where Ruby may answer `2`.
+#
 # The engine's `assert.type-mismatch` rule is the assertion channel: each fixture states the type the engine
 # must answer, so an empty mismatch list means it answered exactly that. (`flow.always-truthy-condition` cannot
 # serve: it fires for an always-false comparison too.)
@@ -31,6 +35,7 @@ RSpec.describe "a call-site literal splat or empty double splat binds as Ruby pa
         def two(a, b = 2) = b
         def pair(a, b) = b
         def kw(*a, k: 1) = k
+        def lit(**o) = false
         def self.sfirst(*xs) = xs.first
       end
       class Box
@@ -241,7 +246,75 @@ RSpec.describe "a call-site literal splat or empty double splat binds as Ruby pa
     end
   end
 
+  describe "any other double splat that is not a non-empty closed shape binds with no correspondence (#3191)" do
+    it "an open hash into an optional parameter" do
+      expect(mismatches("Row.new.opt(**o2)", "Dynamic[top]")).to eq([])
+    end
+
+    it "an open hash after positionals" do
+      expect(mismatches("Row.new.count(1, 2, **o2)", "non-negative-int")).to eq([])
+    end
+
+    it "an open hash leaves the keywords unknown" do
+      expect(mismatches("Row.new.kw(1, **o2)", "Dynamic[top]")).to eq([])
+    end
+
+    it "a mixed keyword hash" do
+      expect(mismatches("Row.new.count(1, k: 2, **o2)", "non-negative-int")).to eq([])
+    end
+
+    it "two double splats of an empty local" do
+      expect(mismatches("Row.new.count(**h, **h)", "non-negative-int")).to eq([])
+    end
+
+    it "a double splat of nil" do
+      expect(mismatches("Row.new.count(**nil)", "non-negative-int")).to eq([])
+    end
+
+    it "a literal holding only a double splat of an empty literal" do
+      expect(mismatches("Row.new.count(**{ **{} })", "non-negative-int")).to eq([])
+    end
+
+    it "through public_send" do
+      expect(mismatches("Row.new.public_send(:count, **h)", "non-negative-int")).to eq([])
+    end
+
+    it "through a top-level def" do
+      expect(mismatches("tcount(1, **o2)", "non-negative-int")).to eq([])
+    end
+
+    # The binder used to decline this call (a non-shape keyword hash into a keyword-taking callee); the body is
+    # now typed with every parameter `Dynamic`, and its return reads none of them.
+    it "types a body the binder used to decline" do
+      expect(mismatches("Row.new.lit(**o2)", "false")).to eq([])
+    end
+
+    it "control: the same body with literal keywords" do
+      expect(mismatches("Row.new.lit(k: 1)", "false")).to eq([])
+    end
+  end
+
   describe "controls: a non-empty double splat is still one argument" do
+    it "a non-empty closed shape after a positional" do
+      expect(mismatches("Row.new.count(1, **{ k: 2 })", "2")).to eq([])
+    end
+
+    it "a keyword hash with no double splat is one argument even when it is not typed as a shape" do
+      expect(mismatches("Row.new.count(1, x.first => 1)", "2")).to eq([])
+    end
+
+    it "literal keywords still bind by name" do
+      expect(mismatches("Row.new.kw(1, k: 2)", "2")).to eq([])
+    end
+
+    it "public_send with positionals only" do
+      expect(mismatches("Row.new.public_send(:count, 1, 2)", "2")).to eq([])
+    end
+
+    it "public_send with a literal empty double splat" do
+      expect(mismatches("Row.new.public_send(:count, 1, **{})", "1")).to eq([])
+    end
+
     it "a keyword whose value is an empty literal hash" do
       expect(mismatches("Row.new.count(k: {})", "1")).to eq([])
     end

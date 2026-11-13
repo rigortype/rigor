@@ -2439,14 +2439,14 @@ module Rigor
       # is passed as keywords when it is a `ruby2_keywords` hash.
       #
       # Issue #3157 — a call whose every splat {#expand_tuple_splats} can expand is bound as the equivalent
-      # positional call. Issue #3099 — a literal `**{}` passes no argument and is dropped; any other lone double
-      # splat typed as an empty closed shape (`f(**h)`, `h = {}`) is bound with no positional correspondence,
-      # since the shape may be a stale read of a hash a callee filled.
+      # positional call. Issue #3099 — a literal `**{}` passes no argument and is dropped. Issue #3191 — any other
+      # trailing keyword hash holding a double splat is bound with no positional correspondence unless it is typed
+      # as a non-empty closed shape ({#unknown_double_splat?}).
       def positional_correspondence(call_node, arg_types)
         arguments = call_node.arguments&.arguments
         unless splat_arguments?(call_node)
           return [arg_types[0...-1], false] if literal_empty_double_splat?(arguments&.last)
-          return [[UNKNOWN_KEYWORDS], true] if empty_double_splat?(arguments&.last, arg_types.last)
+          return [[UNKNOWN_KEYWORDS], true] if unknown_double_splat?(arguments&.last, arg_types.last)
 
           return [arg_types, false]
         end
@@ -2472,12 +2472,16 @@ module Rigor
           end
       end
 
-      # Issue #3099 — whether `argument` is a keyword hash {#call_arg_type} typed (as `type`) to a shape with no
-      # pairs. Only a lone double splat of a closed shape is typed so ({#double_splat_hash_shape}). Bound as
-      # given, it left a positional `{}`: `def count(*keys) = keys.size` called `r.count(**h)` with `h = {}`
-      # folded to `1`.
-      def empty_double_splat?(argument, type)
-        argument.is_a?(Prism::KeywordHashNode) && type.is_a?(Type::HashShape) && type.pairs.empty?
+      # Issues #3099 / #3191 — whether `argument` is a keyword hash holding a double splat whose type (`type`) is
+      # not a non-empty closed shape. Ruby passes such a hash as a trailing positional `Hash` to a method that
+      # declares no keywords when it is non-empty, and passes nothing when it is empty, so the call does not say
+      # how many positionals the callee receives. An empty closed shape (`**h`, `h = {}`) may be a stale read of
+      # a hash a callee filled; an open or shapeless one (`**opts`), a mixed `k: 1, **h`, two splats `**h, **h`
+      # and `**nil` are not typed as a shape at all ({#double_splat_hash_shape}). Bound as given, each left a
+      # positional `Hash`: `def count(*keys) = keys.size` called `r.count(1, 2, **opts)` folded to `3`.
+      def unknown_double_splat?(argument, type)
+        argument.is_a?(Prism::KeywordHashNode) && argument.elements.any?(Prism::AssocSplatNode) &&
+          !keyword_shape?(type)
       end
 
       # Issue #3157 — the argument list with each `*splat` replaced by its elements, or nil to keep the

@@ -939,8 +939,23 @@ binding cannot manufacture a diagnostic inside the callee's body.
 - Every other keyword-hash argument MUST keep its own pre-existing type, and so keep the pre-#1125 answer: a MIXED hash
   (`f(a: 1, **h)` — the literal pairs and the splatted shape are not merged), an OPEN shape (unknown extras make every
   missing-keyword answer a guess rather than a read), a shape with a non-Symbol key (Ruby itself rejects those as
-  keywords), a shapeless `Hash[Symbol, V]`, and any other value. The binder then declines the call, which answers
-  `Dynamic[top]` exactly as before.
+  keywords), a shapeless `Hash[Symbol, V]`, and any other value. When such an argument holds a double splat (an
+  open or shapeless `**opts`, a mixed `k: 1, **h`, `**h, **h`, `**nil`, `**{ **{} }`), the body tiers MUST bind
+  the call with no positional correspondence, as for a positional splat below (issue
+  [#3191](https://github.com/rigortype/rigor/issues/3191)). Ruby passes that hash as a trailing positional
+  `Hash` to a callee that declares no keywords only when it is non-empty, and passes nothing when it is empty,
+  so the call does not say how many positionals the callee receives: bound as given, `r.count(1, 2, **opts)`
+  folded to `3` and `kw(1, **opts)` with `def kw(*a, k: 1) = k` read the keyword default. A keyword hash with
+  no double splat (`f("a" => 1)`) keeps its own type and binds as one argument.
+
+  The rule gives up precision wherever the hash provably is non-empty but is not exactly one closed non-empty
+  shape: a double splat mixed with a literal pair or with `**{}` (`count(1, k: 2, **o2)`, `count(1, **c, j: 1)`,
+  `count(1, **{}, k: 1)`, `count(1, "a" => 1, **o2)`), two closed shapes (`**c, **c`), a nested `**{ **c }`,
+  `**c.merge(...)`, and a union of closed non-empty shapes all bind with no positional correspondence, and a
+  required positional receiving the hash (`def id(a) = a; id(**o2)`) reads `Dynamic[top]` rather than
+  `Hash[...]`. It also types bodies the binder used to decline: a call whose non-shape keyword hash goes into a
+  keyword-taking callee was declined, and is now body-typed with every parameter `Dynamic[top]`, so
+  `def lit(**o) = false` called `lit(**o2)` answers `false`.
 - A named `**rest` parameter MUST bind the CLOSED `HashShape` of the pairs no named keyword parameter consumed, with
   each pair's value type. With no keyword shape, an OPEN shape, or no pair left over it MUST keep `Dynamic[top]`: the
   last case is what leaves the literal form's existing binding untouched (`def target(a:, b:, **rest)` called

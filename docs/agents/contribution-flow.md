@@ -290,18 +290,12 @@ the lane's `Known limits` ([`parallel-lanes.md`](parallel-lanes.md)), once per l
 No entry is needed for a decision that only tightens (a residue pin moving down, a check that now
 checks more) or that writes down an outcome a `ready-for-agent` issue already stated.
 
-**A decision already landed whose only defect is procedural is held, not reverted.** Where a change
-is sound in substance but the process was not followed — it named a precedent that was not yet
-ratified, it belonged to the serious list and was not asked first, its entry was written after the
-fact — the remedy is to leave the change in place, keep or restore its entry in the queue, and say in
-the entry what the process missed. The user ratifies it by the next release, so the queue is where
-the inconsistency is reconciled rather than in a revert. A revert costs the change and the code under
-it for nothing, when the thing to repair is the record.
-
-Two boundaries. The substance has to have been checked, not assumed: say in the entry what was
-verified and by whom, because the entry is now carrying both the decision and the reason it is
-late. And this is remediation, not permission — a serious decision is still asked first, and
-"it can be ratified later" is not a reason to skip the ask.
+**A decision that landed when it should have waited** is repaired in the record rather than by a
+revert, where the record is all that is wrong, and the maintainer decides it at ratification. The
+rule, its bounds — nothing already published or otherwise outside this repository's history — and why
+the criterion for waiting up front is unchanged are the 2026-11-14 amendment to
+[ADR-123](../adr/123-merge-queue-and-post-hoc-approval.md). Landing one deliberately is not covered
+by it: a serious decision waits, as above, and step 3's unattended loop parks it.
 
 ## Release Cadence
 

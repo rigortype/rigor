@@ -16,6 +16,11 @@ approval queue"; the reasoning is [ADR-123](../docs/adr/123-merge-queue-and-post
   release, a ratified entry is deleted in the release branch the same way. A revised or reverted
   entry is deleted by the PR that changes the decision. A release ships only when this directory
   holds nothing but this README.
+- **An entry can come back.** Where a ratification deleted an entry the maintainer then wanted held
+  — the record was defective, not the decision — the entry is restored by the PR that holds it, with
+  a paragraph saying what the process missed and what was verified. ADR-123's 2026-11-14 amendment is
+  the rule and its bounds; WD2's "the entry travels with its PR" still governs an entry that goes
+  because its own change was reverted.
 - **Gate**: `spec/docs/approval_queue_spec.rb` checks the format below and fails a `release/**`
   pull request while any entry remains; CI's change detection fails any run, the merge queue's
   included, that changes `lib/rigor/version.rb` while an entry remains.

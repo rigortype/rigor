@@ -119,6 +119,20 @@ followed, and how to undo it. Serious decisions still wait for the maintainer be
 *Criterion: a decision waits up front only when undoing it after merge would be costly or visible
 to users; everything else is reversible until a release ships it.*
 
+*Amended 2026-11-14 (maintainer's decision).* A decision that landed when it should have waited is
+repaired in the record, not by a revert, **where the record is all that is wrong**: a non-serious
+decision with no entry, or one whose entry named a precedent that was not yet ratified. The change
+stays, its entry stays in the queue stating what the process missed and what was verified, and the
+maintainer decides it at ratification like any other. The criterion above is unchanged and decides
+this case too — holding is available only while undoing is still neither costly nor visible, which is
+what makes the defect a record and not a fact about the world. So it is **not** available for anything
+already outside this repository's history: a published gem or tag, a changed ruleset, required check,
+secret or permission, or a new runtime dependency (ADR-31). Those are undone or disclosed at once.
+Nor is it licence: a serious decision still waits for the maintainer before landing, and the
+unattended loop of [`contribution-flow.md`](../agents/contribution-flow.md) § "Landing a pull
+request" step 3 still parks one rather than landing it. The remedy is for a defect discovered, never
+for one chosen.
+
 **3. A release ships only ratified decisions.** `/rigor-release-prep` opens by reporting every
 queue entry to the maintainer, in the maintainer's language, and asking them to ratify, revise or
 revert each one. The release proceeds only when the queue is empty: ratified entries are deleted,

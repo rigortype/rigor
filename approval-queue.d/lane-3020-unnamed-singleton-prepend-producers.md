@@ -37,9 +37,16 @@ ratified only by the batch that restores this one. The field keeps the PR it cit
 to spell "the precedent was not yet ratified" in the field itself. This note is that spelling.
 
 What is being asked is therefore the row on its merits, not the chain: whether this classification is
-right, independently of the row it followed. The review of #3230 read five of the batch's
-classifications against the code, three of them consumer-classified, and found all five correct; that
-is evidence, not ratification.
+right, independently of the row it followed.
+
+The entry was restored rather than the row reverted, under
+[ADR-123's 2026-11-14 amendment](../docs/adr/123-merge-queue-and-post-hoc-approval.md).
+What was read, and by whom: the
+row's subject was read against the code on 2026-11-14 by the session that restored this entry —
+`ResolutionChain#unnamed_extend_nodes` is a memoised `@marks.filter_map { … }.freeze` over the chain's
+order marks, writing nothing, which is what its row's reason says. #3230's review reported reading
+five of that batch's sixteen entries' classifications and named none of them, so nothing here rests
+on it.
 
 ## To undo
 

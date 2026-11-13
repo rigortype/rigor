@@ -373,8 +373,8 @@ assertions:
   '365': String
   '366': String
   '367': String
-  '368': String?
-  '369': String?
+  '368': Dynamic[top]
+  '369': Dynamic[top]
   '370': String
   '371': String?
   '372': String
@@ -390,12 +390,12 @@ assertions:
   '382': String
   '383': String
   '384': String
-  '385': String?
-  '386': String?
-  '387': String?
-  '388': MatchData?
-  '389': String?
-  '390': String?
+  '385': Dynamic[top]
+  '386': Dynamic[top]
+  '387': Dynamic[top]
+  '388': Dynamic[top]
+  '389': Dynamic[top]
+  '390': Dynamic[top]
   '391': String
   '392': String
   '393': String?
@@ -404,4 +404,7 @@ assertions:
   '396': String
   '397': String
   '398': String
-  '399': String?
+  '399': String
+  '400': String
+  '401': String
+  '402': Dynamic[top]

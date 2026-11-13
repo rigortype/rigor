@@ -367,9 +367,11 @@ module Rigor
       # with a narrowed global untyped, since it reads the definer's slot whenever the method is called. `$_`, which
       # shares the slot, enters on the same terms ({LastLine.block_entry}, issue #1359). A closure's body, which runs
       # whenever it is called, enters with `$!`, `$@` and `$?` unbound ({FreshFrameBlocks.closure_entry}, issue #1360),
-      # and with the match globals unbound whatever its body does ({FreshFrameBlocks.deferred_body?}, issue #1371): the
+      # and with the match globals unbound whatever its body does ({FreshFrameBlocks.proc_body?}, issue #1371): the
       # narrowing where a lambda or proc is written proves nothing about the `$~` it reads when it is called. The
-      # block of `Enumerator.new` or `Hash.new` on the core class enters the same way (issue #3195).
+      # block of `Enumerator.new` or `Hash.new` on the core class runs later too, but often in the statement that
+      # makes it, so where none of the rules above forgets them it enters with a narrowed global untyped
+      # ({FreshFrameBlocks.deferred_constructor?}, issue #3195).
       #
       # Issue #1429 — the entry also restores a guard's narrowing of a global or constant where the body may run after
       # code that rebinds it ({GuardRebinding.block_entry}).
@@ -390,11 +392,15 @@ module Rigor
 
       def frame_entry(scope, block_node, call_node)
         return scope unless scope.match_globals_bound?
-        return scope unless FreshFrameBlocks.deferred_body?(block_node, call_node, scope) ||
-                            scope.match_rebinding_closure? || entry_may_match?(block_node.body, scope, call_node) ||
-                            (call_node.is_a?(Prism::CallNode) && operands_may_rebind?(call_node, scope))
+        return scope.forget_match_globals if entry_forgets?(scope, block_node, call_node)
 
-        scope.forget_match_globals
+        FreshFrameBlocks.deferred_constructor?(block_node, call_node, scope) ? scope.untyped_match_globals : scope
+      end
+
+      def entry_forgets?(scope, block_node, call_node)
+        FreshFrameBlocks.proc_body?(block_node, call_node, scope) ||
+          scope.match_rebinding_closure? || entry_may_match?(block_node.body, scope, call_node) ||
+          (call_node.is_a?(Prism::CallNode) && operands_may_rebind?(call_node, scope))
       end
 
       def entry_may_match?(body, scope, call_node)
@@ -403,7 +409,7 @@ module Rigor
 
         body.is_a?(Prism::Node) && scan(body, scope, base: true)
       end
-      private_class_method :frame_entry, :entry_may_match?
+      private_class_method :frame_entry, :entry_forgets?, :entry_may_match?
     end
   end
 end

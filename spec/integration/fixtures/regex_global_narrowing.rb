@@ -2937,12 +2937,12 @@ module ClosurePool1371
 end
 
 # Issue #3195 — the block of `Enumerator.new` or `Hash.new` runs later too, when the enumerator is read or a key is
-# missing, so it enters unbound as a proc body does. #1371 pinned both as `String` here.
+# missing, so it reads a narrowed global untyped. #1371 pinned both as `String` here.
 def closure_control_other_keepers(str)
   return unless str =~ /(\d+)/
 
-  e = Enumerator.new { |y| assert_type("String?", $1); y << 1 }
-  h = Hash.new { |_h, _k| assert_type("String?", $1) }
+  e = Enumerator.new { |y| assert_type("Dynamic[top]", $1); y << 1 }
+  h = Hash.new { |_h, _k| assert_type("Dynamic[top]", $1) }
   [e, h]
 end
 
@@ -3009,18 +3009,18 @@ def literal_brace_after_group(line)
 end
 
 # Issue #3195 — an enumerator's generator runs when the enumerator is read, and a hash's default proc on a missing
-# key, so the narrowing where either is written proves nothing about the `$~` it reads (Ruby:
-# `deferred_stale_enumerator("a1", "zy")` and `deferred_stale_hash("a1", "zy")` return nil).
+# key, so the narrowing where either is written does not prove the `$~` it reads, and a narrowed global reads
+# untyped there (Ruby: `deferred_stale_enumerator("a1", "zy")` and `deferred_stale_hash("a1", "zy")` return nil).
 def deferred_stale_enumerator(str, other)
   e = nil
-  e = Enumerator.new { |y| assert_type("String?", $1); y << $1 } if str =~ /(\d+)/
+  e = Enumerator.new { |y| assert_type("Dynamic[top]", $1); y << $1 } if str =~ /(\d+)/
   other =~ /(x)?y/
   e&.first
 end
 
 def deferred_stale_hash(str, other)
   h = nil
-  h = Hash.new { |_h, _k| assert_type("String?", $1); $1 } if str =~ /(\d+)/
+  h = Hash.new { |_h, _k| assert_type("Dynamic[top]", $1); $1 } if str =~ /(\d+)/
   other =~ /(x)?y/
   h && h[:missing]
 end
@@ -3028,12 +3028,55 @@ end
 def deferred_forms(str)
   return unless str =~ /(\d+)/
 
-  a = ::Enumerator.new { |y| assert_type("String?", $1); assert_type("MatchData?", Regexp.last_match); y << 1 }
-  b = ::Hash.new { |_h, _k| assert_type("String?", $1) }
-  c = Hash.new(capacity: 4) { |_h, _k| assert_type("String?", $&) }
-  d = Enumerator.new { |y| w = $1; y << w.upcase } # GENUINE-NIL
+  a = ::Enumerator.new { |y| assert_type("Dynamic[top]", $1); assert_type("Dynamic[top]", $~); y << 1 }
+  b = ::Hash.new { |_h, _k| assert_type("Dynamic[top]", $1) }
+  c = Hash.new(capacity: 4) { |_h, _k| assert_type("Dynamic[top]", $&) }
   assert_type("String", $1)
-  [a, b, c, d]
+  [a, b, c]
+end
+
+# The block often runs in the statement that makes it, where it does read the narrowing, so a copy of a narrowed
+# group used there is not reported (Ruby: `["1"]`, "1", "1" and `[:a, "b"]` for `"a1"`, `"a1"`, `"a1"` and `"a=b"`).
+def deferred_runs_now_to_a(str)
+  return [] unless str =~ /(\d+)/
+
+  Enumerator.new { |y| w = $1; y << w.upcase }.to_a
+end
+
+def deferred_runs_now_next(str)
+  return unless str =~ /(\d+)/
+
+  e = Enumerator.new { |y| w = $1; y << w.upcase }
+  e.next
+end
+
+def deferred_runs_now_hash(str)
+  return unless str =~ /(\d+)/
+
+  Hash.new { |_h, _k| w = $1; w.upcase }[:k]
+end
+
+def deferred_runs_now_pair(str)
+  return unless str =~ /(\w+)=(\w+)/
+
+  Enumerator.new do |y|
+    k = $1
+    v = $2
+    y << k.to_sym
+    y << v.strip
+  end.first(2)
+end
+
+# Controls: a block whose own body may match forgets the globals on entry, as any block's does, and a group nothing
+# narrowed is unbound, so a copy of either is still reported.
+def deferred_body_matches(str)
+  return unless str =~ /(\d+)/
+
+  Enumerator.new { |y| w = $1; y << w.upcase; "zz" =~ /(q)/ }.to_a # GENUINE-NIL
+end
+
+def deferred_unbound
+  Hash.new { |_h, _k| w = $1; w.upcase }[:k] # GENUINE-NIL
 end
 
 # A match the block runs narrows inside it as anywhere else, and still rebinds the frame's slot.
@@ -3046,8 +3089,9 @@ def deferred_own_match(str, other)
 end
 
 # Controls: a project class that only shares the name runs its block as its own method does, a receiver that is not
-# the literal constant is not read as the core class, and a plain iterator's block shares the frame, so each still
-# reads the enclosing narrowing (Ruby: "1" for `DeferredPool3195.entry("a1", Array)`).
+# the literal constant naming the core class (a variable, a subclass, an alias) is not read as that class, and a
+# plain iterator's block shares the frame, so each still reads the enclosing narrowing (Ruby: "1" for
+# `DeferredPool3195.entry("a1", Array)`).
 module DeferredPool3195
   class Enumerator
     def self.new = yield
@@ -3067,9 +3111,23 @@ module DeferredPool3195
   end
 end
 
-# Issue #3198 — a refinement in effect that defines `grep` is the method the call runs: it matches, if at all, in a
-# frame of its own, so its block keeps the frame-wide entry (Ruby: nil for `RefinedGrep3198.run`, where the frame's
-# last match failed). The control's receiver has no refinement in effect and enters with the call's own match.
+class DeferredTable3195 < Hash; end
+DeferredAlias3195 = Enumerator
+
+def deferred_other_spellings(str)
+  return unless str =~ /(\d+)/
+
+  a = DeferredTable3195.new { |_h, _k| assert_type("String", $1) }
+  b = DeferredAlias3195.new { |y| assert_type("String", $1); y << 1 }
+  c = Object::Enumerator.new { |y| assert_type("String", $1); y << 1 }
+  [a, b, c]
+end
+
+# Issue #3198 — where a refinement that defines `grep` is in effect, the call may run the refinement's method, which
+# matches, if at all, in a frame of its own, or `Enumerable`'s; the refined class is not compared with the receiver.
+# The block reads what `Enumerable`'s would bind untyped, so it neither claims a `String` the refined method never
+# set (Ruby: nil for `RefinedGrep3198.refined`) nor reports the copy `Enumerable`'s sets (Ruby: `["A"]` for
+# `RefinedGrep3198.unrefined(%w[a b])`). The control outside the refinement enters with the call's own match.
 module RefinedGrepRange3198
   refine Range do
     def grep(_pattern) = yield("x")
@@ -3083,8 +3141,23 @@ end
 module RefinedGrep3198
   using RefinedGrepRange3198
 
-  def self.run
-    (1..3).grep(/(a)/) { assert_type("String?", $1); $1 }
+  def self.refined
+    (1..3).grep(/(a)/) { assert_type("Dynamic[top]", $1); $1 }
+  end
+
+  def self.unrefined(items)
+    %w[a b].grep(/(a)/) { w = $1; w.upcase }
+    items.grep(/(a)/) { w = $1; w.upcase }
+  end
+
+  # Controls: a group the pattern does not always set, and any group in a `grep_v` block, is unbound there as it is
+  # without the refinement, so a copy of it is still reported.
+  def self.optional_group(items)
+    items.grep(/(a)?/) { w = $1; w.upcase } # GENUINE-NIL
+  end
+
+  def self.inverted(items)
+    items.grep_v(/(a)/) { w = $1; w.upcase } # GENUINE-NIL
   end
 end
 

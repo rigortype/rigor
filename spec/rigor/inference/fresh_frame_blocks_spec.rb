@@ -167,25 +167,36 @@ RSpec.describe Rigor::Inference::FreshFrameBlocks do
   end
 
   # Issue #1371, #3195 — the bodies that run later than where they are written, on the slot of the frame that wrote
-  # them.
+  # them: a proc's, and the block of the core `Enumerator.new` or `Hash.new`.
   describe ".deferred_body?" do
-    def deferred?(source, in_scope = scope)
+    def answers(source, in_scope = scope)
       node = call(source)
-      described_class.deferred_body?(node.block, node, in_scope)
-    end
-
-    it "names a lambda literal, Kernel's `lambda` / `proc`, and the core `Proc.new`, `Enumerator.new` and `Hash.new`" do
-      expect(described_class.deferred_body?(call("-> { }"), nil, scope)).to be(true)
-      ["lambda { }", "proc { }", "Kernel.proc { }", "Proc.new { }", "Enumerator.new { |y| y << 1 }",
-       "::Enumerator.new { }", "Hash.new { |h, k| k }", "::Hash.new(capacity: 2) { }"].each do |source|
-        expect(deferred?(source)).to be(true), source
+      %i[proc_body? deferred_constructor? deferred_body?].map do |predicate|
+        described_class.public_send(predicate, node.block, node, in_scope)
       end
     end
 
-    it "does not name another receiver's `new`, another method of those classes, or a block with no owning call" do
+    it "names a lambda literal, Kernel's `lambda` / `proc` and the core `Proc.new` as a proc body" do
+      lambda_node = call("-> { }")
+      expect(described_class.proc_body?(lambda_node, nil, scope)).to be(true)
+      expect(described_class.deferred_constructor?(lambda_node, nil, scope)).to be(false)
+      expect(described_class.deferred_body?(lambda_node, nil, scope)).to be(true)
+      ["lambda { }", "proc { }", "Kernel.proc { }", "Proc.new { }"].each do |source|
+        expect(answers(source)).to eq([true, false, true]), source
+      end
+    end
+
+    it "names the block of the core `Enumerator.new` or `Hash.new` as a deferred constructor's" do
+      ["Enumerator.new { |y| y << 1 }", "::Enumerator.new { }", "Hash.new { |h, k| k }",
+       "::Hash.new(capacity: 2) { }"].each do |source|
+        expect(answers(source)).to eq([false, true, true]), source
+      end
+    end
+
+    it "names neither for another receiver's `new`, another method of those classes, or no owning call" do
       ["klass.new { }", "Enumerator::Lazy.new(items) { }", "Enumerator.produce { }", "Hash.fetch(:k) { }",
-       "Thread.new { }", "obj.lambda { }", "items.each { }"].each do |source|
-        expect(deferred?(source)).to be(false), source
+       "Object::Enumerator.new { }", "Thread.new { }", "obj.lambda { }", "items.each { }"].each do |source|
+        expect(answers(source)).to eq([false, false, false]), source
       end
       expect(described_class.deferred_body?(call("Enumerator.new { }").block, nil, scope)).to be(false)
     end
@@ -205,8 +216,8 @@ RSpec.describe Rigor::Inference::FreshFrameBlocks do
       index = Rigor::Inference::ScopeIndexer.index(root, default_scope: scope)
       node = root.breadth_first_search { |n| n.is_a?(Prism::CallNode) && n.name == :new && !n.block.nil? }
 
-      expect(described_class.deferred_body?(node.block, node, index[node])).to be(false)
-      expect(described_class.deferred_body?(node.block, node, scope)).to be(true)
+      expect(described_class.deferred_constructor?(node.block, node, index[node])).to be(false)
+      expect(described_class.deferred_constructor?(node.block, node, scope)).to be(true)
     end
   end
 end

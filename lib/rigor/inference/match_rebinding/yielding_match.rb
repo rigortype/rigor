@@ -24,9 +24,10 @@ module Rigor
       # a regex literal for the pattern, a `grep` block enters with that match edge and a `grep_v` block with the
       # globals unbound. `Enumerable` is mixed into classes of every kind, so any explicit receiver counts but one
       # whose `grep` the project defines ({ProjectMethodOwnership}): that method matches, if at all, in a frame of
-      # its own, and its block keeps the frame-wide entry as a project `scan`'s does; so does a call a refinement that
-      # defines the name is in effect at (issue #3198). Any other pattern (`grep(Integer)`) keeps the frame-wide entry
-      # too, since its `===` may leave `$~` alone.
+      # its own, and its block keeps the frame-wide entry as a project `scan`'s does. Where a refinement that defines
+      # the name is in effect at the call (issue #3198), the method that runs is the refinement's or `Enumerable`'s,
+      # and this does not tell which, so the block enters with what `Enumerable`'s would bind read untyped. Any other
+      # pattern (`grep(Integer)`) keeps the frame-wide entry too, since its `===` may leave `$~` alone.
       module YieldingMatch
         NAMES = Set[:scan, :gsub, :gsub!, :sub, :sub!].freeze
         GREP_NAMES = Set[:grep, :grep_v].freeze
@@ -59,10 +60,10 @@ module Rigor
           pattern = pattern_argument(call_node)
           return scope unless pattern.is_a?(Prism::RegularExpressionNode) ||
                               pattern.is_a?(Prism::InterpolatedRegularExpressionNode)
-          return scope if project_method?(call_node, operand_scope) || refined?(call_node, operand_scope)
-          return scope.forget_match_globals if call_node.name == :grep_v
+          return scope if project_method?(call_node, operand_scope)
 
-          Narrowing.yielded_match_scope(scope, pattern)
+          entry = call_node.name == :grep_v ? scope.forget_match_globals : Narrowing.yielded_match_scope(scope, pattern)
+          refined?(call_node, operand_scope) ? entry.untyped_match_globals : entry
         end
 
         # True when the receiver answers the call with a method the project defines, or is a carrier whose class
@@ -76,9 +77,9 @@ module Rigor
           end
         end
 
-        # Issue #3198 — true when a refinement in effect at the call defines its name on any class: the refined method
+        # Issue #3198 — true when a refinement in effect at the call defines its name on any class: a refined method
         # is Ruby's, and matches, if at all, in a frame of its own. The refined class is not compared with the
-        # receiver, so any in-effect row for the name declines.
+        # receiver, so the call may still be `Enumerable`'s.
         def refined?(call_node, operand_scope)
           SelfPreservingBlock.refined_in_effect?(call_node, call_node.name, operand_scope)
         end

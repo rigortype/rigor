@@ -930,6 +930,10 @@ binding cannot manufacture a diagnostic inside the callee's body.
   with Symbol keys MUST be typed at the call site as that shape, so `f(**h)` binds the callee's named keyword
   parameters by name exactly as the literal form `f(a: 1, b: 2)` does. The shape MUST be carried in the argument list
   itself rather than passed alongside it, because the ADR-84 return memo keys on `(def_node, receiver, arg_types)`.
+  When that shape has no pairs (`f(**h)` with `h = {}`, `f(**{})`) and the double splat is the call's last argument,
+  Ruby passes no argument for it, and the body tiers MUST bind the list without it (issue
+  [#3099](https://github.com/rigortype/rigor/issues/3099)): bound as one positional `{}`, `def count(*keys) =
+  keys.size` called `r.count(**h)` folded to `1`.
 - Every other keyword-hash argument MUST keep its own pre-existing type, and so keep the pre-#1125 answer: a MIXED hash
   (`f(a: 1, **h)` — the literal pairs and the splatted shape are not merged), an OPEN shape (unknown extras make every
   missing-keyword answer a guess rather than a read), a shape with a non-Symbol key (Ruby itself rejects those as
@@ -940,8 +944,8 @@ binding cannot manufacture a diagnostic inside the callee's body.
   last case is what leaves the literal form's existing binding untouched (`def target(a:, b:, **rest)` called
   `target(a: 1, b: 2)` still binds `rest` to `Dynamic[top]`), while a caller that leaves keys over — the only shape
   where the parameter holds something to report — gets them typed.
-- A positional splat (`f(*a)`, `f(1, *a)`, `f(*a, 2)`, a literal `f(*[1, 2])` included) is carried in the list as
-  ONE argument, so the list does not say how many positionals the callee receives. The same holds for a `f(...)`
+- A positional splat (`f(*a)`, `f(1, *a)`, `f(*a, 2)`) is carried in the list as ONE argument, so the list does not
+  say how many positionals the callee receives. The same holds for a `f(...)`
   with no forwarding frame to expand it from. A user `def` body re-typed for such a call MUST NOT bind that list
   positionally (issue [#1237](https://github.com/rigortype/rigor/issues/1237)). The binding's result is not a lower
   bound: `def count(*keys) = keys.size` called `r.count(*[0, 1])` folded to `1` and drew
@@ -958,7 +962,18 @@ binding cannot manufacture a diagnostic inside the callee's body.
   kept. Such a frame MUST read and store the ADR-84 return memo under a key of its own, distinct from every
   positional key, so a splat call is memoized, recorded and bounded like any other frame; its ADR-89 return
   summary key carries the same mark, and the incremental session MUST re-drive that key with no positional
-  correspondence too. It installs no `...` forwarding list. A `Tuple` splat is not expanded into positionals.
+  correspondence too. It installs no `...` forwarding list.
+
+  When every splat's value is a `Tuple` whose every element provably is not a `Hash` (a constant that is not a
+  Hash, a nested `Tuple`, an integer or float range, a nominal of a core class such as `Integer`, `String`,
+  `Symbol` or `Array`, or a union of these), the body tiers MUST instead expand each splat into its elements and
+  bind the result as the equivalent positional call (issue [#3157](https://github.com/rigortype/rigor/issues/3157)):
+  `first(*[1, 2])` with `def first(*xs) = xs.first` answers `1`. With no `Hash` element no `ruby2_keywords` hash
+  can supply the keywords, so they bind as for that positional call. Any other splat, a list holding `...`, and a
+  `Tuple` with an element that may be a `Hash` (a `HashShape`, a `Hash` nominal, a nominal of any class outside
+  that core set, `Dynamic`) keep the no-correspondence binding above. So does a Tuple splat at a call typed
+  inside a body re-typed for another call: there a rest parameter holds the caller's Tuple, and a chain
+  `m1(*a) = m2(*a) + m2(1, *a)` would hand each level a longer one and walk every arity of every level.
 - `def m(...)` MUST NOT be declined by the call-site binder. Its NAMED parameters (a leading `def m(a, ...)`
   required) bind as before, and nothing is bound for the forwarding slot, which is not a binding at all.
 - A `f(...)` call inside a `def m(...)` body MUST expand to the argument types of the call that entered the frame, so

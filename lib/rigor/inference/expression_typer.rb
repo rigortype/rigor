@@ -2437,8 +2437,17 @@ module Rigor
       # keyword-hash argument the call writes and {#call_arg_type} types as a `HashShape` supplies one. Any
       # other call leaves the keywords unknown (an open empty shape), because a splatted array's last element
       # is passed as keywords when it is a `ruby2_keywords` hash.
+      #
+      # Issue #3157 — a call whose every splat is a `Tuple` {#expand_tuple_splats} can expand is bound as the
+      # equivalent positional call. Issue #3099 — an empty closed double splat passes no argument
+      # ({#drop_empty_double_splat}).
       def positional_correspondence(call_node, arg_types)
-        return [arg_types, false] unless splat_arguments?(call_node)
+        unless splat_arguments?(call_node)
+          return [drop_empty_double_splat(call_node.arguments&.arguments, arg_types), false]
+        end
+
+        expanded = expand_tuple_splats(call_node.arguments.arguments, arg_types)
+        return [expanded, false] if expanded
 
         last = call_node.arguments.arguments.last
         keywords = arg_types.last if last.is_a?(Prism::KeywordHashNode) && arg_types.last.is_a?(Type::HashShape)
@@ -2447,6 +2456,70 @@ module Rigor
 
       UNKNOWN_KEYWORDS = Type::Combinator.hash_shape_of({}, extra_keys: :open)
       private_constant :UNKNOWN_KEYWORDS
+
+      # Issue #3099 — `arg_types` without its last entry when the call's last argument is a lone double splat
+      # (`f(**h)`, `f(**{})`) {#call_arg_type} typed as a closed `HashShape` with no pairs. Ruby passes no
+      # argument for it, so binding it left a positional `{}`: `def count(*keys) = keys.size` called
+      # `r.count(**h)` with `h = {}` folded to `1`. Any other list is returned as it is. `arguments` and
+      # `arg_types` share their last entry on every path that reaches here.
+      def drop_empty_double_splat(arguments, arg_types)
+        return arg_types unless empty_double_splat?(arguments&.last, arg_types.last)
+
+        arg_types[0...-1]
+      end
+
+      def empty_double_splat?(argument, type)
+        argument.is_a?(Prism::KeywordHashNode) && argument.elements.size == 1 &&
+          argument.elements.first.is_a?(Prism::AssocSplatNode) &&
+          type.is_a?(Type::HashShape) && type.closed? && type.pairs.empty?
+      end
+
+      # Issue #3157 — the argument list with each `*splat` replaced by its elements, or nil to keep the
+      # no-correspondence binding. It expands only when every splat's value is a `Tuple` (fixed arity) whose
+      # every element is {#provably_not_hash?}: a splatted array's last element is passed as keywords when it
+      # is a `ruby2_keywords` hash, so an element that may be a `Hash` leaves the keywords unknown. A list
+      # holding `...` is not expanded. An empty closed double splat written last is dropped
+      # ({#drop_empty_double_splat}).
+      #
+      # Only a call outside every re-typed body frame expands (the main walk's call sites). Inside a frame a rest
+      # parameter is bound to the caller's Tuple, so a chain `m1(*a) = m2(*a) + m2(1, *a)` handed each level a
+      # longer Tuple and walked every arity of every level (spec/rigor/inference/splat_chain_growth_spec.rb).
+      def expand_tuple_splats(arguments, arg_types)
+        return nil if forwards_arguments?(arguments)
+        return nil unless typing_state.stack(INFERENCE_GUARD).empty?
+
+        expanded = []
+        arguments.each_with_index do |argument, index|
+          next expanded << arg_types[index] unless argument.is_a?(Prism::SplatNode)
+          return nil if argument.expression.nil?
+
+          tuple = type_of(argument.expression)
+          return nil unless tuple.is_a?(Type::Tuple) && tuple.elements.all? { |element| provably_not_hash?(element) }
+
+          expanded.concat(tuple.elements)
+        end
+        return expanded unless empty_double_splat?(arguments.last, arg_types.last)
+
+        expanded[0...-1]
+      end
+
+      # Classes no instance of which is a `Hash`. A `Nominal` of any other class may be a `Hash` subclass.
+      NON_HASH_CLASSES = %w[
+        Integer Float Rational Complex String Symbol Array Range Regexp NilClass TrueClass FalseClass Proc
+      ].to_set.freeze
+      private_constant :NON_HASH_CLASSES
+
+      # Whether no value of `type` is a `Hash`. Anything this does not recognise answers false.
+      def provably_not_hash?(type)
+        case type
+        when Type::Constant then !type.value.is_a?(Hash)
+        when Type::Tuple, Type::IntegerRange, Type::FloatRange then true
+        when Type::Nominal then NON_HASH_CLASSES.include?(type.class_name)
+        when Type::Union then type.members.all? { |member| provably_not_hash?(member) }
+        when Type::Refined, Type::Difference then provably_not_hash?(type.base)
+        else false
+        end
+      end
 
       # The post-dispatch tiers for a call `MethodDispatcher` could not answer, in their historical
       # order; extracted from {#call_dispatch_type_for} whole.

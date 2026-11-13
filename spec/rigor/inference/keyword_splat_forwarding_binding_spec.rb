@@ -196,6 +196,9 @@ RSpec.describe "issue #1125 — keyword-splat and `...` call-site binding" do
       #
       # Issue #1237: the body is re-typed with no positional correspondence instead of declined, so each
       # positional parameter is `Dynamic[top]` and the body's shape survives; the Tuple is still not expanded.
+      #
+      # Issue #3157 expands only a splat of an array literal; `*args` is a local, so it keeps the no-correspondence
+      # binding.
       expect_binds(<<~RUBY)
         require "rigor/testing"
         include Rigor::Testing

@@ -6,6 +6,9 @@
 # tier that re-types a body from the call's arguments now re-types it with no positional correspondence under a
 # splat: each positional parameter is `Dynamic[top]` and the rest parameter `Array[untyped]`. The body still
 # answers, so a callee that always raises keeps its `bot` and an argument-independent return is kept.
+#
+# `idx` is an `Array[Integer]`, not an array literal: a splat of a literal whose elements cannot be a `Hash` is
+# expanded into positionals (issue #3157, spec/integration/call_site_tuple_splat_return_spec.rb).
 require "spec_helper"
 
 RSpec.describe "a call-site splat does not bind as one positional argument (#1237)", type: :runner do
@@ -21,7 +24,7 @@ RSpec.describe "a call-site splat does not bind as one positional argument (#123
   def program(defs, call, expected: 2)
     <<~RUBY
       #{defs}
-      idx = [0, 1]
+      idx = ARGV.map(&:to_i)
       n = #{call}
       puts "hit" if n == #{expected}
     RUBY
@@ -60,8 +63,8 @@ RSpec.describe "a call-site splat does not bind as one positional argument (#123
       expect(rules(program(row, "Row.new.count(*idx, 2)", expected: 3))).to eq([])
     end
 
-    it "a splat of a literal array" do
-      expect(rules(program(row, "Row.new.count(*[1, 2])"))).to eq([])
+    it "a splat of a literal array whose element may be a Hash" do
+      expect(rules(program(row, "Row.new.count(*[1, ENV.to_h])"))).to eq([])
     end
 
     it "a singleton call" do
@@ -195,7 +198,7 @@ def fwd(...) = count(...)"
     end
 
     it "does not fold to the default" do
-      expect(rules(program("def opt(a = 5) = a", "opt(*[7])", expected: 7))).to eq([])
+      expect(rules(program("def opt(a = 5) = a", "opt(*idx.take(1))", expected: 7))).to eq([])
     end
   end
 
@@ -218,8 +221,6 @@ def fwd(...) = count(...)"
       expect(rules(program(defs, "Row.new.count(&blk)", expected: 1))).to eq(always)
     end
 
-    # Only a NON-EMPTY closed shape binds by name. An empty `**h` is still carried as one positional `{}` (a
-    # separate, pre-existing gap filed by the #3097 review), which this change does not touch.
     it "binds a keyword splat of a non-empty closed hash shape" do
       defs = "class Row\n  def kw(a: 1) = a\nend\nh = { a: 2 }"
       expect(rules(program(defs, "Row.new.kw(**h)", expected: 3))).to eq(always)

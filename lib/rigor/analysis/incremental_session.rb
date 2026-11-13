@@ -1257,7 +1257,7 @@ module Rigor
       end
 
       # ADR-89 WD2 / issue #3160 — bring the behavioural summaries up to date with THIS run. The invariant the gate
-      # reads them under: a pair's summary holds every key under which a CURRENT symbol dependent of the def
+      # reads them under: a pair's summary holds every key under which a CURRENT direct symbol dependent of the def
       # observes it, each with the def's current return. A summary that cannot be shown to is deleted, and a pair
       # with no summary keeps its dependents, so every doubt below resolves to "no summary".
       #
@@ -1275,6 +1275,10 @@ module Rigor
       #
       # Fewer keys are never the conservative direction: each key protects the readers that observe the def under
       # it, so a summary missing one skips a reader whose answer the edit moved.
+      #
+      # The invariant covers DIRECT symbol dependents only. A dependent that reaches the def through another def
+      # is not covered: a gate-passing edit of that middle def can change the key such a skipped reader observes
+      # here, or give it a new callee, and no summary records that (issue #3180).
       def refresh_return_summaries(runner, analyze_set)
         harvest = runner.return_summaries
         analyzed = analyze_set.to_set

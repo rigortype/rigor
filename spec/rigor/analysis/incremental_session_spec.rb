@@ -3058,6 +3058,43 @@ end
         end
       end
 
+      # A def with no stored summary and a dependent this run did not analyse stays without one: the run's keys are
+      # not that dependent's. A pooled baseline stores nothing, so the added reader's key alone would let an edit
+      # that moves the return only at `m.rb`'s key skip `m.rb`.
+      it "starts no summary from a run that analysed only some readers of a def that had none" do
+        Dir.mktmpdir do |dir|
+          session = described_class.new(configuration: configuration(dir), environment: shared_environment, workers: 2)
+          summaries = []
+          rechecks = replay(dir, [{ "a.rb" => "def v(k) = k == 1 ? :a : :b\n", "m.rb" => "puts 'hit' if v(1) == :a\n" },
+                                  { "b.rb" => "v(5)\n" },
+                                  { "a.rb" => "def v(k) = k == 1 ? :z : :b\n" }],
+                            session: session, recheck_workers: 0) { |s| summaries << summary_of(s, dir) }
+          expect(summaries.first).to be_nil
+          expect(basenames(rechecks.last.affected)).to include("m.rb")
+        end
+      end
+
+      # Two memo entries can share `[receiver, args]` and differ in the `:self` grant or the yield frame, so a kept
+      # row is dropped only for a fresh row with the same key AND return. Kept beside a fresh row whose return
+      # differs, it leaves a pair no re-evaluation satisfies, and the gate keeps the dependents. A unit row: no
+      # project was built in which the two polarities reach different readers.
+      it "keeps a kept row beside a fresh row with the same key and another return" do
+        session = session_for(configuration(Dir.tmpdir))
+        kept = { keys: [[:recv, [1]], [:recv, [2]]], returns: [":a", ":b"], effects: [] }
+        fresh = { keys: [[:recv, [1]], [:recv, [2]]], returns: [":a", "Dynamic[top]"], effects: [0] }
+
+        expect(session.send(:merged_return_summary, kept, fresh))
+          .to eq(keys: [[:recv, [1]], [:recv, [2]], [:recv, [2]]], returns: [":a", "Dynamic[top]", ":b"], effects: [0])
+      end
+
+      it "holds the stored summaries to the total cap" do
+        stub_const("Rigor::Analysis::Runner::RETURN_SUMMARY_TOTAL_CAP", 2)
+        session = session_for(configuration(Dir.tmpdir))
+
+        expect(session.send(:capped_return_summaries, { a: 1, b: 2, c: 3 })).to eq(a: 1, b: 2)
+        expect(session.send(:capped_return_summaries, { a: 1, b: 2 })).to eq(a: 1, b: 2)
+      end
+
       # A sequential baseline's summary must not outlive a pooled recheck that analysed one of the def's readers:
       # that run observed a key this process cannot list.
       it "drops a summary when a pooled recheck analyses a reader of its def" do

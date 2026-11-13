@@ -1566,9 +1566,13 @@ Two persisted summaries prove "nothing changed":
   dependents. Any mismatch, a changed signature, a missing def, an
   ineligible def (one that also exposes ivar/cvar writes or `yield` values),
   or a missing summary keeps the dependents — the conservative direction.
-  A stored summary MUST hold every key under which a current symbol dependent
-  of the def observes it, each with the def's current return
-  ([#3160](https://github.com/rigortype/rigor/issues/3160)); a def for which
+  A stored summary MUST hold every key under which a current direct symbol
+  dependent of the def observes it, each with the def's current return
+  ([#3160](https://github.com/rigortype/rigor/issues/3160)). The invariant
+  does not cover a dependent that reaches the def through another def: a
+  gate-passing edit of that middle def can change the key a skipped reader
+  observes on this one, or give it a new callee
+  ([#3180](https://github.com/rigortype/rigor/issues/3180)). A def for which
   that cannot be shown MUST have no summary, and a def with no summary keeps
   its symbol dependents. Fewer keys are not the conservative direction: a
   missing key skips the reader that observes the def under it. A recheck

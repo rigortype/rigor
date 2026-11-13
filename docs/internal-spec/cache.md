@@ -1582,7 +1582,7 @@ Two persisted summaries prove "nothing changed":
     callee's closure only when the gate proved every stored return unmoved or
     the def's text did not change. With no stored summary there is nothing to
     add to, and the def stays without one;
-  - the def left its file, or has no symbol dependent: removed.
+  - the def has no symbol dependent: removed.
 
   A run that cannot list the keys it observed for a def records none for it: a
   def observed under more than `RETURN_SUMMARY_KEYS_PER_DEF` (8) keys in one

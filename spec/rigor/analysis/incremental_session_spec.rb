@@ -2902,10 +2902,12 @@ end
       it "keeps the key of a reader the recheck did not re-analyse (shrink)" do
         Dir.mktmpdir do |dir|
           # The second step edits the callee without moving a return and re-analyses only one of its readers.
+          keys = []
           rechecks = replay(dir, [{ "a.rb" => v5_a, "m.rb" => "v(1)\n", "b.rb" => "puts 'hit' if v(5) == :a\n" },
                                   { "a.rb" => "def v(k) = k == 5 ? :a : (:b)\n", "m.rb" => "v(1)\n\n" },
-                                  { "a.rb" => v5_z }])
+                                  { "a.rb" => v5_z }]) { |s| keys << key_args(summary_of(s, dir)) }
           expect(basenames(rechecks.first.affected)).to eq(%w[a.rb m.rb])
+          expect(keys.first).to contain_exactly(["1"], ["5"]) # the re-observed key is not recorded twice
           expect(basenames(rechecks.last.affected)).to include("b.rb")
         end
       end

@@ -1264,7 +1264,7 @@ module Rigor
       # A run's harvest ({Runner#return_summaries}) is what the files it analysed observed, so per pair:
       #
       # - neither the def's file nor any of its dependents was analysed: nothing was observed anew, keep it;
-      # - the def is gone from its (re-analysed) file, or has no dependent left: delete;
+      # - the def has no dependent left (which is also where a def that left its file ends up): delete;
       # - the run cannot list the keys it observed (a pool run, a def past the per-def or total cap, a call the
       #   memo refused to store): delete;
       # - every dependent was analysed: the harvest is the whole key set, and replaces the summary (deleting it
@@ -1281,17 +1281,13 @@ module Rigor
         analyzed = analyze_set.to_set
         (@return_summaries.keys | (harvest || {}).keys).each do |pair|
           dependents = @symbol_dependents[pair] || Set.new
-          callee_analyzed = analyzed.include?(pair.first)
-          next if !callee_analyzed && !dependents.empty? && !dependents.intersect?(analyzed)
+          next if !analyzed.include?(pair.first) && !dependents.empty? && !dependents.intersect?(analyzed)
 
-          gone = dependents.empty? || (callee_analyzed && !defines_symbol?(pair))
-          summary = gone ? nil : refreshed_return_summary(pair, harvest, dependents.subset?(analyzed))
+          summary = refreshed_return_summary(pair, harvest, dependents.subset?(analyzed)) unless dependents.empty?
           summary.nil? ? @return_summaries.delete(pair) : @return_summaries[pair] = summary
         end
         @return_summaries = capped_return_summaries(@return_summaries)
       end
-
-      def defines_symbol?((path, symbol)) = @symbol_fingerprints[path]&.key?(symbol) || false
 
       # ADR-89 WD2 — the full-run behavioural surface: every file was analysed, so the harvest is every reader's.
       # A def the run could not list the keys of (nil in the harvest) and a pool run (no harvest) record nothing.

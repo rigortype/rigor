@@ -1,0 +1,4 @@
+- **[incremental]** `rigor check --incremental` no longer keeps a stale answer for a file whose re-check was skipped because an edited method it calls still returns the same values. ([#3196](https://github.com/rigortype/rigor/pull/3196))
+  - An edit that starts or stops reading another file's constant in that method now re-checks its callers, since `flow.always-truthy-condition` at the call site depends on that read.
+  - When the edited method calls into a plugin that reads a file, the skipped callers are now re-checked once that file changes, and they report the plugin's run-level notices as a cold run does.
+  - Incremental snapshots from earlier versions are rebuilt once (snapshot schema 52).

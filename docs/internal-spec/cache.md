@@ -1582,7 +1582,10 @@ Two persisted summaries prove "nothing changed":
   before, or one it calls under another key
   ([#3180](https://github.com/rigortype/rigor/issues/3180)). The gate's probe
   evaluated the def at every stored key, which is every key its readers
-  observe it under, so what the probe read and observed bounds what they do.
+  observe it under, so what the probe read and observed bounds what they do,
+  with one exception: a `defined?(B::X)` in the def's body records no
+  `constant:` edge, so a skipped reader is not re-analysed when the census
+  of `B::X` moves ([#3199](https://github.com/rigortype/rigor/issues/3199)).
   For each pair the gate passed, a recheck therefore MUST:
   - add every dependency edge the probe recorded for the pair (symbol,
     ancestry and name-keyed alike, the def's own file included) to each
@@ -1593,18 +1596,25 @@ Two persisted summaries prove "nothing changed":
     evaluation read as observed by this run, in the update below. A def the
     probe cannot list the keys of has no summary;
   - credit each such skipped reader with the plugin reads
-    (`Plugin::IoBoundary`) and run-scoped registrations (`disclose_once`,
-    `emit_once`) the probe made while evaluating the pair's def, as an
-    analysis of the reader would have credited them
-    ([#3187](https://github.com/rigortype/rigor/issues/3187)): a later edit
-    of what the plugin read re-analyses the reader, and the reader replays the
-    registrations while it is served, the recheck that passed the gate
-    included.
+    (`Plugin::IoBoundary`) the probe made while evaluating the pair's def,
+    as an analysis of the reader would have credited them
+    ([#3187](https://github.com/rigortype/rigor/issues/3187)), so a later
+    edit of what the plugin read re-analyses the reader.
 
-  A skipped reader may gain an edge or a key it does not need (the probe ran
-  the def at all of its keys, the reader observes some); that costs a
+  A skipped reader may gain an edge, a key or a plugin read it does not need
+  (the probe ran the def at all of its keys, the reader observes some); an
+  edge, key or read only ever adds a reason to re-analyse, so it costs a
   re-analysis, never an answer. A pair the gate did not pass contributes
   nothing: its dependents are all re-analysed.
+
+  Run-scoped plugin registrations (`disclose_once`, `emit_once`) are not
+  edges: a served reader replays the ones it holds, so one credited that the
+  reader does not reach, or one its def stops registering, is a wrong
+  answer, and the ledger does not record which def or key a reader's
+  registration came through. The gate therefore MUST NOT pass a pair whose
+  probe registered any such row, nor a pair any of whose symbol dependents
+  holds one ([#3187](https://github.com/rigortype/rigor/issues/3187)); its
+  dependents are re-analysed and settle their rows afresh.
 
   A reader consumes one surface of a def it calls besides the return and
   the effects: `flow.always-truthy-condition` withholds on a predicate that

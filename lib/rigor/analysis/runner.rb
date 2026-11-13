@@ -965,7 +965,8 @@ module Rigor
       # {#analysis_reads} and {#analysis_disclosures} hold for an analysed file: the spec triple => the boundary rows
       # its evaluation read ({Plugin::IoBoundary.attributing}), and => the run-scoped rows it registered
       # ({RunDisclosureCredit}). A triple whose evaluation read or registered nothing has no key. The incremental
-      # session credits them to the readers a passing gate skips, as it does {#probe_reads}.
+      # session credits the reads to the readers a passing gate skips, as it does {#probe_reads}; a registration
+      # keeps the def's readers instead, since no skipped reader could be credited with it, or have it retracted.
       attr_reader :probe_plugin_reads, :probe_disclosures
 
       # Issue #3186 — the spec triple => {#guard_constants} of the def the last {#evaluate_return_types} re-evaluated,

@@ -337,11 +337,9 @@ module Rigor
       # in the full run's file order (#1524).
       def run_closure(analyze_set, current, previous, forced, fresh_params)
         reused = (current & previous) - analyze_set.to_a
-        served = served_state(reused)
-        served[:served_run_disclosures] += gate_disclosures(reused)
         runner = build_runner(analyze_only: analyze_set, record_dependencies: true,
                               param_inferred_types: fresh_params, **forced_target_options(forced),
-                              restored_run_level_rows: @run_level_rows, **served)
+                              restored_run_level_rows: @run_level_rows, **served_state(reused))
         [runner, run_runner(runner).diagnostics, reused]
       end
       private :run_closure
@@ -1282,19 +1280,17 @@ module Rigor
         invert_dependency_graph
       end
 
-      # Issue #3187 — the plugin reads and run-scoped registrations the probe made while evaluating a passed pair's
-      # def, credited to each reader of the pair it skipped, as an analysis of that reader would have credited them:
-      # a later edit of what the plugin read re-analyses the reader ({#plugin_read_affected}), and the reader replays
-      # the registrations while it is served ({RunDisclosureLedger#credit}). Like the edges, a reader may gain a row
-      # it does not need, which costs a re-analysis.
+      # Issue #3187 — the plugin reads the probe made while evaluating a passed pair's def, credited to each reader of
+      # the pair it skipped, as an analysis of that reader would have credited them: a later edit of what the plugin
+      # read re-analyses the reader ({#plugin_read_affected}). Like the edges, a reader may gain a row it does not
+      # need, which costs a re-analysis. Run-scoped registrations are not credited: a pair whose probe registered one
+      # does not pass ({#readers_hold_disclosures?}).
       def credit_probe_plugin_rows(observations, skipped)
         skipped.each do |pair, readers|
           rows = observations.plugin_reads[pair]
-          records = observations.disclosures[pair]
-          readers.each do |reader|
-            @plugin_reads[reader] = ((@plugin_reads[reader] || []) | rows).freeze if rows
-            @plugin_disclosures.credit(reader, records) if records
-          end
+          next if rows.nil?
+
+          readers.each { |reader| @plugin_reads[reader] = ((@plugin_reads[reader] || []) | rows).freeze }
         end
       end
 
@@ -1798,7 +1794,9 @@ module Rigor
       # descriptor is present (not a memo refusal) and equal to the persisted one. A probe failure yields an
       # empty set (keep everything).
       def return_stable_pairs(pairs, scan_index)
-        specs = pairs.filter_map { |pair| return_spec_for(pair, scan_index) }
+        specs = pairs.reject { |pair| readers_hold_disclosures?(pair) }.filter_map do |pair|
+          return_spec_for(pair, scan_index)
+        end
         return Set.new if specs.empty?
 
         runner, results = probe_return_types(specs)
@@ -1806,11 +1804,22 @@ module Rigor
           triple = [spec[:class_name], spec[:method_name], spec[:singleton]]
           next unless returns_unmoved?(spec[:pair], results[triple])
           next unless guard_constants_unmoved?(spec[:pair], runner.probe_guard_constants[triple])
+          # Issue #3187 — a run-scoped row the probe registered keeps the readers ({#readers_hold_disclosures?}).
+          next if runner.probe_disclosures.key?(triple)
 
           pairs[spec[:pair]] = triple
         end
         @gate_observations = gate_observations(runner, passed) unless passed.empty?
         passed.keys.to_set
+      end
+
+      # Issue #3187 — whether a symbol dependent of `pair` holds a run-scoped plugin row ({RunDisclosureLedger}), which
+      # keeps the pair's readers, as a probe that registers one does. A skipped reader replays the rows its last
+      # analysis registered, and which of them came through the edited def, under which key, is not recorded; nor
+      # can rows the probe registers be credited to a reader without that key, or ever be retracted once its def
+      # stops registering them. So a reader holding any row is re-analysed, which settles its rows afresh.
+      def readers_hold_disclosures?(pair)
+        (@symbol_dependents[pair] || Set.new).any? { |reader| @plugin_disclosures.files.key?(reader) }
       end
 
       # Issue #3186 — whether the probe's `current` constant spellings ({Runner#guard_constants}) are `pair`'s stored
@@ -1838,10 +1847,9 @@ module Rigor
       # another def. `reads` is each passing pair's {DependencyRecorder::Record}; `summaries` is the probe's own
       # harvest ({Runner#return_summaries}: nil for a def it cannot list the keys of, nil as a whole in pool mode),
       # cut down to the defs a passing pair read. A failing pair's observations are left out: its readers are all
-      # re-analysed, and the run's harvest speaks for them. Issue #3187 — `plugin_reads` and `disclosures` are each
-      # passing pair's plugin boundary rows and run-scoped registrations ({Runner#probe_plugin_reads},
-      # {Runner#probe_disclosures}); a pair whose evaluation made none has no key.
-      GateObservations = Data.define(:reads, :summaries, :plugin_reads, :disclosures)
+      # re-analysed, and the run's harvest speaks for them. Issue #3187 — `plugin_reads` is each passing pair's plugin
+      # boundary rows ({Runner#probe_plugin_reads}); a pair whose evaluation read none has no key.
+      GateObservations = Data.define(:reads, :summaries, :plugin_reads)
       private_constant :GateObservations
 
       # `passed` maps each passing pair to its spec triple. The probe recorded reads for every def it evaluated, and
@@ -1853,8 +1861,7 @@ module Rigor
           record.symbol_sources.each { |path, symbols| symbols.each { |symbol| pairs << [path, symbol] } }
         end
         GateObservations.new(reads: reads, summaries: runner.return_summaries&.slice(*observed),
-                             plugin_reads: probe_rows(passed, runner.probe_plugin_reads),
-                             disclosures: probe_rows(passed, runner.probe_disclosures))
+                             plugin_reads: probe_rows(passed, runner.probe_plugin_reads))
       end
 
       # `table` (spec triple => rows) re-keyed by each passing pair, leaving out a pair with no rows.
@@ -1928,21 +1935,6 @@ module Rigor
       def disclosure_refreshers(removed)
         @stale_disclosures = @plugin_disclosures.stale_identities { |row| plugin_read_fresh?(row) }
         @plugin_disclosures.refreshers(@stale_disclosures, removed.to_set)
-      end
-
-      # Issue #3187 — the run-scoped rows the gate's probe registered for a pair it passed that has a reader among
-      # `reused`, as that reader replays them. The ledger credits them to the reader only once the run is absorbed
-      # ({#credit_probe_plugin_rows}), and a cold run's analysis of the reader would register them in this one.
-      def gate_disclosures(reused)
-        observations = @gate_observations
-        return [] if observations.nil? || observations.disclosures.empty?
-
-        served = reused.to_set
-        observations.disclosures.flat_map do |pair, records|
-          next [] unless (@symbol_dependents[pair] || Set.new).intersect?(served)
-
-          records.map { |record| RunDisclosureCredit.replayable(record) }
-        end
       end
 
       # Issue #1898 — the plugin effect-fact digest a run's collections were stamped under. A plugin writes its

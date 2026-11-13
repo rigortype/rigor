@@ -121,20 +121,6 @@ module Rigor
         @files.delete(path)
       end
 
-      # Issue #3187 — adds `records` (fresh registrations with `:reads`, {RunDisclosureCredit}) to `path`'s, for a
-      # file the run did not analyse that reaches them anyway: a reader the ADR-89 WD2 gate skipped, credited with
-      # what the gate's probe registered while evaluating the def it reads. A record whose identity `path` already
-      # holds is not added twice. An identity this run registered keeps the rows {#absorb} gave it.
-      def credit(path, records)
-        held = Array(@files[path])
-        identities = held.to_set { |record| RunDisclosureCredit.identity(record) }
-        added = records.reject { |record| identities.include?(RunDisclosureCredit.identity(record)) }
-        return if added.empty?
-
-        added.each { |record| @reads[RunDisclosureCredit.identity(record)] ||= record[:reads] }
-        store(path, held + added.map { |record| RunDisclosureCredit.replayable(record) })
-      end
-
       private
 
       def refresh_unanalysed(stale, registered, analyzed)

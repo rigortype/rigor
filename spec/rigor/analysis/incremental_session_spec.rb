@@ -3215,7 +3215,7 @@ end
             )
             reads = { [File.join(dir, "c.rb"), "<toplevel>#w"] => stray }
             observations = described_class.const_get(:GateObservations).new(reads: reads, summaries: nil,
-                                                                            plugin_reads: {}, disclosures: {})
+                                                                            plugin_reads: {})
             session.instance_variable_set(:@gate_observations, observations)
 
             guarded_recheck(session)

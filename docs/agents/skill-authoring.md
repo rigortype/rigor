@@ -56,7 +56,15 @@ Triage the output with the adversarial review's findings:
 - Only two sections of `waza check` bind: "Spec Compliance" and "Links". A failure there is a
   defect; fix it. The ❌ lines under Compliance Score, Token Budget, Advisory Checks, and the overall
   verdict are publication-profile advisories and follow the next rule. A link check that fails for
-  lack of network is "`waza` cannot run", not a defect.
+  lack of network is "`waza` cannot run", not a defect. Neither is `link escapes skill directory` in
+  `.claude/skills/`, where pointing into the repository is what these skills are for: nine of the
+  fifteen do it. What `waza` reports under Links for such a link is only that it leaves the skill's
+  directory — it stops there and never resolves the target, so a renamed ADR reads exactly like a
+  healthy link. `spec/docs/link_integrity_spec.rb` resolves them instead, over both trees, and
+  `make docs-check` runs it. A link that stays inside the skill directory is `waza`'s to check, and
+  a missing target there is a defect. In `skills/`, a `SKILL.md` or its `references/` may not link
+  into the repository at all, for the reason at the top of this file, whether or not `waza` flags
+  it.
 - `waza quality` output is advisory and never severe on its own. Adopt an item only when it identifies
   a real defect independent of the agentskills.io publication profile; Rigor's comprehensive workflows
   do not need to be reshaped for its token budget or labels, and a low completeness score for detail

@@ -24,6 +24,32 @@ require "spec_helper"
 LINK_INTEGRITY_DOCS_ROOT = File.expand_path("../../docs", __dir__)
 LINK_INTEGRITY_REPO_ROOT = File.expand_path("../..", __dir__)
 
+# The two skill trees (`.claude/skills/` contributor workflows, `skills/` user-facing ones) link into this
+# repository the way any document here does, and nothing resolved those links before: `waza check`, the only
+# tool that reads them, stops at "link escapes skill directory" and never looks at an ESCAPING link's
+# target, so a renamed ADR leaves output byte-identical to the healthy case (`docs/agents/skill-authoring.md`
+# § "The `waza` review" says so, which is why the escape itself is not a defect there; a link that stays
+# inside the skill directory it does resolve, and reports as "target does not exist").
+#
+# A placeholder link an instruction teaches the author to WRITE (`rigor-adr-author`'s `[Title](N-slug.md)`
+# row) resolves to nothing, so it belongs in a code span or a fenced block, which the extractor strips.
+# There is no per-link exemption here.
+LINK_INTEGRITY_SKILL_ROOTS = %w[.claude/skills skills].map { |rel| File.join(LINK_INTEGRITY_REPO_ROOT, rel) }.freeze
+
+# A floor per tree, not one for the pair: a floor on the total cannot see one tree drop out when the other
+# is large enough to carry it. Each is sized just under the current counts — `.claude/skills/` 13 files /
+# 97 links, `skills/` 21 / 88 — tight enough that a weakened extractor goes red on both trees (the greedy
+# fenced-code stripper the `docs/` corpus names above takes them to 78 and 56 links).
+#
+# They move with the set in BOTH directions. ADR-81 is a skill-set optimization ADR, so retiring a skill
+# legitimately lowers a count — the largest single skill carries 5 linked files and 42 links — and the
+# floor is then lowered with it. A failure here is one of those two things, never a reason to widen the
+# slack so that neither is visible.
+LINK_INTEGRITY_SKILL_FLOORS = {
+  ".claude/skills" => { files: 11, links: 90 },
+  "skills" => { files: 18, links: 80 }
+}.freeze
+
 # The `references/` git submodules hold vendored upstream sources. Contributors check them out, but CI
 # does not (the test job runs without submodules), so a link into `references/` is legitimately present
 # locally yet absent in CI — never gate it here.
@@ -86,6 +112,15 @@ LINK_INTEGRITY_LINKED_DOCS = begin
   Dir[File.join(LINK_INTEGRITY_DOCS_ROOT, "**", "*.md")].select do |md_path|
     next false if md_path.delete_prefix("#{LINK_INTEGRITY_DOCS_ROOT}/").match?(LINK_INTEGRITY_EXCLUDE)
 
+    helper.extract_relative_links(File.read(md_path, encoding: "utf-8"), File.dirname(md_path)).any?
+  end
+end.freeze
+
+# The same, for the two skill trees. Separate from LINK_INTEGRITY_LINKED_DOCS because the floors below
+# describe a much smaller corpus, and because a skill is reached by its own tree, not by `docs/`.
+LINK_INTEGRITY_LINKED_SKILL_DOCS = begin
+  helper = Object.new.extend(LinkIntegrityHelpers)
+  LINK_INTEGRITY_SKILL_ROOTS.flat_map { |root| Dir[File.join(root, "**", "*.md")] }.sort.select do |md_path|
     helper.extract_relative_links(File.read(md_path, encoding: "utf-8"), File.dirname(md_path)).any?
   end
 end.freeze
@@ -155,6 +190,48 @@ RSpec.describe "documentation link integrity" do
                           "LINK_INTEGRITY_EXCLUDE has grown past the two surfaces it documents, so " \
                           "these documents' links are no longer checked by anything:\n" +
                           unexpected.map { |rel| "  → #{rel}" }.join("\n")
+  end
+
+  describe "the skill trees" do
+    LINK_INTEGRITY_LINKED_SKILL_DOCS.each do |md_path|
+      rel = md_path.delete_prefix("#{LINK_INTEGRITY_REPO_ROOT}/")
+
+      it "#{rel} — all relative links exist" do
+        broken = extract_relative_links(
+          File.read(md_path, encoding: "utf-8"),
+          File.dirname(md_path)
+        ).reject { |t| File.exist?(t) }
+        expect(broken).to be_empty,
+                          "Broken links in #{md_path.delete_prefix("#{LINK_INTEGRITY_REPO_ROOT}/")}:\n" +
+                          broken.map { |t| "  → #{t.delete_prefix("#{LINK_INTEGRITY_REPO_ROOT}/")}" }.join("\n")
+      end
+    end
+
+    # Same vacuity guard as the `docs/` corpus above, and the same reason: these examples are generated at
+    # load time, so a tree that moves or a glob that stops matching reports green having checked nothing.
+    # One example per tree, because a tree that drops out takes its own counts to zero whatever the other
+    # one holds. A failure here reads either way: the corpus went vacuous, or the skill set shrank on
+    # purpose and LINK_INTEGRITY_SKILL_FLOORS is the line to move.
+    LINK_INTEGRITY_SKILL_FLOORS.each do |rel, floor|
+      it "generates examples for a plausible number of #{rel} documents and links" do
+        docs = LINK_INTEGRITY_LINKED_SKILL_DOCS.select do |md_path|
+          md_path.start_with?("#{File.join(LINK_INTEGRITY_REPO_ROOT, rel)}/")
+        end
+        links = docs.sum do |md_path|
+          extract_relative_links(File.read(md_path, encoding: "utf-8"), File.dirname(md_path)).size
+        end
+
+        expect(docs.size).to be >= floor[:files]
+        expect(links).to be >= floor[:links]
+      end
+    end
+
+    # The floors above are per tree, so they only hold while the table names every tree in the corpus:
+    # dropping a root from LINK_INTEGRITY_SKILL_ROOTS would otherwise retire its floor with it.
+    it "sets a floor for every tree in the corpus" do
+      expect(LINK_INTEGRITY_SKILL_FLOORS.keys.map { |rel| File.join(LINK_INTEGRITY_REPO_ROOT, rel) })
+        .to match_array(LINK_INTEGRITY_SKILL_ROOTS)
+    end
   end
 
   # #438: a self-referential GitHub URL names a ref in THIS repository, so it is checkable offline — and it is

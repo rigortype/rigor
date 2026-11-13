@@ -3456,6 +3456,29 @@ Unrelated
       expect(cvars).to eq({})
     end
 
+    def cvar_seeds(source)
+      described_class.build_class_cvar_index(parse(source), Rigor::Scope.empty)
+                     .transform_values { |entries| entries.transform_values(&:describe) }
+    end
+
+    it "joins a body write that arrives after the `def` entry exists, through a reopening" do
+      expect(cvar_seeds("class C; def s = (@@a = 1); end; class C; @@a = nil; end")).to eq("C" => { :@@a => "1?" })
+    end
+
+    it "joins a `class_variable_set` that follows the `def` write" do
+      expect(cvar_seeds("class C; def s = (@@x = 1); def t = class_variable_set(:@@x, 5); end"))
+        .to eq("C" => { :@@x => "1 | 5" })
+    end
+
+    it "keeps every pending body write until the `def` write creates the entry" do
+      expect(cvar_seeds("class C; @@a = nil; @@a = :x; def s = (@@a = 1); end"))
+        .to eq("C" => { :@@a => "1 | :x | nil" })
+    end
+
+    it "creates no entry for a class-body rescue reference or for index alone" do
+      expect(cvar_seeds("class C; begin; rescue => @@c; end; for @@f in [1]; end; end")).to eq({})
+    end
+
     it "types a class-body write with the class itself as `self`" do
       cvars = described_class.build_class_cvar_index(parse(<<~RUBY), Rigor::Scope.empty)
         class Klass

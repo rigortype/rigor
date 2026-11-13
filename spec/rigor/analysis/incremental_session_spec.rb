@@ -3431,9 +3431,12 @@ end
       # recheck equal to a cold run.
       describe "a callee that only probes another file's constant" do
         def w_probe = "class C; def self.w(k); defined?(B::X); A.v(k); end; end\n"
-        def tree(x) = { "a.rb" => "class A; def self.v(k) = k == 5 ? k + 1 : k + 2; end\n",
-                        "b.rb" => "class B; X = #{x}; end\n", "c.rb" => w_probe,
-                        "r.rb" => "puts 'hit' if C.w(1) == 3\n" }
+
+        def tree(value)
+          { "a.rb" => "class A; def self.v(k) = k == 5 ? k + 1 : k + 2; end\n",
+            "b.rb" => "class B; X = #{value}; end\n", "c.rb" => w_probe,
+            "r.rb" => "puts 'hit' if C.w(1) == 3\n" }
+        end
 
         def truthy?(recheck)
           recheck.diagnostics.any? { |d| File.basename(d.path) == "r.rb" && d.message.include?("always truthy") }

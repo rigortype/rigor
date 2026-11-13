@@ -3,6 +3,7 @@
 require "spec_helper"
 require "tmpdir"
 require "fileutils"
+require "timeout"
 
 # Issue #1237 / PR #3097 review — a call with a positional splat re-types its callee with no positional correspondence.
 # Such a frame first bypassed the return memo, so a chain whose every level calls the next one twice under a splat
@@ -43,6 +44,27 @@ RSpec.describe "a chain of splat calls walks each level a bounded number of time
     analyze_file(chain(14))
 
     # 15 levels; the main walk types each `def` once more. Re-walking per path reads 2**14 here.
+    expect(bt.snapshot[bt::MEMO_BODY_EVALS]).to be <= 15 * 4
+  end
+
+  # Issue #3157 — a splat of an array literal is expanded only outside every re-typed body frame. Expanded inside
+  # one, each level's literal nests the caller's arguments one deeper, so every level sees a new argument list
+  # per path and the walk is exponential again (depth 15 timed out at 100 s). The timeout turns that hang into a
+  # failure; the counter bound is the assertion.
+  def literal_chain(depth, call)
+    defs = (1..depth).map { |i| "  def m#{i}(*a) = #{format(call, n: i + 1)}\n" }.join
+    "class C\n#{defs}  def m#{depth + 1}(*a) = a.size\nend\nC.new.m1(*[1])\n"
+  end
+
+  it "walks a depth-14 chain of literal splats linearly" do
+    Timeout.timeout(60) { analyze_file(literal_chain(14, "m%<n>d(*[a, 1]) + m%<n>d(*[a, a])")) }
+
+    expect(bt.snapshot[bt::MEMO_BODY_EVALS]).to be <= 15 * 4
+  end
+
+  it "walks a depth-14 chain of several literal splats per call linearly" do
+    Timeout.timeout(60) { analyze_file(literal_chain(14, "m%<n>d(*[1], *[a]) + m%<n>d(*[a], *[a], *[1])")) }
+
     expect(bt.snapshot[bt::MEMO_BODY_EVALS]).to be <= 15 * 4
   end
 end

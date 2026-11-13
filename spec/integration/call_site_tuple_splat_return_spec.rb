@@ -35,7 +35,7 @@ RSpec.describe "a call-site literal splat or empty double splat binds as Ruby pa
       end
       class Box
         def initialize(h) = @h = h
-        def fill = @h[:k] = 1
+        def fill = @h[:k] = 7
       end
       def tcount(*keys) = keys.size
       def tfirst(*xs) = xs.first
@@ -48,8 +48,8 @@ RSpec.describe "a call-site literal splat or empty double splat binds as Ruby pa
     RUBY
   end
 
-  def mismatches_in(body)
-    analyze("#{row}#{body}\n").diagnostics.select { |d| d.rule == "assert.type-mismatch" }.map(&:message)
+  def mismatches_in(body, sig: {})
+    analyze("#{row}#{body}\n", sig: sig).diagnostics.select { |d| d.rule == "assert.type-mismatch" }.map(&:message)
   end
 
   # The `assert.type-mismatch` messages for `assert_type(expected, call)` after the shared definitions.
@@ -102,6 +102,10 @@ RSpec.describe "a call-site literal splat or empty double splat binds as Ruby pa
       expect(mismatches("Row.new.count(*[[1], ARGV.size])", "2")).to eq([])
     end
 
+    it "a parenthesised literal" do
+      expect(mismatches("Row.new.first(*([1, 2]))", "1")).to eq([])
+    end
+
     it "an element narrowed to a non-empty array" do
       expect(mismatches_in('assert_type("1", Row.new.count(*[x])) unless x.empty?')).to eq([])
     end
@@ -143,6 +147,29 @@ RSpec.describe "a call-site literal splat or empty double splat binds as Ruby pa
 
     it "a literal holding a splat of its own" do
       body = "t1 = [1]\n[2].each { t1 << _1 }\nassert_type(\"non-negative-int\", Row.new.count(*[*t1]))"
+      expect(mismatches_in(body)).to eq([])
+    end
+
+    it "an element that is a non-empty hash" do
+      sig = { "catalog.rbs" => <<~RBS }
+        class Catalog
+          %a{rigor:v1:return: non-empty-hash[Symbol, Integer]}
+          def attributes: () -> Hash[Symbol, Integer]
+        end
+      RBS
+      body = "class Catalog\n  def attributes = { name: 1 }\nend\n" \
+             'assert_type("Dynamic[top]", Row.new.kw(*[1, Catalog.new.attributes]))'
+      expect(mismatches_in(body, sig: sig)).to eq([])
+    end
+
+    # Ruby answers 7 for both: `fill` stores `k` into the hash `h1` names, which the local's `{}` does not see.
+    it "an empty double splat of a filled local beside a non-literal splat" do
+      body = "h1 = {}\nBox.new(h1).fill\nassert_type(\"Dynamic[top]\", Row.new.kw(*ARGV, **h1))"
+      expect(mismatches_in(body)).to eq([])
+    end
+
+    it "an empty double splat of a filled local beside a literal splat" do
+      body = "h1 = {}\nBox.new(h1).fill\nassert_type(\"Dynamic[top]\", Row.new.kw(*[1], **h1))"
       expect(mismatches_in(body)).to eq([])
     end
 

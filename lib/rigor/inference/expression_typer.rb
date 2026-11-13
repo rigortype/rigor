@@ -2455,7 +2455,7 @@ module Rigor
         return [expanded, false] if expanded
 
         last = arguments.last
-        keywords = arg_types.last if last.is_a?(Prism::KeywordHashNode) && arg_types.last.is_a?(Type::HashShape)
+        keywords = arg_types.last if last.is_a?(Prism::KeywordHashNode) && keyword_shape?(arg_types.last)
         [[keywords || UNKNOWN_KEYWORDS], true]
       end
 
@@ -2489,8 +2489,14 @@ module Rigor
       # one leaves the keywords unknown. A list holding `...` is not expanded: its argument types do not line up
       # with its argument nodes. The splat's own entry in `arg_types` is `Dynamic[top]` ({#type_of_non_value}),
       # so the literal's elements are typed here.
+      #
+      # Only a call outside every re-typed body frame expands (the main walk's call sites). Inside a frame a rest
+      # parameter holds the caller's arguments, so a chain `m1(*a) = m2(*[a, 1]) + m2(*[a, a])` handed each level
+      # a deeper element type and walked every combination of every level
+      # (spec/rigor/inference/splat_chain_growth_spec.rb).
       def expand_tuple_splats(arguments, arg_types)
         return nil if forwards_arguments?(arguments)
+        return nil unless typing_state.stack(INFERENCE_GUARD).empty?
 
         last = arguments.last
         trailing_keywords = last.is_a?(Prism::KeywordHashNode)
@@ -2519,7 +2525,7 @@ module Rigor
       # every element is {#provably_not_hash?}. A splat element (`*[*t]`) types `Dynamic[top]`
       # ({#type_of_non_value}), so it declines too.
       def literal_splat_elements(splat)
-        literal = splat.expression
+        literal = unparenthesized(splat.expression)
         return nil unless literal.is_a?(Prism::ArrayNode)
 
         types = literal.elements.map { |element| type_of(element) }
@@ -2532,11 +2538,19 @@ module Rigor
       ].to_set.freeze
       private_constant :NON_HASH_CLASSES
 
-      # Whether no value of `type` is a `Hash`. Anything this does not recognise answers false.
+      # `*([1, 2])`'s array literal, or the node itself when it is not a parenthesised single expression.
+      def unparenthesized(node)
+        return node unless node.is_a?(Prism::ParenthesesNode) && node.body.is_a?(Prism::StatementsNode)
+
+        statements = node.body.body
+        statements.size == 1 ? statements.first : node
+      end
+
+      # Whether no value of `type` is a `Hash`. Anything this does not recognise answers false. A `Constant` never
+      # carries a `Hash` (it holds scalars only).
       def provably_not_hash?(type)
         case type
-        when Type::Constant then !type.value.is_a?(Hash)
-        when Type::Tuple, Type::IntegerRange then true
+        when Type::Constant, Type::Tuple, Type::IntegerRange then true
         when Type::Nominal then NON_HASH_CLASSES.include?(type.class_name)
         when Type::Union then type.members.all? { |member| provably_not_hash?(member) }
         when Type::Refined, Type::Difference then provably_not_hash?(type.base)

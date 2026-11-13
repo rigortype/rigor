@@ -956,9 +956,9 @@ binding cannot manufacture a diagnostic inside the callee's body.
   - every required, optional and trailing positional parameter binds `Dynamic[top]` (an optional's default is
     not read, since the splat may supply the slot);
   - the rest parameter binds `Array[untyped]`;
-  - the keyword parameters bind from a trailing keyword-hash argument the call writes, exactly as for any call.
-    With none written, the keywords are unknown and bind `Dynamic[top]`, because a splatted array's last element
-    is passed as keywords when it is a `ruby2_keywords` hash.
+  - the keyword parameters bind from a trailing keyword-hash argument the call writes when its type is a
+    non-empty shape. With none written, or an empty or open one, the keywords are unknown and bind
+    `Dynamic[top]`: a splatted array's last element is passed as keywords when it is a `ruby2_keywords` hash.
 
   The body still answers, so a callee that always raises keeps `bot` and a return that reads no positional is
   kept. Such a frame MUST read and store the ADR-84 return memo under a key of its own, distinct from every
@@ -966,11 +966,11 @@ binding cannot manufacture a diagnostic inside the callee's body.
   summary key carries the same mark, and the incremental session MUST re-drive that key with no positional
   correspondence too. It installs no `...` forwarding list.
 
-  When every splat's operand is an array literal (`*[1, 2]`, `*[]`), and every element's type, each typed on its own,
-  provably is not a `Hash` (a constant that is not a Hash, a `Tuple`, an integer range, a nominal of a core class
-  such as `Integer`, `String`, `Symbol` or `Array`, a union of these, or a refinement or difference over one), the
-  body tiers MUST instead expand each splat into its elements and bind the result as the equivalent positional
-  call (issue [#3157](https://github.com/rigortype/rigor/issues/3157)): `first(*[1, 2])` with
+  When every splat's operand is an array literal (`*[1, 2]`, `*[]`, `*([1, 2])`), and every element's type, each
+  typed on its own, provably is not a `Hash` (a constant, a `Tuple`, an integer range, a nominal of a core class
+  such as `Integer`, `String`, `Symbol` or `Array`, a union of these, or a refinement or difference whose base is
+  one), the body tiers MUST instead expand each splat into its elements and bind the result as the equivalent
+  positional call (issue [#3157](https://github.com/rigortype/rigor/issues/3157)): `first(*[1, 2])` with
   `def first(*xs) = xs.first` answers `1`. With no `Hash` element no `ruby2_keywords` hash can supply the
   keywords, so they bind as for that positional call. A trailing literal `**{}` is dropped as above. These MUST
   keep the no-correspondence binding:
@@ -980,7 +980,14 @@ binding cannot manufacture a diagnostic inside the callee's body.
     set, `Dynamic`, or a splat element such as `*[*t]`);
   - a trailing keyword hash that is neither literal `**{}` nor a non-empty shape: an open or shapeless
     double splat, a mixed `k: 2, **h`, or an empty shape read from a local;
-  - a list holding `...`.
+  - a list holding `...`;
+  - a call typed inside a body re-typed for another call. There a rest parameter holds the caller's arguments,
+    so a chain `m1(*a) = m2(*[a, 1]) + m2(*[a, a])` would nest them one level deeper per call and walk every
+    combination of every level.
+
+  Whenever the no-correspondence binding applies, the keywords bind from a trailing keyword hash only when its
+  type is a non-empty shape. An empty shape read from a local (`**h` with `h = {}`) leaves them unknown, since
+  the hash may have been filled since.
 - `def m(...)` MUST NOT be declined by the call-site binder. Its NAMED parameters (a leading `def m(a, ...)`
   required) bind as before, and nothing is bound for the forwarding slot, which is not a binding at all.
 - A `f(...)` call inside a `def m(...)` body MUST expand to the argument types of the call that entered the frame, so

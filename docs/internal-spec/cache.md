@@ -1566,17 +1566,41 @@ Two persisted summaries prove "nothing changed":
   dependents. Any mismatch, a changed signature, a missing def, an
   ineligible def (one that also exposes ivar/cvar writes or `yield` values),
   or a missing summary keeps the dependents — the conservative direction.
-  A stored summary MUST hold every key under which a current direct symbol
-  dependent of the def observes it, each with the def's current return
-  ([#3160](https://github.com/rigortype/rigor/issues/3160)). The invariant
-  does not cover a dependent that reaches the def through another def: a
-  gate-passing edit of that middle def can change the key a skipped reader
-  observes on this one, or give it a new callee
-  ([#3180](https://github.com/rigortype/rigor/issues/3180)). A def for which
+  A stored summary MUST hold every key under which a current symbol
+  dependent of the def observes it, directly or through other defs, each with
+  the def's current return
+  ([#3160](https://github.com/rigortype/rigor/issues/3160)), and every file
+  that observes a def MUST be one of its symbol dependents. A def for which
   that cannot be shown MUST have no summary, and a def with no summary keeps
   its symbol dependents. Fewer keys are not the conservative direction: a
-  missing key skips the reader that observes the def under it. A recheck
-  therefore updates each summary from what the files it analysed observed:
+  missing key skips the reader that observes the def under it.
+
+  A reader the gate skips is not re-analysed, yet through the edited def it
+  now reaches whatever that def reaches: a callee the def did not call
+  before, or one it calls under another key
+  ([#3180](https://github.com/rigortype/rigor/issues/3180)). The gate's probe
+  evaluated the def at every stored key, which is every key its readers
+  observe it under, so what the probe read and observed bounds what they do.
+  For each pair the gate passed, a recheck therefore MUST:
+  - add every dependency edge the probe recorded for the pair (symbol,
+    ancestry and name-keyed alike, the def's own file included) to each
+    symbol dependent of the pair it did not analyse. This holds in pool mode
+    too, where a recheck can pass the gate on summaries a sequential run
+    stored;
+  - count every key the probe's return memo holds for a def the pair's
+    evaluation read as observed by this run, in the update below. A def the
+    probe cannot list the keys of has no summary.
+
+  A skipped reader may gain an edge or a key it does not need (the probe ran
+  the def at all of its keys, the reader observes some); that costs a
+  re-analysis, never an answer. A pair the gate did not pass contributes
+  nothing: its dependents are all re-analysed.
+
+  A recheck updates each summary from what the files it analysed, and the
+  probe for the pairs the gate passed, observed. "Every symbol dependent"
+  below is read before the probe's edges are added: a skipped reader that
+  gains its first edge to a def observes it only through the passed pair,
+  so the probe's keys are all of its keys.
   - every symbol dependent was analysed: replaced by this run's keys (an
     unchanged file's def is harvested through the node its handle resolved
     to), and removed when no analysed file observed the def, as for a def
@@ -1595,7 +1619,7 @@ Two persisted summaries prove "nothing changed":
   refused to store, a def past `RETURN_SUMMARY_TOTAL_CAP`, and every def
   after a pool run (its workers' memos never reach the session, so a pooled
   run leaves no summary and the gate is inert under `--workers`). Snapshot
-  SCHEMA 50.
+  SCHEMA 51 (50 for the key rule; 51 for the skipped readers' edges and keys).
   A key a splat call observed ([#1237](https://github.com/rigortype/rigor/issues/1237)) is stored as
   `(receiver, args, true)` and re-evaluated the way that call bound it, with no
   positional correspondence ([`inference-engine.md`](inference-engine.md)); snapshot SCHEMA 48.

@@ -212,7 +212,10 @@ module Rigor
       # merged across the runs that observed them, and a def whose keys cannot all be listed has no entry (the
       # `overflow` form of 49 is gone). A pre-50 summary holds only what the last run that analysed the def's file
       # saw, so a warm run would skip a reader added, or left out of that run, since.
-      SCHEMA = 50
+      # 51: issue #3180 — a reader the ADR-89 WD2 gate skipped holds the dependency edges the gate's probe recorded
+      # for the def it passed, and the summaries hold the keys that probe observed. A pre-51 snapshot's skipped
+      # readers lack the edges and keys of whatever a gate-passed def came to reach, so a warm run would skip them.
+      SCHEMA = 51
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.

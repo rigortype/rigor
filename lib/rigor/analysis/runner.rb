@@ -520,6 +520,7 @@ module Rigor
         # The `[path, node_id] => Prism::DefNode` table the last `run`'s {Inference::DefNodeResolver} filled, kept for
         # the same reader.
         @resolved_def_nodes = nil
+        @probe_reads = {}.freeze
         build_collaborators
       end
 
@@ -906,12 +907,29 @@ module Rigor
       def evaluate_return_types(paths, specs)
         return {} if specs.empty?
 
+        @probe_reads = {}
         Cache::FileDigest.with_run(strict: @configuration.cache_validation_strict?) do
-          Inference::DefNodeResolver.with_run { evaluate_return_types_setup(paths, specs) }
+          Inference::DefNodeResolver.with_run do
+            evaluate_return_types_setup(paths, specs)
+          ensure
+            @resolved_def_nodes = Inference::DefNodeResolver.resolved_nodes
+          end
         end
       ensure
+        # Issue #3180 — as {#run} does: {#return_summaries} then answers for what the probe observed.
+        @return_memo = Inference::ExpressionTyper.current_return_memo
         RunScopedSlots.release
       end
+
+      # Issue #3180 — what the last {#evaluate_return_types} read while re-evaluating each spec's def at its keys: the
+      # spec triple => a {DependencyRecorder::Record} of every def, class and name the evaluation read, the def's own
+      # file included (nothing is filtered as a self-read). The incremental session gives these edges to the readers
+      # a passing gate skips, since they now reach whatever the edited def reaches. Empty before the first probe.
+      attr_reader :probe_reads
+
+      # The consumer {#evaluate_spec_returns} records under. It is no file's path, so no read is dropped as a self-read.
+      PROBE_CONSUMER = ""
+      private_constant :PROBE_CONSUMER
 
       # Builds the discovery index + environment (a real run's prologue, minus per-file analysis) and
       # re-evaluates each spec's def. Extracted so {#evaluate_return_types}'s `with_run` wrappers stay thin.
@@ -948,11 +966,16 @@ module Rigor
         return spec[:keys].map { nil } if node.nil?
 
         scope = seed_project_scope(Scope.empty(environment: environment, source_path: spec[:path]))
-        spec[:keys].map do |(receiver, arg_types, positionals_unknown)|
-          result = scope.user_method_return(node, receiver, arg_types,
-                                            positionals_unknown: positionals_unknown || false)
-          result&.describe(:short)
-        end
+        returns = nil
+        @probe_reads[[spec[:class_name], spec[:method_name], spec[:singleton]]] =
+          DependencyRecorder.record_for(PROBE_CONSUMER) do
+            returns = spec[:keys].map do |(receiver, arg_types, positionals_unknown)|
+              result = scope.user_method_return(node, receiver, arg_types,
+                                                positionals_unknown: positionals_unknown || false)
+              result&.describe(:short)
+            end
+          end
+        returns
       end
 
       # ADR-45 — unchanged-project fast path. Serves the whole run's (pre-severity-profile) diagnostics

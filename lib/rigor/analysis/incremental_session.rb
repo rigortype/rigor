@@ -394,6 +394,7 @@ module Rigor
       # whole project — what a `sig/` edit already costs through the snapshot fingerprint.
       def affected_closure(changed, added, removed, param_files = Set.new, param_pairs = Set.new)
         @stale_plugin_readers = plugin_read_affected | disclosure_refreshers(removed)
+        # Issue #3180 — a recheck that passed the gate and then re-baselined absorbed nothing: start without it.
         @gate_observations = nil
         return whole_project_closure(changed, added) if source_rbs_gate.moved?(@seed_bundles, changed, added, removed)
 
@@ -1246,7 +1247,9 @@ module Rigor
       end
 
       # The summaries, then the skipped readers' edges, in that order ({#refresh_return_summaries}), with what the
-      # gate's probe observed for this recheck taken and cleared.
+      # gate's probe observed for this recheck taken and cleared. The clear is a guard no spec pins:
+      # {#affected_closure} resets the slot before every {#absorb}, so nothing reads it again. It only keeps a
+      # consumed observation from outliving its recheck, should absorb gain another caller.
       def refresh_gated_state(runner, analyze_set)
         observations = @gate_observations
         @gate_observations = nil
@@ -1318,7 +1321,10 @@ module Rigor
       #
       # A run's harvest ({Runner#return_summaries}) is what the files it analysed observed. The keys the gate's
       # probe observed for the pairs it passed (`observations`, {#gate_observations}) count as this run's too: they
-      # are what the readers the gate skipped observe through the edited def. So per pair:
+      # are what the readers the gate skipped observe through the edited def. Two things a skipped reader reaches
+      # are outside this, and outside the invariant: the probe folds a value constant the reader's own analysis
+      # does not, so the gate can pass on a return the reader never sees (issue #3186), and the plugin reads and
+      # run disclosures of the def are credited to no skipped reader (issue #3187). So per pair:
       #
       # - the run cannot list the keys it observed (a pool run, a def past the per-def or total cap, a call the
       #   memo refused to store): delete;
@@ -1778,11 +1784,9 @@ module Rigor
           triple = [spec[:class_name], spec[:method_name], spec[:singleton]]
           next unless returns_unmoved?(spec[:pair], results[triple])
 
-          # Issue #3180 — a pair passes only with the probe's reads in hand: its skipped readers need them.
-          record = runner.probe_reads[triple]
-          next if record.nil?
-
-          reads[spec[:pair]] = record
+          # Issue #3180 — the probe recorded reads for every def it evaluated, and it evaluated this one: a
+          # summary holds at least one key, so a def the probe could not find answered nil and did not pass.
+          reads[spec[:pair]] = runner.probe_reads[triple]
           passed << spec[:pair]
         end
         @gate_observations = gate_observations(runner, reads) unless stable.empty?

@@ -1570,7 +1570,8 @@ Two persisted summaries prove "nothing changed":
   dependent of the def observes it, directly or through other defs, each with
   the def's current return
   ([#3160](https://github.com/rigortype/rigor/issues/3160)), and every file
-  that observes a def MUST be one of its symbol dependents. A def for which
+  that observes a def MUST be one of its symbol dependents (both up to the
+  two exceptions named below). A def for which
   that cannot be shown MUST have no summary, and a def with no summary keeps
   its symbol dependents. Fewer keys are not the conservative direction: a
   missing key skips the reader that observes the def under it.
@@ -1580,8 +1581,9 @@ Two persisted summaries prove "nothing changed":
   before, or one it calls under another key
   ([#3180](https://github.com/rigortype/rigor/issues/3180)). The gate's probe
   evaluated the def at every stored key, which is every key its readers
-  observe it under, so what the probe read and observed bounds what they do.
-  For each pair the gate passed, a recheck therefore MUST:
+  observe it under, so what the probe read and observed bounds what they do,
+  with the two exceptions below. For each pair the gate passed, a recheck
+  therefore MUST:
   - add every dependency edge the probe recorded for the pair (symbol,
     ancestry and name-keyed alike, the def's own file included) to each
     symbol dependent of the pair it did not analyse. This holds in pool mode
@@ -1595,6 +1597,18 @@ Two persisted summaries prove "nothing changed":
   the def at all of its keys, the reader observes some); that costs a
   re-analysis, never an answer. A pair the gate did not pass contributes
   nothing: its dependents are all re-analysed.
+
+  Two things are not covered, by this rule or by the invariant above, and
+  each leaves a skipped reader stale:
+  - the probe folds a value constant that the reader's own analysis does
+    not, so its return at a stored key can differ from the one the reader
+    sees and the gate can pass on it
+    ([#3186](https://github.com/rigortype/rigor/issues/3186));
+  - the plugin reads (`Plugin::IoBoundary`) and run-scoped disclosures made
+    while typing the edited def are credited to the file being analysed, and
+    the probe credits none to a skipped reader, so a later change of what a
+    plugin read does not re-analyse it
+    ([#3187](https://github.com/rigortype/rigor/issues/3187)).
 
   A recheck updates each summary from what the files it analysed, and the
   probe for the pairs the gate passed, observed. "Every symbol dependent"

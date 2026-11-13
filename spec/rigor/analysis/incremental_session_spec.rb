@@ -3160,6 +3160,66 @@ end
           end
         end
 
+        def edges_of(session, dir, name, table = :@symbol_sources)
+          held = session.instance_variable_get(table)[File.join(dir, name)] || []
+          basenames(held.respond_to?(:keys) ? held.keys : held)
+        end
+
+        # State rows: the edge tables themselves, where no later edit tells the difference.
+        it "keeps a skipped reader's file-level sources the union of its finer edges" do
+          Dir.mktmpdir do |dir|
+            session = session_for(configuration(dir))
+            replay(dir, [tree, { "c.rb" => w_new_callee }], session: session)
+            expect(edges_of(session, dir, "r.rb")).to contain_exactly("a.rb", "b.rb", "c.rb")
+            expect(edges_of(session, dir, "r.rb", :@sources)).to contain_exactly("a.rb", "b.rb", "c.rb")
+          end
+        end
+
+        it "gives a skipped reader no edge to its own file when the middle def comes to call a def of it" do
+          Dir.mktmpdir do |dir|
+            session = session_for(configuration(dir))
+            rechecks = replay(dir, [tree.merge("r.rb" => "class R; def self.h(k) = k + 5; end\n#{reader}"),
+                                    { "c.rb" => "def w(k) = R.h(k) == 6 ? A.v(k) : 0\n" }], session: session)
+            expect(basenames(rechecks.first.affected)).to eq(["c.rb"])
+            expect(edges_of(session, dir, "r.rb")).to contain_exactly("a.rb", "c.rb")
+            expect(edges_of(session, dir, "r.rb", :@sources)).to contain_exactly("a.rb", "c.rb")
+          end
+        end
+
+        # `m.rb` reaches `w` under a key whose evaluation never calls `B.u`, and is re-analysed for its own edit:
+        # its edges are the ones its analysis recorded. `n.rb`, skipped, gets the probe's.
+        it "leaves a reader the recheck analysed with the edges its own analysis recorded" do
+          Dir.mktmpdir do |dir|
+            session = session_for(configuration(dir))
+            readers = { "r.rb" => "w(2)\n", "m.rb" => "w(1)\n" }
+            rechecks = replay(dir, [tree.merge(readers),
+                                    { "c.rb" => "def w(k) = k == 2 ? B.u(k) - 3 : A.v(k)\n", "m.rb" => "w(1)\n\n" }],
+                              session: session)
+            expect(basenames(rechecks.first.affected)).to eq(%w[c.rb m.rb])
+            expect(edges_of(session, dir, "r.rb")).to include("b.rb")
+            expect(edges_of(session, dir, "m.rb")).not_to include("b.rb")
+          end
+        end
+
+        # A recheck that passed the gate and then re-baselined never absorbed what the probe observed. The next
+        # recheck starts without it: here it is planted, and a recheck with no edit folds nothing into `r.rb`.
+        it "drops the probe's observations of a recheck that did not absorb them" do
+          Dir.mktmpdir do |dir|
+            session = session_for(configuration(dir))
+            replay(dir, [tree], session: session)
+            stray = Rigor::Analysis::DependencyRecorder::Record.new(
+              consumer: "", sources: Set[File.join(dir, "b.rb")], missing: Set.new,
+              symbol_sources: { File.join(dir, "b.rb") => Set["B.u"] }, ancestry_sources: Set.new
+            )
+            observations = described_class.const_get(:GateObservations)
+                                          .new(reads: { [File.join(dir, "c.rb"), "<toplevel>#w"] => stray }, summaries: nil)
+            session.instance_variable_set(:@gate_observations, observations)
+
+            guarded_recheck(session)
+            expect(edges_of(session, dir, "r.rb")).to contain_exactly("a.rb", "c.rb")
+          end
+        end
+
         # The probe lists no key for a def it observed under more than the per-def cap, so the def has no summary.
         it "drops a callee's summary when the middle def's edit observes it under keys the probe cannot list" do
           Dir.mktmpdir do |dir|

@@ -670,17 +670,49 @@ module Rigor
         end
       end
 
-      # Issue #2443 — `scope` with what every match binds, laid over the bindings it holds, for the block of a call
-      # that yields only after it has matched in the caller's frame ({MatchRebinding::YieldingMatch}): `$~` a
-      # `MatchData`, and `$&` and the pre- and post-match a `String`. The numbered groups and `$+` keep the bindings
-      # `scope` gives them. Typing them from the call's own pattern needs the group walk
-      # ({#unconditional_capture_groups}) to read every source right, which it does not yet (#2472), and forgetting
-      # them would report a group an earlier match in the method narrowed.
-      def yielded_match_scope(scope)
-        string_t = Type::Combinator.nominal_of("String")
-        scope.with_global(:$~, Type::Combinator.nominal_of("MatchData"))
-             .with_global(:$&, string_t).with_global(:$`, string_t).with_global(:$', string_t)
+      # Issue #2443, #1371 — the scope the block of a call that yields only after it has matched in the caller's frame
+      # enters with ({MatchRebinding::YieldingMatch}): the match edge of `pattern`, the call's pattern argument, over
+      # `scope` with the match globals forgotten. `$~` is a `MatchData`, `$&` and the pre- and post-match a `String`,
+      # and so is each numbered group {#yielded_capture_groups} vouches for; every other group is unbound, so it
+      # reads the RBS `String?` whatever an earlier match in the method bound it to.
+      def yielded_match_scope(scope, pattern)
+        regex_match_predicate_scopes(scope, yielded_capture_groups(pattern)).first
       end
+
+      # The pattern sources {#yielded_capture_groups} reads groups from: literal characters, `.`, the anchors, the
+      # quantifiers, `|`, plain and `(?:…)` groups, the class escapes, `\n`, `\r` and `\t`, an escaped punctuation
+      # character, and a bracket class holding only those with no bracket inside it. The group walk
+      # ({#unconditional_capture_groups}) reads these right; it misreads sources outside them (#2472, #1476).
+      PLAIN_PATTERN_ATOM = %r{[A-Za-z0-9 _\-.,:;=<>!@%&~'"`/^$+*?|(){}#]|\\[wWdDsShHnrt]|\\[^A-Za-z0-9\s]}
+      PLAIN_PATTERN_CLASS =
+        %r{\[\^?(?:[A-Za-z0-9 _\-.,:;=<>!@%~'"`/^$+*?|(){}#]|\\[wWdDsShHnrt]|\\[^A-Za-z0-9\s])+\]}
+      PLAIN_PATTERN = /\A(?:#{PLAIN_PATTERN_CLASS}|#{PLAIN_PATTERN_ATOM}|\\[bBAzZG])*\z/
+      OTHER_GROUP_FORM = /\(\?(?!:)/
+      # A quantifier on a quantifier repeats the quantified atom, so `(a)+{0}` and `(a){2}?` may match without the
+      # group. `+?` and `++` are one quantifier.
+      STACKED_QUANTIFIER = /\+[?+]?[*{]|\+[?+][?+]|\}[*+?{]/
+      NO_GROUPS = Set.new.freeze
+      private_constant :PLAIN_PATTERN_ATOM, :PLAIN_PATTERN_CLASS, :PLAIN_PATTERN, :OTHER_GROUP_FORM,
+                       :STACKED_QUANTIFIER, :NO_GROUPS
+
+      # Issue #1371 — the 1-based indices of the groups every match of `pattern` sets, read only from a regex
+      # literal written between slashes, without interpolation or the `x` flag, whose source is a {PLAIN_PATTERN}
+      # with no `(?` form but `(?:` and no {STACKED_QUANTIFIER}. Any other pattern, a String one included, vouches
+      # for no group: declining costs precision, while a misread group would read `String` where Ruby has nil. A
+      # `%r` literal is declined because its source escapes the delimiter, which hides a quantifier from the walk:
+      # `%r,(a){\,1}b,` is `/(a){,1}b/`.
+      def yielded_capture_groups(pattern)
+        return NO_GROUPS unless pattern.is_a?(Prism::RegularExpressionNode) && !pattern.extended?
+        return NO_GROUPS unless pattern.opening == "/"
+
+        plain_pattern_source?(pattern.content) ? unconditional_capture_groups(pattern.content) : NO_GROUPS
+      end
+
+      def plain_pattern_source?(source)
+        source.ascii_only? && PLAIN_PATTERN.match?(source) && !OTHER_GROUP_FORM.match?(source) &&
+          !STACKED_QUANTIFIER.match?(source)
+      end
+      private_class_method :yielded_capture_groups, :plain_pattern_source?
 
       # Issue #2443 — true when every member of `type` is a String (a project subclass included) or a `Dynamic` that
       # is untyped or may hold only Strings, Symbols and nil ({#match_member_kind}). A `nil` member never runs the

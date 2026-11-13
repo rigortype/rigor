@@ -115,6 +115,26 @@ module Rigor
         scope.forget_error_info.forget_last_status
       end
 
+      # Issue #1371 — true when `block_node` is the body of a proc made where it is written: a lambda literal, or the
+      # block of Kernel's `lambda` / `proc` or of `Proc.new` on the core class. Such a body runs whenever the proc is
+      # called, so the match globals narrowed where it is written prove nothing about the slot it reads then, and it
+      # enters with them unbound ({MatchRebinding.block_entry}). The other calls that keep their block
+      # ({StoredBlockCall}) are a definer's or a root's ({.entry}), or run it on a schedule of their own
+      # (`Enumerator.new`, `Hash.new`), and keep the ordinary entry, as does a project's own `Proc`.
+      # Only a lambda literal the statement evaluator enters gets this entry: one written as an operand is typed as a
+      # value, and the rule walker reads its body in the enclosing scope.
+      def proc_body?(block_node, call_node, scope)
+        return true if block_node.is_a?(Prism::LambdaNode)
+        return false unless call_node.is_a?(Prism::CallNode) && call_node.block.equal?(block_node)
+
+        receiver = call_node.receiver
+        case call_node.name
+        when :lambda, :proc then StoredBlockCall.kernel_spelled?(receiver)
+        when :new then StoredBlockCall.root_constant_name(receiver) == :Proc && core_class?(receiver, :Proc, scope)
+        else false
+        end
+      end
+
       def core_class?(receiver, constant, scope)
         type = scope.type_of(receiver)
         type.is_a?(Type::Singleton) && type.class_name == constant.name

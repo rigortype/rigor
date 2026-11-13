@@ -7,6 +7,7 @@ require_relative "../type"
 require_relative "block_call_timing"
 require_relative "fresh_frame_blocks"
 require_relative "guard_rebinding"
+require_relative "project_method_ownership"
 require_relative "stored_block_call"
 require_relative "match_rebinding/frame"
 require_relative "match_rebinding/operands"
@@ -364,14 +365,17 @@ module Rigor
       # ractor's root block with the globals unbound, since it reads a slot of its own, and a `define_method` body
       # with a narrowed global untyped, since it reads the definer's slot whenever the method is called. `$_`, which
       # shares the slot, enters on the same terms ({LastLine.block_entry}, issue #1359). A closure's body, which runs
-      # whenever it is called, enters with `$!`, `$@` and `$?` unbound ({FreshFrameBlocks.closure_entry}, issue #1360).
+      # whenever it is called, enters with `$!`, `$@` and `$?` unbound ({FreshFrameBlocks.closure_entry}, issue #1360),
+      # and with the match globals unbound whatever its body does ({FreshFrameBlocks.proc_body?}, issue #1371): the
+      # narrowing where a lambda or proc is written proves nothing about the `$~` it reads when it is called.
       #
       # Issue #1429 — the entry also restores a guard's narrowing of a global or constant where the body may run after
       # code that rebinds it ({GuardRebinding.block_entry}).
       #
-      # Issue #2443 — the block of a call that matches before every yield (`scan`, `gsub`, `sub`, …) on a String or
-      # untyped receiver enters with that call's own match edge, laid over the entry above ({YieldingMatch}); a match
-      # its body runs still rebinds them through the statement-level rules.
+      # Issue #2443, #1371 — the block of a call that matches before every yield (`scan`, `gsub`, `sub`, … on a String
+      # or untyped receiver, `grep` and `grep_v` with a regex literal) enters with that call's own match edge in place
+      # of the entry above ({YieldingMatch}); a match its body runs still rebinds them through the statement-level
+      # rules.
       def block_entry(scope, block_node, call_node = nil)
         operand_scope = scope
         scope = GuardRebinding.block_entry(scope, block_node, call_node)
@@ -384,7 +388,8 @@ module Rigor
 
       def frame_entry(scope, block_node, call_node)
         return scope unless scope.match_globals_bound?
-        return scope unless scope.match_rebinding_closure? || entry_may_match?(block_node.body, scope, call_node) ||
+        return scope unless FreshFrameBlocks.proc_body?(block_node, call_node, scope) ||
+                            scope.match_rebinding_closure? || entry_may_match?(block_node.body, scope, call_node) ||
                             (call_node.is_a?(Prism::CallNode) && operands_may_rebind?(call_node, scope))
 
         scope.forget_match_globals

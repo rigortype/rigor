@@ -8,7 +8,7 @@
 
 ## Background
 
-#3204 asks for class-body and module-body cvar writes to enter the class-cvar census through the seam a `def` body's write uses. The fix adds `ScopeIndexer#collect_body_cvar_writes`, the class-body twin of the grandfathered `collect_def_cvar_writes`, and `ScopeIndexer#record_reflective_cvar_write`, which records a `class_variable_set(:@@x, v)` on an implicit or `self` receiver. `spec/rigor/declaration_facts/producers_spec.rb` counts both as declaration producers, so each needs a row.
+#3204 asks for class-body and module-body cvar writes to enter the class-cvar census through the seam a `def` body's write uses. The fix adds `ScopeIndexer#collect_body_cvar_writes`, the class-body twin of the grandfathered `collect_def_cvar_writes`, and `ScopeIndexer#record_reflective_cvar_write`, which records a `class_variable_set(:@@x, v)` on an implicit or `self` receiver. After review round 1, both record writes that only join an entry a `def` body's write creates (the coordinator's join-only rule). `spec/rigor/declaration_facts/producers_spec.rb` counts both as declaration producers, so each needs a row.
 
 ## Options and trade-offs
 
@@ -18,8 +18,8 @@
 
 ## Decision
 
-The first option. Each row says what the method records and that it decides no owner or side: the prefix and scope come from the walk's body context (or the legacy walker's equivalent), as for `collect_def_cvar_writes`. #2086 recorded rows in the same file for the same kind of reason. The join helper reuses the grandfathered `record_cvar_write` name, so no third row was added.
+The first option. Each row says what the method records, that its writes only join, and which owner and `self` it uses: the prefix and scope come from the walk's body context (or the legacy walker's equivalent), as for `collect_def_cvar_writes`, and `collect_body_cvar_writes` types the rvalue with the class as `self`, the `self` of a class body. #2086 recorded rows in the same file for the same kind of reason. The join helper reuses the grandfathered `record_cvar_write` name, so no third row was added.
 
 ## To undo
 
-Delete the two rows and the two methods. That removes class-body writes and `class_variable_set` from the census, and the `flow.always-truthy-condition` false positive of #3204 returns.
+Delete the two rows and the two methods. That removes class-body writes and `class_variable_set` from the census, and the `flow.always-truthy-condition` false positive of #3204 returns. The `join_only:` keyword on `record_cvar_write` and `finished_cvar_census` can then go too; the union of the rescue floor stays.

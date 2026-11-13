@@ -142,6 +142,7 @@ module ClassCvarsEquivalenceCases
           @@sb = :s
           class Bare
             @@unnamed = nil
+            def u = (@@unnamed = 1)
           end
         end
         class Inner
@@ -149,6 +150,8 @@ module ClassCvarsEquivalenceCases
           def ib = (@@ib = 1)
         end
         K = Class.new { @@kb = 2.0 }
+        @@body_only = nil
+        def w = (@@cb = @@cs = @@sb = @@kb = 0)
       end
       module M
         @@mb = nil
@@ -204,7 +207,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         .to eq(%w[M X::Reopened M::Y::Local X::Single M::Bare M::Z::W])
       expect(tables(cases["eval blocks under class << self and inside a factory"]).last.keys).to eq(%w[X::B])
       expect(described(tables(cases["class, module and class << self body writes (#3204)"]).last))
-        .to eq("C" => { :@@cb => "nil", :@@cs => "1", :@@sb => ":s", :@@kb => "2.0" },
+        .to eq("C" => { :@@cb => "0?", :@@cs => "0 | 1", :@@sb => "0 | :s", :@@kb => "0 | 2.0" },
                "C::Inner" => { :@@ib => "1?" }, "M" => { :@@mb => "1?" })
       expect(described(tables(cases["def barriers and operator writes"]).last))
         .to eq("Census" => { :@@ab => "1?", :@@ac => "[1, 2]" })

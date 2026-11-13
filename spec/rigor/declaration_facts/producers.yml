@@ -206,6 +206,7 @@ lib/rigor/inference/last_line/self_evidence.rb:
   computes: what a file shows about the self its implicit-self gets and readline readers run with
   producers:
     Rigor::Inference::LastLine::SelfEvidence: grandfathered
+    Rigor::Inference::LastLine::SelfEvidence#collect_const_sets: 'issue #3156, the namespaces a literal const_set binds a name in, which the override walk reads only to decline a body-less ancestor; it nests through Source::ConstantPath.pushed_nesting and stops at a header it cannot render'
     Rigor::Inference::LastLine::SelfEvidence::Scan#classify: grandfathered
     Rigor::Inference::LastLine::SelfEvidence::Scan#def_context: grandfathered
     Rigor::Inference::LastLine::SelfEvidence::Scan#mixin: grandfathered

@@ -1,0 +1,2 @@
+- **[engine]** `def.override-return-widened` and `def.override-param-narrowed` now check an override against a project class or module whose Ruby body defines nothing but whose RBS declares the method. ([#3174](https://github.com/rigortype/rigor/pull/3174))
+  - Examples: an empty `class Base; end` with an RBS `def`, `attr_reader` or `alias`, or a body-less module whose RBS includes an interface. Both were silent before.

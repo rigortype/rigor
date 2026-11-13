@@ -93,6 +93,39 @@ module Rigor
       # when the entry is interned.
       Entry = Data.define(:name, :side, :raw, :candidates, :superclass_edge, :last_segment, :owner) do
         def external? = name.nil?
+
+        # Issue #3156 — the BODY-LESS class or module the project declares that an external entry names, or nil: the
+        # first of its spellings that is a `discovered_classes` key, read in Ruby's lookup order. Such a declaration
+        # records no method, superclass or include (`module PMod; end`), which is why the chain holds it as external.
+        # The owner-qualified spelling (#1698) leads only on a mixin edge: Ruby evaluates a superclass expression
+        # outside the class's own body, so `class Leaf < Base` never names `Leaf::Base`. Any spelling up to the match
+        # that RBS alone knows, that a project constant write binds (`AMid = ::Other` in `NS`), or that names a class
+        # with a body leaves nil, since Ruby may resolve the constant there or the chain should have held it. It files
+        # the entry's negative class and constant edges, which a declaration or write of the name appearing or
+        # vanishing fires.
+        def declared_name(scope)
+          spelling = raw.to_s
+          Analysis::DependencyRecorder.read_last_segment(:class, spelling)
+          Analysis::DependencyRecorder.read_last_segment(:constant, spelling)
+          own = owner && !superclass_edge && !spelling.start_with?("::")
+          (own ? ["#{owner}::#{spelling}", *candidates] : candidates).uniq.each do |candidate|
+            return nil if constant_written?(scope, candidate)
+            return (scope.known_user_class?(candidate) ? nil : candidate) if scope.discovered_classes.key?(candidate)
+            return nil if Rigor::Reflection.rbs_class_known?(candidate, scope: scope)
+          end
+          nil
+        end
+
+        private
+
+        # Whether a project constant write other than a class declaration binds `name` exactly (the census keeps a
+        # write as spelled, a `*::` wildcard for one it cannot place), or a literal `const_set` in this file does
+        # (`LastLine::SelfEvidence#const_set_spellings`; the census files none).
+        def constant_written?(scope, name)
+          (scope.bound_constant_names(name) + scope.shadowing_constant_names(name)).any? do |written|
+            written == name || written.start_with?("*::")
+          end || scope.discovery.implicit_self_evidence&.const_set_spellings&.include?(name) || false
+        end
       end
 
       # How many project entries a chain may hold before it is cut (ADR-41 WD4). The breadth-first walks

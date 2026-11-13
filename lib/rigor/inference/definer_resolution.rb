@@ -82,11 +82,16 @@ module Rigor
       # the entry's answer, as `[owner_name, value]` (the owner is part of the answer so that two worlds naming
       # different parents disagree). It is the override lints' parent read: the nearest project ancestor after the
       # class whose block answers.
+      #
+      # Issue #3156 — a class or module the project declares but whose Ruby body records no method, superclass or
+      # include (`module PMod; end`, `class AMid` / `end`) is an external entry on the chain, which only its RBS
+      # declaration speaks for. The override block answers from RBS, so such an entry is asked too, under the
+      # project name it resolves to (`ResolutionChain::Entry#declared_name`); an undeclared external is not.
       def override_answer(scope)
         lambda do |chain, from|
-          first_hit(chain, scope, from) do |entry|
-            value = yield(entry.name)
-            [entry.name, value] unless value.nil?
+          first_hit(chain, scope, from, askable_external: true) do |name|
+            value = yield(name)
+            [name, value] unless value.nil?
           end
         end
       end
@@ -331,17 +336,20 @@ module Rigor
         kind == :singleton ? [:singleton, method_name.to_sym] : method_name.to_sym
       end
 
-      def first_hit(chain, scope, from)
+      # The first entry at or after `from` whose block answers. The default answer functions are handed the project
+      # entry; the override one (`askable_external:`) is handed a name, and also asks an external entry the project
+      # declares.
+      def first_hit(chain, scope, from, askable_external: false)
         index = from - 1
         found = nil
         chain.search(scope, from) do |entry|
           index += 1
-          next if entry.external?
+          next unless (name = entry.external? ? askable_external && entry.declared_name(scope) : entry.name)
 
-          answer = yield(entry)
+          answer = yield(askable_external ? name : entry)
           next if answer.nil?
 
-          found = Hit.new(answer, entry.name, index, entry.side)
+          found = Hit.new(answer, name, index, entry.side)
         end
         found
       end

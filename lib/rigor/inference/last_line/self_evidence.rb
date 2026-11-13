@@ -52,6 +52,7 @@ module Rigor
       #   (`respond_to?(:gets)`, `send(:gets)`).
       class SelfEvidence
         TypingState.memo_field(self, :@scan, reason: "one walk of the file's root node, built on first ask")
+        TypingState.memo_field(self, :@const_set_spellings, reason: "one walk of the file's root, built on first ask")
 
         # The context of a reader whose `self` is `main`.
         MAIN = :main
@@ -86,7 +87,13 @@ module Rigor
         def initialize(root)
           @root = root
           @scan = nil
+          @const_set_spellings = nil
         end
+
+        # Issue #3156 — the constants this file binds by a `const_set` with a literal name on the body's own module
+        # (implicit `self` or `self.const_set`) inside a `class` / `module` body, qualified by that body's nesting
+        # (`module NS; const_set(:AMid, Other)` binds `"NS::AMid"`). The census files no such write.
+        def const_set_spellings = (@const_set_spellings ||= collect_const_sets(@root, nil, Set.new).freeze)
 
         # {MAIN}, the `Prism::ClassNode` or `Prism::ModuleNode` whose body the implicit-self reader `call_node` runs
         # in, or nil: the file may give it another `self`, or it is not one of this file's readers.
@@ -98,6 +105,26 @@ module Rigor
         private
 
         def scan = (@scan ||= Scan.new(@root))
+
+        def collect_const_sets(node, namespace, found)
+          case node
+          when Prism::ClassNode, Prism::ModuleNode
+            inner = Source::ConstantPath.pushed_nesting(namespace ? [namespace] : [], node.constant_path)&.first
+            collect_const_sets(node.body, inner, found) if inner
+            return found
+          when Prism::CallNode
+            found << "#{namespace}::#{literal_const_set_name(node)}" if namespace && literal_const_set_name(node)
+          end
+          node&.compact_child_nodes&.each { |child| collect_const_sets(child, namespace, found) }
+          found
+        end
+
+        def literal_const_set_name(node)
+          return nil unless node.name == :const_set && (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
+
+          name = node.arguments&.arguments&.first
+          name.unescaped if name.is_a?(Prism::SymbolNode) || name.is_a?(Prism::StringNode)
+        end
 
         # One walk of the file, whose answers {SelfEvidence} keeps once the walk is complete.
         class Scan

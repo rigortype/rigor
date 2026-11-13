@@ -2560,6 +2560,18 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       end
     end
 
+    it "records a rescue-reference ivar as the exception class the clause names" do
+      program = parse(<<~RUBY)
+        class F
+          def run
+            begin; risky; rescue TypeError => @v; end
+          end
+        end
+      RUBY
+      ivars = described_class.index(program, default_scope: default_scope)[program].class_ivars_for("F")
+      expect(ivars[:@v]).to eq(Rigor::Type::Combinator.nominal_of("TypeError"))
+    end
+
     describe "parallel / multiple-assignment ivar targets (N1)" do
       it "records an array-literal RHS ivar slot at its tuple position" do
         program = parse(<<~RUBY)

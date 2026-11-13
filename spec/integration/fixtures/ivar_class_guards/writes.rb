@@ -62,7 +62,8 @@ class Writer
   end
 
   # A branch joins with the guard's record kept, so a later call that may rebind still restores it to the binding the
-  # guard narrowed (the class's seed, which the `||=` above makes nilable).
+  # guard narrowed (the class's seed, which the `||=` above makes nilable, and which the `rescue ArgumentError => @io`
+  # and `for @io in` writes above widen with `ArgumentError` and the unknown floor, issue #1217).
   def restored_after_join
     return unless @io.is_a?(StringIO)
 
@@ -72,7 +73,7 @@ class Writer
       n = 2
     end
     @poker.poke
-    assert_type("IO | StringIO | nil", @io)
+    assert_type("ArgumentError | Dynamic[top] | IO | StringIO | nil", @io)
     n
   end
 end

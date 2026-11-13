@@ -1505,7 +1505,7 @@ module Rigor
         # array/tuple-shaped, else the unanalyzable floor (the same `Dynamic[top]` a single write to an unknown RHS
         # records — an unanalyzable multi-write means unknown, not nil).
         record_multi_write_ivars(node, scope, class_name, accumulator)
-        record_binding_target_ivars(node, class_name, accumulator)
+        record_binding_target_ivars(node, scope, class_name, accumulator)
 
         record_ivar_mutator_call(node, class_name, mutated_ivars) if mutated_ivars
 
@@ -2355,13 +2355,15 @@ module Rigor
 
       # Issue #1217 — `rescue => @err` and `for @x in xs` (with `for *@x in`, `for @x, y in`) write the ivar through a
       # target node, not an `InstanceVariableWriteNode`, so the census missed them: a sibling method read the
-      # constructor's `@err = nil` alone and folded `if @err` always-falsey. Each such target contributes the
-      # `Dynamic[top]` floor — the census does not type the exception or the element, and an unknown value is
-      # honest where a missing one is not.
-      def record_binding_target_ivars(node, class_name, accumulator)
-        BindingTargets.names(node, Prism::InstanceVariableTargetNode).each do |name|
-          accumulate_ivar_type(accumulator, class_name, name, Type::Combinator.untyped)
-        end
+      # constructor's `@err = nil` alone and folded `if @err` always-falsey. A rescue reference contributes the
+      # exception instance type the clause names; a `for` index the `Dynamic[top]` floor, since the census does not
+      # type the element, and an unknown value is honest where a missing one is not.
+      def record_binding_target_ivars(node, scope, class_name, accumulator)
+        names = BindingTargets.names(node, Prism::InstanceVariableTargetNode)
+        return if names.empty?
+
+        type = BindingTargets.value_type(node, scope)
+        names.each { |name| accumulate_ivar_type(accumulator, class_name, name, type) }
       end
 
       # The names a `rescue =>` reference or a `for` index binds through a target of `target_class`, looking through
@@ -2381,6 +2383,21 @@ module Rigor
           return EMPTY if root.nil?
 
           collect(root, target_class, [])
+        end
+
+        # What the target is written with: a rescue reference's exception instance (`StandardError` for a bare
+        # `rescue`, `Dynamic[top]` for a class that does not resolve), a `for` index's `Dynamic[top]` floor.
+        def value_type(node, scope)
+          return Type::Combinator.untyped unless node.is_a?(Prism::RescueNode)
+          return Type::Combinator.nominal_of("StandardError") if node.exceptions.empty?
+
+          members = node.exceptions.map do |exception|
+            type = scope.type_of(exception)
+            type.is_a?(Type::Singleton) ? Type::Combinator.nominal_of(type.class_name) : Type::Combinator.untyped
+          end
+          Type::Combinator.union(*members)
+        rescue StandardError
+          Type::Combinator.untyped
         end
 
         def collect(target, target_class, acc)
@@ -2553,11 +2570,12 @@ module Rigor
         return unless node.is_a?(Prism::Node)
 
         record_cvar_write(node, scope, class_name, accumulator) if node.is_a?(Prism::ClassVariableWriteNode)
-        # Issue #1217 — `rescue => @@c` / `for @@c in xs` write through a target node; the floor, as for an ivar.
+        # Issue #1217 — `rescue => @@c` / `for @@c in xs` write through a target node, typed as for an ivar.
         BindingTargets.names(node, Prism::ClassVariableTargetNode).each do |name|
+          type = BindingTargets.value_type(node, scope)
           entries = (accumulator[class_name] ||= {})
           existing = entries[name]
-          entries[name] = existing ? Type::Combinator.union(existing, Type::Combinator.untyped) : Type::Combinator.untyped
+          entries[name] = existing ? Type::Combinator.union(existing, type) : type
         end
         return if IVAR_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
 

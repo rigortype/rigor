@@ -187,7 +187,11 @@ telling it to load the skill. It also carries this floor inline, for a reviewer 
 skill: every command through `nix develop --command`; no edits, pushes or comments on the PR; never
 `make verify`, `make check` or the whole suite; `references/` read-only; and "if the skill does not
 load, read it with `git show origin/master:.claude/skills/rigor-reviewer/SKILL.md`; if that fails,
-stop and report". The v0.4.7 window (2026-10-24 to 11-03) is why the contract moved: while it lived
+stop and report". **When the PR edits the reviewer contract itself** — that skill, or the Pi harness
+and takt files that point at its § Report — the brief says to read the contract from `origin/master`
+instead of loading it, because a harness loads a skill from the tree it runs in, and that tree is the
+head under review: the change would otherwise set the rules for its own review. The reviewer says in
+its verdict line which copy it followed. The v0.4.7 window (2026-10-24 to 11-03) is why the contract moved: while it lived
 only in this file, reviewers stopped opening with the fixed `Severe N | …` line after about 11-01
 and returned prose (#2333).
 

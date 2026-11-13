@@ -40,7 +40,9 @@ Load and follow:
 ## Output
 
 The report shape is not this harness's own. Return the fixed report of
-[`rigor-reviewer`](../../../../.claude/skills/rigor-reviewer/SKILL.md) § Report — the parsed
+[`rigor-reviewer`](../../../../.claude/skills/rigor-reviewer/SKILL.md) § Report, read from
+`origin/master` when the PR under review edits it (this harness loads a skill from the checkout, so
+the head's copy is what you would otherwise get) — the parsed
 `Severe N | …` line, the verdict line naming the head SHA you reviewed, `Severe remaining`, and each
 finding with its severity, its failure scenario, introduced or pre-existing, and its repro — then add
 this harness's fields:

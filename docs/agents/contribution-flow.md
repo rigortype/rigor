@@ -157,8 +157,8 @@ Once the change is implemented and `make verify-changed` passes:
    Its § Report is the one report shape, whichever harness reviews: the Pi harness
    ([`contracts/README.md`](../../agents/pi-harness/contracts/README.md) § Reviewer) and the takt
    adversary ([`adversarial-review.md`](../../.takt/facets/instructions/adversarial-review.md))
-   return it and add their own fields after it, so
-   a review satisfies this step wherever it ran, and whoever lands reads the same fields. A review that
+   return it and add their own fields after it, so a review satisfies this step wherever it ran, and
+   whoever lands reads the same fields. A review that
    comes back without that shape — no severity, no repro per finding — has not been triaged by anyone
    yet, and step 3 cannot be applied to it: ask for the report, rather than reviewing the PR again.
    A PR that changes a skill also runs the `waza` review in [`skill-authoring.md`](skill-authoring.md)
@@ -183,8 +183,13 @@ Once the change is implemented and `make verify-changed` passes:
    **When nobody is coordinating.** An unattended loop — takt, the Pi harness, a scripted heartbeat —
    may land a PR by itself only where every condition in step 6 holds (the `waza` comment on a skill
    PR included) and this step asks it for no judgment: every review step 2 requires reported
-   `Severe remaining: no` — for the Pi harness, each of the co-primary pair ADR-115 WD6 names — the
-   round's fixes changed wording or specs rather than behaviour, and no advisory job warned.
+   `Severe remaining: no` on the head being landed and left no verdict outstanding — for the Pi
+   harness, each of the co-primary pair ADR-115 WD6 names, and a harness whose report ends in
+   `Approved` / `Needs fix` has to have returned `Approved` — the round's fixes changed wording or
+   specs rather than behaviour, and no advisory job warned. A report can carry no severe finding and
+   still return `Needs fix`, which the harness contracts leave to the reviewer's judgment; an
+   outstanding `Needs fix` is a review that has not stopped, so the loop parks rather than landing
+   over it.
    Everything else stops at Draft with the review report posted as a PR comment, which is the
    handover: a severe finding, a finding the loop would reject, an allocation hold, or any decision
    § "Decisions and the approval queue" covers — the serious ones, and a non-serious one with no

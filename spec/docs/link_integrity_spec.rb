@@ -48,9 +48,11 @@ LINK_INTEGRITY_SKILL_ROOTS = %w[.claude/skills skills agents/pi-harness .pi .tak
 # The last three trees joined after the corpus was built, and `agents/pi-harness/` had been carrying a dead
 # link the whole time (`rigor-lane`'s note pointer was one `..` short), which is the argument for a tree
 # joining the day it starts linking into the repository. `.pi/` and `.takt/` are small because an agent
-# definition and a facet are prose for a model, not documents, and nearly every link they hold is a pointer
-# at the shared reviewer contract — so their floors sit AT the current count, not under it: losing one of
-# those pointers is the thing worth failing for, and adding one never fails a floor.
+# definition and a facet are prose for a model, not documents, and all but one of the links they hold is a
+# pointer at the shared reviewer contract (the exception is `.takt/README.md` → `parallel-lanes.md`) — so
+# their floors sit AT the current count, not under it: losing one of those pointers is the thing worth
+# failing for, and adding one never fails a floor. The cost is that retiring a reviewer band or a facet
+# lowers the count, and the floor moves with it in one line, as the three above do.
 #
 # They move with the set in BOTH directions. ADR-81 is a skill-set optimization ADR, so retiring a skill
 # legitimately lowers a count — the largest single skill carries 5 linked files and 42 links — and the

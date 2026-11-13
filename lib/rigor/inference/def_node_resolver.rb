@@ -59,6 +59,11 @@ module Rigor
       # being silently reachable from production.
       def self.run_scope? = !TypingState.current[RUN_MEMO].nil?
 
+      # Issue #3160 — the nodes this run's memo has minted so far, keyed `[path, node_id]` (nil outside a run scope).
+      # The return memo keys on them, so the runner keeps the table to find an unchanged file's def in the memo once
+      # the run scope has closed.
+      def self.resolved_nodes = TypingState.current[RUN_MEMO]&.fetch(:nodes)
+
       # Resolves `handle` to a `Prism::DefNode` (the same object across the run for a given (path, node_id)), or
       # nil. A non-handle argument is returned unchanged, so callers can pass a table value that is either a live
       # node (cold / re-walked file) or a handle (unchanged file) without branching.

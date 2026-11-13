@@ -2735,8 +2735,9 @@ end
 
     # Issue #3116 — the summary holds at most `RETURN_SUMMARY_KEYS_PER_DEF` (8) keys per def. A def observed under
     # more used to keep the first eight and pass the gate on them, so an edit that moved the return only at the
-    # ninth key left that key's reader on its cached rows. Such a def now records `overflow: true` and no key, and
-    # the gate keeps every symbol dependent.
+    # ninth key left that key's reader on its cached rows. Such a def now records no summary at all (issue #3160:
+    # an entry marked `overflow` failed open for a reader that ignored the mark), and the gate keeps every symbol
+    # dependent.
     describe "a def observed under more keys than the per-def cap" do
       let(:callee_a) { "def v(k) = k == 99 ? :a : :b\n" }
       let(:callee_z) { "def v(k) = k == 99 ? :z : :b\n" }
@@ -2769,7 +2770,6 @@ end
       it "records every key of a def observed under exactly the cap, and still skips its readers" do
         recheck_capped(callee_a, callee_same, plain: 7) do |recheck, summary, dir|
           expect(summary[:keys].size).to eq(Rigor::Analysis::Runner::RETURN_SUMMARY_KEYS_PER_DEF)
-          expect(summary[:overflow]).to be_nil
           expect(basenames(recheck.affected)).to eq(["a.rb"])
           expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
         end
@@ -2782,9 +2782,9 @@ end
         end
       end
 
-      it "records the overflow instead of the first eight keys" do
+      it "records no summary instead of the first eight keys" do
         recheck_capped(callee_a, callee_a, plain: 8) do |_recheck, summary, _dir|
-          expect(summary).to include(keys: [], returns: [], overflow: true)
+          expect(summary).to be_nil
         end
       end
 
@@ -2816,7 +2816,7 @@ end
           File.write(File.join(dir, "spl.rb"), splat_reader)
           session = session_for(configuration(dir))
           guarded_baseline(session)
-          expect(session.instance_variable_get(:@return_summaries)[key]).to include(keys: [], overflow: true)
+          expect(session.instance_variable_get(:@return_summaries)).not_to have_key(key)
         end
       end
 
@@ -2825,13 +2825,13 @@ end
       # keep every reader. A change that starts merging worker harvests has to make this hold on its own.
       it "keeps every reader in pool mode, where no summary is harvested" do
         recheck_capped(callee_a, callee_z, plain: 9, workers: 2) do |recheck, summary, dir|
-          expect(summary.nil? || summary[:overflow]).to be(true)
+          expect(summary).to be_nil
           expect(basenames(recheck.affected)).to eq(basenames(Dir[File.join(dir, "*.rb")]))
           expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
         end
       end
 
-      # A guard: the marker costs a def under the cap nothing when nothing was edited.
+      # A guard: the cap costs a def under it nothing when nothing was edited.
       it "re-analyses nothing on two rechecks with no edit" do
         Dir.mktmpdir do |dir|
           write_capped_tree(dir, callee_a, plain: 3)
@@ -2842,6 +2842,205 @@ end
             expect(recheck.affected).to be_empty
             expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
           end
+        end
+      end
+    end
+
+    # Issue #3160 — the summary's key set has to cover every key a CURRENT reader observes the def under, whichever
+    # run recorded it. It used to be replaced by whatever the run that analysed the callee's file happened to see,
+    # so a reader added later was never recorded and a recheck of the callee beside some of its readers forgot the
+    # rest. Every row replays a sequence of edits and compares each warm answer with a cold run.
+    describe "a key set that tracks the readers that exist now" do
+      let(:v5_a) { "def v(k) = k == 5 ? :a : :b\n" }
+      let(:v5_z) { "def v(k) = k == 5 ? :z : :b\n" }
+      let(:v99_a) { "def v(k) = k == 99 ? :a : :b\n" }
+      let(:v99_z) { "def v(k) = k == 99 ? :z : :b\n" }
+
+      # Writes (or, for a nil content, deletes) each file of `step`.
+      def apply_step(dir, step)
+        step.each do |name, content|
+          path = File.join(dir, name)
+          content.nil? ? File.delete(path) : File.write(path, content)
+        end
+      end
+
+      # Baselines the first step, rechecks after each later one, and returns the rechecks. Every recheck is
+      # compared with a cold run of the tree it saw.
+      def replay(dir, steps, workers: 0, session: nil, recheck_workers: nil)
+        apply_step(dir, steps.first)
+        session ||= described_class.new(configuration: configuration(dir), environment: shared_environment,
+                                        workers: workers)
+        guarded_baseline(session)
+        session.instance_variable_set(:@workers, recheck_workers) if recheck_workers
+        steps.drop(1).map do |step|
+          apply_step(dir, step)
+          recheck = guarded_recheck(session)
+          expect(sorted(recheck.diagnostics)).to eq(sorted(full_run(dir)))
+          yield session if block_given?
+          recheck
+        end
+      end
+
+      def basenames(paths) = paths.map { |path| File.basename(path) }.sort
+
+      def summary_of(session, dir, symbol = "<toplevel>#v")
+        session.instance_variable_get(:@return_summaries)[[File.join(dir, "a.rb"), symbol]]
+      end
+
+      def key_args(summary) = summary[:keys].map { |(_receiver, args)| args.map { |type| type.describe(:short) } }
+
+      it "records the key of a reader added after the baseline (grow)" do
+        Dir.mktmpdir do |dir|
+          rechecks = replay(dir, [{ "a.rb" => v5_a, "m.rb" => "v(1)\n" },
+                                  { "b.rb" => "puts 'hit' if v(5) == :a\n" },
+                                  { "a.rb" => v5_z }])
+          expect(basenames(rechecks.last.affected)).to include("b.rb")
+          expect(rechecks.last.diagnostics.map(&:message)).to include(a_string_matching(/always falsey/))
+        end
+      end
+
+      it "keeps the key of a reader the recheck did not re-analyse (shrink)" do
+        Dir.mktmpdir do |dir|
+          # The second step edits the callee without moving a return and re-analyses only one of its readers.
+          rechecks = replay(dir, [{ "a.rb" => v5_a, "m.rb" => "v(1)\n", "b.rb" => "puts 'hit' if v(5) == :a\n" },
+                                  { "a.rb" => "def v(k) = k == 5 ? :a : (:b)\n", "m.rb" => "v(1)\n\n" },
+                                  { "a.rb" => v5_z }])
+          expect(basenames(rechecks.first.affected)).to eq(%w[a.rb m.rb])
+          expect(basenames(rechecks.last.affected)).to include("b.rb")
+        end
+      end
+
+      it "keeps a def's keys when a sibling def of its file is edited" do
+        Dir.mktmpdir do |dir|
+          v3 = "def v(k) = k == 3 ? :a : :b\n"
+          readers = "#{(1..7).map { |i| "v(#{i})\n" }.join}puts 'hit3' if v(3) == :a\n"
+          rechecks = replay(dir, [{ "a.rb" => "#{v3}def w = 1\n", "b.rb" => readers, "c.rb" => "v(99)\nw\n" },
+                                  { "a.rb" => "#{v3}def w = 2\n" },
+                                  { "a.rb" => "def v(k) = k == 3 ? :z : :b\ndef w = 2\n" }])
+          expect(basenames(rechecks.first.affected)).to eq(%w[a.rb c.rb])
+          expect(basenames(rechecks.last.affected)).to include("b.rb")
+        end
+      end
+
+      it "drops the summary when an added reader takes the def past the per-def cap" do
+        Dir.mktmpdir do |dir|
+          baseline = { "a.rb" => v99_a }
+          8.times { |i| baseline["r#{i + 1}.rb"] = "v(#{i + 1})\n" }
+          rechecks = replay(dir, [baseline, { "c.rb" => "puts 'hit' if v(99) == :a\n" }, { "a.rb" => v99_z }]) do |s|
+            expect(summary_of(s, dir)).to be_nil
+          end
+          expect(basenames(rechecks.last.affected)).to include("c.rb")
+        end
+      end
+
+      it "matches a cold run after a reader file is deleted, and forgets the summary with the last reader" do
+        Dir.mktmpdir do |dir|
+          session = session_for(configuration(dir))
+          replay(dir, [{ "a.rb" => v5_a, "m.rb" => "v(1)\n", "b.rb" => "puts 'hit' if v(5) == :a\n" },
+                       { "b.rb" => nil }, { "a.rb" => v5_z }, { "m.rb" => nil }], session: session)
+          expect(summary_of(session, dir)).to be_nil
+        end
+      end
+
+      it "matches a cold run after a reader file is renamed" do
+        Dir.mktmpdir do |dir|
+          reader = "puts 'hit' if v(5) == :a\n"
+          rechecks = replay(dir, [{ "a.rb" => v5_a, "m.rb" => "v(1)\n", "b.rb" => reader },
+                                  { "b.rb" => nil, "d.rb" => reader },
+                                  { "a.rb" => v5_z }])
+          expect(basenames(rechecks.last.affected)).to include("d.rb")
+        end
+      end
+
+      it "re-checks a reader whose own edit changed the key it observes" do
+        Dir.mktmpdir do |dir|
+          rechecks = replay(dir, [{ "a.rb" => v5_a, "m.rb" => "v(1)\n", "b.rb" => "puts 'hit' if v(2) == :a\n" },
+                                  { "b.rb" => "puts 'hit' if v(5) == :a\n" },
+                                  { "a.rb" => v5_z }])
+          expect(basenames(rechecks.last.affected)).to include("b.rb")
+        end
+      end
+
+      it "still skips every reader, edit after edit, when no return moves and the readers are unchanged" do
+        Dir.mktmpdir do |dir|
+          session = session_for(configuration(dir))
+          rechecks = replay(dir, [{ "a.rb" => v5_a, "m.rb" => "v(1)\n", "b.rb" => "puts 'hit' if v(5) == :a\n" },
+                                  { "a.rb" => "def v(k) = k == 5 ? :a : (:b)\n" },
+                                  { "a.rb" => "def v(k) = k == 5 ? (:a) : (:b)\n" },
+                                  { "a.rb" => "def v(k) = (k == 5) ? (:a) : (:b)\n" }], session: session)
+          expect(rechecks.map { |recheck| basenames(recheck.affected) }).to all(eq(["a.rb"]))
+          expect(key_args(summary_of(session, dir))).to contain_exactly(["1"], ["5"])
+        end
+      end
+
+      it "re-analyses nothing on two rechecks with no edit, and leaves the summaries as they were" do
+        Dir.mktmpdir do |dir|
+          session = session_for(configuration(dir))
+          tree = { "a.rb" => v5_a, "m.rb" => "v(1)\n", "b.rb" => "puts 'hit' if v(5) == :a\n" }
+          summaries = nil
+          rechecks = replay(dir, [tree, {}, {}], session: session) do |s|
+            summaries ||= s.instance_variable_get(:@return_summaries).dup
+            expect(s.instance_variable_get(:@return_summaries)).to eq(summaries)
+          end
+          expect(rechecks.map(&:affected)).to all(be_empty)
+          expect(summaries).not_to be_empty
+        end
+      end
+
+      # A call whose result the return memo refused to store (ADR-84 WD3) still handed that result to its caller,
+      # so the stored entries are not every key the def was observed under. Here `burn(30)`'s unroll leaves
+      # `dig(6)` too little fuel, the memo refuses that degraded result, and the later top-level `dig(6)` stores a
+      # full one (return_memo_taint_spec.rb's shape). No end-to-end stale answer was built from this: it pins the
+      # summary's absence, which is what keeps the readers.
+      it "records no summary for a def one of whose calls the return memo refused to store" do
+        Dir.mktmpdir do |dir|
+          File.write(File.join(dir, "a.rb"), <<~RUBY)
+            class R
+              def dig(n)
+                return 0 if n.zero?
+
+                dig(n - 1)
+              end
+
+              def burn(n)
+                return dig(n + 6) if n.zero?
+
+                burn(n - 1)
+              end
+            end
+          RUBY
+          File.write(File.join(dir, "m.rb"), "R.new.burn(30)\nR.new.dig(6)\n")
+          session = session_for(configuration(dir))
+          guarded_baseline(session)
+
+          expect(summary_of(session, dir, "R#burn")).not_to be_nil
+          expect(summary_of(session, dir, "R#dig")).to be_nil
+        end
+      end
+
+      # Pool mode harvests no summary (the workers type the calls in memos this process never sees), so the gate
+      # stays inert there: a pooled session records none, whatever the shape.
+      it "matches a cold run for each shape in pool mode, and records no summary" do
+        grow = [{ "a.rb" => v5_a, "m.rb" => "v(1)\n" }, { "b.rb" => "puts 'hit' if v(5) == :a\n" }, { "a.rb" => v5_z }]
+        shrink = [{ "a.rb" => v5_a, "m.rb" => "v(1)\n", "b.rb" => "puts 'hit' if v(5) == :a\n" },
+                  { "a.rb" => "def v(k) = k == 5 ? :a : (:b)\n", "m.rb" => "v(1)\n\n" }, { "a.rb" => v5_z }]
+        [grow, shrink].each do |steps|
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, steps, workers: 2) { |s| expect(summary_of(s, dir)).to be_nil }
+            expect(basenames(rechecks.last.affected)).to include("b.rb")
+          end
+        end
+      end
+
+      # A sequential baseline's summary must not outlive a pooled recheck that analysed one of the def's readers:
+      # that run observed a key this process cannot list.
+      it "drops a summary when a pooled recheck analyses a reader of its def" do
+        Dir.mktmpdir do |dir|
+          session = session_for(configuration(dir))
+          rechecks = replay(dir, [{ "a.rb" => v5_a, "m.rb" => "v(1)\n" },
+                                  { "b.rb" => "puts 'hit' if v(5) == :a\n" },
+                                  { "a.rb" => v5_z }], session: session, recheck_workers: 2)
+          expect(basenames(rechecks.last.affected)).to include("b.rb")
         end
       end
     end

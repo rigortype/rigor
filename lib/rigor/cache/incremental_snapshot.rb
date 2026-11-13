@@ -208,7 +208,11 @@ module Rigor
       # 49: issue #3116 — a `return_summaries` entry for a def observed under more keys than the per-def cap is
       # `{ keys: [], returns: [], effects:, overflow: true }`. A pre-49 summary holds the first eight keys of such a
       # def with no marker, so a warm run would skip the reader of a key it never recorded.
-      SCHEMA = 49
+      # 50: issue #3160 — a `return_summaries` entry holds every key under which a current reader observes the def,
+      # merged across the runs that observed them, and a def whose keys cannot all be listed has no entry (the
+      # `overflow` form of 49 is gone). A pre-50 summary holds only what the last run that analysed the def's file
+      # saw, so a warm run would skip a reader added, or left out of that run, since.
+      SCHEMA = 50
 
       # The persisted per-file state.
       # `cache` maps an analyzed file to its diagnostics.
@@ -243,9 +247,9 @@ module Rigor
       # #1237: `[receiver, arg_types, true]` for a key a splat call observed)
       # (Marshal-clean type tuples), their `describe(:short)` return descriptors, and the content-mutated
       # parameter positions. A recheck re-evaluates a declaration-stable changed callee at these keys and,
-      # when every return + the effects are unchanged, skips its symbol dependents. Issue #3116 — a def observed
-      # under more keys than the per-def cap carries `overflow: true` and no key; the recheck never skips its
-      # dependents.
+      # when every return + the effects are unchanged, skips its symbol dependents. Issues #3116 / #3160 — an entry
+      # holds every key under which a current symbol dependent observes the def; a def whose keys cannot all be
+      # listed (more than the per-def cap, among others) has no entry, and the recheck never skips its dependents.
       # ADR-67 WD6c lift:
       # `param_table` is the `parameter_inference:` seed table (`[class, method, kind] => {param => Type}`)
       # the run that wrote the snapshot seeded its analysis from — `{}` when the gate is off. A recheck

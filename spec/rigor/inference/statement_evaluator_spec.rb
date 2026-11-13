@@ -1271,6 +1271,37 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       expect(post.local(:h).members).to include(a_kind_of(Rigor::Type::Nominal))
       expect(post.local(:g)).to be_a(Rigor::Type::HashShape)
     end
+
+    # Issue #1217 — a bare `*a` index is `*a = element`; left unbound, a read after the loop folded on `a = 0`.
+    it "for-loop with a bare splat local index binds the element's rest" do
+      _, post = evaluate("a = 0\nfor *a in [[1, 2]]; end")
+      _, control = evaluate("a = 0\nfor b in [[1, 2]]; end")
+      expect(post.local(:a).members).to include(
+        Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.constant_of(1), Rigor::Type::Combinator.constant_of(2))
+      )
+      expect(control.local(:a)).to eq(Rigor::Type::Combinator.constant_of(0))
+    end
+
+    it "for-loop with a bare splat ivar index binds the element's rest" do
+      _, post = evaluate("@a = 0\nfor *@a in [[1, 2]]; end")
+      _, control = evaluate("@a = 0\nfor b in [[1, 2]]; end")
+      expect(post.ivar(:@a)).not_to eq(Rigor::Type::Combinator.constant_of(0))
+      expect(control.ivar(:@a)).to eq(Rigor::Type::Combinator.constant_of(0))
+    end
+
+    it "for-loop with an ivar index binds the ivar" do
+      _, post = evaluate("@x = 0\nfor @x in [1, 2]; end")
+      _, control = evaluate("@x = 0\nfor y in [1, 2]; end")
+      expect(post.ivar(:@x)).not_to eq(Rigor::Type::Combinator.constant_of(0))
+      expect(control.ivar(:@x)).to eq(Rigor::Type::Combinator.constant_of(0))
+    end
+
+    it "for-loop with a class-variable index binds the class variable" do
+      _, post = evaluate("@@x = 0\nfor @@x in [1, 2]; end")
+      _, control = evaluate("@@x = 0\nfor y in [1, 2]; end")
+      expect(post.cvar(:@@x)).not_to eq(Rigor::Type::Combinator.constant_of(0))
+      expect(control.cvar(:@@x)).to eq(Rigor::Type::Combinator.constant_of(0))
+    end
   end
 
   describe "and/or short-circuit" do
@@ -2911,6 +2942,19 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
   end
 
   describe "rescue variable binding" do
+    # Issue #1217 — each non-local reference kind is written by the clause; the post-join keeps the pre-`begin` value
+    # beside the exception, so a later `if @err` does not fold on the `nil`.
+    {
+      "an ivar" => ["@err", :ivar], "a class variable" => ["@@err", :cvar], "a global" => ["$err", :global]
+    }.each do |label, (name, reader)|
+      it "binds #{label} reference to the exception" do
+        _, post = evaluate("#{name} = nil\nbegin\n  risky\nrescue TypeError => #{name}\nend")
+        _, control = evaluate("#{name} = nil\nbegin\n  risky\nrescue TypeError => e\nend")
+        expect(post.public_send(reader, name.to_sym).members).to include(Rigor::Type::Combinator.nominal_of("TypeError"))
+        expect(control.public_send(reader, name.to_sym)).to eq(Rigor::Type::Combinator.constant_of(nil))
+      end
+    end
+
     # The rescue variable is only bound inside the rescue branch; the primary body's scope does not include it. After
     # the begin/rescue join the post-scope nil-injects the variable, so the observable type is `ExcType | nil`. These
     # tests verify the exception-type component.

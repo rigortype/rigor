@@ -1505,6 +1505,7 @@ module Rigor
         # array/tuple-shaped, else the unanalyzable floor (the same `Dynamic[top]` a single write to an unknown RHS
         # records — an unanalyzable multi-write means unknown, not nil).
         record_multi_write_ivars(node, scope, class_name, accumulator)
+        record_binding_target_ivars(node, class_name, accumulator)
 
         record_ivar_mutator_call(node, class_name, mutated_ivars) if mutated_ivars
 
@@ -2352,6 +2353,48 @@ module Rigor
         end
       end
 
+      # Issue #1217 — `rescue => @err` and `for @x in xs` (with `for *@x in`, `for @x, y in`) write the ivar through a
+      # target node, not an `InstanceVariableWriteNode`, so the census missed them: a sibling method read the
+      # constructor's `@err = nil` alone and folded `if @err` always-falsey. Each such target contributes the
+      # `Dynamic[top]` floor — the census does not type the exception or the element, and an unknown value is
+      # honest where a missing one is not.
+      def record_binding_target_ivars(node, class_name, accumulator)
+        BindingTargets.names(node, Prism::InstanceVariableTargetNode).each do |name|
+          accumulate_ivar_type(accumulator, class_name, name, Type::Combinator.untyped)
+        end
+      end
+
+      # The names a `rescue =>` reference or a `for` index binds through a target of `target_class`, looking through
+      # a splat and a multi-target index.
+      module BindingTargets
+        EMPTY = [].freeze
+        private_constant :EMPTY
+
+        module_function
+
+        def names(node, target_class)
+          root =
+            case node
+            when Prism::RescueNode then node.reference
+            when Prism::ForNode then node.index
+            end
+          return EMPTY if root.nil?
+
+          collect(root, target_class, [])
+        end
+
+        def collect(target, target_class, acc)
+          case target
+          when target_class then acc << target.name
+          when Prism::SplatNode then collect(target.expression, target_class, acc) if target.expression
+          when Prism::MultiTargetNode
+            [*target.lefts, target.rest, *target.rights].compact.each { |t| collect(t, target_class, acc) }
+          end
+          acc
+        end
+      end
+      private_constant :BindingTargets
+
       def falsey_constant?(type)
         type.is_a?(Type::Constant) && (type.value.nil? || type.value == false)
       end
@@ -2510,6 +2553,12 @@ module Rigor
         return unless node.is_a?(Prism::Node)
 
         record_cvar_write(node, scope, class_name, accumulator) if node.is_a?(Prism::ClassVariableWriteNode)
+        # Issue #1217 — `rescue => @@c` / `for @@c in xs` write through a target node; the floor, as for an ivar.
+        BindingTargets.names(node, Prism::ClassVariableTargetNode).each do |name|
+          entries = (accumulator[class_name] ||= {})
+          existing = entries[name]
+          entries[name] = existing ? Type::Combinator.union(existing, Type::Combinator.untyped) : Type::Combinator.untyped
+        end
         return if IVAR_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
 
         node.rigor_each_child { |c| gather_cvar_writes(c, scope, class_name, accumulator) }

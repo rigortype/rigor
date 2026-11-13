@@ -2530,6 +2530,36 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       end
     end
 
+    # Issue #1217 — `rescue => @err` and `for @x in` write the ivar through a target node; without the census entry a
+    # sibling method read only `@err = nil` and folded `if @err` always-falsey.
+    describe "rescue-reference and for-index ivar targets" do
+      {
+        "a rescue reference" => "begin; risky; rescue => @v; end",
+        "a for index" => "for @v in [1, 2]; end",
+        "a splat for index" => "for *@v in [[1, 2]]; end",
+        "a multi-target for index" => "for @v, w in [[1, 2]]; end"
+      }.each do |label, write|
+        it "records #{label} as the unknown floor beside the constructor's nil" do
+          program = parse(<<~RUBY)
+            class F
+              def initialize
+                @v = nil
+                @c = nil
+              end
+
+              def run
+                #{write}
+                @c = nil
+              end
+            end
+          RUBY
+          ivars = described_class.index(program, default_scope: default_scope)[program].class_ivars_for("F")
+          expect(ivars[:@v]).not_to eq(Rigor::Type::Combinator.constant_of(nil))
+          expect(ivars[:@c]).to eq(Rigor::Type::Combinator.constant_of(nil))
+        end
+      end
+    end
+
     describe "parallel / multiple-assignment ivar targets (N1)" do
       it "records an array-literal RHS ivar slot at its tuple position" do
         program = parse(<<~RUBY)
@@ -3350,6 +3380,25 @@ Unrelated
       RUBY
       expect(defs.fetch("S::X", {})).to have_key(:sm)
       expect(defs.fetch("X", {})).to be_empty
+    end
+
+    # Issue #1217 — the cvar twin of the ivar census entry for a target-node write.
+    it "records a rescue-reference or for-index `@@x` as the unknown floor beside its nil write" do
+      cvars = described_class.build_class_cvar_index(parse(<<~RUBY), Rigor::Scope.empty)
+        class C
+          def a = (@@r = nil)
+          def b = (@@f = nil)
+          def c = (@@n = nil)
+          def d
+            begin; risky; rescue => @@r; end
+            for @@f in [1, 2]; end
+          end
+        end
+      RUBY
+      entries = cvars.fetch("C")
+      expect(entries[:@@r]).not_to eq(Rigor::Type::Combinator.constant_of(nil))
+      expect(entries[:@@f]).not_to eq(Rigor::Type::Combinator.constant_of(nil))
+      expect(entries[:@@n]).to eq(Rigor::Type::Combinator.constant_of(nil))
     end
 
     it "keeps `@@x` inside a `def` in a meta-new or eval block on the lexical cref" do

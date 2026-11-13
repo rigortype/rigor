@@ -2777,7 +2777,8 @@ end
 
 # Any other pattern vouches for no group, so each reads `String?` even where Ruby always sets it: the group walk
 # misreads these forms (#2472, #1476). A nested class, a named group, a lookaround, a quantifier on a quantifier
-# (`(a)+{0}`, `(a)+??` and `(a){1}?` match without the group), the `x` flag, an interpolation, a String, and a variable.
+# (`(a)+{0}`, `(a)+??` and `(a){1}?` match without the group), the `x` flag (`(a) ?` is an optional group there), an
+# interpolation, a String, and a variable.
 def own_match_declined(str, re)
   return unless str =~ /(\d+)/
 
@@ -2788,6 +2789,7 @@ def own_match_declined(str, re)
   str.sub(/(a)+??/) { assert_type("String?", $1); "" }
   str.sub(/(a){1}?/) { assert_type("String?", $1); "" }
   str.sub(/(a) # (b)/x) { assert_type("String?", $1); "" }
+  str.sub(/(a) ?/x) { assert_type("String?", $1); "" }
   str.sub(/(a)#{str}/) { assert_type("String?", $1); "" }
   str.sub("(a)") { assert_type("String?", $1); assert_type("MatchData", $~); "" }
   str.sub(re) { assert_type("String?", $1); "" }
@@ -2805,6 +2807,14 @@ def own_match_grep(str, items)
     assert_type("MatchData", $~)
     [$1, $2]
   end
+end
+
+# An interpolated literal is a Regexp too, and vouches for no group (Ruby: `own_match_grep_interpolated("a1", ["ac"])`
+# returns `[nil]`).
+def own_match_grep_interpolated(str, items)
+  return unless str =~ /(\d+)/
+
+  items.grep(/(a)?#{str}?c/) { assert_type("String?", $1); assert_type("MatchData", $~); $1 }
 end
 
 def own_match_grep_v(str, items)

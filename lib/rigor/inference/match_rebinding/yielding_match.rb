@@ -62,10 +62,9 @@ module Rigor
           Narrowing.yielded_match_scope(scope, pattern)
         end
 
-        # The call's first argument when it is its only one; nil otherwise.
+        # The call's first argument, which each of these methods takes as its pattern; nil without one.
         def pattern_argument(call_node)
-          arguments = call_node.arguments&.arguments
-          arguments.first if arguments && arguments.size == 1
+          call_node.arguments&.arguments&.first
         end
 
         def own_block_call?(block_node, call_node)

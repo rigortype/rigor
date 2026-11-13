@@ -31,6 +31,12 @@ module Rigor
     # pure-value operand never reached, so a chained `b.push(2).size`, an argument `puts(b.push(2))` or
     # `d.map!.with_index { … }` left `b` / `d` on the literal their assignment wrote.
     #
+    # Issue #3163 — a `def` inside a block or lambda of the expression is looked into for one thing: an in-place
+    # mutation of an instance variable, class variable or global ({.method_mutation?}). The block may call the
+    # method it defines, and the evaluator floors such a variable after the block
+    # (`StatementEvaluator#floor_block_defined_method_mutations`), which it reaches only for an operand this module
+    # answers for: `puts([1].each { def h; $buf << 1; end; h })`.
+    #
     # Short-circuiting and allocation-free outside a mutator-named call: the evaluator asks it of every call's
     # operands, and asks it again of each operand it threads. A found effect stops the recursion without a
     # `return` out of the child block, which would allocate once per frame it unwinds and make a deep literal
@@ -58,12 +64,15 @@ module Rigor
       ].freeze
       JUMP_NODES = Set[Prism::NextNode, Prism::BreakNode].freeze
       SCOPE_NODES = Set[Prism::BlockNode, Prism::LambdaNode].freeze
+      NON_LOCAL_READ_NODES = Set[
+        Prism::InstanceVariableReadNode, Prism::ClassVariableReadNode, Prism::GlobalVariableReadNode
+      ].freeze
       OPAQUE_NODES = Set[
         Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode, Prism::DefinedNode
       ].freeze
       private_constant :LOCAL_WRITE_NODES, :OUTLIVING_WRITE_NODES, :INSTANCE_WRITE_NODES, :GLOBAL_WRITE_NODES,
                        :COMPOUND_LOCAL_WRITES,
-                       :COMPOUND_INSTANCE_WRITES, :JUMP_NODES, :SCOPE_NODES, :OPAQUE_NODES
+                       :COMPOUND_INSTANCE_WRITES, :JUMP_NODES, :SCOPE_NODES, :NON_LOCAL_READ_NODES, :OPAQUE_NODES
 
       module_function
 
@@ -79,7 +88,7 @@ module Rigor
         return true if OUTLIVING_WRITE_NODES.include?(klass)
         return true if jumps && JUMP_NODES.include?(klass)
         return true if klass == Prism::CallNode && outliving_mutation?(node, nesting)
-        return false if OPAQUE_NODES.include?(klass)
+        return block_defined_method_mutation?(node, nesting) if OPAQUE_NODES.include?(klass)
 
         nesting += 1 if SCOPE_NODES.include?(klass)
         jumps &&= !JumpTargets.boundary?(node)
@@ -88,6 +97,38 @@ module Rigor
         found
       end
       private_class_method :effect?
+
+      # Issue #3163 — the one effect an opaque node has: a `def` under a block or lambda whose body mutates a
+      # non-local in place ({.method_mutation?}).
+      def block_defined_method_mutation?(node, nesting)
+        node.instance_of?(Prism::DefNode) && nesting.positive? && method_mutation?(node)
+      end
+      private_class_method :block_defined_method_mutation?
+
+      # True when `node`, a `def` or anything in its body, holds a call or index write
+      # that mutates an instance variable, class variable or global in place: a {MutationWidening::SHAPE_MUTATORS}
+      # name, or an index `||=` / `&&=` / `op=`, on a read of one. A class or module body inside the method is not
+      # looked into; a `def` nested in it is.
+      def method_mutation?(node)
+        klass = node.class
+        if klass == Prism::CallNode
+          return true if MutationWidening::SHAPE_MUTATORS.include?(node.name) && non_local_read?(node.receiver)
+        elsif OUTLIVING_WRITE_NODES.include?(klass)
+          return true if node.respond_to?(:receiver) && non_local_read?(node.receiver)
+        elsif klass != Prism::DefNode && OPAQUE_NODES.include?(klass)
+          return false
+        end
+
+        found = false
+        node.rigor_each_child { |child| found ||= method_mutation?(child) }
+        found
+      end
+      private_class_method :method_mutation?
+
+      def non_local_read?(node)
+        NON_LOCAL_READ_NODES.include?(node.class)
+      end
+      private_class_method :non_local_read?
 
       # True when `node` is a call the straight-line widening would answer for a variable that outlives the
       # expression: a {MutationWidening::SHAPE_MUTATORS} name on a receiver whose {ReceiverAlias.mutated_reads},

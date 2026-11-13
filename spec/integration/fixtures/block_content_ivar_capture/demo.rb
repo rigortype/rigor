@@ -183,15 +183,17 @@ class IvarContentCapture
     puts "one" if @rw.first == "1"
   end
 
-  # --- Paired controls: an instance variable of another object, under a
-  # block nested in the seam's block or in a method the block defines,
-  # keeps this object's binding. ---
+  # --- Paired control: an instance variable of another object, under a
+  # block nested in the seam's block, keeps this object's binding. ---
   def nested_foreign
     @nf = [0]
     [1].each { String.instance_eval { @nf << 1 if @nf } }
     assert_type("Array[0]", @nf)
   end
 
+  # A method the block defines may run during it, so the instance
+  # variable it mutates floors although nothing here calls it (issue
+  # #3163; the `block_defined_method_mutation` fixture has the rest).
   def nested_def
     @nd = [0]
     [1].each do
@@ -199,7 +201,7 @@ class IvarContentCapture
         @nd << 1
       end
     end
-    assert_type("Array[0]", @nd)
+    assert_type("Array[Dynamic[top]]", @nd)
   end
 
 

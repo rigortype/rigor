@@ -18,6 +18,6 @@ assertions:
   '15': 3 | Array[Dynamic[top]]
   '16': Array[Dynamic[top]]
   '17': Array[0]
-  '18': Array[0]
+  '18': Array[Dynamic[top]]
   '19': Array[5]
   '20': Array[Dynamic[top]]

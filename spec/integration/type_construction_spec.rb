@@ -3414,6 +3414,24 @@ RSpec.describe "Rigor type construction (integration)" do
       end
     end
 
+    # The content seams leave out a `def` body the block defines, which runs only when called; the block may
+    # call it, and its in-place mutation of an instance variable, class variable or global then runs during the
+    # block (issue #3163).
+    describe "fixtures/block_defined_method_mutation/ — a method the block defines mutates a non-local" do
+      let(:harness) { harness_for("block_defined_method_mutation") }
+
+      it "produces no assert_type mismatches" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+
+      it "reports nothing but the genuine fold" do
+        reported = harness.diagnostics.reject { |d| d.severity == :info || d.rule.to_s == "call.unresolved-toplevel" }
+        expect(reported.map { |d| [d.line, d.rule.to_s] })
+          .to eq(marked_lines(harness, "# GENUINE-FALSEY").map { |line| [line, "flow.always-truthy-condition"] })
+      end
+    end
+
     # The slice-A rebind fixpoint re-ran the body with only the REBOUND locals moving, so a captured
     # collection the body mutates in place re-entered every pass at its pre-call contents, and a
     # rebind read from it (`last = a.last; a << x`) closed over the first iteration's answer.

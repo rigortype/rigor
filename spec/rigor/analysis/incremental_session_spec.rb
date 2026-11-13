@@ -2963,6 +2963,30 @@ end
         end
       end
 
+      # The added reader alone observes the def under more keys than the cap, so this run lists none of them and
+      # the keys the summary already held prove nothing about `big.rb`.
+      it "drops the summary when an added reader's keys cannot be listed" do
+        Dir.mktmpdir do |dir|
+          big = "#{(10..17).map { |i| "v(#{i})\n" }.join}puts 'hit' if v(99) == :a\n"
+          rechecks = replay(dir, [{ "a.rb" => v99_a, "m.rb" => "v(1)\n" }, { "big.rb" => big }, { "a.rb" => v99_z }])
+          expect(basenames(rechecks.last.affected)).to include("big.rb")
+        end
+      end
+
+      it "replaces the keys when every reader was re-analysed, and starts a summary with the first reader" do
+        Dir.mktmpdir do |dir|
+          session = session_for(configuration(dir))
+          keys = []
+          rechecks = replay(dir, [{ "a.rb" => v5_a },
+                                  { "b.rb" => "puts 'hit' if v(2) == :a\n" },
+                                  { "b.rb" => "puts 'hit' if v(5) == :a\n" },
+                                  { "a.rb" => "def v(k) = k == 5 ? :a : (:b)\n" }],
+                            session: session) { |s| keys << key_args(summary_of(s, dir) || { keys: [] }) }
+          expect(keys).to eq([[["2"]], [["5"]], [["5"]]])
+          expect(basenames(rechecks.last.affected)).to eq(["a.rb"])
+        end
+      end
+
       it "still skips every reader, edit after edit, when no return moves and the readers are unchanged" do
         Dir.mktmpdir do |dir|
           session = session_for(configuration(dir))

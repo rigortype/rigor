@@ -1573,12 +1573,11 @@ Two persisted summaries prove "nothing changed":
   its symbol dependents. Fewer keys are not the conservative direction: a
   missing key skips the reader that observes the def under it. A recheck
   therefore updates each summary from what the files it analysed observed:
-  - neither the def's file nor any symbol dependent was analysed: unchanged;
   - every symbol dependent was analysed: replaced by this run's keys (an
     unchanged file's def is harvested through the node its handle resolved
     to), and removed when no analysed file observed the def;
-  - only some were analysed: the stored keys are kept and this run's are
-    added. The kept returns are current because a dependent stays out of its
+  - otherwise: the stored keys are kept and this run's are added (none, when
+    no dependent was analysed). The kept returns are current because a dependent stays out of its
     callee's closure only when the gate proved every stored return unmoved or
     the def's text did not change. With no stored summary there is nothing to
     add to, and the def stays without one;

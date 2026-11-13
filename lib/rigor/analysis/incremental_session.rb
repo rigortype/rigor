@@ -1263,16 +1263,16 @@ module Rigor
       #
       # A run's harvest ({Runner#return_summaries}) is what the files it analysed observed, so per pair:
       #
-      # - neither the def's file nor any of its dependents was analysed: nothing was observed anew, keep it;
       # - the def has no dependent left (which is also where a def that left its file ends up): delete;
       # - the run cannot list the keys it observed (a pool run, a def past the per-def or total cap, a call the
       #   memo refused to store): delete;
       # - every dependent was analysed: the harvest is the whole key set, and replaces the summary (deleting it
       #   when no analysed file observed the def);
-      # - only some dependents were analysed: the summary keeps the keys of the dependents that were not, and
-      #   gains this run's ({#merged_return_summary}). The kept returns are current: a dependent stays out of the
-      #   closure of its callee's edit only when the gate proved the returns unmoved at every kept key, or when
-      #   the def's own text did not change. With no summary to keep, the other dependents' keys are unknown.
+      # - otherwise the summary keeps the keys of the dependents that were not analysed, and gains this run's
+      #   ({#merged_return_summary}), which are none when no dependent was analysed. The kept returns are current:
+      #   a dependent stays out of the closure of its callee's edit only when the gate proved the returns unmoved
+      #   at every kept key, or when the def's own text did not change. With no summary to keep, the other
+      #   dependents' keys are unknown.
       #
       # Fewer keys are never the conservative direction: each key protects the readers that observe the def under
       # it, so a summary missing one skips a reader whose answer the edit moved.
@@ -1281,8 +1281,6 @@ module Rigor
         analyzed = analyze_set.to_set
         (@return_summaries.keys | (harvest || {}).keys).each do |pair|
           dependents = @symbol_dependents[pair] || Set.new
-          next if !analyzed.include?(pair.first) && !dependents.empty? && !dependents.intersect?(analyzed)
-
           summary = refreshed_return_summary(pair, harvest, dependents.subset?(analyzed)) unless dependents.empty?
           summary.nil? ? @return_summaries.delete(pair) : @return_summaries[pair] = summary
         end

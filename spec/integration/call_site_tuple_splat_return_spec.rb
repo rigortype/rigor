@@ -288,8 +288,8 @@ RSpec.describe "a call-site literal splat or empty double splat binds as Ruby pa
       expect(mismatches("Row.new.count(1, **{ k: 2 })", "2")).to eq([])
     end
 
-    it "a keyword hash with no double splat is one argument even when it is not a shape" do
-      expect(mismatches('Row.new.count(1, "a" => 1)', "2")).to eq([])
+    it "a keyword hash with no double splat is one argument even when it is not typed as a shape" do
+      expect(mismatches("Row.new.count(1, x.first => 1)", "2")).to eq([])
     end
 
     it "literal keywords still bind by name" do

@@ -1,2 +1,3 @@
 - **[engine]** A call passing an empty hash as a double splat (`r.count(**h)` with `h = {}`) no longer types its return from a user method body that bound the splat as one positional `{}`, which reported `flow.always-truthy-condition` on correct code. ([#3190](https://github.com/rigortype/rigor/pull/3190))
-  - A call whose positional splats are all Tuples with no `Hash` element (`first(*[1, 2])`) now types its return as the equivalent positional call, instead of with every positional parameter `untyped`.
+  - A literal `**{}` passes no argument; any other empty double splat is bound with every positional parameter `untyped`, since the hash may have been filled since it was read.
+  - A call whose positional splats are all array literals with no `Hash` element (`first(*[1, 2])`) now types its return as the equivalent positional call, instead of with every positional parameter `untyped`.

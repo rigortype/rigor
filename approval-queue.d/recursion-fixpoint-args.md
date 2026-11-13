@@ -45,7 +45,8 @@ Ruby never returns from that call). It is sound because the
 summary is the return of the frame's body under the frame's bindings, which is the re-entry's
 return exactly when those bindings include the re-entry's; it is bounded because the switch to
 the floor happens once per fixpoint. A value-keyed re-entry and the re-entry's block are held
-against the frame like any argument (review round 1). It follows #3158 in what it gives up: that PR binds
+against the frame like any argument (review round 1); `&b` is the frame's block only while the
+body neither assigns `b` nor declares it in a block of its own (round 2). It follows #3158 in what it gives up: that PR binds
 `Dynamic[top]` where the recursion changes a slot, and this one answers `Dynamic[top]` where it
 does.
 
@@ -59,10 +60,11 @@ under a constant-argument unroll owns its own summary, which keeps #3158's
 No row of `recursive_keyword_parity.rb` or of the ADR-55 fixtures moved, and no existing spec
 was edited.
 
-### Cost, pending the maintainer
+### Cost, accepted by the maintainer on 2026-11-13
 
-`tool/engine_alloc_ab.rb` over `lib` against the merge base `a1bb73d1c`: 84,831,673 to 85,816,402
-allocations, +1.16%, above the 1.0% per-PR band (`pr_allocations_pct`). The diagnostics over
+`tool/engine_alloc_ab.rb` over `lib` against the merge base `a1bb73d1c`, on the final head:
+84,831,276 to 85,858,726 allocations, +1.21%, above the 1.0% per-PR band (`pr_allocations_pct`).
+The maintainer accepted the rise at +1.16%, measured before review round 2's block-parameter scan. The diagnostics over
 `lib` are identical. The rise is the discarded evaluations: a recursion with an uncovered re-entry
 types its body once reading the summary, throws that evaluation away and types it again on the
 floor, and a first unpinned frame under an unroll runs a fixpoint where it ran one evaluation.
@@ -73,7 +75,7 @@ never compute `bot`, so `spin` (no base case) would answer `Dynamic[top]` instea
 the bodies #3158's widened retry recovers (`keyword(1, n: some_int)`) would bypass the retry and
 answer `Dynamic[top]` instead of `Integer`.
 
-Accepting the rise above the band is the maintainer's call and has not been made.
+The maintainer accepted the rise above the band on 2026-11-13.
 
 The floor also gives up true positives the wrong answer happened to report:
 

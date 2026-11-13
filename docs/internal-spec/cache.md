@@ -1614,7 +1614,12 @@ Two persisted summaries prove "nothing changed":
   registration came through. The gate therefore MUST NOT pass a pair whose
   probe registered any such row, nor a pair any of whose symbol dependents
   holds one ([#3187](https://github.com/rigortype/rigor/issues/3187)); its
-  dependents are re-analysed and settle their rows afresh.
+  dependents are re-analysed and settle their rows afresh. This is broad: a
+  plugin that registers a standing row from every file (rigor-rails-i18n's
+  `emit_once(:view_diagnostics, …)`) turns the gate off for every pair that
+  has a reader. That costs re-analysis, never an answer; narrowing it needs
+  per-row provenance in the ledger
+  ([#3201](https://github.com/rigortype/rigor/issues/3201)).
 
   A reader consumes one surface of a def it calls besides the return and
   the effects: `flow.always-truthy-condition` withholds on a predicate that

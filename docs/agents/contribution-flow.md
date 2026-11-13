@@ -291,11 +291,13 @@ No entry is needed for a decision that only tightens (a residue pin moving down,
 checks more) or that writes down an outcome a `ready-for-agent` issue already stated.
 
 **A decision that landed when it should have waited** is repaired in the record rather than by a
-revert, where the record is all that is wrong, and the maintainer decides it at ratification. The
-rule, its bounds — nothing already published or otherwise outside this repository's history — and why
-the criterion for waiting up front is unchanged are the 2026-11-14 amendment to
-[ADR-123](../adr/123-merge-queue-and-post-hoc-approval.md). Landing one deliberately is not covered
-by it: a serious decision waits, as above, and step 3's unattended loop parks it.
+revert in two cases and no others: a non-serious decision with no entry, or a decision whose entry
+named a precedent that was not yet ratified. The change stays, its entry states what the process
+missed and what was verified, and the maintainer decides it at ratification. Nothing already published
+or otherwise outside this repository's history is held that way, and landing one deliberately is not
+covered at all: a serious decision waits, as above, and step 3's unattended loop parks it. The rule,
+its bounds and why the criterion for waiting up front is unchanged are the 2026-11-14 amendment to
+[ADR-123](../adr/123-merge-queue-and-post-hoc-approval.md).
 
 ## Release Cadence
 

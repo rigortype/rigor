@@ -120,10 +120,13 @@ followed, and how to undo it. Serious decisions still wait for the maintainer be
 to users; everything else is reversible until a release ships it.*
 
 *Amended 2026-11-14 (maintainer's decision).* A decision that landed when it should have waited is
-repaired in the record, not by a revert, **where the record is all that is wrong**: a non-serious
-decision with no entry, or one whose entry named a precedent that was not yet ratified. The change
-stays, its entry stays in the queue stating what the process missed and what was verified, and the
-maintainer decides it at ratification like any other. The criterion above is unchanged and decides
+repaired in the record, not by a revert, **where the record is all that is wrong**, which is these two
+cases and no others: a non-serious decision with no entry, or a decision whose entry named a precedent
+that was not yet ratified. The second is serious by the list — a gate row without a precedent is — and
+is held anyway, because what was skipped is the asking and undoing the change is still neither costly
+nor visible. The change stays, its entry stays in the queue, or comes back to it where a ratification
+had already removed it, stating what the process missed and what was verified, and the maintainer
+decides it at ratification like any other. The criterion above is unchanged and decides
 this case too — holding is available only while undoing is still neither costly nor visible, which is
 what makes the defect a record and not a fact about the world. So it is **not** available for anything
 already outside this repository's history: a published gem or tag, a changed ruleset, required check,

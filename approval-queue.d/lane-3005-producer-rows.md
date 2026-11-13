@@ -50,14 +50,14 @@ to spell "the precedent was not yet ratified" in the field itself. This note is 
 What is being asked is therefore the row on its merits, not the chain: whether this classification is
 right, independently of the row it followed.
 
-Held rather than reverted, under ADR-123's 2026-11-14 amendment: the defect is in the record, and
-the maintainer decides the rows themselves here. What was verified, and when: #3230's review read
-five of that batch's sixteen entries' classifications against the code, not these; before this entry
-was put to the maintainer on 2026-11-14 both of its rows were read against the code —
+The entry was restored rather than the rows reverted, under [ADR-123's 2026-11-14 amendment](../docs/adr/123-merge-queue-and-post-hoc-approval.md). What was read, and by whom: both
+rows were read against the code on 2026-11-14 by the session that restored this entry —
 `ScopeIndexer#record_hook_block_singleton_defs`, which files declarations and is recorded as a
 producer with its reason, and `SyntheticMethodScanner#concern_extend_arguments`, which reads one
 statement's shape and returns module names or nil. The grandfathered row that went with them was
-`concern_module_body?`, and the pin moved 367 → 366, which is the tightening direction.
+`concern_module_body?`, and the pin moved 367 → 366 in `c5c93faaa`, which is the tightening
+direction. #3230's review reported reading five of that batch's sixteen entries' classifications and
+named none of them, so nothing here rests on it.
 
 ## To undo
 

@@ -44,13 +44,14 @@ to spell "the precedent was not yet ratified" in the field itself. This note is 
 What is being asked is therefore the row on its merits, not the chain: whether this classification is
 right, independently of the row it followed.
 
-Held rather than reverted, under ADR-123's 2026-11-14 amendment: the defect is in the record, and
-the maintainer decides the rows themselves here. What was verified, and when: of the four rows, two
-were read against the code before this entry was put to the maintainer on 2026-11-14 —
-`ScopeIndexer#taint_computed_mixin_send` and `#taint_computed_hook_send`, which take the owner and the
-sides from their caller and only taint, the same shape as the `#taint_unrecorded_mixin` row ratified
-in #3230. The other two rows were not re-read. #3230's review read five of that batch's classifications
-against the code, not these.
+The entry was restored rather than the rows reverted, under [ADR-123's 2026-11-14 amendment](../docs/adr/123-merge-queue-and-post-hoc-approval.md). What was read, and by whom: two
+of the four rows were read against the code on 2026-11-14 by the session that restored this entry.
+`ScopeIndexer#taint_computed_hook_send` takes the owner and the sides from its caller and only
+taints; `#taint_computed_mixin_send` takes the owner from its caller and derives the sides itself
+(`in_singleton ? [side, :include] : [side]`, the instance side a `class << self` body keeps), which
+is what its row's reason says. Both match the shape of the `#taint_unrecorded_mixin` row ratified in
+#3230. The other two rows were not read. #3230's review reported reading five of that batch's sixteen
+entries' classifications and named none of them, so nothing here rests on it.
 
 ## To undo
 

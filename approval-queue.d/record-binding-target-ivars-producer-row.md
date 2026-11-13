@@ -37,11 +37,13 @@ to spell "the precedent was not yet ratified" in the field itself. This note is 
 What is being asked is therefore the row on its merits, not the chain: whether this classification is
 right, independently of the row it followed.
 
-Held rather than reverted, under ADR-123's 2026-11-14 amendment: the defect is in the record, and
-the maintainer decides the row itself here. What was verified, and when: #3230's review read this
-row's subject against the code — `ScopeIndexer#record_binding_target_ivars`, which calls
-`accumulate_ivar_type` per name and so writes the census — and found the producer classification and
-the row's stated reason correct.
+The entry was restored rather than the row reverted, under [ADR-123's 2026-11-14 amendment](../docs/adr/123-merge-queue-and-post-hoc-approval.md). What was read, and by whom: the
+row's subject was read against the code on 2026-11-14 by the session that restored this entry —
+`ScopeIndexer#record_binding_target_ivars` calls `accumulate_ivar_type` once per name, so it writes
+the census and is recorded as a producer, and the row's stated reason (a `rescue` reference or `for`
+index, typed by the clause's exception or the `Dynamic[top]` floor) matches the body. #3230's review
+reported reading five of that batch's sixteen entries' classifications and named none of them, so
+nothing here rests on it.
 
 ## To undo
 

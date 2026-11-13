@@ -2521,7 +2521,7 @@ module Rigor
         return nil unless literal.is_a?(Prism::ArrayNode) && literal.elements.none?(Prism::SplatNode)
 
         tuple = type_of(literal)
-        return nil unless tuple.is_a?(Type::Tuple) && tuple.elements.size == literal.elements.size
+        return nil unless tuple.is_a?(Type::Tuple)
         return nil unless tuple.elements.all? { |element| provably_not_hash?(element) }
 
         tuple.elements

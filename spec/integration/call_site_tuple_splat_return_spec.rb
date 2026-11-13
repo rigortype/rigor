@@ -137,6 +137,11 @@ RSpec.describe "a call-site literal splat or empty double splat binds as Ruby pa
       expect(mismatches("Row.new.count(*[1, 2], **h)", "non-negative-int")).to eq([])
     end
 
+    it "a literal holding a splat of its own" do
+      body = "t1 = [1]\n[2].each { t1 << _1 }\nassert_type(\"non-negative-int\", Row.new.count(*[*t1]))"
+      expect(mismatches_in(body)).to eq([])
+    end
+
     it "a splat beside a ... forwarding" do
       expect(mismatches("fwd(2, 3)", "non-negative-int")).to eq([])
     end
@@ -206,6 +211,10 @@ RSpec.describe "a call-site literal splat or empty double splat binds as Ruby pa
   end
 
   describe "controls: a non-empty double splat is still one argument" do
+    it "a keyword whose value is an empty literal hash" do
+      expect(mismatches("Row.new.count(k: {})", "1")).to eq([])
+    end
+
     it "a non-empty closed shape into a rest parameter" do
       expect(mismatches("Row.new.count(**{ k: 2 })", "1")).to eq([])
     end

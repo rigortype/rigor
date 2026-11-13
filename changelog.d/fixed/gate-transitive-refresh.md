@@ -1,0 +1,3 @@
+- **[incremental]** `rigor check --incremental` no longer keeps a stale answer for a file that reaches an edited method only through another method whose own edit was skipped as return-preserving. ([#3182](https://github.com/rigortype/rigor/pull/3182))
+  - When such an edit makes the middle method call a new method, or an existing one with other arguments, the files that were not re-analysed now learn that dependency, so a later edit of the callee re-checks them.
+  - Incremental snapshots from earlier versions are rebuilt once (snapshot schema 51).

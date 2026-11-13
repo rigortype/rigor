@@ -1120,7 +1120,7 @@ module Rigor
           # behind `bleeding_edge:` because it is a new discipline (ADR-50 Decision 3), not for lack of
           # confidence.
           evidence_tier: :high,
-          since: "0.5.0"
+          since: "0.4.8"
         ),
 
         CheckRules::RULE_SUPPRESSION_UNKNOWN_MARKER => Entry.new(

@@ -152,15 +152,17 @@ The same failure inside the suite: a green example that would stay green with th
   out without it — two review rounds and a full CI run green on a commit that was red on the author's
   machine. Take corpus *membership* from the index (`TrackedFiles.call`,
   `spec/support/tracked_files.rb`, which carries the `-z` / byte-exact / hook-environment reasoning);
-  content still comes from the working tree, which is the point of a pre-push run.
+  content still comes from the working tree, which is the point of a pre-push run. For a tree that
+  also holds uncommitted drafts worth catching, the next bullet and #3214 hold the open choice
+  between that and merely excluding ignored paths.
 - **Not every local-only failure is that bug**, and most gates here read the working tree on purpose:
   `make lint`, `check`, `coverage` and a dozen `spec/docs/` corpora walk a directory, and
   `bin/verify-changed` checks whitespace on untracked files, so that a new `docs/` page with a dead
   link is caught before the commit rather than after. Two more that answer differently by design and
   are not defects: the `references/ruby` examples in `spec/docs/c_effects_raises_gate_spec.rb`, which
   execute on a clone that has the optional submodule and `skip` in every CI job, and the Nix devShell,
-  which CI never runs at all (it builds the package instead) — § "Validation" answers that one with a
-  local `make verify`. Keep gates only one side can run few, and verify such a gate *executed* before
+  which CI never runs at all (it builds the package instead) — `AGENTS.md` § "Validation" answers
+  that one with a local `make verify`. Keep gates only one side can run few, and verify such a gate *executed* before
   believing it ([`rigor-worktree`](../../.claude/skills/rigor-worktree/SKILL.md)); do not read their
   asymmetry as the bug below.
   The bug is narrower: the same gate, on the same content, executing in both places and returning two

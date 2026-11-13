@@ -55,6 +55,9 @@ Local runs are targeted; the full gate is CI on the pull request.
   it were the bottleneck (five at once took 12–20 minutes each), and CI runs a superset. Run one
   only to reproduce a failure CI does not explain, for a Flake-environment change CI cannot see, or
   where a skill's own gate requires it (release prep, dependency and Ruby bumps).
+- Writing or changing a gate: where its corpus comes from, and which local-only failures are
+  deliberate, is [`measurement.md`](docs/agents/measurement.md) § "Specs and gates that pass without
+  checking".
 - A push straight to `master` that changes only Markdown or other paths the Ruby suite never reads
   (the list is in `ci.yml`'s `changes` job: `.sh`, `editors/`, the playground's frontend, …) skips
   CI: run `make docs-check` first. Such a PR runs it in CI. `make verify-sequential` is for

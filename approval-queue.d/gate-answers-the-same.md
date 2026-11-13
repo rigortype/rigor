@@ -34,7 +34,7 @@ red, should the loop also run a local gate before it lands?
   is not about reading the working tree, which most gates here do and should — `make lint`, `check`,
   `coverage` and a dozen `spec/docs/` corpora walk directories, and `bin/verify-changed` checks
   whitespace on untracked files on purpose — nor about a gate only one side can run, of which this
-  repository keeps three on purpose (below).
+  repository keeps two on purpose (below).
 - **Have the loop compare its own local run against CI** and park on disagreement. Catches the class
   rather than one gate, but it is a second gate's worth of wall-clock on every PR to detect
   something that should not exist, and a disagreement is exactly the case the loop may not judge.
@@ -56,16 +56,23 @@ Where the rule is written changed during review. It opened as two sentences in `
 absolute rule there brands this repository's deliberate exceptions a defect, first the uncommitted
 draft a local run is meant to catch, then the gates only one side executes. The second spelling is
 what moved it: the contract now carries no rule of its own on this, and the whole of it, exceptions
-included, sits in `measurement.md`, which is what a gate author reads. Saying it in the shorter,
-more-read file cost more than it bought.
+included, sits in `measurement.md`. Saying it in the shorter, more-read file cost more than it
+bought.
 
-Residuals, accepted and named rather than fixed. These are gates only one side can run, so an
-unattended loop cannot be helped by them — and the first of them does return two verdicts for one
-commit, which is why the rule had to say in so many words that this is not the defect it describes:
+Round 3 then found that nothing routed a gate author there: `AGENTS.md`'s only pointer to
+`measurement.md` is scoped to tasks that measure rather than gate, and the one path that does reach
+the section is the `rigor-lane` skill's mutation table. So § "Validation" gains a bullet that is a
+pointer and nothing else — it states no rule and brands nothing a defect, which is what both earlier
+rounds objected to, and it makes this entry's claim about where the rule lives true.
+
+Residuals, accepted and named rather than fixed. The first two are gates only one side can run, so an
+unattended loop cannot be helped by them — and the first does return two verdicts for one commit,
+which is why the rule had to say in so many words that this is not the defect it describes. The third
+is not a gate at all:
 
 - The two `references/ruby` examples in `spec/docs/c_effects_raises_gate_spec.rb` execute on a clone
   that has the optional submodule and `skip` in every CI job (none checks it out). So the same gate,
-  on the same commit, is red here and pending there. Deliberate, documented in that spec's own header
+  on the same commit, executes here and is pending there. Deliberate, documented in that spec's header
   as "the honest state", and the `rigor-worktree` skill tells a worker to verify such a gate executed
   before believing it.
 - The Nix devShell is never exercised in CI. `nix-package` builds and smoke-tests the package, not
@@ -79,9 +86,8 @@ Each is a reason to keep such gates few, not a reason to give the loop a local r
 
 ## To undo
 
-Delete both sentences this PR adds to `AGENTS.md` § "Validation" — the corpus-from-the-index one and
-the "the gate is the defect" one, which is the sentence that forbids the condition an undo would be
-re-adding and also holds the pointer to the `measurement.md` bullets — and those three bullets, then
-add the condition to step 3's "When nobody is coordinating" paragraph. Nothing reads any of it in
-code; `spec/docs/` has no gate on this rule, which is itself a consequence of the decision — the rule
-is about how a gate is written, and the repository has no instrument that checks that.
+Delete the three bullets this PR adds to `measurement.md` § "Specs and gates that pass without
+checking" and the one bullet that points at them from `AGENTS.md` § "Validation", then add the
+condition to step 3's "When nobody is coordinating" paragraph. Nothing reads any of it in code;
+`spec/docs/` has no gate on this rule, which is itself a consequence of the decision — the rule is
+about how a gate is written, and the repository has no instrument that checks that.

@@ -127,6 +127,9 @@ module Rigor
         # ADR-89 WD2 — per-def observed-key return summaries: [path, symbol] => { keys:, returns:, effects: }.
         # Harvested from the ADR-84 return memo after each run; drives the behavioural-stability gate.
         @return_summaries = {}
+        # Issue #3180 — what the ADR-89 WD2 gate's probe read for the pairs it passed, from the closure decision
+        # until {#absorb} folds it into the skipped readers; nil when no pair passed.
+        @gate_observations = nil
         # ADR-67 WD6c lift — the `parameter_inference:` seed table the cached diagnostics were computed
         # under (`{}` when the gate is off — the gate state is constant across a snapshot's lifetime because
         # the configuration is part of the global fingerprint). A recheck recomputes the table fresh and
@@ -391,6 +394,8 @@ module Rigor
       # whole project — what a `sig/` edit already costs through the snapshot fingerprint.
       def affected_closure(changed, added, removed, param_files = Set.new, param_pairs = Set.new)
         @stale_plugin_readers = plugin_read_affected | disclosure_refreshers(removed)
+        # Issue #3180 — a recheck that passed the gate and then re-baselined absorbed nothing: start without it.
+        @gate_observations = nil
         return whole_project_closure(changed, added) if source_rbs_gate.moved?(@seed_bundles, changed, added, removed)
 
         (gated_closure(changed, added, removed, param_files, param_pairs) | @stale_plugin_readers).freeze
@@ -1237,8 +1242,62 @@ module Rigor
         # with anything its closure demanded for itself, so this is the same union the next run replays.
         @run_level_rows = runner.run_level_rows
         @synthetic_surface_digest = synthetic_surface_digest_of(runner)
-        refresh_return_summaries(runner, analyze_set)
+        refresh_gated_state(runner, analyze_set)
         refresh_effect_collections(runner, analyze_set)
+      end
+
+      # The summaries, then the skipped readers' edges, in that order ({#refresh_return_summaries}), with what the
+      # gate's probe observed for this recheck taken and cleared. The clear is a guard no spec pins:
+      # {#affected_closure} resets the slot before every {#absorb}, so nothing reads it again. It only keeps a
+      # consumed observation from outliving its recheck, should absorb gain another caller.
+      def refresh_gated_state(runner, analyze_set)
+        observations = @gate_observations
+        @gate_observations = nil
+        refresh_return_summaries(runner, analyze_set, observations)
+        absorb_gate_reads(observations, analyze_set)
+      end
+
+      # Issue #3180 — give every reader the ADR-89 WD2 gate skipped the edges its probe recorded for the pair it
+      # passed ({#gate_observations}): the reader reaches those defs, classes and names through the edited def now,
+      # and no analysis of the reader will record that until something else re-analyses it. The probe evaluated the
+      # def at all of its stored keys and a reader observes it under some of them, so the reader may gain an edge it
+      # does not need; that costs a re-analysis, never an answer. Runs after {#refresh_return_summaries}, which reads
+      # the dependents as they stood before these edges. Independent of the summaries: a pooled recheck over
+      # summaries a sequential run stored can pass the gate too, and its skipped readers need the edges as much.
+      def absorb_gate_reads(observations, analyze_set)
+        return if observations.nil?
+
+        analyzed = analyze_set.to_set
+        folds = observations.reads.flat_map do |pair, record|
+          ((@symbol_dependents[pair] || Set.new) - analyzed).map { |reader| [reader, record] }
+        end
+        return if folds.empty?
+
+        folds.each { |reader, record| add_recorded_reads(reader, record) }
+        invert_dependency_graph
+      end
+
+      # `record`'s reads added to `reader`'s, less the reads of `reader`'s own file (a file records no edge to
+      # itself). Builds new sets: a restored snapshot's are not this session's to mutate. The self-filter on the
+      # ancestry edges is a guard no spec pins: it mirrors the two that are pinned, and no row was built in which
+      # the edited def comes to read the ancestry of a class its skipped reader's file declares.
+      def add_recorded_reads(reader, record)
+        symbols = (@symbol_sources[reader] || {}).dup
+        record.symbol_sources.each do |path, names|
+          symbols[path] = (symbols[path] || Set.new) | names unless path == reader
+        end
+        @symbol_sources[reader] = symbols
+        @ancestry_sources[reader] = (@ancestry_sources[reader] || Set.new) | (record.ancestry_sources - [reader])
+        @sources[reader] = (@sources[reader] || Set.new) | (record.sources - [reader])
+        @missing[reader] = (@missing[reader] || Set.new) | record.missing
+      end
+
+      # The inverted indexes of the four per-consumer edge tables.
+      def invert_dependency_graph
+        @dependents          = Incremental.invert(@sources)
+        @symbol_dependents   = Incremental.invert_symbols(@symbol_sources)
+        @ancestry_dependents = Incremental.invert(@ancestry_sources)
+        @negative_dependents = Incremental.invert(@missing)
       end
 
       # ADR-103 WD13 / #382 — the effects analogue of {#refresh_return_summaries}, and the same soundness
@@ -1256,12 +1315,18 @@ module Rigor
         @effect_plugin_digest = effect_plugin_digest_of(runner)
       end
 
-      # ADR-89 WD2 / issue #3160 — bring the behavioural summaries up to date with THIS run. The invariant the gate
-      # reads them under: a pair's summary holds every key under which a CURRENT direct symbol dependent of the def
-      # observes it, each with the def's current return. A summary that cannot be shown to is deleted, and a pair
+      # ADR-89 WD2 / issues #3160, #3180 — bring the behavioural summaries up to date with THIS run. The invariant
+      # the gate reads them under: a pair's summary holds every key under which a CURRENT symbol dependent of the
+      # def observes it, directly or through other defs, each with the def's current return; and every file that
+      # observes the def is one of its symbol dependents. A summary that cannot be shown to is deleted, and a pair
       # with no summary keeps its dependents, so every doubt below resolves to "no summary".
       #
-      # A run's harvest ({Runner#return_summaries}) is what the files it analysed observed, so per pair:
+      # A run's harvest ({Runner#return_summaries}) is what the files it analysed observed. The keys the gate's
+      # probe observed for the pairs it passed (`observations`, {#gate_observations}) count as this run's too: they
+      # are what the readers the gate skipped observe through the edited def. Two things a skipped reader reaches
+      # are outside this, and outside the invariant: the probe folds a value constant the reader's own analysis
+      # does not, so the gate can pass on a return the reader never sees (issue #3186), and the plugin reads and
+      # run disclosures of the def are credited to no skipped reader (issue #3187). So per pair:
       #
       # - the run cannot list the keys it observed (a pool run, a def past the per-def or total cap, a call the
       #   memo refused to store): delete;
@@ -1276,11 +1341,12 @@ module Rigor
       # Fewer keys are never the conservative direction: each key protects the readers that observe the def under
       # it, so a summary missing one skips a reader whose answer the edit moved.
       #
-      # The invariant covers DIRECT symbol dependents only. A dependent that reaches the def through another def
-      # is not covered: a gate-passing edit of that middle def can change the key such a skipped reader observes
-      # here, or give it a new callee, and no summary records that (issue #3180).
-      def refresh_return_summaries(runner, analyze_set)
-        harvest = runner.return_summaries
+      # "Every dependent" is read off the edges as they stood BEFORE {#absorb_gate_reads} adds the probe's. A
+      # skipped reader that gains its first edge to a def there observes it only through the pair the gate passed,
+      # so the probe's keys are all of its keys; one that already held an edge was not analysed, and the pair keeps
+      # its stored keys.
+      def refresh_return_summaries(runner, analyze_set, observations = nil)
+        harvest = harvest_with_gate_summaries(runner.return_summaries, observations&.summaries)
         analyzed = analyze_set.to_set
         (@return_summaries.keys | (harvest || {}).keys).each do |pair|
           dependents = @symbol_dependents[pair] || Set.new
@@ -1288,6 +1354,19 @@ module Rigor
           summary.nil? ? @return_summaries.delete(pair) : @return_summaries[pair] = summary
         end
         @return_summaries = capped_return_summaries(@return_summaries)
+      end
+
+      # Issue #3180 — `harvest` (this run's) with the keys the gate's probe observed (`probed`, see
+      # {#gate_observations}) counted as observed by this run: they are what the readers the gate skipped observe
+      # through the def it passed, each with the callee's current return. A def either side cannot list the keys
+      # of has none, and so has one whose keys together pass the per-def cap. A run with no harvest stays without.
+      def harvest_with_gate_summaries(harvest, probed)
+        return harvest if harvest.nil? || probed.nil? || probed.empty?
+
+        probed.each_with_object(harvest.dup) do |(pair, summary), merged|
+          mine = merged.fetch(pair, summary)
+          merged[pair] = mine.nil? || summary.nil? ? nil : merged_return_summary(mine, summary)
+        end
       end
 
       # ADR-89 WD2 — the full-run behavioural surface: every file was analysed, so the harvest is every reader's.
@@ -1361,10 +1440,7 @@ module Rigor
           @ancestry_sources[path] = record.ancestry_sources.dup
           @missing[path]          = record.missing.dup
         end
-        @dependents          = Incremental.invert(@sources)
-        @symbol_dependents   = Incremental.invert_symbols(@symbol_sources)
-        @ancestry_dependents = Incremental.invert(@ancestry_sources)
-        @negative_dependents = Incremental.invert(@missing)
+        invert_dependency_graph
         @symbol_fingerprints.merge!(runner.symbol_fingerprints)
         # Wholesale replace (the subset runner's pre-pass is complete): a file that lost its last class must
         # drop out of the map so a later re-add registers as an appearance.
@@ -1704,15 +1780,45 @@ module Rigor
         specs = pairs.filter_map { |pair| return_spec_for(pair, scan_index) }
         return Set.new if specs.empty?
 
-        results = probe_return_types(specs)
-        specs.each_with_object(Set.new) do |spec, stable|
-          descriptors = results[[spec[:class_name], spec[:method_name], spec[:singleton]]]
-          expected = @return_summaries[spec[:pair]][:returns]
-          next if descriptors.nil? || descriptors.length != expected.length
-          next unless descriptors.each_with_index.all? { |d, i| !d.nil? && d == expected[i] }
+        runner, results = probe_return_types(specs)
+        reads = {}
+        stable = specs.each_with_object(Set.new) do |spec, passed|
+          triple = [spec[:class_name], spec[:method_name], spec[:singleton]]
+          next unless returns_unmoved?(spec[:pair], results[triple])
 
-          stable << spec[:pair]
+          # Issue #3180 — the probe recorded reads for every def it evaluated, and it evaluated this one: a
+          # summary holds at least one key, so a def the probe could not find answered nil and did not pass.
+          reads[spec[:pair]] = runner.probe_reads[triple]
+          passed << spec[:pair]
         end
+        @gate_observations = gate_observations(runner, reads) unless stable.empty?
+        stable
+      end
+
+      # Whether the probe's `descriptors` are `pair`'s stored returns, key for key, none of them a memo refusal.
+      def returns_unmoved?(pair, descriptors)
+        expected = @return_summaries[pair][:returns]
+        return false if descriptors.nil? || descriptors.length != expected.length
+
+        descriptors.each_with_index.all? { |descriptor, index| !descriptor.nil? && descriptor == expected[index] }
+      end
+
+      # Issue #3180 — what the gate's probe observed for the pairs it passed. A reader the gate skips is not
+      # re-analysed, yet it now reaches whatever the edited def reaches: a callee the def did not call before, or
+      # one it calls under another key. The probe evaluated the def at every key its readers observe it under, so
+      # its reads are a superset of theirs through this def, and its memo holds every key those evaluations put to
+      # another def. `reads` is each passing pair's {DependencyRecorder::Record}; `summaries` is the probe's own
+      # harvest ({Runner#return_summaries}: nil for a def it cannot list the keys of, nil as a whole in pool mode),
+      # cut down to the defs a passing pair read. A failing pair's observations are left out: its readers are all
+      # re-analysed, and the run's harvest speaks for them.
+      GateObservations = Data.define(:reads, :summaries)
+      private_constant :GateObservations
+
+      def gate_observations(runner, reads)
+        observed = reads.each_value.with_object(Set.new) do |record, pairs|
+          record.symbol_sources.each { |path, symbols| symbols.each { |symbol| pairs << [path, symbol] } }
+        end
+        GateObservations.new(reads: reads, summaries: runner.return_summaries&.slice(*observed))
       end
 
       def return_spec_for(pair, scan_index)
@@ -1726,13 +1832,15 @@ module Rigor
           singleton: singleton, keys: @return_summaries[pair][:keys] }
       end
 
+      # The probe's runner and its `spec triple => descriptors` answer ({} when the probe failed).
       def probe_return_types(specs)
-        build_runner.evaluate_return_types(@paths, specs)
+        runner = build_runner
+        [runner, runner.evaluate_return_types(@paths, specs)]
       rescue Inference::MemoAudit::Mismatch
         # ADR-129 WD5 (#2785) — the audit's mismatch (raised by the run's release) fails the session, not the probe.
         raise
       rescue StandardError
-        {}
+        [runner, {}]
       end
 
       TOP_LEVEL_KEY = Inference::ScopeIndexer::TOP_LEVEL_DEF_KEY

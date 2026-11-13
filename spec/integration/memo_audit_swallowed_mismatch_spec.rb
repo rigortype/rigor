@@ -128,7 +128,7 @@ RSpec.describe "a MemoAudit mismatch swallowed by a rescue on the typing path (#
     allow(runner).to receive(:evaluate_return_types).and_raise(Rigor::Inference::MemoAudit::Mismatch, "probed")
     expect { session.send(:probe_return_types, []) }.to raise_error(Rigor::Inference::MemoAudit::Mismatch, /probed/)
     allow(runner).to receive(:evaluate_return_types).and_raise(ArgumentError)
-    expect(session.send(:probe_return_types, [])).to eq({})
+    expect(session.send(:probe_return_types, []).last).to eq({})
   end
 
   it "fails the run on a mismatch raised outside every file's analysis" do

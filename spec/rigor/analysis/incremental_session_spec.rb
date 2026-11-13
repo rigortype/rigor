@@ -3106,6 +3106,259 @@ end
           expect(basenames(rechecks.last.affected)).to include("b.rb")
         end
       end
+
+      # Issue #3180 — a reader the gate skips still reaches whatever the edited def reaches now: a callee it did
+      # not call before, or one it calls under another key. The gate's probe evaluated the def at every stored
+      # key, so what it read and observed is folded into the skipped readers' edges and the callees' summaries.
+      # `r.rb` reads `A.v` only through `w`; each row passes the gate on an edit of the middle def, then edits what
+      # the middle def reaches now.
+      describe "a reader that reaches a def through another def the gate passed" do
+        def a_v = "class A; def self.v(k) = k == 5 ? k + 1 : k + 2; end\n"
+        def a_v_moved_at5 = "class A; def self.v(k) = k == 5 ? k + 7 : k + 2; end\n"
+        def b_u = "class B; def self.u(k) = k + 5; end\n"
+        def w_plain = "def w(k) = A.v(k)\n"
+        def w_new_key = "def w(k) = A.v(k + 4) == 6 ? A.v(k) : 0\n"
+        def w_new_callee = "def w(k) = B.u(k) == 6 ? A.v(k) : 0\n"
+        def reader = "puts 'hit' if w(1) == 3\n"
+        def tree = { "a.rb" => a_v, "b.rb" => b_u, "c.rb" => w_plain, "r.rb" => reader }
+        def b_u_moved = { "b.rb" => "class B; def self.u(k) = k + 6; end\n" }
+
+        def falsey?(recheck) = recheck.diagnostics.map(&:message).any?(/always falsey/)
+
+        def summary_in(session, dir, name, symbol)
+          session.instance_variable_get(:@return_summaries)[[File.join(dir, name), symbol]]
+        end
+
+        it "re-checks the reader when the callee moves at a key the middle def's edit introduced" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [tree, { "c.rb" => w_new_key }, { "a.rb" => a_v_moved_at5 }])
+            expect(basenames(rechecks.first.affected)).to eq(["c.rb"]) # the gate passed
+            expect(basenames(rechecks.last.affected)).to include("r.rb")
+            expect(falsey?(rechecks.last)).to be(true)
+          end
+        end
+
+        it "re-checks the reader when a callee the middle def's edit introduced moves" do
+          Dir.mktmpdir do |dir|
+            session = session_for(configuration(dir))
+            keys = []
+            rechecks = replay(dir, [tree, { "c.rb" => w_new_callee }, b_u_moved],
+                              session: session) { |s| keys << key_args(summary_in(s, dir, "b.rb", "B.u")) }
+            expect(basenames(rechecks.first.affected)).to eq(["c.rb"])
+            # `B.u` had no reader, so its summary starts here: `c.rb`'s own key and the one `r.rb` reaches it under.
+            expect(keys.first).to contain_exactly(["Dynamic[top]"], ["1"])
+            expect(basenames(rechecks.last.affected)).to include("r.rb")
+            expect(falsey?(rechecks.last)).to be(true)
+          end
+        end
+
+        it "re-checks the reader when the file of a callee the middle def's edit introduced is deleted" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [tree, { "c.rb" => w_new_callee }, { "b.rb" => nil }])
+            expect(basenames(rechecks.first.affected)).to eq(["c.rb"])
+            expect(basenames(rechecks.last.affected)).to include("r.rb")
+          end
+        end
+
+        def edges_of(session, dir, name, table = :@symbol_sources)
+          held = session.instance_variable_get(table)[File.join(dir, name)] || []
+          basenames(held.respond_to?(:keys) ? held.keys : held)
+        end
+
+        # State rows: the edge tables themselves, where no later edit tells the difference.
+        it "keeps a skipped reader's file-level sources the union of its finer edges" do
+          Dir.mktmpdir do |dir|
+            session = session_for(configuration(dir))
+            replay(dir, [tree, { "c.rb" => w_new_callee }], session: session)
+            expect(edges_of(session, dir, "r.rb")).to contain_exactly("a.rb", "b.rb", "c.rb")
+            expect(edges_of(session, dir, "r.rb", :@sources)).to contain_exactly("a.rb", "b.rb", "c.rb")
+          end
+        end
+
+        it "gives a skipped reader no edge to its own file when the middle def comes to call a def of it" do
+          Dir.mktmpdir do |dir|
+            session = session_for(configuration(dir))
+            rechecks = replay(dir, [tree.merge("r.rb" => "class R; def self.h(k) = k + 5; end\n#{reader}"),
+                                    { "c.rb" => "def w(k) = R.h(k) == 6 ? A.v(k) : 0\n" }], session: session)
+            expect(basenames(rechecks.first.affected)).to eq(["c.rb"])
+            expect(edges_of(session, dir, "r.rb")).to contain_exactly("a.rb", "c.rb")
+            expect(edges_of(session, dir, "r.rb", :@sources)).to contain_exactly("a.rb", "c.rb")
+          end
+        end
+
+        # `m.rb` reaches `w` under a key whose evaluation never calls `B.u`, and is re-analysed for its own edit:
+        # its edges are the ones its analysis recorded. `n.rb`, skipped, gets the probe's.
+        it "leaves a reader the recheck analysed with the edges its own analysis recorded" do
+          Dir.mktmpdir do |dir|
+            session = session_for(configuration(dir))
+            readers = { "r.rb" => "w(2)\n", "m.rb" => "w(1)\n" }
+            rechecks = replay(dir, [tree.merge(readers),
+                                    { "c.rb" => "def w(k) = k == 2 ? B.u(k) - 3 : A.v(k)\n", "m.rb" => "w(1)\n\n" }],
+                              session: session)
+            expect(basenames(rechecks.first.affected)).to eq(%w[c.rb m.rb])
+            expect(edges_of(session, dir, "r.rb")).to include("b.rb")
+            expect(edges_of(session, dir, "m.rb")).not_to include("b.rb")
+          end
+        end
+
+        # A recheck that passed the gate and then re-baselined never absorbed what the probe observed. The next
+        # recheck starts without it: here it is planted, and a recheck with no edit folds nothing into `r.rb`.
+        it "drops the probe's observations of a recheck that did not absorb them" do
+          Dir.mktmpdir do |dir|
+            session = session_for(configuration(dir))
+            replay(dir, [tree], session: session)
+            stray = Rigor::Analysis::DependencyRecorder::Record.new(
+              consumer: "", sources: Set[File.join(dir, "b.rb")], missing: Set.new,
+              symbol_sources: { File.join(dir, "b.rb") => Set["B.u"] }, ancestry_sources: Set.new
+            )
+            reads = { [File.join(dir, "c.rb"), "<toplevel>#w"] => stray }
+            observations = described_class.const_get(:GateObservations).new(reads: reads, summaries: nil)
+            session.instance_variable_set(:@gate_observations, observations)
+
+            guarded_recheck(session)
+            expect(edges_of(session, dir, "r.rb")).to contain_exactly("a.rb", "c.rb")
+          end
+        end
+
+        # The probe lists no key for a def it observed under more than the per-def cap, so the def has no summary.
+        it "drops a callee's summary when the middle def's edit observes it under keys the probe cannot list" do
+          Dir.mktmpdir do |dir|
+            session = session_for(configuration(dir))
+            many = "def w(k) = (#{(10..18).map { |i| "A.v(k + #{i})" }.join('; ')}; A.v(k))\n"
+            summaries = []
+            rechecks = replay(dir, [tree, { "c.rb" => many },
+                                    { "a.rb" => "class A; def self.v(k) = k == 15 ? k + 1 : k + 2; end\n" }],
+                              session: session) { |s| summaries << summary_in(s, dir, "a.rb", "A.v") }
+            expect(basenames(rechecks.first.affected)).to eq(["c.rb"])
+            expect(summaries.first).to be_nil
+            expect(basenames(rechecks.last.affected)).to include("r.rb")
+          end
+        end
+
+        # `t` fails the gate in the recheck that passes `w`, and every reader of `t` is re-analysed: its keys are
+        # this run's, and the probe's evaluation of `t` at the key it had stored adds nothing to them.
+        it "leaves the keys of a def the gate did not pass to the run that re-analysed its readers" do
+          Dir.mktmpdir do |dir|
+            session = session_for(configuration(dir))
+            keys = []
+            rechecks = replay(dir, [tree.merge("t.rb" => v5_a.sub("v", "t"), "m.rb" => "puts 'hit' if t(5) == :a\n"),
+                                    { "c.rb" => "def w(k) = (A.v(k))\n", "t.rb" => v5_z.sub("v", "t"),
+                                      "m.rb" => "puts 'hit' if t(2) == :a\n" }],
+                              session: session) { |s| keys << key_args(summary_in(s, dir, "t.rb", "<toplevel>#t")) }
+            expect(basenames(rechecks.first.affected)).to eq(%w[c.rb m.rb t.rb]) # `w` passed
+            expect(keys).to eq([[["2"]]])
+          end
+        end
+
+        # The introduced callee sits in the edited def's own file: the probe's reads are not filtered as that
+        # file's self-reads, since they are filed for other files' readers.
+        it "re-checks the reader when the introduced callee is a def of the middle def's own file" do
+          Dir.mktmpdir do |dir|
+            h = "class H; def self.h(k) = k + 5; end\n"
+            rechecks = replay(dir, [tree.merge("c.rb" => "#{h}#{w_plain}"),
+                                    { "c.rb" => "#{h}def w(k) = H.h(k) == 6 ? A.v(k) : 0\n" },
+                                    { "c.rb" => "#{h.sub('+ 5', '+ 6')}def w(k) = H.h(k) == 6 ? A.v(k) : 0\n" }])
+            expect(basenames(rechecks.first.affected)).to eq(["c.rb"])
+            expect(basenames(rechecks.last.affected)).to include("r.rb")
+            expect(falsey?(rechecks.last)).to be(true)
+          end
+        end
+
+        it "re-checks the reader when a class the middle def's edit names first appears" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [tree.merge("a.rb" => "class A; def self.v(k) = k.nope; end\n"),
+                                    { "c.rb" => "def w(k) = Zed.z(k)\n" },
+                                    { "z.rb" => "class Zed; def self.z(k) = 3; end\n" }])
+            expect(basenames(rechecks.first.affected)).to eq(["c.rb"])
+            expect(basenames(rechecks.last.affected)).to include("r.rb")
+            expect(rechecks.last.diagnostics.map(&:message)).to include(a_string_matching(/always truthy/))
+          end
+        end
+
+        it "re-checks the reader when the ancestry of a class the middle def's edit introduced moves" do
+          Dir.mktmpdir do |dir|
+            classes = { "p.rb" => "class P; def v(k) = k + 2; end\n", "q.rb" => "class Q; def v(k) = k + 9; end\n",
+                        "s.rb" => "class S < P; end\n" }
+            rechecks = replay(dir, [tree.merge(classes), { "c.rb" => "def w(k) = S.new.v(k)\n" },
+                                    { "s.rb" => "class S < Q; end\n" }])
+            expect(basenames(rechecks.first.affected)).to eq(["c.rb"])
+            expect(basenames(rechecks.last.affected)).to include("r.rb")
+            expect(falsey?(rechecks.last)).to be(true)
+          end
+        end
+
+        it "follows the middle def through two gate-passing edits" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [tree, { "c.rb" => w_new_callee }, { "c.rb" => w_new_key },
+                                    { "a.rb" => a_v_moved_at5 }])
+            expect(rechecks.first(2).map { |recheck| basenames(recheck.affected) }).to all(eq(["c.rb"]))
+            expect(basenames(rechecks.last.affected)).to include("r.rb")
+            expect(falsey?(rechecks.last)).to be(true)
+          end
+        end
+
+        it "answers as a cold run does once the middle def stops calling the callee" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [tree, { "c.rb" => "def w(k) = B.u(k) - 3\n" }, { "a.rb" => a_v_moved_at5 },
+                                    { "a.rb" => "class A; def self.v(k) = k == 5 ? k + 7 : k + 9; end\n" },
+                                    b_u_moved])
+            expect(basenames(rechecks.first.affected)).to eq(["c.rb"])
+            expect(rechecks.map { |recheck| falsey?(recheck) }).to eq([false, false, false, true])
+          end
+        end
+
+        it "still skips the reader for a return-preserving edit that calls the same defs under the same keys" do
+          Dir.mktmpdir do |dir|
+            session = session_for(configuration(dir))
+            summaries = []
+            rechecks = replay(dir, [tree, { "c.rb" => "def w(k) = (A.v(k))\n" },
+                                    { "c.rb" => "def w(k) = ((A.v(k)))\n" },
+                                    { "a.rb" => "class A; def self.v(k) = k == 5 ? k + 1 : (k + 2); end\n" }],
+                              session: session) { |s| summaries << summary_of(s, dir, "A.v") }
+            expect(rechecks.first(2).map { |recheck| basenames(recheck.affected) }).to all(eq(["c.rb"]))
+            expect(basenames(rechecks.last.affected)).to eq(["a.rb"])
+            expect(summaries.map { |summary| key_args(summary) }.uniq.size).to eq(1)
+          end
+        end
+
+        it "reaches a callee two defs away, whichever of the two the gate passed" do
+          x = "class X; def self.x(k) = A.v(k); end\n"
+          far = tree.merge("x.rb" => x, "c.rb" => "def w(k) = X.x(k)\n")
+          [{ "x.rb" => "class X; def self.x(k) = A.v(k + 4) == 6 ? A.v(k) : A.v(k + 4); end\n" },
+           { "c.rb" => "def w(k) = X.x(k + 4) == 6 ? X.x(k) : 0\n" }].each do |edit|
+            Dir.mktmpdir do |dir|
+              rechecks = replay(dir, [far, edit, { "a.rb" => a_v_moved_at5 }])
+              expect(basenames(rechecks.first.affected)).to eq(edit.keys) # the gate passed
+              expect(basenames(rechecks.last.affected)).to include("r.rb")
+              expect(falsey?(rechecks.last)).to be(true)
+            end
+          end
+        end
+
+        it "matches a cold run for both shapes in pool mode, where no gate passes" do
+          [[{ "c.rb" => w_new_key }, { "a.rb" => a_v_moved_at5 }],
+           [{ "c.rb" => w_new_callee }, b_u_moved]].each do |edits|
+            Dir.mktmpdir do |dir|
+              rechecks = replay(dir, [tree, *edits], workers: 2)
+              expect(basenames(rechecks.first.affected)).to include("r.rb")
+              expect(falsey?(rechecks.last)).to be(true)
+            end
+          end
+        end
+
+        # A pooled recheck harvests no summary, yet it can pass the gate on the summaries a sequential run stored.
+        # The reader it skips needs the probe's edges all the same: with no summary left for `B.u`, they alone
+        # bring `r.rb` into the next edit's closure.
+        it "gives a reader skipped by a pooled recheck the edges the probe recorded" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [tree, { "c.rb" => w_new_callee }, b_u_moved],
+                              session: session_for(configuration(dir)), recheck_workers: 2)
+            expect(basenames(rechecks.first.affected)).to eq(["c.rb"])
+            expect(basenames(rechecks.last.affected)).to include("r.rb")
+            expect(falsey?(rechecks.last)).to be(true)
+          end
+        end
+      end
     end
 
     it "propagates a return-visible body edit to symbol dependents (return moved at observed key)" do
@@ -3467,7 +3720,7 @@ end
 
     after { Rigor::Plugin.unregister! }
 
-    let(:requirer) { ->(_name) { Rigor::Plugin.register(Rigor::Plugin::RbsInline) } }
+    def requirer = ->(_name) { Rigor::Plugin.register(Rigor::Plugin::RbsInline) }
 
     def inline_config(dir)
       Rigor::Configuration.new(
@@ -3804,7 +4057,7 @@ end
 
     after { Rigor::Plugin.unregister! }
 
-    let(:requirer) { ->(_name) { Rigor::Plugin.register(Rigor::Plugin::RbsInline) } }
+    def requirer = ->(_name) { Rigor::Plugin.register(Rigor::Plugin::RbsInline) }
 
     def envelope_config(dir)
       Rigor::Configuration.new(

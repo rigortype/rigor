@@ -4551,7 +4551,9 @@ module Rigor
       end
 
       # Whether the re-entry runs with a block the summary's frame covers. A re-entry with no block, or
-      # one that passes the def's own block parameter on (`&blk`, or the anonymous `&`), does. One that
+      # one that passes the def's own block parameter on (`&blk`, or the anonymous `&`), does; `&blk` is
+      # the frame's block only while the body never assigns `blk` and no block or lambda in it declares
+      # the name ({RecursionRebinding}'s write and block-local scan, as for a positional). One that
       # passes another `&expression` does not. A block literal does when the value it yields is covered
       # by the value the frame's block yields, which is nil on both sides for a def that never `yield`s.
       # The re-entry's call is the node being typed; with none to read, only the yield values are compared.
@@ -4573,7 +4575,11 @@ module Rigor
         return false if own.nil?
 
         expression = block.expression
-        expression.nil? ? own.name.nil? : expression.is_a?(Prism::LocalVariableReadNode) && expression.name == own.name
+        return own.name.nil? if expression.nil?
+        return false unless expression.is_a?(Prism::LocalVariableReadNode) && expression.name == own.name
+
+        written = RecursionRebinding.rebound_parameters(def_node, Set.new)
+        written != RecursionRebinding::ALL && !written.include?(own.name)
       end
 
       # `2` is covered by `Integer` though their union is spelled `2 | Integer`, so the argument is also

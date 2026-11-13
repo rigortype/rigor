@@ -91,6 +91,48 @@ class ArgumentRecursion
   def blk_foreign(x, o, &b) = coin ? yield : blk_foreign(x, o, &o)
   def blk_foreign_kw(x:, o:, &b) = coin ? yield : blk_foreign_kw(x: x, o: o, &o)
 
+  def blk_assigned(x, &b)
+    return yield if coin
+
+    b = proc { :other }
+    blk_assigned(x, &b)
+  end
+
+  def blk_assigned_kw(x:, &b)
+    return yield if coin
+
+    b = proc { :other }
+    blk_assigned_kw(x: x, &b)
+  end
+
+  def blk_maybe_assigned(x, &b)
+    return yield if coin
+
+    b = proc { :other } if coin
+    blk_maybe_assigned(x, &b)
+  end
+
+  def blk_maybe_assigned_kw(x:, &b)
+    return yield if coin
+
+    b = proc { :other } if coin
+    blk_maybe_assigned_kw(x: x, &b)
+  end
+
+  def blk_shadowed(x, &b) = coin ? yield : [proc { :other }].map { |b| blk_shadowed(x, &b) }.first
+  def blk_shadowed_kw(x:, &b) = coin ? yield : [proc { :other }].map { |b| blk_shadowed_kw(x: x, &b) }.first
+
+  def blk_covered(x) = coin ? yield : blk_covered(x) { 2 }
+  def blk_covered_kw(x:) = coin ? yield : blk_covered_kw(x: x) { 2 }
+
+  def restored(k, t) = t == :a ? [restored(some_int, :b), (coin ? :o : restored(3, :a))] : (coin ? :base : restored(k, t))
+
+  def restored_kw(k:, t:)
+    return coin ? :base : restored_kw(k: k, t: t) unless t == :a
+
+    [restored_kw(k: some_int, t: :b), (coin ? :o : restored_kw(k: 3, t: :a))]
+  end
+
   def fib(n) = n < 2 ? n : fib(n - 1) + fib(n - 2)
   def fib_kw(n:) = n < 2 ? n : fib_kw(n: n - 1) + fib_kw(n: n - 2)
 
@@ -157,7 +199,7 @@ assert_type("Dynamic[top]", subject.same(1))
 assert_type("Dynamic[top]", subject.same_kw(n: 1))
 
 # Ruby: an Array holding :base or a deeper Array. The `(some_int, :b)` frame under the constant call owns
-# a summary of its own, and the outer summary is back in place for the `(3, :a)` re-entry inside it.
+# a summary of its own, which does not cover the `(3, :a)` re-entry inside it.
 assert_type("[:base | Dynamic[top]]", subject.nested(3, :a))
 assert_type("[:base | Dynamic[top]]", subject.nested_kw(k: 3, t: :a))
 
@@ -175,6 +217,25 @@ assert_type("1 | Dynamic[top]", subject.blk_unnamed_kw(x: 1) { 1 })
 # Ruby: 1. The def's own block parameter passed on is the frame's block.
 assert_type("1", subject.blk_passed(1) { 1 })
 assert_type("1", subject.blk_passed_kw(x: 1) { 1 })
+
+# Ruby: 1 or :other. `&b` names the block parameter, but the body assigned it, on one path or on all, or
+# a block in the body declares a `b` of its own.
+assert_type("1 | Dynamic[top]", subject.blk_assigned(1) { 1 })
+assert_type("1 | Dynamic[top]", subject.blk_assigned_kw(x: 1) { 1 })
+assert_type("1 | Dynamic[top]", subject.blk_maybe_assigned(1) { 1 })
+assert_type("1 | Dynamic[top]", subject.blk_maybe_assigned_kw(x: 1) { 1 })
+assert_type("1 | Dynamic[top]", subject.blk_shadowed(1) { 1 })
+assert_type("1 | Dynamic[top]", subject.blk_shadowed_kw(x: 1) { 1 })
+
+# Ruby: 0..9. The block literal yields `2`, which the frame's `Integer` covers: the summary is read.
+assert_type("Integer", subject.blk_covered(1) { rand(10) })
+assert_type("Integer", subject.blk_covered_kw(x: 1) { rand(10) })
+
+# Ruby: a two-element Array. After the nested `(some_int, :b)` fixpoint returns, the outer frame's
+# summary is back in place for the `(3, :a)` re-entry beside it; left on the nested entry, that re-entry
+# starts a fixpoint of its own each time and the walk does not end.
+assert_type("Dynamic[top]", subject.restored(3, :a))
+assert_type("Dynamic[top]", subject.restored_kw(k: 3, t: :a))
 
 # Ruby: 1 or :o. `&o` is another block.
 assert_type("1 | Dynamic[top]", subject.blk_foreign(1, -> { :o }) { 1 })
@@ -204,3 +265,6 @@ puts "deeper" if subject.nested(3, :a).first != :base # reachable: nested
 puts "sym" if subject.first_of(1).is_a?(Symbol) # reachable: first_of
 puts "other" if (subject.blk_literal(1) { 1 }) == :other # reachable: blk_literal
 puts "other" if (subject.blk_unnamed(1) { 1 }) == :other # reachable: blk_unnamed
+puts "other" if (subject.blk_assigned(1) { 1 }) == :other # reachable: blk_assigned
+puts "other" if (subject.blk_maybe_assigned(1) { 1 }) == :other # reachable: blk_maybe_assigned
+puts "other" if (subject.blk_shadowed(1) { 1 }) == :other # reachable: blk_shadowed

@@ -6,6 +6,7 @@
 # helper so adding a new scenario means dropping a `.rb` file under `fixtures/` and adding a few `expect` lines here.
 
 require "spec_helper"
+require "timeout"
 require_relative "support/fixture_harness"
 
 RSpec.describe "Rigor type construction (integration)" do
@@ -3126,8 +3127,10 @@ RSpec.describe "Rigor type construction (integration)" do
       # Before the fix the base case answered with the first frame's arguments: `acc(rand(10), 1)` was `1`,
       # and a branch only a deeper call reaches (`:int`, `:zero`) was missing from the answer with nothing
       # beside it to say so.
+      # The timeout is for the `restored` rows: with the outermost summary not put back after a nested
+      # fixpoint, their walk does not end (60 s and 1.5 GB were not enough). The fixture takes a few seconds.
       it "answers `Dynamic[top]` for an in-cycle call the outer call's arguments do not cover" do
-        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        mismatches = Timeout.timeout(60) { harness.errors.select { |d| d.message.start_with?("assert_type ") } }
         expect(mismatches).to be_empty
       end
 

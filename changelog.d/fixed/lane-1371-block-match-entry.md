@@ -1,0 +1,3 @@
+- **[inference]** A `scan`, `gsub` or `sub` block, a `grep` block and a lambda or proc body no longer read the `$1` an earlier match in the method narrowed. ([#3193](https://github.com/rigortype/rigor/pull/3193))
+  - `return if line =~ /^(#)/; line.gsub(/(\w+)/) { w = $1; w.capitalize }` is now silent: the block reads its own call's group, which is a `String` when the pattern is a simple regex literal that always sets it.
+  - After `return unless s =~ /(\d+)/`, `$1` reads `String?` in `s.gsub(/(a)?b/) { … }`, in `items.grep_v(/(a)/) { … }` and in `-> { … }`, `lambda { … }`, `proc { … }` and `Proc.new { … }`, so a copy of it used unguarded there is reported.

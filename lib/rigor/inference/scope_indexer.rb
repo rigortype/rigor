@@ -2429,7 +2429,7 @@ module Rigor
       def legacy_class_cvar_index(root, default_scope)
         accumulator = {}
         walk_class_cvars(root, [], default_scope, accumulator)
-        accumulator.transform_values(&:freeze).freeze
+        finished_cvar_census(accumulator)
       end
 
       # `def_owner` names the class a `def` leaf's cvar writes belong to when `self` is
@@ -2507,6 +2507,8 @@ module Rigor
         _self_decl, child_prefix, child_cref = ctx
         return true unless node.body
 
+        collect_body_cvar_writes(node.body, child_cref ? [] : child_prefix,
+                                 scope_entering_declaration(default_scope, node.constant_path), accumulator)
         walk_class_cvars(node.body, child_cref ? [] : child_prefix,
                          scope_entering_declaration(default_scope, node.constant_path), accumulator,
                          singleton_cref: child_cref)
@@ -2556,30 +2558,89 @@ module Rigor
         class_name = qualified_prefix.join("::")
         body_scope = census_body_scope(default_scope, qualified_prefix,
                                        Type::Combinator.nominal_of(class_name))
-        gather_cvar_writes(def_node.body, body_scope, class_name, accumulator)
+        gather_cvar_writes(def_node.body, body_scope, class_name, accumulator, join_only: false)
       end
 
-      def gather_cvar_writes(node, scope, class_name, accumulator)
+      # Issue #3204 — the writes a `class` / `module` body makes outside its `def`s (`@@x = nil` at the top of
+      # the body, in a block or a `class << self` there): Ruby resolves each through the body's lexical cref,
+      # so it is the same cvar a sibling `def` reads. Such a write only joins an entry a `def` body's write of
+      # the same class creates: the census misses most of the other ways a cvar is written
+      # (`||=`, `+=`, an including class, a subclass, another file, `class_variable_set` from outside), so a
+      # body-only seed would be precise where Ruby's value is not, and stays unbound. The rvalue is typed with
+      # the class itself as `self`. The gather stops at `def`, `class` and `module`, which their own events enter.
+      def collect_body_cvar_writes(body, qualified_prefix, default_scope, accumulator)
+        return if body.nil? || qualified_prefix.empty?
+
+        class_name = qualified_prefix.join("::")
+        body_scope = census_body_scope(default_scope, qualified_prefix,
+                                       Type::Combinator.singleton_of(class_name))
+        gather_cvar_writes(body, body_scope, class_name, accumulator, join_only: true)
+      end
+
+      def gather_cvar_writes(node, scope, class_name, accumulator, join_only:)
         return unless node.is_a?(Prism::Node)
 
-        record_cvar_write(node, scope, class_name, accumulator) if node.is_a?(Prism::ClassVariableWriteNode)
+        if node.is_a?(Prism::ClassVariableWriteNode)
+          record_cvar_write(accumulator, class_name, node.name, EmptySeed.erase(node.value, scope.type_of(node.value)),
+                            join_only: join_only)
+        end
+        record_reflective_cvar_write(node, scope, class_name, accumulator) if node.is_a?(Prism::CallNode)
         # Issue #1217 — `rescue => @@c` / `for @@c in xs` write through a target node. Each enters as the
-        # `Dynamic[top]` floor, the rescue reference too: this census walks `def` bodies only, so a class-body
-        # `@@c = nil` is not in it, and a typed exception entry would read as non-nil in a sibling method.
+        # `Dynamic[top]` floor, the rescue reference too: the census keys each class alone, so a superclass's
+        # `@@c = nil` is not in a subclass's entry, and a typed exception entry would read as non-nil there.
         BindingTargets.names(node, Prism::ClassVariableTargetNode).each do |name|
-          (accumulator[class_name] ||= {})[name] = Type::Combinator.untyped
+          record_cvar_write(accumulator, class_name, name, Type::Combinator.untyped, join_only: join_only)
         end
         return if IVAR_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
 
-        node.rigor_each_child { |c| gather_cvar_writes(c, scope, class_name, accumulator) }
+        node.rigor_each_child { |c| gather_cvar_writes(c, scope, class_name, accumulator, join_only: join_only) }
       end
 
-      def record_cvar_write(node, scope, class_name, accumulator)
-        rvalue_type = EmptySeed.erase(node.value, scope.type_of(node.value))
-        accumulator[class_name] ||= {}
-        existing = accumulator[class_name][node.name]
-        accumulator[class_name][node.name] =
-          existing ? Type::Combinator.union(existing, rvalue_type) : rvalue_type
+      # Issue #3204 — `class_variable_set(:@@x, v)` on an implicit or `self` receiver writes the cvar a sibling
+      # `def` reads, as `@@x = v` does. It only joins, like a class-body write: a dynamic name, a `send`, an
+      # explicit receiver or another file may write the same cvar unseen.
+      def record_reflective_cvar_write(node, scope, class_name, accumulator)
+        return unless node.name == :class_variable_set && (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
+
+        args = node.arguments&.arguments
+        return unless args&.size == 2
+
+        name_node, value = args
+        # A name that is not a cvar's never meets a `def` write's entry, so the join drops it.
+        name = name_node.unescaped if name_node.is_a?(Prism::SymbolNode) || name_node.is_a?(Prism::StringNode)
+        return unless name
+
+        record_cvar_write(accumulator, class_name, name.to_sym, EmptySeed.erase(value, scope.type_of(value)),
+                          join_only: true)
+      end
+
+      # A class-body or `class_variable_set` write no `def` body's write has met yet (issue #3204): it joins an
+      # entry a creating write makes later, and {#finished_cvar_census} drops it when none does.
+      JoinOnlyCvarWrite = Data.define(:type)
+      private_constant :JoinOnlyCvarWrite
+
+      # Every census write unions with what the entry already holds, so the seed does not depend on the order of
+      # the writes. A `join_only` write (a class or module body's, or `class_variable_set`) never creates an entry
+      # on its own: it is held as a {JoinOnlyCvarWrite} until a `def` body's write of the same cvar arrives.
+      def record_cvar_write(accumulator, class_name, name, type, join_only:)
+        entries = (accumulator[class_name] ||= {})
+        existing = entries[name]
+        entries[name] =
+          if existing.nil? then join_only ? JoinOnlyCvarWrite.new(type) : type
+          elsif existing.is_a?(JoinOnlyCvarWrite)
+            joined = Type::Combinator.union(existing.type, type)
+            join_only ? JoinOnlyCvarWrite.new(joined) : joined
+          else Type::Combinator.union(existing, type)
+          end
+      end
+
+      # The census as the discovery index holds it: each cvar only joining writes reached dropped, each class's
+      # entry frozen, then the whole.
+      def finished_cvar_census(accumulator)
+        accumulator.filter_map do |class_name, entries|
+          kept = entries.reject { |_, type| type.is_a?(JoinOnlyCvarWrite) }
+          [class_name, kept.freeze] unless kept.empty?
+        end.to_h.freeze
       end
 
       # The program-global pre-pass's tables on the seeded scope's discovery index, and each global materialised into

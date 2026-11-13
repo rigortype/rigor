@@ -1,0 +1,2 @@
+- **[engine]** A class variable's `class`-body or `module`-body value now joins what its methods assign, so `@@x.nil?` in a sibling method no longer folds when the body set `@@x = nil`. ([#3218](https://github.com/rigortype/rigor/pull/3218))
+  - A body that is the only place a class variable is written still leaves its reads unknown, as before.

@@ -386,7 +386,7 @@ RSpec.describe "Declaration-fact witness" do
       changed = changed_runtime { |r| r["modules"]["Widget"]["class_variables"]["@@label"] = %w[Integer Object] }
 
       expect(DeclarationWitness::Relations.class_cvars_violations(changed, *tables))
-        .to eq(['class_cvars: Rigor types Widget @@label as "renamed"; Ruby holds a Integer'])
+        .to eq(['class_cvars: Rigor types Widget @@label as "renamed" | "widget"; Ruby holds a Integer'])
     end
 
     it "reports a nesting Ruby disagrees with, and ignores an anonymous entry no constant resolves through" do

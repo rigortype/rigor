@@ -31,7 +31,7 @@ Read those before extending the catalogue if you have not already; the decision 
 
 ## Workflow
 
-The flow has six stages. The first four are mechanical; the last two are decision-heavy.
+Stage 0 scaffolds most of the flow. Stages 1–4 are mechanical, stages 5 and 6 are decision-heavy, and stages 7–9 test, verify and document.
 
 ### Stage 0 — Run the scaffold script (recommended)
 
@@ -231,8 +231,8 @@ When in doubt, blocklist. The cost of a missed fold is one method's loss; the co
 ### When to introduce a new refinement carrier
 
 - The new shape is already in `imported-built-in-types.md` — implement it.
-- The new shape is a **point-removal** (e.g. `non-empty-string`, `non-zero-int`) — use `Type::Difference` and add a `Combinator.<name>` factory plus a `Builtins::ImportedRefinements` registry entry. The carrier landed in v0.0.3.
-- The new shape is a **predicate-subset** (e.g. `lowercase-string`, `numeric-string`, `decimal-int-string`) — use `Type::Refined`. The carrier landed in v0.0.4. Concrete steps:
+- The new shape is a **point-removal** (e.g. `non-empty-string`, `non-zero-int`) — use `Type::Difference` and add a `Combinator.<name>` factory plus a `Builtins::ImportedRefinements` registry entry.
+- The new shape is a **predicate-subset** (e.g. `lowercase-string`, `numeric-string`, `decimal-int-string`) — use `Type::Refined`. Concrete steps:
   1. Pick a `predicate_id` Symbol (kebab-case → snake_case, e.g. `numeric-string` → `:numeric`).
   2. Add an entry to `Type::Refined::PREDICATES` whose recogniser MUST be total over arbitrary input (return `false` rather than raise on non-base values). The recogniser is invoked at constant-fold and acceptance time over `Constant<base>` values.
   3. Add an entry to `Type::Refined::CANONICAL_NAMES` keyed on `[base_class_name, predicate_id]` so `describe` prints the kebab-case spelling.
@@ -240,7 +240,7 @@ When in doubt, blocklist. The cost of a missed fold is one method's loss; the co
   5. Add a `Builtins::ImportedRefinements::REGISTRY` entry mapping the kebab-case name to the new factory.
   6. Add catalog-tier projections in `MethodDispatcher::ShapeDispatch#dispatch_refined` for any methods whose answer is determined by the refinement (e.g. case-fold idempotence). Methods without a specific projection delegate to the base nominal so size-tier projections still apply.
   7. Add a self-asserting fixture under `spec/integration/fixtures/<name>/` (`demo.rb` + `sig/`) and wire it into `spec/integration/type_construction_spec.rb`.
-- The new shape is an **Enumerable-aware projection** (e.g. `Enumerable[T]` block parameter typing across Array / Set / Range) — that is a v0.0.4 architecture slice, not a per-class import.
+- The new shape is an **Enumerable-aware projection** (e.g. `Enumerable[T]` block parameter typing across Array / Set / Range) — that is an architecture change, not a per-class import.
 
 ### When to update ADR-3 / ADR-5 / spec docs
 

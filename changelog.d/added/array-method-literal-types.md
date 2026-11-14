@@ -1,0 +1,1 @@
+- **[engine]** Fold literal `Tuple`, `HashShape`, and `Range` types across remaining `Array` and `Enumerable` methods. ([#3239](https://github.com/rigortype/rigor/pull/3239))

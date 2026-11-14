@@ -1772,6 +1772,15 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
         dump_type((1..3).detect { |e| e > 1 })
       RUBY
     end
+
+    it "folds find_all and collect_concat per position and keeps the undecided floor on find_all" do
+      expect(dumped_types(<<~RUBY)).to eq(["[2, 3]", "[1, 10, 2, 20]", "Array[1 | 2]"])
+        dump_type([1, 2, 3].find_all { |n| n > 1 })
+        dump_type([1, 2].collect_concat { |n| [n, n * 10] })
+        seen = 0
+        dump_type([1, 2].find_all { |e| seen += 1; seen == 2 })
+      RUBY
+    end
   end
 
   describe "control flow (Slice 3 phase 1)" do
@@ -2763,6 +2772,72 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
         end
       RUBY
       expect(call_type(source, :logger).describe).to eq(":toplevel")
+    end
+  end
+
+  describe "per-element Tuple / Range block folding for rfind, rindex, take_while, drop_while, partition, and count" do
+    def statement_type(source, statement_index)
+      root = Prism.parse(source).value
+      index = Rigor::Inference::ScopeIndexer.index(root, default_scope: scope)
+      node = root.statements.body[statement_index]
+      index[node].type_of(node)
+    end
+
+    it "folds rfind and rindex from right to left on Tuple receivers" do
+      expect(scope.type_of(parse_expression("[10, 20, 30].rfind { |x| x > 15 }")).describe).to eq("30")
+      expect(scope.type_of(parse_expression("[10, 20, 30].rfind { |x| x > 99 }")).describe).to eq("nil")
+      expect(scope.type_of(parse_expression("[10, 20, 30].rfind(-> { :none }) { |x| x > 99 }")).describe)
+        .to eq("10 | 20 | 30 | Dynamic[top]")
+      expect(scope.type_of(parse_expression("[10, 20, 10].rindex { |x| x == 10 }")).describe).to eq("2")
+      expect(scope.type_of(parse_expression("[10, 20, 10].rindex { |x| x == 99 }")).describe).to eq("nil")
+    end
+
+    it "does not fold Array-only index / rindex / rfind on Range receivers" do
+      expect(scope.type_of(parse_expression("(1..3).index { |x| x == 2 }")).describe).to eq("Dynamic[top]")
+      expect(scope.type_of(parse_expression("(1..3).rindex { |x| x == 2 }")).describe).to eq("Dynamic[top]")
+      expect(scope.type_of(parse_expression("(1..3).rfind { |x| x == 2 }")).describe).to eq("Dynamic[top]")
+    end
+
+    it "floors rfind and rindex when the block rebinds a captured local across iterations (#587b)" do
+      rfind_src = "seen = 0\n[10, 20].rfind { |x| seen += 1; seen == 2 }\n"
+      rindex_src = "seen = 0\n[10, 20].rindex { |x| seen += 1; seen == 2 }\n"
+      expect(statement_type(rfind_src, 1).describe).to eq("10 | 20 | nil")
+      expect(statement_type(rindex_src, 1).describe).to eq("Integer?")
+    end
+
+    it "marks RepeatedOrWrites from right to left on rfind / rindex" do
+      # On `[1, 2].rfind`, `2` runs FIRST (unmarked memo `||=`) and `1` runs SECOND (marked), so `== 2` folds to `2`
+      # while `== 1` does not falsely fold to `1`.
+      expect(statement_type("cache = {}\n[1, 2].rfind { |e| (cache[:last] ||= e) == 2 }\n", 1).describe).to eq("2")
+      expect(statement_type("cache = {}\n[1, 2].rfind { |e| (cache[:last] ||= e) == 1 }\n", 1).describe)
+        .to eq("1 | 2 | nil")
+    end
+
+    it "folds take_while, drop_while, partition, and count per element and floors on undecided predicates" do
+      expect(scope.type_of(parse_expression("[1, 2, 3, 1].take_while { |x| x < 3 }")).describe).to eq("[1, 2]")
+      expect(scope.type_of(parse_expression("[1, 2, 3, 1].drop_while { |x| x < 3 }")).describe).to eq("[3, 1]")
+      expect(scope.type_of(parse_expression("[1, 2, 3].take_while { |x| x == 3 ? nil : true }")).describe)
+        .to eq("[1, 2]")
+      expect(scope.type_of(parse_expression("[1, 2, 3].drop_while { |x| x == 2 ? nil : true }")).describe)
+        .to eq("[2, 3]")
+      expect(statement_type("flag = rand > 0.5\n[1, 2, 3].take_while { |e| e == 1 ? flag : false }\n", 1).describe)
+        .to eq("Array[1 | 2 | 3]")
+      expect(statement_type("flag = rand > 0.5\n[1, 2, 3].drop_while { |e| e == 1 ? flag : false }\n", 1).describe)
+        .to eq("Array[1 | 2 | 3]")
+      expect(statement_type("flag = rand > 0.5\n[1, 2, 3].rfind { |e| e == 1 || (e == 3 && flag) }\n", 1).describe)
+        .to eq("1 | 3")
+      expect(statement_type("flag = rand > 0.5\n[1, 2, 3].rindex { |e| e == 1 || (e == 3 && flag) }\n", 1).describe)
+        .to eq("0 | 2")
+      expect(scope.type_of(parse_expression("[1, 2, 3].partition { |x| x.odd? }")).describe).to eq("[[1, 3], [2]]")
+      expect(scope.type_of(parse_expression("[nil, 1, false].partition { |x| x }")).describe)
+        .to eq("[[1], [nil, false]]")
+      expect(scope.type_of(parse_expression("[1, 2].partition { |x| x == 1 ? nil : true }")).describe)
+        .to eq("[[2], [1]]")
+      expect(scope.type_of(parse_expression("[1, 2].reject { |x| x == 1 ? nil : true }")).describe).to eq("[1]")
+      expect(scope.type_of(parse_expression("[1, 2, 3].count { |x| x.odd? }")).describe).to eq("2")
+
+      count_rebound = "seen = 0\n[1, 2].count { |x| seen += 1; seen == 2 }\n"
+      expect(statement_type(count_rebound, 1).describe).to eq("Integer")
     end
   end
 end

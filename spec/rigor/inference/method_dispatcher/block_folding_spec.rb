@@ -274,8 +274,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::BlockFolding do
     end
   end
 
-  describe "find/detect/find_index/index falsey-block short-circuit" do
-    %i[find detect find_index index].each do |method|
+  describe "find/detect/find_index/index/rfind/rindex falsey-block short-circuit" do
+    %i[find detect find_index index rfind rindex].each do |method|
       it "folds `#{method} { false }` to Constant[nil]" do
         result = fold(receiver: array_of(integer_nominal), method: method, block: false_const)
         expect(result).to eq(constant_of(nil))
@@ -291,6 +291,34 @@ RSpec.describe Rigor::Inference::MethodDispatcher::BlockFolding do
                       args: [constant_of(0)])
         expect(result).to be_nil
       end
+    end
+
+    %i[rfind index rindex].each do |method|
+      it "declines Array-only `#{method} { false }` on non-Array receivers" do
+        user_class = Rigor::Type::Combinator.nominal_of("CustomFinder")
+        expect(fold(receiver: user_class, method: method, block: false_const)).to be_nil
+        expect(fold(receiver: hash_shape_of(a: constant_of(1)), method: method, block: false_const)).to be_nil
+        expect(fold(receiver: constant_of(Set[1, 2]), method: method, block: false_const)).to be_nil
+        expect(fold(receiver: constant_of(1..3), method: method, block: false_const)).to be_nil
+      end
+    end
+  end
+
+  describe "find_all (Enumerable alias of select that always returns Array)" do
+    it "folds find_all { false } and find_all { true } on Array[T] and Tuple" do
+      expect(fold(receiver: array_of(integer_nominal), method: :find_all, block: false_const))
+        .to eq(tuple_of)
+      expect(fold(receiver: array_of(integer_nominal), method: :find_all, block: true_const))
+        .to eq(array_of(integer_nominal))
+      tup = tuple_of(integer_nominal, string_nominal)
+      expect(fold(receiver: tup, method: :find_all, block: true_const))
+        .to eq(array_of(Rigor::Type::Combinator.union(integer_nominal, string_nominal)))
+    end
+
+    it "folds find_all { false } on a HashShape to the empty tuple and declines find_all { true }" do
+      shape = hash_shape_of(a: constant_of(1))
+      expect(fold(receiver: shape, method: :find_all, block: false_const)).to eq(tuple_of)
+      expect(fold(receiver: shape, method: :find_all, block: true_const)).to be_nil
     end
   end
 
@@ -361,6 +389,33 @@ RSpec.describe Rigor::Inference::MethodDispatcher::BlockFolding do
       it "declines `#{method}` without a block (the Enumerator form)" do
         expect(fold(receiver: tuple_of(constant_of(1)), method: method, block: nil)).to be_nil
       end
+    end
+
+    it "folds minmax_by on non-empty Tuple and Range to a 2-element pair Tuple" do
+      tup = tuple_of(constant_of(1), string_nominal)
+      elem_union = Rigor::Type::Combinator.union(constant_of(1), string_nominal)
+      expect(fold(receiver: tup, method: :minmax_by, block: any_key))
+        .to eq(tuple_of(elem_union, elem_union))
+
+      range_elem = Rigor::Type::Combinator.integer_range(2, 4)
+      expect(fold(receiver: constant_of(2..4), method: :minmax_by, block: any_key))
+        .to eq(tuple_of(range_elem, range_elem))
+    end
+
+    it "folds minmax_by on empty Tuple and empty Range to [nil, nil]" do
+      nil_const = constant_of(nil)
+      expect(fold(receiver: tuple_of, method: :minmax_by, block: any_key))
+        .to eq(tuple_of(nil_const, nil_const))
+      expect(fold(receiver: constant_of(1...1), method: :minmax_by, block: any_key))
+        .to eq(tuple_of(nil_const, nil_const))
+    end
+
+    it "declines minmax_by when receiver size is dynamic, an arg is given, or block is nil" do
+      expect(fold(receiver: array_of(integer_nominal), method: :minmax_by, block: any_key)).to be_nil
+      expect(fold(receiver: constant_of(1..), method: :minmax_by, block: any_key)).to be_nil
+      expect(fold(receiver: tuple_of(constant_of(1)), method: :minmax_by, block: any_key,
+                  args: [constant_of(1)])).to be_nil
+      expect(fold(receiver: tuple_of(constant_of(1)), method: :minmax_by, block: nil)).to be_nil
     end
   end
 

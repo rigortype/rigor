@@ -243,7 +243,7 @@ module Rigor
       OBJECT_NON_ESCAPING = %i[tap then yield_self].freeze
 
       ENUMERABLE_NON_ESCAPING = %i[
-        each map collect flat_map collect_concat
+        each reverse_each map collect flat_map collect_concat
         select filter reject filter_map
         find detect find_index find_all
         any? all? none? one? count tally sum
@@ -255,7 +255,7 @@ module Rigor
         zip
       ].freeze
 
-      ARRAY_EXTRA = %i[each_index].freeze
+      ARRAY_EXTRA = %i[each_index rfind index rindex].freeze
       HASH_EXTRA = %i[
         each_pair each_key each_value
         transform_keys transform_values

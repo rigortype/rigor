@@ -25,11 +25,11 @@ module Rigor
             # Methods that yield (block-dependent) — classifier
             # may mark them leaf when the block call is gated:
             :each, :each_with_index, :each_index, :each_slice,
-            :each_cons, :each_with_object,
+            :each_cons, :each_with_object, :reverse_each,
             # Identity/comparison methods that take a block too
             :max, :min, :max_by, :min_by, :minmax, :minmax_by,
             :sort_by, :group_by, :partition, :all?, :any?, :none?,
-            :one?, :find, :detect, :find_all, :find_index,
+            :one?, :find, :detect, :rfind, :find_all, :find_index, :index, :rindex,
             :reduce, :inject, :flat_map, :collect_concat,
             :zip, :product, :combination, :permutation,
             :chunk_while, :slice_when, :tally

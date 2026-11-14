@@ -76,8 +76,18 @@ FOLD_PARITY_CASES = {
   "Array / Tuple — ShapeDispatch" => [
     "[3, 1, 2].sort", "[1, 2, 3].reverse", "[1, 2, 3].first", "[1, 2, 3].last",
     "[1, 2, 3].sum", "[1, 2, 3].min", "[1, 2, 3].max", "[1, 2, 3].size",
-    "[1, 2, 3].length", "[1, 2, 3].count", "[1, 2, 2].include?(2)",
-    "[1, 2, 3].empty?", "[].empty?", "[1, nil, 2].compact", "[1, 2, 3].take(2)",
+    "[1, 2, 3].length", "[1, 2, 3].count", "[1, 1, 2].count(1)",
+    "[1, 2, 2].include?(2)", "[1, 2, 2].member?(2)",
+    "[1, 2, 3].empty?", "[].empty?", "[].all?", "[nil, false].none?",
+    "[1, nil, 2].compact", "[1, 2, 3].take(2)",
+    "[2, 1].rotate", "[2, 1].minmax",
+    "[1, 1, 2].uniq", "[1, 1.0].uniq",
+    "[1, 1, 2].union", "[1, 2].intersection", "[1, 2].difference",
+    "[1, 2].entries", "[1, 2].to_ary", "[1, 2].to_set",
+    "[1, 2].zip", "[10, 20, 30].fetch_values(0, 2)",
+    "[[1, 2], [3, 4]].assoc(3)", "[[1, 2], [3, 4]].rassoc(4)",
+    "[1, 1, 2].tally", "[[1, 2], [3, 4]].transpose",
+    "[1, 2].product([3, 4])", '[65, 66].pack("C*")',
     "[1, 2] + [3, 4]", "[10, 20, 30][1]",
     '[1, 2, 3].join("-")', "[1, 2, 3].join",
     '["a", "b"].join("-")', '["a", "b"].join', "[].join"
@@ -107,15 +117,22 @@ FOLD_PARITY_CASES = {
   ],
   "Array — per-element select/filter/reject fold" => [
     "[1, 2, 3, 4].select { |n| n.even? }", "[1, 2, 3, 4].filter { |n| n > 2 }",
+    "[1, 2, 3].find_all { |n| n > 1 }", "[1, 2].collect_concat { |n| [n, n * 10] }",
     "[1, 2, nil].reject { |x| x.nil? }", "[1, 2, nil].reject(&:nil?)",
     "[1, 2, nil].select(&:nil?)", "[1, 2, 3, 4, 5].select(&:odd?)",
-    "[1, 2, 3].reject { |n| n.positive? }", "[1, 2, 3].map(&:to_s)"
+    "[1, 2, 3].reject { |n| n.positive? }", "[1, 2, 3].map(&:to_s)",
+    "[1, 3, 2].minmax_by { |n| n }"
   ],
   "Array / Range — per-element find/detect/index fold" => [
     "[1, 2].find { |e| e > 1 }", "[1, 2].find { |e| e > 5 }", "(1..3).detect { |e| e > 1 }",
     "[1, 2].find(-> { 0 }) { |e| e > 5 }", "[1, 2].detect(proc { 0 }) { |e| e > 5 }",
     "(1..3).find(-> { 0 }) { |e| e > 5 }", "(1..3).detect(-> { 0 }) { |e| e > 5 }",
-    "[1, 2].find(-> { 0 }, &:nil?)", "[1, 2].index { |e| e == 2 }", "[1, 2].index(2)"
+    "[1, 2].find(-> { 0 }, &:nil?)", "[1, 2].index { |e| e == 2 }", "[1, 2].index(2)",
+    "[1, 2, 3].rfind { |e| e > 1 }", "[1, 2, 1].rindex { |e| e == 1 }",
+    "[1, 2, 3, 1].take_while { |e| e < 3 }", "[1, 2, 3, 1].drop_while { |e| e < 3 }",
+    "[1, 2, 3].partition { |e| e.odd? }", "[1, 2, 3].count { |e| e.odd? }",
+    "[10, 20, 30, 40].values_at(1..2, -1)", "[1, 2, 3].sum(10)", "['a', 'b'].sum('')",
+    "[[1, 2], [3, 4], [1, 2]].uniq", "[[1, 2], [3, 4]].include?([1, 2])"
   ],
   # A `:none` fallback, because upstream's `detect` answered `Elem?` and an Integer `0` would pass for an element.
   # No `(1..3)` receiver: its element reads `Dynamic[top]` here, which admits `:none` on either answer.

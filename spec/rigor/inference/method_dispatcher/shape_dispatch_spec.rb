@@ -2135,4 +2135,202 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
         .to eq(Rigor::Type::Combinator.positive_int)
     end
   end
+
+  describe "additional Array / Tuple literal and shape folds" do
+    let(:t) { tuple(constant(1), constant(1), constant(2)) }
+
+    it "folds member? identically to include? on Tuple" do
+      expect(dispatch(receiver: t, method_name: :member?, args: [constant(2)])).to eq(constant(true))
+      expect(dispatch(receiver: t, method_name: :member?, args: [constant(9)])).to eq(constant(false))
+      expect(dispatch(receiver: tuple(constant(1), Rigor::Type::Combinator.nominal_of("Object")),
+                      method_name: :member?, args: [constant(9)])).to be_nil
+    end
+
+    it "folds entries and to_ary identically to to_a on Tuple" do
+      expect(dispatch(receiver: t, method_name: :entries)).to eq(t)
+      expect(dispatch(receiver: t, method_name: :to_ary)).to eq(t)
+      expect(dispatch(receiver: t, method_name: :entries, args: [constant(1)])).to be_nil
+      expect(dispatch(receiver: t, method_name: :to_ary, args: [constant(1)])).to be_nil
+    end
+
+    it "folds count(needle) when all elements and the needle are Constant" do
+      expect(dispatch(receiver: t, method_name: :count, args: [constant(1)])).to eq(constant(2))
+      expect(dispatch(receiver: t, method_name: :count, args: [constant(9)])).to eq(constant(0))
+      expect(dispatch(receiver: tuple(constant(1), Rigor::Type::Combinator.nominal_of("Integer")),
+                      method_name: :count, args: [constant(1)])).to be_nil
+      expect(dispatch(receiver: t, method_name: :count, args: [constant(1), constant(2)])).to be_nil
+      expect(dispatch(receiver: t, method_name: :count, args: [constant(1)],
+                      block_type: constant(true))).to be_nil
+    end
+
+    it "folds zero-arg zip, union, intersection, and difference while keeping symbolic operators strict" do
+      ab = tuple(constant(1), constant(2))
+      expect(dispatch(receiver: ab, method_name: :zip))
+        .to eq(tuple(tuple(constant(1)), tuple(constant(2))))
+      expect(dispatch(receiver: tuple, method_name: :zip)).to eq(tuple)
+      expect(dispatch(receiver: t, method_name: :union)).to eq(ab)
+      expect(dispatch(receiver: t, method_name: :intersection)).to eq(t)
+      expect(dispatch(receiver: t, method_name: :difference)).to eq(t)
+      expect(dispatch(receiver: t, method_name: :|)).to be_nil
+      expect(dispatch(receiver: t, method_name: :-)).to be_nil
+    end
+
+    it "preserves eql? uniqueness in Tuple#uniq (1 and 1.0 stay distinct)" do
+      mixed = tuple(constant(1), constant(1.0), constant(1))
+      expect(dispatch(receiver: mixed, method_name: :uniq)).to eq(tuple(constant(1), constant(1.0)))
+    end
+
+    it "folds to_set on all-Constant Tuples and declines when any element is dynamic" do
+      expect(dispatch(receiver: t, method_name: :to_set)).to eq(constant(Set[1, 2]))
+      expect(dispatch(receiver: tuple, method_name: :to_set)).to eq(constant(Set[]))
+      expect(dispatch(receiver: tuple(constant(1), Rigor::Type::Combinator.nominal_of("Integer")),
+                      method_name: :to_set)).to be_nil
+      expect(dispatch(receiver: t, method_name: :to_set, args: [constant(1)])).to be_nil
+    end
+
+    it "folds fetch_values for valid indices and empty arity, and declines out-of-bounds" do
+      recv = tuple(constant(10), constant(20), constant(30))
+      expect(dispatch(receiver: recv, method_name: :fetch_values, args: [constant(0), constant(-1)]))
+        .to eq(tuple(constant(10), constant(30)))
+      expect(dispatch(receiver: recv, method_name: :fetch_values)).to eq(tuple)
+      expect(dispatch(receiver: recv, method_name: :fetch_values, args: [constant(3)])).to be_nil
+      expect(dispatch(receiver: recv, method_name: :fetch_values, args: [constant(0)],
+                      block_type: constant(0))).to be_nil
+    end
+
+    it "folds assoc and rassoc on nested Tuples and respects intervening unknown arrays" do
+      pairs = tuple(tuple(constant(1), constant(:a)), tuple(constant(2), constant(:b)))
+      expect(dispatch(receiver: pairs, method_name: :assoc, args: [constant(2)]))
+        .to eq(tuple(constant(2), constant(:b)))
+      expect(dispatch(receiver: pairs, method_name: :assoc, args: [constant(9)]))
+        .to eq(constant(nil))
+      expect(dispatch(receiver: pairs, method_name: :rassoc, args: [constant(:b)]))
+        .to eq(tuple(constant(2), constant(:b)))
+      expect(dispatch(receiver: pairs, method_name: :rassoc, args: [constant(:z)]))
+        .to eq(constant(nil))
+
+      with_scalar = tuple(constant("skip"), tuple(constant(2), constant(:b)))
+      expect(dispatch(receiver: with_scalar, method_name: :assoc, args: [constant(2)]))
+        .to eq(tuple(constant(2), constant(:b)))
+
+      with_unknown_array = tuple(Rigor::Type::Combinator.nominal_of("Array"), tuple(constant(2), constant(:b)))
+      expect(dispatch(receiver: with_unknown_array, method_name: :assoc, args: [constant(2)])).to be_nil
+      expect(dispatch(receiver: tuple(tuple(constant(1))), method_name: :rassoc, args: [constant(nil)]))
+        .to eq(constant(nil))
+    end
+
+    it "folds tally to a HashShape of Constant counts" do
+      expect(dispatch(receiver: tuple(constant(1), constant(1), constant("a")), method_name: :tally))
+        .to eq(Rigor::Type::Combinator.hash_shape_of(1 => constant(2), "a" => constant(1)))
+      expect(dispatch(receiver: tuple, method_name: :tally)).to eq(hash_shape({}))
+      expect(dispatch(receiver: tuple(constant(1), Rigor::Type::Combinator.nominal_of("Object")),
+                      method_name: :tally)).to be_nil
+    end
+
+    it "folds transpose on rectangular nested Tuples and declines ragged or flat shapes" do
+      matrix = tuple(tuple(constant(1), constant(2)), tuple(constant(3), constant(4)))
+      expect(dispatch(receiver: matrix, method_name: :transpose))
+        .to eq(tuple(tuple(constant(1), constant(3)), tuple(constant(2), constant(4))))
+      expect(dispatch(receiver: tuple, method_name: :transpose)).to eq(tuple)
+      ragged = tuple(tuple(constant(1), constant(2)), tuple(constant(3)))
+      expect(dispatch(receiver: ragged, method_name: :transpose)).to be_nil
+      expect(dispatch(receiver: tuple(constant(1)), method_name: :transpose)).to be_nil
+    end
+
+    it "folds product on Tuple receivers and arguments within the element cap" do
+      left = tuple(constant(1), constant(2))
+      right = tuple(constant(3), constant(4))
+      expect(dispatch(receiver: left, method_name: :product, args: [right])).to eq(
+        tuple(
+          tuple(constant(1), constant(3)),
+          tuple(constant(1), constant(4)),
+          tuple(constant(2), constant(3)),
+          tuple(constant(2), constant(4))
+        )
+      )
+      expect(dispatch(receiver: left, method_name: :product))
+        .to eq(tuple(tuple(constant(1)), tuple(constant(2))))
+      expect(dispatch(receiver: tuple, method_name: :product, args: [right])).to eq(tuple)
+
+      nine = tuple(*Array.new(9, constant(1)))
+      expect(dispatch(receiver: nine, method_name: :product, args: [nine])).to be_nil
+      expect(dispatch(receiver: left, method_name: :product,
+                      args: [Rigor::Type::Combinator.nominal_of("Array")])).to be_nil
+    end
+
+    it "folds pack for safe directives and declines pointer or buffer forms" do
+      bytes = tuple(constant(65), constant(66))
+      expect(dispatch(receiver: bytes, method_name: :pack, args: [constant("C*")])).to eq(constant("AB"))
+      expect(dispatch(receiver: tuple(constant("a")), method_name: :pack, args: [constant("p")])).to be_nil
+      expect(dispatch(receiver: tuple(constant("a")), method_name: :pack, args: [constant("P")])).to be_nil
+      expect(dispatch(receiver: bytes, method_name: :pack,
+                      args: [constant("C*"), hash_shape(buffer: constant(""))])).to be_nil
+      expect(dispatch(receiver: tuple(constant(65), Rigor::Type::Combinator.nominal_of("Integer")),
+                      method_name: :pack, args: [constant("C*")])).to be_nil
+    end
+
+    it "folds Tuple#values_at with Constant[Range] and mixed Integer/Range arguments" do
+      recv = tuple(constant(10), constant(20), constant(30), constant(40))
+      expect(dispatch(receiver: recv, method_name: :values_at, args: [constant(1..2)]))
+        .to eq(tuple(constant(20), constant(30)))
+      expect(dispatch(receiver: recv, method_name: :values_at, args: [constant(0...2), constant(-1)]))
+        .to eq(tuple(constant(10), constant(20), constant(40)))
+      expect(dispatch(receiver: recv, method_name: :values_at, args: [constant(0..100)])).to be_nil
+    end
+
+    it "folds Tuple#sum(init) with a Constant numeric or string initial value" do
+      nums = tuple(constant(1), constant(2), constant(3))
+      expect(dispatch(receiver: nums, method_name: :sum, args: [constant(10)])).to eq(constant(16))
+      expect(dispatch(receiver: tuple, method_name: :sum, args: [constant(10)])).to eq(constant(10))
+      strs = tuple(constant("a"), constant("b"))
+      expect(dispatch(receiver: strs, method_name: :sum, args: [constant("")])).to eq(constant("ab"))
+      expect(dispatch(receiver: strs, method_name: :sum)).to be_nil
+      expect(dispatch(receiver: nums, method_name: :sum, args: [constant("")])).to be_nil
+    end
+
+    it "folds value-equality and eql? Tuple methods on nested constant Tuples or HashShapes" do
+      pair_a = tuple(constant(1), constant(2))
+      pair_b = tuple(constant(3), constant(4))
+      nested = tuple(pair_a, pair_b, pair_a)
+
+      expect(dispatch(receiver: nested, method_name: :uniq)).to eq(tuple(pair_a, pair_b))
+      expect(dispatch(receiver: nested, method_name: :include?, args: [pair_a])).to eq(constant(true))
+      expect(dispatch(receiver: nested, method_name: :include?, args: [tuple(constant(9))])).to eq(constant(false))
+      expect(dispatch(receiver: nested, method_name: :count, args: [pair_a])).to eq(constant(2))
+      expect(dispatch(receiver: nested, method_name: :index, args: [pair_a])).to eq(constant(0))
+      expect(dispatch(receiver: nested, method_name: :rindex, args: [pair_a])).to eq(constant(2))
+      expect(dispatch(receiver: nested, method_name: :&, args: [tuple(pair_b)])).to eq(tuple(pair_b))
+      expect(dispatch(receiver: tuple(pair_b, pair_a), method_name: :sort)).to eq(tuple(pair_a, pair_b))
+      expect(dispatch(receiver: tuple(pair_a, pair_b), method_name: :inspect)).to eq(constant("[[1, 2], [3, 4]]"))
+      expect(dispatch(receiver: tuple(pair_a, pair_b), method_name: :join, args: [constant("-")]))
+        .to eq(constant("1-2-3-4"))
+
+      hs_a = hash_shape(a: constant(1))
+      hs_b = hash_shape(a: constant(2))
+      hashes = tuple(hs_a, hs_b, hs_a)
+      expect(dispatch(receiver: hashes, method_name: :uniq)).to eq(tuple(hs_a, hs_b))
+      expect(dispatch(receiver: hashes, method_name: :count, args: [hs_a])).to eq(constant(2))
+
+      open_hs = Rigor::Type::HashShape.new({ a: constant(1) }, extra_keys: :open)
+      optional_hs = Rigor::Type::HashShape.new({ a: constant(1) }, optional_keys: Set[:a])
+      expect(dispatch(receiver: tuple(open_hs), method_name: :uniq)).to be_nil
+      expect(dispatch(receiver: tuple(optional_hs), method_name: :uniq)).to be_nil
+    end
+
+    it "declines non-shape tally keys, undecided earlier assoc slots, and oversized pack output" do
+      expect(dispatch(receiver: tuple(constant(1..2)), method_name: :tally)).to be_nil
+      int_nom = Rigor::Type::Combinator.nominal_of("Integer")
+      pair_a = tuple(constant(1), constant(2))
+      expect(dispatch(receiver: tuple(tuple(int_nom, constant(:a)), pair_a), method_name: :assoc,
+                      args: [constant(1)])).to be_nil
+      expect(dispatch(receiver: tuple(constant("a" * 5000)), method_name: :pack, args: [constant("a*")])).to be_nil
+    end
+
+    it "declines huge pack repeat counts and offsets before calling Array#pack" do
+      expect(dispatch(receiver: tuple, method_name: :pack, args: [constant("x99999999999999")])).to be_nil
+      expect(dispatch(receiver: tuple, method_name: :pack, args: [constant("x2000000000")])).to be_nil
+      expect(dispatch(receiver: tuple(constant(1)), method_name: :pack, args: [constant("@1500000000C")])).to be_nil
+      expect(dispatch(receiver: tuple(constant("a")), method_name: :pack, args: [constant("A1500000000")])).to be_nil
+    end
+  end
 end

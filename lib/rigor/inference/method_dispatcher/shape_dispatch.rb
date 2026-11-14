@@ -975,23 +975,27 @@ module Rigor
 
           def tuple_sum_with_init(tuple, init)
             return nil unless init.is_a?(Type::Constant)
+            return tuple_sum_with_string_init(tuple, init.value) if init.value.is_a?(String)
+            return nil unless init.value.is_a?(Numeric)
+            return init if tuple.elements.empty?
 
-            if init.value.is_a?(Numeric)
-              return init if tuple.elements.empty?
+            values = constant_numeric_values(tuple.elements)
+            return nil if values.nil?
 
-              values = constant_numeric_values(tuple.elements)
-              return nil if values.nil?
+            Type::Combinator.constant_of(values.sum(init.value))
+          rescue StandardError
+            nil
+          end
 
-              Type::Combinator.constant_of(values.sum(init.value))
-            elsif init.value.is_a?(String)
-              values = constant_values(tuple.elements)
-              return nil if values.nil? || !values.all?(String)
+          def tuple_sum_with_string_init(tuple, init_str)
+            values = constant_values(tuple.elements)
+            return nil if values.nil? || !values.all?(String)
+            return nil if values.sum(&:bytesize) + init_str.bytesize > TUPLE_JOIN_BYTE_LIMIT
 
-              result = values.sum(init.value)
-              return nil if result.bytesize > TUPLE_JOIN_BYTE_LIMIT
+            result = values.sum(init_str)
+            return nil if result.bytesize > TUPLE_JOIN_BYTE_LIMIT
 
-              Type::Combinator.constant_of(result)
-            end
+            Type::Combinator.constant_of(result)
           rescue StandardError
             nil
           end
@@ -1362,14 +1366,16 @@ module Rigor
           end
 
           # `tuple.pack(template)` — folds to `Constant[String]` when all elements and template are
-          # `Constant` (excluding non-deterministic pointer directives `p`/`P`), capped at
-          # `TUPLE_JOIN_BYTE_LIMIT`.
+          # `Constant` (excluding non-deterministic pointer directives `p`/`P` and numeric counts or offsets
+          # whose sum exceeds `TUPLE_JOIN_BYTE_LIMIT`), capped at `TUPLE_JOIN_BYTE_LIMIT`.
           def tuple_pack(tuple, _method_name, args)
             return nil unless args.size == 1
 
             template = args.first
             return nil unless template.is_a?(Type::Constant) && template.value.is_a?(String)
+            return nil if template.value.bytesize > TUPLE_JOIN_BYTE_LIMIT
             return nil if template.value.match?(/[pP]/)
+            return nil if pack_count_exceeds_limit?(template.value)
 
             values = constant_values(tuple.elements)
             return nil if values.nil?
@@ -1380,6 +1386,15 @@ module Rigor
             Type::Combinator.constant_of(result)
           rescue StandardError
             nil
+          end
+
+          def pack_count_exceeds_limit?(template)
+            total = 0
+            template.scan(/\d+/) do |digits|
+              total += digits.to_i
+              return true if total > TUPLE_JOIN_BYTE_LIMIT
+            end
+            false
           end
 
           # `tuple + other` — concatenates two Tuples. Both sides must be `Type::Tuple`. Returns a new

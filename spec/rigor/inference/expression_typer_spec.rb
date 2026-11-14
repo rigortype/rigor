@@ -2817,6 +2817,11 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       expect(scope.type_of(parse_expression("[1, 2, 3, 1].take_while { |x| x < 3 }")).describe).to eq("[1, 2]")
       expect(scope.type_of(parse_expression("[1, 2, 3, 1].drop_while { |x| x < 3 }")).describe).to eq("[3, 1]")
       expect(scope.type_of(parse_expression("[1, 2, 3].partition { |x| x.odd? }")).describe).to eq("[[1, 3], [2]]")
+      expect(scope.type_of(parse_expression("[nil, 1, false].partition { |x| x }")).describe)
+        .to eq("[[1], [nil, false]]")
+      expect(scope.type_of(parse_expression("[1, 2].partition { |x| x == 1 ? nil : true }")).describe)
+        .to eq("[[2], [1]]")
+      expect(scope.type_of(parse_expression("[1, 2].reject { |x| x == 1 ? nil : true }")).describe).to eq("[1]")
       expect(scope.type_of(parse_expression("[1, 2, 3].count { |x| x.odd? }")).describe).to eq("2")
 
       count_rebound = "seen = 0\n[1, 2].count { |x| seen += 1; seen == 2 }\n"

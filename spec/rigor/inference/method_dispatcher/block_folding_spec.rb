@@ -292,6 +292,16 @@ RSpec.describe Rigor::Inference::MethodDispatcher::BlockFolding do
         expect(result).to be_nil
       end
     end
+
+    %i[rfind index rindex].each do |method|
+      it "declines Array-only `#{method} { false }` on non-Array receivers" do
+        user_class = Rigor::Type::Combinator.nominal_of("CustomFinder")
+        expect(fold(receiver: user_class, method: method, block: false_const)).to be_nil
+        expect(fold(receiver: hash_shape_of(a: constant_of(1)), method: method, block: false_const)).to be_nil
+        expect(fold(receiver: constant_of(Set[1, 2]), method: method, block: false_const)).to be_nil
+        expect(fold(receiver: constant_of(1..3), method: method, block: false_const)).to be_nil
+      end
+    end
   end
 
   describe "find_all (Enumerable alias of select that always returns Array)" do

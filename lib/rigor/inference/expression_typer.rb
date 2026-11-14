@@ -7026,7 +7026,7 @@ module Rigor
       end
 
       def truthy_constant?(type)
-        type.is_a?(Type::Constant) && type.value && type.value != false
+        type.is_a?(Type::Constant) && !type.value.nil? && type.value != false
       end
 
       def falsey_constant?(type)

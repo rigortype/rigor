@@ -57,6 +57,7 @@ module Rigor
         # These methods only fold on the falsey side here; the truthy-block side requires per-position
         # analysis.
         FALSEY_BLOCK_NIL_METHODS = Set[:find, :detect, :rfind, :find_index, :index, :rindex].freeze
+        ARRAY_ONLY_FALSEY_NIL_METHODS = Set[:rfind, :index, :rindex].freeze
 
         # Block-taking `count` returns the number of elements for which the block is truthy. With a
         # Constant-falsey block the answer is unconditionally `Constant[0]`; with a Constant-truthy block on
@@ -86,7 +87,7 @@ module Rigor
           elsif filter_method?(method_name)
             fold_filter(receiver, method_name, truthiness)
           elsif FALSEY_BLOCK_NIL_METHODS.include?(method_name)
-            fold_falsey_nil_short_circuit(method_name, truthiness, args)
+            fold_falsey_nil_short_circuit(receiver, method_name, truthiness, args)
           elsif method_name == COUNT_METHOD
             fold_count(receiver, truthiness, args)
           end
@@ -298,13 +299,13 @@ module Rigor
           end
         end
 
-        # `find` / `detect` / `find_index` / `index` (block form) short-circuit to nil when the block is
-        # provably falsey. `index` and `find_index` also accept a non-block argument form
-        # (`arr.index(value)`); we decline whenever the call carries a positional argument so the RBS tier
-        # still answers the value-search variant correctly.
-        def fold_falsey_nil_short_circuit(_method_name, truthiness, args)
+        # `find` / `detect` / `find_index` (and Array-only `rfind` / `index` / `rindex`) short-circuit to
+        # nil when the block is provably falsey. Calls with a positional argument decline so the RBS tier
+        # answers value-search calls.
+        def fold_falsey_nil_short_circuit(receiver, method_name, truthiness, args)
           return nil unless args.empty?
           return nil unless truthiness == :falsey
+          return nil if ARRAY_ONLY_FALSEY_NIL_METHODS.include?(method_name) && filter_receiver_kind(receiver) != :array
 
           Type::Combinator.constant_of(nil)
         end

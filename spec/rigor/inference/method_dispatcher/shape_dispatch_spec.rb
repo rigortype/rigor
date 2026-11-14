@@ -2313,5 +2313,12 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       open_hs = Rigor::Type::HashShape.new(entries: { a: constant(1) }, open: true)
       expect(dispatch(receiver: tuple(open_hs), method_name: :uniq)).to be_nil
     end
+
+    it "declines huge pack repeat counts and offsets before calling Array#pack" do
+      expect(dispatch(receiver: tuple, method_name: :pack, args: [constant("x99999999999999")])).to be_nil
+      expect(dispatch(receiver: tuple, method_name: :pack, args: [constant("x2000000000")])).to be_nil
+      expect(dispatch(receiver: tuple(constant(1)), method_name: :pack, args: [constant("@1500000000C")])).to be_nil
+      expect(dispatch(receiver: tuple(constant("a")), method_name: :pack, args: [constant("A1500000000")])).to be_nil
+    end
   end
 end

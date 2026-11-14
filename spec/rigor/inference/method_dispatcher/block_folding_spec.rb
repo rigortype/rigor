@@ -325,6 +325,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::BlockFolding do
       expect(fold(receiver: receiver, method: :find, block: false_const)).to be_nil
     end
 
+    # Guard: the allowlist and the Dynamic path keep folding (fails only if a core name is dropped).
     it "keeps the folds on core nominals and on a Dynamic receiver" do
       %w[Array Hash Set Range Enumerator Enumerator::Lazy Enumerable].each do |name|
         receiver = Rigor::Type::Combinator.nominal_of(name)

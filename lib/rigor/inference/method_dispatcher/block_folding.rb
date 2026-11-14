@@ -52,6 +52,15 @@ module Rigor
 
         PREDICATE_METHODS = Set[:all?, :any?, :none?].freeze
 
+        # Issue #3242 — the nominal receivers whose `find` / `detect` / `find_index` / `count` / `all?` /
+        # `any?` / `none?` are core's (Array's, Hash's, Set's, Range's own, or Enumerable's). Any other
+        # class may define the method itself (`class Bag; def find = (yield; 8); end`), and a subclass of a
+        # core class is its own `Nominal`, so the folds that read no receiver shape decline on it and the
+        # call resolves to the project's method.
+        CORE_ENUMERABLE_NOMINALS = Set[
+          "Array", "Hash", "Set", "Range", "Enumerator", "Enumerator::Lazy", "Enumerable"
+        ].freeze
+
         # Methods whose answer is `nil` when the block always returns Ruby-falsey — `find` / `detect` /
         # `rfind` short-circuit to nil when nothing matches, `find_index` / `index` / `rindex` likewise.
         # These methods only fold on the falsey side here; the truthy-block side requires per-position
@@ -184,6 +193,7 @@ module Rigor
         # `pattern === element` and ignores the block, so `[1, 2].all?(String) { true }` is `false`.
         def fold_predicate(receiver, method_name, truthiness, args)
           return nil unless args.empty?
+          return nil if project_nominal_receiver?(receiver)
 
           emptiness = receiver_emptiness(receiver)
           decision = predicate_decision(method_name, truthiness, emptiness)
@@ -306,6 +316,7 @@ module Rigor
           return nil unless args.empty?
           return nil unless truthiness == :falsey
           return nil if ARRAY_ONLY_FALSEY_NIL_METHODS.include?(method_name) && filter_receiver_kind(receiver) != :array
+          return nil if project_nominal_receiver?(receiver)
 
           Type::Combinator.constant_of(nil)
         end
@@ -315,9 +326,22 @@ module Rigor
         # fold only fires when the block is the sole source of selection.
         def fold_count(receiver, truthiness, args)
           return nil unless args.empty?
+          return nil if project_nominal_receiver?(receiver)
           return Type::Combinator.constant_of(0) if truthiness == :falsey
 
           fold_count_truthy(receiver)
+        end
+
+        # True when the receiver is, or may be, an instance of a class outside {CORE_ENUMERABLE_NOMINALS}:
+        # a `Nominal` of another class, or a `Difference` / `Union` carrying one. The shape carriers
+        # (`Tuple`, `HashShape`, `Constant`) and a `Dynamic` receiver are not, so their folds stand.
+        def project_nominal_receiver?(receiver)
+          case receiver
+          when Type::Nominal then !CORE_ENUMERABLE_NOMINALS.include?(receiver.class_name)
+          when Type::Difference then project_nominal_receiver?(receiver.base)
+          when Type::Union then receiver.members.any? { |member| project_nominal_receiver?(member) }
+          else false
+          end
         end
 
         def fold_count_truthy(receiver)

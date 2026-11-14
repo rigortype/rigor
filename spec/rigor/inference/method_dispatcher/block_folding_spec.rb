@@ -304,6 +304,41 @@ RSpec.describe Rigor::Inference::MethodDispatcher::BlockFolding do
     end
   end
 
+  # Issue #3242 — a class outside the core collections may define these methods itself, so the folds that
+  # read no receiver shape decline on its nominal and the RBS / project tier answers.
+  describe "receivers outside the core collections" do
+    def project_nominal = Rigor::Type::Combinator.nominal_of("Bag")
+
+    %i[find detect find_index count all? any? none?].each do |method|
+      it "declines `#{method} { false }` on a project nominal" do
+        expect(fold(receiver: project_nominal, method: method, block: false_const)).to be_nil
+      end
+
+      it "declines `#{method} { false }` on a union holding a project nominal" do
+        receiver = Rigor::Type::Combinator.union(tuple_of(integer_nominal), project_nominal)
+        expect(fold(receiver: receiver, method: method, block: false_const)).to be_nil
+      end
+    end
+
+    it "declines on a Difference over a project nominal" do
+      receiver = Rigor::Type::Combinator.difference(project_nominal, tuple_of)
+      expect(fold(receiver: receiver, method: :find, block: false_const)).to be_nil
+    end
+
+    it "keeps the folds on core nominals and on a Dynamic receiver" do
+      %w[Array Hash Set Range Enumerator Enumerator::Lazy Enumerable].each do |name|
+        receiver = Rigor::Type::Combinator.nominal_of(name)
+        expect(fold(receiver: receiver, method: :find, block: false_const)).to eq(constant_of(nil))
+        expect(fold(receiver: receiver, method: :count, block: false_const)).to eq(constant_of(0))
+        expect(fold(receiver: receiver, method: :any?, block: false_const)).to eq(false_const)
+      end
+      dynamic = Rigor::Type::Combinator.untyped
+      expect(fold(receiver: dynamic, method: :find, block: false_const)).to eq(constant_of(nil))
+      expect(fold(receiver: dynamic, method: :count, block: false_const)).to eq(constant_of(0))
+      expect(fold(receiver: non_empty_array(integer_nominal), method: :all?, block: false_const)).to eq(false_const)
+    end
+  end
+
   describe "find_all (Enumerable alias of select that always returns Array)" do
     it "folds find_all { false } and find_all { true } on Array[T] and Tuple" do
       expect(fold(receiver: array_of(integer_nominal), method: :find_all, block: false_const))

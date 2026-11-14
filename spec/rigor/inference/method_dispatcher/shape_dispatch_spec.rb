@@ -2261,7 +2261,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
     it "folds pack for safe directives and declines pointer or buffer forms" do
       bytes = tuple(constant(65), constant(66))
       expect(dispatch(receiver: bytes, method_name: :pack, args: [constant("C*")])).to eq(constant("AB"))
-      expect(dispatch(receiver: bytes, method_name: :pack, args: [constant("p")])).to be_nil
+      expect(dispatch(receiver: tuple(constant("a")), method_name: :pack, args: [constant("p")])).to be_nil
+      expect(dispatch(receiver: tuple(constant("a")), method_name: :pack, args: [constant("P")])).to be_nil
       expect(dispatch(receiver: bytes, method_name: :pack,
                       args: [constant("C*"), hash_shape(buffer: constant(""))])).to be_nil
       expect(dispatch(receiver: tuple(constant(65), Rigor::Type::Combinator.nominal_of("Integer")),
@@ -2310,8 +2311,19 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       expect(dispatch(receiver: hashes, method_name: :uniq)).to eq(tuple(hs_a, hs_b))
       expect(dispatch(receiver: hashes, method_name: :count, args: [hs_a])).to eq(constant(2))
 
-      open_hs = Rigor::Type::HashShape.new(entries: { a: constant(1) }, open: true)
+      open_hs = Rigor::Type::HashShape.new({ a: constant(1) }, extra_keys: :open)
+      optional_hs = Rigor::Type::HashShape.new({ a: constant(1) }, optional_keys: Set[:a])
       expect(dispatch(receiver: tuple(open_hs), method_name: :uniq)).to be_nil
+      expect(dispatch(receiver: tuple(optional_hs), method_name: :uniq)).to be_nil
+    end
+
+    it "declines non-shape tally keys, undecided earlier assoc slots, and oversized pack output" do
+      expect(dispatch(receiver: tuple(constant(1..2)), method_name: :tally)).to be_nil
+      int_nom = Rigor::Type::Combinator.nominal_of("Integer")
+      pair_a = tuple(constant(1), constant(2))
+      expect(dispatch(receiver: tuple(tuple(int_nom, constant(:a)), pair_a), method_name: :assoc,
+                      args: [constant(1)])).to be_nil
+      expect(dispatch(receiver: tuple(constant("a" * 5000)), method_name: :pack, args: [constant("a*")])).to be_nil
     end
 
     it "declines huge pack repeat counts and offsets before calling Array#pack" do

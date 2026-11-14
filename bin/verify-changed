@@ -11,7 +11,9 @@
 #   1. whitespace errors (`git diff --check`, and the same check on untracked files);
 #   2. RuboCop on the changed files `make lint` covers;
 #   3. RSpec on the changed specs; the mirror spec of a changed lib/ or tool/ file;
-#      the specs that name a changed fixture; for a changed plugin or example,
+#      the specs that name a changed fixture — by its directory path when it
+#      lives under a fixtures/ tree, since `demo.rb` alone names dozens of
+#      fixture directories; for a changed plugin or example,
 #      the integration specs that load it plus the two all-plugin conformance
 #      specs — the opt-in files in their own processes, as in `verify`; and
 #      for any engine change (lib/, sig/, data/) the whole-engine drift specs
@@ -31,12 +33,25 @@
 # Changes it knows it cannot cover are listed at the end instead of passing
 # silently.
 #
-# Usage: bin/verify-changed [base]   (base defaults to origin/master; run it
-# inside the Flake, e.g. via `make verify-changed`)
+# Usage: bin/verify-changed [base] [--list-specs]   (base defaults to
+# origin/master; run it inside the Flake, e.g. via `make verify-changed`)
+#
+# --list-specs prints the specs the selection picked and exits before any check
+# runs — spec/tool/verify_changed_spec.rb drives it with VERIFY_CHANGED_PATHS
+# (newline-separated paths standing in for the diff) to pin the selection.
 
 set -uo pipefail
 
-base_ref="${1:-${VERIFY_BASE:-origin/master}}"
+list_only=""
+base_ref=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --list-specs) list_only=1 ;;
+    *) base_ref="$1" ;;
+  esac
+  shift
+done
+base_ref="${base_ref:-${VERIFY_BASE:-origin/master}}"
 if ! merge_base="$(git merge-base HEAD "$base_ref" 2>/dev/null)"; then
   echo "verify-changed: cannot find a merge base with $base_ref (git fetch origin?)" >&2
   exit 2
@@ -45,16 +60,32 @@ fi
 # NUL-separated reads keep spaces and non-ASCII names intact (core.quotePath
 # would otherwise hand back a quoted name that fails every -f test).
 changed=()
-while IFS= read -r -d '' path; do
-  [[ -f "$path" ]] && changed+=("$path")
-done < <({ git diff -z --name-only --diff-filter=d "$merge_base"; git ls-files -z --others --exclude-standard; } | sort -zu)
+if [[ -n "${VERIFY_CHANGED_PATHS:-}" ]]; then
+  # Test hook: the listed paths stand in for the whole diff, verbatim — no -f
+  # filter, so a path that does not exist can still exercise the fallbacks.
+  while IFS= read -r path; do
+    [[ -n "$path" ]] && changed+=("$path")
+  done <<< "$VERIFY_CHANGED_PATHS"
+else
+  while IFS= read -r -d '' path; do
+    [[ -f "$path" ]] && changed+=("$path")
+  done < <({ git diff -z --name-only --diff-filter=d "$merge_base"; git ls-files -z --others --exclude-standard; } | sort -zu)
+fi
 untracked=()
 while IFS= read -r -d '' path; do untracked+=("$path"); done < <(git ls-files -z --others --exclude-standard)
 deleted=()
-while IFS= read -r -d '' path; do deleted+=("$path"); done < <(git diff -z --name-only --diff-filter=D "$merge_base")
+if [[ -z "${VERIFY_CHANGED_PATHS:-}" ]]; then
+  while IFS= read -r -d '' path; do deleted+=("$path"); done < <(git diff -z --name-only --diff-filter=D "$merge_base")
+fi
 
-echo "verify-changed: ${#changed[@]} changed and ${#deleted[@]} deleted file(s)" \
-  "since $(git rev-parse --short "$merge_base") ($base_ref)"
+# In list mode stdout carries only the spec list, so the banner goes to stderr.
+if [[ -n "$list_only" ]]; then
+  echo "verify-changed: ${#changed[@]} changed and ${#deleted[@]} deleted file(s)" \
+    "since $(git rev-parse --short "$merge_base") ($base_ref)" >&2
+else
+  echo "verify-changed: ${#changed[@]} changed and ${#deleted[@]} deleted file(s)" \
+    "since $(git rev-parse --short "$merge_base") ($base_ref)"
+fi
 
 failures=()
 step() {
@@ -80,9 +111,11 @@ check_untracked_whitespace() {
   return "$status"
 }
 
-step "git diff --check" git diff --check "$merge_base"
-if ((${#untracked[@]})); then
-  step "whitespace (untracked files)" check_untracked_whitespace "${untracked[@]}"
+if [[ -z "$list_only" ]]; then
+  step "git diff --check" git diff --check "$merge_base"
+  if ((${#untracked[@]})); then
+    step "whitespace (untracked files)" check_untracked_whitespace "${untracked[@]}"
+  fi
 fi
 
 # Newline-separated lists, de-duplicated by `lines` below: the host's /bin/bash
@@ -102,10 +135,40 @@ add_spec() {
   esac
 }
 add_mirror_spec() { [[ -f "$1" ]] && add_spec "$1"; }
+# spec_paths_matching <extended regex>: the spec files whose text matches, sorted.
+spec_paths_matching() { grep -rlE --include='*_spec.rb' "$1" spec | sort -u; }
 # add_specs_matching <extended regex>: every spec file whose text matches.
 add_specs_matching() {
   local spec
-  while IFS= read -r spec; do add_spec "$spec"; done < <(grep -rlE --include='*_spec.rb' "$1" spec)
+  while IFS= read -r spec; do add_spec "$spec"; done < <(spec_paths_matching "$1")
+}
+# fixture_dirs_matching <path below a fixtures/ root>: a file inside
+# `fixtures/effects/tracer/` is named in specs by a directory prefix of its
+# path (`effects/tracer` for the fixture's own specs, `effects` for a spec
+# that globs the container). Every ancestor is tried deepest-first: the first
+# level a spec names is the precise match, and a shallower level may still add
+# the specs that name the fixture more broadly — but only while it adds few,
+# so a container name like `effects` cannot re-select every spec that says
+# "effects". The cap is on NEW specs per level; the deepest match is never
+# capped. Returns success when any level matched.
+fixture_dirs_matching() {
+  local rest="$1" dir matches added result="" spec
+  while [[ "$rest" == */* ]]; do
+    dir="${rest%/*}"
+    matches="$(spec_paths_matching "(^|[^A-Za-z0-9_])${dir}([^A-Za-z0-9_]|$)")"
+    if [[ -n "$matches" ]]; then
+      if [[ -z "$result" ]]; then
+        result="$matches"
+      else
+        added="$(comm -13 <(printf '%s\n' "$result") <(printf '%s\n' "$matches") | grep -c .)"
+        (( added <= 10 )) && result="$(printf '%s\n%s\n' "$result" "$matches" | sort -u)"
+      fi
+    fi
+    rest="$dir"
+  done
+  [[ -z "$result" ]] && return 1
+  while IFS= read -r spec; do add_spec "$spec"; done <<< "$result"
+  return 0
 }
 lines() { printf '%s' "$1" | sort -u; }
 # Specs that read the whole engine rather than one file: a lib change anywhere
@@ -183,11 +246,17 @@ for path in ${changed[@]+"${changed[@]}"}; do
       ;;
     spec/*_spec.rb) add_spec "$path" ;;
     spec/*)
-      # A fixture: run the specs that name it.
+      # A fixture: run the specs that name it. Under a fixtures/ tree the
+      # directory path is the identifier; a flat fixture (`fixtures/x.rb`) or a
+      # directory lookup that names no spec falls back to the basename stem.
       stem="$(basename "$path")"
       stem="${stem%%.*}"
       before="$specs$pool_specs$plugin_specs"
-      add_specs_matching "$stem"
+      matched=""
+      if [[ "$path" == spec/fixtures/* || "$path" == spec/*/fixtures/* ]]; then
+        fixture_dirs_matching "${path#*fixtures/}" && matched=1
+      fi
+      [[ -z "$matched" ]] && add_specs_matching "$stem"
       [[ "$specs$pool_specs$plugin_specs" == "$before" ]] && uncovered+="$path (no spec names it)"$'\n'
       ;;
     lib/*.rb)
@@ -282,6 +351,17 @@ run_on() {
   while IFS= read -r path; do files+=("$path"); done < <(lines "$list")
   step "$name" "$@" "${files[@]}"
 }
+
+# --list-specs: stdout is the selected spec paths only, one per line; the
+# uncovered report goes to stderr. No check runs.
+if [[ -n "$list_only" ]]; then
+  lines "$specs$pool_specs$plugin_specs"
+  if [[ -n "$uncovered" ]]; then
+    echo "verify-changed: not covered locally:" >&2
+    lines "$uncovered" | sed 's/^/  - /' >&2
+  fi
+  exit 0
+fi
 
 # `--only-recognized-file-types` drops a named file RuboCop would not pick up on
 # its own (a .md, a .yml), while still taking config.ru, Gemfile and *.gemspec.

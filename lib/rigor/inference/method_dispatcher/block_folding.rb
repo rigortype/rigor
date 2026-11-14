@@ -37,12 +37,12 @@ module Rigor
       module BlockFolding
         module_function
 
-        FILTER_KEEP_ON_TRUTHY = Set[:select, :filter, :take_while].freeze
+        FILTER_KEEP_ON_TRUTHY = Set[:select, :filter, :find_all, :take_while].freeze
         FILTER_KEEP_ON_FALSEY = Set[:reject, :drop_while].freeze
 
-        # The filter methods `Hash` defines itself, returning a Hash. `take_while` / `drop_while` on a Hash
-        # are Enumerable's and return an Array of `[key, value]` pairs; `Set` and `Range` define none of the
-        # five, so all of theirs return an Array too.
+        # The filter methods `Hash` defines itself, returning a Hash. `find_all` / `take_while` /
+        # `drop_while` on a Hash are Enumerable's and return an Array of `[key, value]` pairs; `Set` and
+        # `Range` define none of the six, so all of theirs return an Array too.
         HASH_RETURNING_FILTERS = Set[:select, :filter, :reject].freeze
 
         # `filter_receiver_kind`'s answer for a nominal receiver; an unlisted class declines.
@@ -52,21 +52,21 @@ module Rigor
 
         PREDICATE_METHODS = Set[:all?, :any?, :none?].freeze
 
-        # Methods whose answer is `nil` when the block always returns Ruby-falsey — `find` / `detect`
-        # short-circuit to nil when nothing matches, `find_index` / `index` likewise. These methods only fold
-        # on the falsey side for now; the truthy-block side requires per-position analysis (the index of the
-        # first kept element, or the element itself, depend on the receiver's shape and on which positions
-        # actually evaluate to truthy).
-        FALSEY_BLOCK_NIL_METHODS = Set[:find, :detect, :find_index, :index].freeze
+        # Methods whose answer is `nil` when the block always returns Ruby-falsey — `find` / `detect` /
+        # `rfind` short-circuit to nil when nothing matches, `find_index` / `index` / `rindex` likewise.
+        # These methods only fold on the falsey side here; the truthy-block side requires per-position
+        # analysis.
+        FALSEY_BLOCK_NIL_METHODS = Set[:find, :detect, :rfind, :find_index, :index, :rindex].freeze
 
         # Block-taking `count` returns the number of elements for which the block is truthy. With a
         # Constant-falsey block the answer is unconditionally `Constant[0]`; with a Constant-truthy block on
         # a finitely-sized receiver it is `Constant[size]`.
         COUNT_METHOD = :count
 
-        # `min_by` / `max_by` pick one element by the block's key, so the block's value decides WHICH element
-        # but never WHETHER one is returned: only an empty receiver answers `nil`.
-        EDGE_BY_METHODS = Set[:min_by, :max_by].freeze
+        # `min_by` / `max_by` / `minmax_by` pick edge elements by the block's key, so the block's value
+        # decides WHICH element(s) but never WHETHER one is returned: only an empty receiver answers `nil`
+        # (or `[nil, nil]` for `minmax_by`).
+        EDGE_BY_METHODS = Set[:min_by, :max_by, :minmax_by].freeze
 
         # `context.block_type` is the inferred return type of the call's block; `nil` means "no block at the
         # call site" and disqualifies every rule here.
@@ -76,7 +76,7 @@ module Rigor
           args = context.args
           block_type = context.block_type
           return nil if receiver.nil? || block_type.nil?
-          return fold_edge_by(receiver, args) if EDGE_BY_METHODS.include?(method_name)
+          return fold_edge_by(receiver, method_name, args) if EDGE_BY_METHODS.include?(method_name)
 
           truthiness = constant_truthiness(block_type)
           return nil if truthiness.nil?
@@ -92,16 +92,26 @@ module Rigor
           end
         end
 
-        # Issue #1333 — `min_by` / `max_by` with a block and no count on a non-empty Tuple or a non-empty
-        # constant integer `Range` answer the receiver's element type: the RBS `Elem?` return adds `nil` for
-        # the empty receiver, and `[1, 2].min_by { |s| rand(3) } + 1` then reported a nil receiver on correct
-        # code. The block's value picks which element, and one `block_type` typed from the call's entry scope
-        # cannot say which, so the answer is the whole element union. An empty receiver, one whose size is
-        # not static (`Array[T]`), and the count form (`min_by(2) { … }`, an Array) decline to RBS.
-        def fold_edge_by(receiver, args)
+        # Issue #1333 — `min_by` / `max_by` / `minmax_by` with a block and no count on a Tuple or constant
+        # integer `Range` answer the receiver's element type without `nil` when non-empty (or `[nil, nil]`
+        # for an empty `minmax_by`), avoiding false `nil` receivers on `min_by` / `minmax_by` calls.
+        def fold_edge_by(receiver, method_name, args)
           return nil unless args.empty?
-          return nil unless receiver_emptiness(receiver) == :non_empty
 
+          emptiness = receiver_emptiness(receiver)
+          if method_name == :minmax_by && emptiness == :empty
+            nil_const = Type::Combinator.constant_of(nil)
+            return Type::Combinator.tuple_of(nil_const, nil_const)
+          end
+          return nil unless emptiness == :non_empty
+
+          element = edge_by_element_type(receiver)
+          return nil if element.nil?
+
+          method_name == :minmax_by ? Type::Combinator.tuple_of(element, element) : element
+        end
+
+        def edge_by_element_type(receiver)
           case receiver
           when Type::Tuple then Type::Combinator.union(*receiver.elements)
           when Type::Constant then IteratorDispatch.element_type_of(receiver) if receiver.value.is_a?(Range)

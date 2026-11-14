@@ -15,8 +15,8 @@ RSpec.describe Rigor::Inference::ClosureEscapeAnalyzer do
 
   describe ".classify" do
     context "with non-escaping core iteration" do
-      it "recognises Array#each / map / select / inject" do
-        %i[each map select inject reduce flat_map filter_map any? all?].each do |m|
+      it "recognises Array#each / map / select / inject / reverse_each / rfind / index / rindex" do
+        %i[each reverse_each map select inject reduce flat_map filter_map any? all? rfind index rindex].each do |m|
           expect(classify(array_nominal, m)).to eq(:non_escaping), "expected Array##{m} to be non_escaping"
         end
       end

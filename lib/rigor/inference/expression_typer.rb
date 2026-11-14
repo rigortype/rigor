@@ -6074,11 +6074,13 @@ module Rigor
       # position matches. `r = [1, 2].find(-> { 0 }) { |e| e > 5 }` is `0` at runtime; the walk answered `nil`,
       # and `r + 1` then reported a nil receiver on correct code. The other supported methods take no argument.
       PER_ELEMENT_TUPLE_METHODS = Set[
-        :map, :collect, :filter_map, :flat_map,
-        :select, :filter, :reject,
-        :find, :detect, :find_index, :index
+        :map, :collect, :filter_map, :flat_map, :collect_concat,
+        :select, :filter, :find_all, :reject, :take_while, :drop_while,
+        :partition, :count, :find, :detect, :rfind, :find_index, :index, :rindex
       ].freeze
-      private_constant :PER_ELEMENT_TUPLE_METHODS
+      ARRAY_ONLY_PER_ELEMENT_METHODS = Set[:index, :rindex, :rfind].freeze
+      REVERSE_PER_ELEMENT_METHODS = Set[:rfind, :rindex].freeze
+      private_constant :PER_ELEMENT_TUPLE_METHODS, :ARRAY_ONLY_PER_ELEMENT_METHODS, :REVERSE_PER_ELEMENT_METHODS
 
       HASH_SHAPE_TRANSFORM_METHODS = Set[
         :transform_keys, :transform_keys!,
@@ -6097,23 +6099,35 @@ module Rigor
       private_constant :PER_ELEMENT_RANGE_LIMIT
 
       def try_per_element_block_fold(call_node, receiver_type)
-        return nil unless PER_ELEMENT_TUPLE_METHODS.include?(call_node.name)
+        name = call_node.name
+        return nil unless PER_ELEMENT_TUPLE_METHODS.include?(name)
+        return nil if ARRAY_ONLY_PER_ELEMENT_METHODS.include?(name) && !receiver_type.is_a?(Type::Tuple)
         return nil unless call_node.arguments.nil?
 
         element_types = per_element_elements_of(receiver_type)
         return nil if element_types.nil? || element_types.empty?
 
-        per_position = per_element_block_results(call_node.block, element_types)
-        return nil if per_position.nil? || per_position.any?(&:nil?)
+        per_position = evaluate_per_element_positions(call_node.block, element_types, name)
+        return nil if per_position.nil?
 
-        assemble_per_element_result(call_node.name, per_position, element_types) ||
-          undecided_fold_floor(call_node.name, element_types, receiver_type)
+        assemble_per_element_result(name, per_position, element_types) ||
+          undecided_fold_floor(name, element_types, receiver_type)
       end
 
-      # The honest answer for the find family (`find` / `detect` / `find_index` / `index`) and the filter family
-      # (`select` / `filter` / `reject`) when this fold walked every position and the assembler still could not
-      # decide — which happens for exactly one reason: some position's predicate is not a `Constant`, so "the
-      # first matching one" or "the ones kept" is not a static fact.
+      def evaluate_per_element_positions(block, element_types, method_name)
+        reverse = REVERSE_PER_ELEMENT_METHODS.include?(method_name)
+        eval_elements = reverse ? element_types.reverse : element_types
+        per_position = per_element_block_results(block, eval_elements)
+        return nil if per_position.nil? || per_position.any?(&:nil?)
+
+        reverse ? per_position.reverse : per_position
+      end
+
+      # The honest answer for the find family (`find` / `detect` / `rfind` / `find_index` / `index` / `rindex`),
+      # the filter family (`select` / `filter` / `find_all` / `reject` / `take_while` / `drop_while`), and `count`
+      # when this fold walked every position and the assembler still could not decide — which happens for
+      # exactly one reason: some position's predicate is not a `Constant`, so "the matching one" or "the ones
+      # kept" is not a static fact.
       #
       # Falling through to the dispatcher was WRONG for this family, and issue #617 residue (1) is the bill:
       # `seen = 0; [1, 2].find do |e| seen += 1; seen == 2 end` answered `nil` where the runtime answers `2`.
@@ -6123,30 +6137,34 @@ module Rigor
       # typed the predicate per position and saw that it does not fold. Answering here is what keeps that
       # knowledge from being thrown away in favour of a worse-informed tier.
       #
-      # The floor is what `find` can return and no tighter: one of the receiver's own elements, or `nil` when
-      # no element matches. Value pinning survives because it is still true of every candidate — `find` hands
-      # back an element, it does not compute one. `find_index` / `index` answer a position in the receiver, so
-      # `Integer?` is their floor.
+      # The floor is what `find` / `rfind` can return and no tighter: one of the receiver's own elements, or
+      # `nil` when no element matches. Value pinning survives because it is still true of every candidate —
+      # `find` hands back an element, it does not compute one. `find_index` / `index` / `rindex` answer a
+      # position in the receiver, so `Integer?` is their floor.
       #
-      # `select` / `filter` / `reject` take a floor for the same reason. Their fall-through is not merely
-      # wider: `BlockFolding`'s filter folds DO answer on a `Constant` block, and the entry-scope pin hands
-      # them one, so `seen = 0; [1, 2].select do |e| seen += 1; seen == 2 end` answered a provably-empty `[]`
-      # where Ruby answers `[2]`. Nested inside a threaded body, where a position can be typed tail-only
-      # ({#tail_only_body_floor}), `[[], []].select do |a| a << w; a.any? end` did the same. Their floor is an
-      # Array of the receiver's own elements: which of them survive is undecided, and what they are is not.
-      # A range receiver's elements are widened first ({#filter_family_floor}).
+      # `select` / `filter` / `find_all` / `reject` / `take_while` / `drop_while` take a floor for the same
+      # reason. Their fall-through is not merely wider: `BlockFolding`'s filter folds DO answer on a `Constant`
+      # block, and the entry-scope pin hands them one, so `seen = 0; [1, 2].select do |e| seen += 1; seen == 2
+      # end` answered a provably-empty `[]` where Ruby answers `[2]`. Nested inside a threaded body, where a
+      # position can be typed tail-only ({#tail_only_body_floor}), `[[], []].select do |a| a << w; a.any? end`
+      # did the same. Their floor is an Array of the receiver's own elements: which of them survive is
+      # undecided, and what they are is not. A range receiver's elements are widened first
+      # ({#filter_family_floor}). `count` likewise floors to `Integer` so an undecided block never falls through
+      # to `BlockFolding`'s entry-scope `0` or `size`.
       #
       # Nothing else in {PER_ELEMENT_TUPLE_METHODS} takes a floor. `map`'s assembler cannot decline, and
-      # `BlockFolding` never folds `filter_map` / `flat_map`, so their fall-through is the RBS `Array[U]`
+      # `BlockFolding` never folds `filter_map` / `flat_map` / `partition`, so their fall-through is the RBS
       # projection.
       def undecided_fold_floor(method_name, element_types, receiver_type)
         case method_name
-        when :find, :detect
+        when :find, :detect, :rfind
           Type::Combinator.union(*element_types, Type::Combinator.constant_of(nil))
-        when :select, :filter, :reject
+        when :select, :filter, :find_all, :reject, :take_while, :drop_while
           filter_family_floor(element_types, receiver_type)
-        when :find_index, :index
+        when :find_index, :index, :rindex
           Type::Combinator.union(Type::Combinator.nominal_of("Integer"), Type::Combinator.constant_of(nil))
+        when :count
+          Type::Combinator.nominal_of("Integer")
         end
       end
 
@@ -6805,18 +6823,44 @@ module Rigor
         result
       end
 
+      PER_ELEMENT_ASSEMBLERS = {
+        map: :assemble_map_result,
+        collect: :assemble_map_result,
+        filter_map: :assemble_filter_map_result,
+        flat_map: :assemble_flat_map_result,
+        collect_concat: :assemble_flat_map_result,
+        select: :assemble_select_result,
+        filter: :assemble_select_result,
+        find_all: :assemble_select_result,
+        reject: :assemble_reject_result,
+        take_while: :assemble_take_while_result,
+        drop_while: :assemble_drop_while_result,
+        partition: :assemble_partition_result,
+        count: :assemble_count_result,
+        find: :assemble_find_result,
+        detect: :assemble_find_result,
+        rfind: :assemble_rfind_result,
+        find_index: :assemble_find_index_result,
+        index: :assemble_find_index_result,
+        rindex: :assemble_rindex_result
+      }.freeze
+      private_constant :PER_ELEMENT_ASSEMBLERS
+
       def assemble_per_element_result(method_name, per_position, element_types)
-        case method_name
-        when :map, :collect then Type::Combinator.tuple_of(*per_position)
-        when :filter_map then assemble_filter_map_result(per_position)
-        when :flat_map then assemble_flat_map_result(per_position)
-        when :select, :filter
-          assemble_filter_result(per_position, element_types, keep_on_truthy: true)
-        when :reject
-          assemble_filter_result(per_position, element_types, keep_on_truthy: false)
-        when :find, :detect then assemble_find_result(per_position, element_types)
-        when :find_index, :index then assemble_find_index_result(per_position)
-        end
+        handler = PER_ELEMENT_ASSEMBLERS[method_name]
+        send(handler, per_position, element_types) if handler
+      end
+
+      def assemble_map_result(per_position, _element_types)
+        Type::Combinator.tuple_of(*per_position)
+      end
+
+      def assemble_select_result(per_position, element_types)
+        assemble_filter_result(per_position, element_types, keep_on_truthy: true)
+      end
+
+      def assemble_reject_result(per_position, element_types)
+        assemble_filter_result(per_position, element_types, keep_on_truthy: false)
       end
 
       # `select` / `filter` / `reject`: keeps each receiver element whose per-position predicate result
@@ -6836,10 +6880,51 @@ module Rigor
         Type::Combinator.tuple_of(*kept)
       end
 
+      # `take_while` / `drop_while`: stops at the first falsey `Constant` position when every preceding
+      # position is a truthy `Constant` (or takes/drops all elements when every position is a truthy
+      # `Constant`). Declines when an undecided position precedes the stopping point.
+      def assemble_take_while_result(per_position, element_types)
+        cutoff = leading_truthy_cutoff(per_position)
+        return nil if cutoff.nil?
+
+        Type::Combinator.tuple_of(*element_types[0...cutoff])
+      end
+
+      def assemble_drop_while_result(per_position, element_types)
+        cutoff = leading_truthy_cutoff(per_position)
+        return nil if cutoff.nil?
+
+        Type::Combinator.tuple_of(*element_types[cutoff..])
+      end
+
+      def leading_truthy_cutoff(per_position)
+        first_falsey_index = per_position.index { |type| falsey_constant?(type) }
+        return (per_position.all?(Type::Constant) ? per_position.size : nil) if first_falsey_index.nil?
+        return nil unless per_position[0...first_falsey_index].all?(Type::Constant)
+
+        first_falsey_index
+      end
+
+      # `partition`: returns `Tuple[truthy_tuple, falsey_tuple]` when every position folds to a `Constant`.
+      def assemble_partition_result(per_position, element_types)
+        return nil unless per_position.all?(Type::Constant)
+
+        truthy = assemble_filter_result(per_position, element_types, keep_on_truthy: true)
+        falsey = assemble_filter_result(per_position, element_types, keep_on_truthy: false)
+        Type::Combinator.tuple_of(truthy, falsey)
+      end
+
+      # `count`: returns `Constant[Integer]` of the truthy positions when every position folds to a `Constant`.
+      def assemble_count_result(per_position, _element_types)
+        return nil unless per_position.all?(Type::Constant)
+
+        Type::Combinator.constant_of(per_position.count { |type| truthy_constant?(type) })
+      end
+
       # `filter_map` folds tightly only when every per-position result is a `Constant`: positions whose
       # value is `nil` or `false` drop, the rest survive in declaration order. When any position is
       # non-Constant the dispatcher declines (returns nil) so the RBS tier widens to `Array[U]`.
-      def assemble_filter_map_result(per_position)
+      def assemble_filter_map_result(per_position, _element_types = nil)
         return nil unless per_position.all?(Type::Constant)
 
         kept = per_position.reject { |type| type.value.nil? || type.value == false }
@@ -6854,7 +6939,7 @@ module Rigor
       #
       # `Type::Constant` only ever holds non-Array scalars (the carrier rejects Array literals), so a single
       # `Constant` safely contributes itself as a single Tuple element.
-      def assemble_flat_map_result(per_position)
+      def assemble_flat_map_result(per_position, _element_types = nil)
         flattened = per_position.flat_map { |type| flat_map_contribution(type) }
         return nil if flattened.nil? || flattened.any?(&:nil?)
 
@@ -6884,10 +6969,27 @@ module Rigor
         Type::Combinator.union(*candidates.map { |index| element_types[index] })
       end
 
+      # `rfind`: reverse of `find` — returns the last receiver element whose block result is Ruby-truthy,
+      # joined with any undecided positions to its right.
+      def assemble_rfind_result(per_position, element_types)
+        candidates = last_match_candidates(per_position)
+        return candidates if candidates.nil? || candidates.equal?(NO_MATCH)
+
+        Type::Combinator.union(*candidates.map { |index| element_types[index] })
+      end
+
       # `find_index` / `index`: returns the index of the first truthy position, or `Constant[nil]` when
       # nothing matches, on {#assemble_find_result}'s terms.
-      def assemble_find_index_result(per_position)
+      def assemble_find_index_result(per_position, _element_types = nil)
         candidates = first_match_candidates(per_position)
+        return candidates if candidates.nil? || candidates.equal?(NO_MATCH)
+
+        Type::Combinator.union(*candidates.map { |index| Type::Combinator.constant_of(index) })
+      end
+
+      # `rindex`: returns the index of the last truthy position, or `Constant[nil]` when nothing matches.
+      def assemble_rindex_result(per_position, _element_types = nil)
+        candidates = last_match_candidates(per_position)
         return candidates if candidates.nil? || candidates.equal?(NO_MATCH)
 
         Type::Combinator.union(*candidates.map { |index| Type::Combinator.constant_of(index) })
@@ -6908,8 +7010,27 @@ module Rigor
         undecided + [first_truthy_index]
       end
 
+      # The positions `rfind` / `rindex` may stop at — the last decisive truthy one and every undecided one
+      # after it — `NO_MATCH` when every position folds falsey, or nil when an undecided position has no
+      # truthy one before it.
+      def last_match_candidates(per_position)
+        last_truthy_index = per_position.rindex { |type| truthy_constant?(type) }
+        if last_truthy_index.nil?
+          return per_position.all?(Type::Constant) ? NO_MATCH : nil
+        end
+
+        undecided = ((last_truthy_index + 1)...per_position.size).reject do |index|
+          per_position[index].is_a?(Type::Constant)
+        end
+        [last_truthy_index] + undecided
+      end
+
       def truthy_constant?(type)
         type.is_a?(Type::Constant) && type.value && type.value != false
+      end
+
+      def falsey_constant?(type)
+        type.is_a?(Type::Constant) && (type.value.nil? || type.value == false)
       end
 
       # Per-pair block fold for `HashShape#transform_keys` and `HashShape#transform_values` (and their bang

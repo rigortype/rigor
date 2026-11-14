@@ -57,12 +57,13 @@ module Rigor
           last: :tuple_last,
           size: :tuple_size,
           length: :tuple_size,
-          count: :tuple_size,
+          count: :tuple_count,
           empty?: :tuple_empty?,
           any?: :tuple_any?,
           all?: :tuple_all?,
           none?: :tuple_none?,
           include?: :tuple_include?,
+          member?: :tuple_include?,
           sum: :tuple_sum,
           min: :tuple_min,
           max: :tuple_max,
@@ -70,13 +71,23 @@ module Rigor
           sort: :tuple_sort,
           reverse: :tuple_reverse,
           to_a: :tuple_to_a,
+          entries: :tuple_to_a,
+          to_ary: :tuple_to_a,
           to_h: :tuple_to_h,
+          to_set: :tuple_to_set,
           zip: :tuple_zip,
           :[] => :tuple_index,
           slice: :tuple_index,
           fetch: :tuple_index,
           dig: :tuple_dig,
           values_at: :tuple_values_at,
+          fetch_values: :tuple_fetch_values,
+          assoc: :tuple_assoc,
+          rassoc: :tuple_rassoc,
+          tally: :tuple_tally,
+          transpose: :tuple_transpose,
+          product: :tuple_product,
+          pack: :tuple_pack,
           # `concat` / `<<` are deliberately ABSENT from this table: both mutate the receiver in place
           # (`ARRAY_MUTATORS` in `MutationWidening`), and a fold tier has no way to write the folded
           # result back into the caller's binding — it can only return a value for the call expression.
@@ -868,6 +879,25 @@ module Rigor
             Type::Combinator.constant_of(tuple.elements.size)
           end
 
+          # `tuple.count` / `tuple.count(needle)` — 0-arg mirrors `#size`; 1-arg counts elements equal to
+          # `needle` (`==`) when the needle and every element are constant values or shapes (or folds to `0`
+          # on `[]`).
+          def tuple_count(tuple, _method_name, args)
+            return Type::Combinator.constant_of(tuple.elements.size) if args.empty?
+            return nil unless args.size == 1
+
+            needle = unwrap_constant_type(args.first)
+            return nil if needle.equal?(NOT_CONSTANT)
+            return Type::Combinator.constant_of(0) if tuple.elements.empty?
+
+            values = unwrap_constant_elements(tuple.elements)
+            return nil if values.nil?
+
+            Type::Combinator.constant_of(values.count { |v| v == needle })
+          rescue StandardError
+            nil
+          end
+
           # `tuple.empty?` — folds to a precise bool from the tuple's known arity.
           # rubocop:disable Style/ReturnNilInPredicateMethodDefinition
           def tuple_empty?(tuple, _method_name, args)
@@ -909,27 +939,29 @@ module Rigor
             Type::Combinator.constant_of(decision)
           end
 
-          # `tuple.include?(needle)` — folds to a precise bool when the needle is a `Constant` and the
-          # tuple's elements are all `Constant` (so disjointness is checkable). If any element matches the
-          # needle's value the answer is `Constant[true]`; if every element is a Constant whose value is
-          # structurally distinct from the needle the answer is `Constant[false]`.
+          # `tuple.include?(needle)` — folds to a precise bool when the needle and elements are constant
+          # scalars or constant nested Tuple / HashShape values. If any element matches the needle's value
+          # the answer is `Constant[true]`; if every element is constant and structurally distinct from the
+          # needle the answer is `Constant[false]`.
           def tuple_include?(tuple, _method_name, args)
             return nil unless args.size == 1
 
-            needle = args.first
-            return nil unless needle.is_a?(Type::Constant)
+            needle = unwrap_constant_type(args.first)
+            return nil if needle.equal?(NOT_CONSTANT)
             return Type::Combinator.constant_of(false) if tuple.elements.empty?
 
-            return Type::Combinator.constant_of(true) if any_element_matches?(tuple.elements, needle.value)
-            return Type::Combinator.constant_of(false) if tuple.elements.all?(Type::Constant)
+            return Type::Combinator.constant_of(true) if any_element_matches?(tuple.elements, needle)
+            return Type::Combinator.constant_of(false) unless unwrap_constant_elements(tuple.elements).nil?
 
             nil
           end
           # rubocop:enable Style/ReturnNilInPredicateMethodDefinition
 
-          # `tuple.sum` — when every element is a numeric Constant, fold to `Constant[sum]`. Mixed /
-          # non-numeric elements decline so RBS widens.
+          # `tuple.sum` / `tuple.sum(init)` — when every element is a numeric Constant (and optional `init`
+          # is a numeric Constant), fold to `Constant[sum]`; when every element and `init` are String
+          # Constants, fold to `Constant[sum]` within `TUPLE_JOIN_BYTE_LIMIT`.
           def tuple_sum(tuple, _method_name, args)
+            return tuple_sum_with_init(tuple, args.first) if args.size == 1
             return nil unless args.empty?
             return Type::Combinator.constant_of(0) if tuple.elements.empty?
 
@@ -937,16 +969,41 @@ module Rigor
             return nil if values.nil?
 
             Type::Combinator.constant_of(values.sum)
+          rescue StandardError
+            nil
+          end
+
+          def tuple_sum_with_init(tuple, init)
+            return nil unless init.is_a?(Type::Constant)
+
+            if init.value.is_a?(Numeric)
+              return init if tuple.elements.empty?
+
+              values = constant_numeric_values(tuple.elements)
+              return nil if values.nil?
+
+              Type::Combinator.constant_of(values.sum(init.value))
+            elsif init.value.is_a?(String)
+              values = constant_values(tuple.elements)
+              return nil if values.nil? || !values.all?(String)
+
+              result = values.sum(init.value)
+              return nil if result.bytesize > TUPLE_JOIN_BYTE_LIMIT
+
+              Type::Combinator.constant_of(result)
+            end
+          rescue StandardError
+            nil
           end
 
           # `tuple.join(sep = "")` — fold to the joined `Constant[String]` when every element is a
-          # `Constant` (its `to_s` is deterministic for the scalar value classes) and the separator is
-          # absent or a `Constant[String]`. Capped at `TUPLE_JOIN_BYTE_LIMIT`.
+          # constant scalar or nested constant Tuple and the separator is absent or a `Constant[String]`.
+          # Capped at `TUPLE_JOIN_BYTE_LIMIT`.
           def tuple_join(tuple, _method_name, args)
             sep = tuple_join_separator(args)
             return nil if sep.nil?
 
-            values = constant_values(tuple.elements)
+            values = unwrap_constant_elements(tuple.elements)
             return nil if values.nil?
 
             result = values.join(sep)
@@ -970,14 +1027,13 @@ module Rigor
           end
 
           # `tuple.inspect` / `tuple.to_s` (`Array#to_s` is an exact alias of `Array#inspect`) — folds when
-          # every element is a `Constant`, by reconstructing the Ruby Array and calling the REAL `inspect`
-          # so the analyzer's Ruby (4.0.x's `Array#inspect` format) is matched rather than re-derived.
-          # Capped at `TUPLE_JOIN_BYTE_LIMIT` like `#join`, since a large tuple's `inspect` string is
-          # similarly unbounded.
+          # every element is a constant scalar or nested constant Tuple / HashShape, by reconstructing the
+          # Ruby Array and calling the REAL `inspect` so the analyzer's Ruby (4.0.x's `Array#inspect` format)
+          # is matched rather than re-derived. Capped at `TUPLE_JOIN_BYTE_LIMIT` like `#join`.
           def tuple_inspect(tuple, _method_name, args)
             return nil unless args.empty?
 
-            values = constant_values(tuple.elements)
+            values = unwrap_constant_elements(tuple.elements)
             return nil if values.nil?
 
             result = values.inspect
@@ -1022,7 +1078,7 @@ module Rigor
             Type::Combinator.tuple_of(*(tuple.elements * count))
           end
 
-          # `tuple.min` / `tuple.max` — fold when every element is a `Constant` whose values share a
+          # `tuple.min` / `tuple.max` — fold when every element is a constant whose values share a
           # Ruby-comparable domain. Empty tuples fold to `Constant[nil]`. The 1-arg `min(n)` / `max(n)`
           # form folds to a `Tuple` of the n edge-most values in Ruby's order (`min(n)` ascending, `max(n)`
           # descending) — the n-arg sibling of `first(n)`.
@@ -1038,11 +1094,11 @@ module Rigor
             return tuple_minmax_n(tuple, args.first, edge) unless args.empty?
             return Type::Combinator.constant_of(nil) if tuple.elements.empty?
 
-            values = constant_values(tuple.elements)
+            values = unwrap_constant_elements(tuple.elements)
             return nil if values.nil?
 
             result = values.public_send(edge)
-            Type::Combinator.constant_of(result)
+            lift_constant_value(result)
           rescue StandardError
             nil
           end
@@ -1055,19 +1111,18 @@ module Rigor
             return nil unless arg.is_a?(Type::Constant) && arg.value.is_a?(Integer)
             return nil if arg.value.negative?
 
-            values = constant_values(tuple.elements)
+            values = unwrap_constant_elements(tuple.elements)
             return nil if values.nil?
 
             picked = values.public_send(edge, arg.value)
-            Type::Combinator.tuple_of(*picked.map { |v| Type::Combinator.constant_of(v) })
+            Type::Combinator.tuple_of(*picked.map { |v| lift_constant_value(v) })
           rescue StandardError
             nil
           end
 
-          # `tuple.minmax` — the `[min, max]` pair as a 2-slot `Tuple[Constant[min], Constant[max]]`,
-          # mirroring the `Range#minmax` fold. Every element must be a `Constant` and the values must
-          # Ruby-compare; an empty tuple folds to `Tuple[nil, nil]` (Ruby's `[].minmax`), incomparable
-          # mixed-class values decline.
+          # `tuple.minmax` — the `[min, max]` pair as a 2-slot `Tuple`, mirroring the `Range#minmax` fold.
+          # Every element must be constant and the values must Ruby-compare; an empty tuple folds to
+          # `Tuple[nil, nil]` (Ruby's `[].minmax`), incomparable mixed-class values decline.
           def tuple_minmax_pair(tuple, _method_name, args)
             return nil unless args.empty?
 
@@ -1076,30 +1131,30 @@ module Rigor
               return Type::Combinator.tuple_of(nil_const, nil_const)
             end
 
-            values = constant_values(tuple.elements)
+            values = unwrap_constant_elements(tuple.elements)
             return nil if values.nil?
 
             low, high = values.minmax
             Type::Combinator.tuple_of(
-              Type::Combinator.constant_of(low),
-              Type::Combinator.constant_of(high)
+              lift_constant_value(low),
+              lift_constant_value(high)
             )
           rescue StandardError
             nil
           end
 
-          # `tuple.sort` — every element must be a `Constant` and the values must Ruby-compare. The result
+          # `tuple.sort` — every element must be constant and the values must Ruby-compare. The result
           # is a Tuple with the same elements in sorted order. Comparison failures (mixed-class
           # incomparable values) decline.
           def tuple_sort(tuple, _method_name, args)
             return nil unless args.empty?
             return tuple if tuple.elements.size <= 1
 
-            values = constant_values(tuple.elements)
+            values = unwrap_constant_elements(tuple.elements)
             return nil if values.nil?
 
             sorted = values.sort
-            Type::Combinator.tuple_of(*sorted.map { |v| Type::Combinator.constant_of(v) })
+            Type::Combinator.tuple_of(*sorted.map { |v| lift_constant_value(v) })
           rescue StandardError
             nil
           end
@@ -1126,7 +1181,7 @@ module Rigor
           # runtime semantics). Declines when any `other_k` is not a Tuple, since the arity is then unknown
           # and the result would be `Array[Array[…]]` — RBS already gives that answer.
           def tuple_zip(tuple, _method_name, args)
-            return nil if args.empty? || args.size > MAX_ZIP_ARITY
+            return nil if args.size > MAX_ZIP_ARITY
             return nil unless args.all?(Type::Tuple)
 
             zipped = tuple.elements.each_with_index.map do |elem, i|
@@ -1164,21 +1219,167 @@ module Rigor
             [key.value, value]
           end
 
-          # `tuple.values_at(i1, i2, ...)` — returns a Tuple of per-index elements. Each argument must be a
-          # `Constant[Integer]`. Out-of-range indices fill with `Constant[nil]`, mirroring Ruby's runtime
-          # behaviour. Declines when any argument is non-static.
-          def tuple_values_at(tuple, _method_name, args)
-            return nil if args.empty?
+          # `tuple.to_set` — folds to `Constant[Set]` when every element is a `Constant`, matching
+          # `Set[...]` / `Set.new([...])`. Non-constant elements decline so RBS keeps `Set[Elem]`.
+          def tuple_to_set(tuple, _method_name, args)
+            return nil unless args.empty?
 
+            values = constant_values(tuple.elements)
+            return nil if values.nil?
+
+            Type::Combinator.constant_of(::Set.new(values))
+          rescue StandardError
+            nil
+          end
+
+          # `tuple.values_at(i1, i2, ...)` — returns a Tuple of per-index / per-range elements. Each
+          # argument must be a `Constant[Integer]` or a `Constant[Range]` with integer/endless/beginless
+          # endpoints. Out-of-range positive indices fill with `Constant[nil]`, mirroring Ruby's runtime
+          # behaviour. Declines when any argument is non-static, raises `RangeError`, or exceeds
+          # `MAX_SET_OPERATION_SIZE`.
+          def tuple_values_at(tuple, _method_name, args)
+            return nil if args.empty? || args.size > MAX_SET_OPERATION_SIZE
+
+            raw_args = args.map do |arg|
+              return nil unless arg.is_a?(Type::Constant) && values_at_selector?(arg.value)
+
+              arg.value
+            end
+            picked = tuple.elements.values_at(*raw_args)
+            return nil if picked.size > MAX_SET_OPERATION_SIZE
+
+            Type::Combinator.tuple_of(*picked.map { |elem| elem || Type::Combinator.constant_of(nil) })
+          rescue StandardError
+            nil
+          end
+
+          def values_at_selector?(value)
+            return true if value.is_a?(Integer)
+            return false unless value.is_a?(Range) && integer_range?(value)
+
+            !(value.end.is_a?(Integer) && value.end > MAX_SET_OPERATION_SIZE)
+          end
+
+          # `tuple.fetch_values(i1, i2, ...)` — returns a Tuple of per-index elements when every argument
+          # is an in-bounds `Constant[Integer]`; an out-of-range or non-static index declines so RBS handles
+          # the possible `IndexError`.
+          def tuple_fetch_values(tuple, _method_name, args)
             values = args.map do |arg|
-              return nil unless arg.is_a?(Type::Constant)
-              return nil unless arg.value.is_a?(Integer)
+              return nil unless arg.is_a?(Type::Constant) && arg.value.is_a?(Integer)
 
               idx = normalise_index(arg.value, tuple.elements.size)
-              idx ? tuple.elements[idx] : Type::Combinator.constant_of(nil)
+              return nil unless idx
+
+              tuple.elements[idx]
             end
 
             Type::Combinator.tuple_of(*values)
+          end
+
+          # `tuple.assoc(needle)` / `tuple.rassoc(needle)` — scans inner Tuples in declaration order for a
+          # constant match at slot 0 (`assoc`) or slot 1 (`rassoc`). Known non-array scalars/hashes/ranges
+          # are skipped, while an earlier non-constant slot or opaque element declines.
+          def tuple_assoc(tuple, _method_name, args)
+            tuple_slot_lookup(tuple, args, slot_index: 0)
+          end
+
+          def tuple_rassoc(tuple, _method_name, args)
+            tuple_slot_lookup(tuple, args, slot_index: 1)
+          end
+
+          def tuple_slot_lookup(tuple, args, slot_index:)
+            return nil unless args.size == 1
+
+            needle = unwrap_constant_type(args.first)
+            return nil if needle.equal?(NOT_CONSTANT)
+
+            tuple.elements.each do |elem|
+              next if non_array_shape?(elem)
+              return nil unless elem.is_a?(Type::Tuple)
+
+              match = tuple_slot_match(elem, needle, slot_index)
+              return nil if match == :decline
+              return elem if match
+            end
+
+            Type::Combinator.constant_of(nil)
+          rescue StandardError
+            nil
+          end
+
+          def non_array_shape?(elem)
+            elem.is_a?(Type::Constant) || elem.is_a?(Type::HashShape) ||
+              elem.is_a?(Type::IntegerRange) || elem.is_a?(Type::FloatRange)
+          end
+
+          def tuple_slot_match(elem, needle, slot_index)
+            return false if elem.elements.size <= slot_index
+
+            slot = unwrap_constant_type(elem.elements[slot_index])
+            return :decline if slot.equal?(NOT_CONSTANT)
+
+            slot == needle
+          end
+
+          # `tuple.tally` — returns a closed `HashShape` of `value => Constant[count]` when every element
+          # is a `Constant` whose value is a valid static HashShape key.
+          def tuple_tally(tuple, _method_name, args)
+            return nil unless args.empty?
+
+            values = constant_values(tuple.elements)
+            return nil if values.nil?
+            return nil unless values.all? { |v| static_shape_key?(v) }
+
+            counts = values.tally.transform_values { |n| Type::Combinator.constant_of(n) }
+            Type::Combinator.hash_shape_of(counts)
+          end
+
+          # `tuple.transpose` — transposes a Tuple of equal-length Tuples into a Tuple of Tuples.
+          def tuple_transpose(tuple, _method_name, args)
+            return nil unless args.empty?
+            return tuple if tuple.elements.empty?
+            return nil unless tuple.elements.all?(Type::Tuple)
+
+            width = tuple.elements.first.elements.size
+            return nil unless tuple.elements.all? { |row| row.elements.size == width }
+
+            transposed = tuple.elements.map(&:elements).transpose
+            Type::Combinator.tuple_of(*transposed.map { |col| Type::Combinator.tuple_of(*col) })
+          end
+
+          # `tuple.product(other_1, ...)` — Cartesian product of Tuples, bounded by
+          # `MAX_SET_OPERATION_ARITY` and `MAX_SET_OPERATION_SIZE`.
+          def tuple_product(tuple, _method_name, args)
+            return nil if args.size > MAX_SET_OPERATION_ARITY
+            return nil unless args.all?(Type::Tuple)
+
+            total = args.reduce(tuple.elements.size) { |acc, other| acc * other.elements.size }
+            return nil if total > MAX_SET_OPERATION_SIZE
+            return Type::Combinator.tuple_of if total.zero?
+
+            pairs = tuple.elements.product(*args.map(&:elements))
+            Type::Combinator.tuple_of(*pairs.map { |row| Type::Combinator.tuple_of(*row) })
+          end
+
+          # `tuple.pack(template)` — folds to `Constant[String]` when all elements and template are
+          # `Constant` (excluding non-deterministic pointer directives `p`/`P`), capped at
+          # `TUPLE_JOIN_BYTE_LIMIT`.
+          def tuple_pack(tuple, _method_name, args)
+            return nil unless args.size == 1
+
+            template = args.first
+            return nil unless template.is_a?(Type::Constant) && template.value.is_a?(String)
+            return nil if template.value.match?(/[pP]/)
+
+            values = constant_values(tuple.elements)
+            return nil if values.nil?
+
+            result = values.pack(template.value)
+            return nil if result.bytesize > TUPLE_JOIN_BYTE_LIMIT
+
+            Type::Combinator.constant_of(result)
+          rescue StandardError
+            nil
           end
 
           # `tuple + other` — concatenates two Tuples. Both sides must be `Type::Tuple`. Returns a new
@@ -1203,15 +1404,33 @@ module Rigor
           # Every set operation is evaluated by running Ruby's own operator over the unwrapped values, which
           # is the only way to reproduce its `eql?` / `hash` semantics exactly — `[1] & [1.0]` is empty even
           # though `1 == 1.0`, so an equality-based reimplementation would fold the wrong answer.
-          def tuple_intersection(tuple, _method_name, args)
+          def tuple_intersection(tuple, method_name, args)
+            return tuple if method_name == :intersection && args.empty?
+
             set_operation(tuple, args) { |values, others| others.reduce(values, :&) }
           end
 
-          def tuple_union(tuple, _method_name, args)
+          def tuple_union(tuple, method_name, args)
+            return tuple_zero_arg_union(tuple) if method_name == :union && args.empty?
+
             set_operation(tuple, args) { |values, others| others.reduce(values, :|) }
           end
 
-          def tuple_difference(tuple, _method_name, args)
+          def tuple_zero_arg_union(tuple)
+            return tuple if tuple.elements.size <= 1
+
+            values = unwrap_constant_elements(tuple.elements)
+            return nil if values.nil?
+
+            result = values.union
+            return nil if result.size > MAX_SET_OPERATION_SIZE
+
+            Type::Combinator.tuple_of(*result.map { |value| lift_constant_value(value) })
+          end
+
+          def tuple_difference(tuple, method_name, args)
+            return tuple if method_name == :difference && args.empty?
+
             set_operation(tuple, args) { |values, others| others.reduce(values, :-) }
           end
 
@@ -1228,23 +1447,23 @@ module Rigor
 
           # Shared body for the set operations: unwrap the receiver and every Tuple argument, hand the raw
           # values to `block`, and lift the result back. Declines unless every element on both sides is a
-          # `Constant` (an unknown element makes membership undecidable) and every argument is a `Tuple` —
-          # `Array#&` also accepts anything that responds to `to_ary`, which a shape cannot prove.
+          # constant scalar or constant nested Tuple / HashShape (an unknown element makes membership
+          # undecidable) and every argument is a `Tuple`.
           def set_operation(tuple, args)
             return nil if args.empty? || args.size > MAX_SET_OPERATION_ARITY
 
-            values = constant_values(tuple.elements)
+            values = unwrap_constant_elements(tuple.elements)
             return nil if values.nil?
 
             others = args.map do |arg|
               return nil unless arg.is_a?(Type::Tuple)
 
-              constant_values(arg.elements) || (return nil)
+              unwrap_constant_elements(arg.elements) || (return nil)
             end
             result = yield(values, others)
             return nil if result.size > MAX_SET_OPERATION_SIZE
 
-            Type::Combinator.tuple_of(*result.map { |value| Type::Combinator.constant_of(value) })
+            Type::Combinator.tuple_of(*result.map { |value| lift_constant_value(value) })
           end
 
           # An argument list longer than this, or a result wider than this, declines to the RBS tier rather
@@ -1303,16 +1522,19 @@ module Rigor
           end
 
           # `uniq` (no block) → `Tuple` of the first occurrence of each distinct value. Folds only when
-          # every element is a `Constant` so value equality is decidable; the block form defers.
+          # every element is a constant scalar or constant nested Tuple / HashShape so `eql?` identity is
+          # decidable; the block form defers.
           def tuple_uniq(tuple, _method_name, args)
             return nil unless args.empty?
-            return nil unless tuple.elements.all?(Type::Constant)
 
-            seen = []
-            kept = tuple.elements.each_with_object([]) do |element, acc|
-              next if seen.include?(element.value)
+            values = unwrap_constant_elements(tuple.elements)
+            return nil if values.nil?
 
-              seen << element.value
+            seen = {}
+            kept = tuple.elements.zip(values).each_with_object([]) do |(element, value), acc|
+              next if seen.key?(value)
+
+              seen[value] = true
               acc << element
             end
             Type::Combinator.tuple_of(*kept)
@@ -1320,9 +1542,9 @@ module Rigor
 
           # `index(obj)` / `find_index(obj)` → `Constant[Integer]` of the first element equal to `obj`,
           # `Constant[nil]` when none match. Folds only for the argument form (the block form defers) when
-          # every element AND the argument are `Constant` (decidable equality).
+          # every element AND the argument are constant (decidable equality).
           def tuple_find_index(tuple, _method_name, args)
-            constant_index(tuple, args) { |elements, value| elements.index { |e| e.value == value } }
+            constant_index(tuple, args) { |values, needle| values.index { |v| v == needle } }
           end
 
           # `tuple.flatten` / `tuple.flatten(depth)` — recursively flattens nested Tuple elements into a
@@ -1366,17 +1588,19 @@ module Rigor
 
           # `rindex(obj)` → the LAST matching index, same decidability gate.
           def tuple_rindex(tuple, _method_name, args)
-            constant_index(tuple, args) { |elements, value| elements.rindex { |e| e.value == value } }
+            constant_index(tuple, args) { |values, needle| values.rindex { |v| v == needle } }
           end
 
           def constant_index(tuple, args)
             return nil unless args.size == 1
 
-            needle = args.first
-            return nil unless needle.is_a?(Type::Constant)
-            return nil unless tuple.elements.all?(Type::Constant)
+            needle = unwrap_constant_type(args.first)
+            values = unwrap_constant_elements(tuple.elements)
+            return nil if needle.equal?(NOT_CONSTANT) || values.nil?
 
-            Type::Combinator.constant_of(yield(tuple.elements, needle.value))
+            Type::Combinator.constant_of(yield(values, needle))
+          rescue StandardError
+            nil
           end
 
           # `tuple.take(n)` — returns the first n elements as a new Tuple. The argument must be a
@@ -1447,7 +1671,63 @@ module Rigor
           end
 
           def any_element_matches?(elements, value)
-            elements.any? { |e| e.is_a?(Type::Constant) && e.value == value }
+            elements.any? do |e|
+              unwrapped = unwrap_constant_type(e)
+              !unwrapped.equal?(NOT_CONSTANT) && unwrapped == value
+            end
+          end
+
+          NOT_CONSTANT = Object.new.freeze
+          private_constant :NOT_CONSTANT
+
+          # Unwraps a `Type::Constant`, a `Type::Tuple` of recursively constant elements, or a closed
+          # required-only `Type::HashShape` of recursively constant values into its plain Ruby value, or
+          # `NOT_CONSTANT` when any part is non-constant.
+          def unwrap_constant_type(type)
+            case type
+            when Type::Constant
+              type.value
+            when Type::Tuple
+              values = unwrap_constant_elements(type.elements)
+              values.nil? ? NOT_CONSTANT : values
+            when Type::HashShape
+              unwrap_constant_hash_shape(type)
+            else
+              NOT_CONSTANT
+            end
+          end
+
+          def unwrap_constant_hash_shape(shape)
+            return NOT_CONSTANT unless shape.closed? && shape.optional_keys.empty?
+
+            pairs = {}
+            shape.pairs.each do |k, v|
+              unwrapped = unwrap_constant_type(v)
+              return NOT_CONSTANT if unwrapped.equal?(NOT_CONSTANT)
+
+              pairs[k] = unwrapped
+            end
+            pairs
+          end
+
+          def unwrap_constant_elements(elements)
+            elements.map do |elem|
+              val = unwrap_constant_type(elem)
+              return nil if val.equal?(NOT_CONSTANT)
+
+              val
+            end
+          end
+
+          def lift_constant_value(value)
+            case value
+            when Array
+              Type::Combinator.tuple_of(*value.map { |v| lift_constant_value(v) })
+            when Hash
+              Type::Combinator.hash_shape_of(value.transform_values { |v| lift_constant_value(v) })
+            else
+              Type::Combinator.constant_of(value)
+            end
           end
 
           # Per-element Constant value extraction. Returns nil when any element is non-Constant, so the

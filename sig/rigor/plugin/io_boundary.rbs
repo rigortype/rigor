@@ -14,8 +14,7 @@ class Rigor::Plugin::IoBoundary
   # whose parameter is undeclared.
   def refusal_summary: () -> { count: Integer, first_path: String?, nearest_root: String? }?
   def open_url: (untyped url) -> String
-  # Returns a frozen `Rigor::Cache::Descriptor` (no RBS yet -> untyped).
-  # authored: returns Rigor::Cache::Descriptor, which has no RBS declaration yet (#2404); stays `untyped` until it is declared
-  def cache_descriptor: () -> untyped
+  # The returned descriptor is frozen.
+  def cache_descriptor: () -> Rigor::Cache::Descriptor
   def replay: (untyped descriptor) -> nil
 end

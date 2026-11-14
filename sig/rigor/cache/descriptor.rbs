@@ -1,0 +1,14 @@
+class Rigor::Cache::Descriptor::PluginEntry
+  def initialize: (id: untyped, version: untyped, ?config_hash: untyped) -> void
+  def to_h: () -> Hash[String, untyped]
+end
+
+class Rigor::Cache::Descriptor
+  def initialize: (?files: untyped, ?gems: untyped, ?plugins: untyped, ?configs: untyped, ?dependencies: untyped, ?globs: untyped) -> void
+  def self.compose: (*untyped) -> Rigor::Cache::Descriptor
+  def cache_key_for: (producer_id: untyped, ?params: untyped) -> String
+  def to_canonical_bytes: () -> String
+  def to_canonical_hash: () -> Hash[String, untyped]
+  def ==: (untyped) -> (false | true)
+  def hash: () -> Integer
+end

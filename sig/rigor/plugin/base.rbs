@@ -13,8 +13,11 @@
 # `StatementEvaluator#apply_plugin_assertions` has already read its own. The
 # existing `scope.nil?` guards in plugin source stay valid either way.
 #
-# Collaborators that have no RBS yet (Cache::Descriptor, FlowContribution)
-# stay `untyped`; the precision ceiling is the sparse `sig/` tree.
+# Collaborators that have no RBS yet (FlowContribution) stay `untyped`;
+# the precision ceiling is the sparse `sig/` tree. A parameter row stays
+# lenient even where its type IS declared — `cache_for`'s `?descriptor:` and
+# `IoBoundary#replay` both take a `Cache::Descriptor` and both read `untyped`
+# — by ADR-107 clause 2, not for want of a declaration.
 class Rigor::Plugin::Base
   # --- class-level declaration DSLs ---------------------------------
 
@@ -116,6 +119,5 @@ class Rigor::Plugin::Base
   def effect_ancestry: () -> Array[Rigor::Plugin::EffectAncestry]
   def io_boundary: () -> Rigor::Plugin::IoBoundary
   def cache_for: (untyped producer_id, ?params: untyped, ?descriptor: untyped) -> Proc
-  # authored: returns Rigor::Cache::Descriptor::PluginEntry, which has no RBS declaration yet (#2404); stays `untyped` until it is declared
-  def plugin_entry: () -> untyped
+  def plugin_entry: () -> Rigor::Cache::Descriptor::PluginEntry
 end

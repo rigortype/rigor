@@ -624,6 +624,8 @@ RSpec.describe "rigor-graphql integration" do
           totally_undeclared_dsl :x
           self.bogus_in_class_body
           description "a", "b", "c"
+          description 42
+          graphql_name 42
 
           def resolve_field
             undeclared_in_instance_def :y
@@ -654,12 +656,18 @@ RSpec.describe "rigor-graphql integration" do
       expect(call_rule_diagnostics(result.diagnostics)).to be_empty
     end
 
-    it "still reports the rules on an ordinary closed receiver" do
+    # Arms each rule the example above asserts silent, under the same config: `PageInfo` is in
+    # `rbs_complete_ancestors:` and NOT in `open_receivers:`, so its sig is read on a direct
+    # receiver. Without this, the `call.argument-type-mismatch` half of that assertion could not
+    # have fired either way (measurement.md § "Specs and gates that pass without checking").
+    it "still reports each of the three rules on a closed receiver" do
       result = run_plugin(source: <<~RUBY)
         "literal".no_such_method_on_string
+        GraphQL::Types::Relay::PageInfo.description("a", "b", "c")
+        GraphQL::Types::Relay::PageInfo.graphql_name(42)
       RUBY
-      expect(call_rule_diagnostics(result.diagnostics).map(&:qualified_rule))
-        .to include("call.undefined-method")
+      expect(call_rule_diagnostics(result.diagnostics).map(&:qualified_rule).uniq.sort)
+        .to eq(["call.argument-type-mismatch", "call.undefined-method", "call.wrong-arity"])
     end
   end
 

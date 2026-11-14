@@ -445,10 +445,21 @@ RSpec.describe "rigor-graphql integration" do
   # only channel that distinguishes a contributed type from a bare Dynamic read.
   describe "shipped DSL signature (#1100)" do
     def dump_types(source)
-      result = run_plugin(source: source)
-      result.diagnostics
-            .select { |d| d.qualified_rule == "dump.type" }
-            .map { |d| d.message.sub("dump_type: ", "") }
+      dump_type_strings(run_plugin(source: source).diagnostics)
+    end
+
+    def dump_type_strings(diagnostics)
+      diagnostics
+        .select { |d| d.qualified_rule == "dump.type" }
+        .map { |d| d.message.sub("dump_type: ", "") }
+    end
+
+    # The rules `rbs_complete_ancestors:` must NOT enrol a bridged subclass into (#2769): the
+    # subclass stays outside RBS, so these signature-reading checks decline every call it makes.
+    def call_rule_diagnostics(diagnostics)
+      diagnostics.select do |d|
+        %w[call.undefined-method call.wrong-arity call.argument-type-mismatch].include?(d.qualified_rule)
+      end
     end
 
     def run_plugin(source:)
@@ -600,6 +611,55 @@ RSpec.describe "rigor-graphql integration" do
       # subclassing it is not a supported graphql-ruby extension point, so the bridge must stay off
       # and the inherited call keeps the false-positive-safe Dynamic fallback.
       expect(dump_types(source)).to eq(["Dynamic[top]"])
+    end
+
+    # #2769 — `rbs_complete_ancestors:` is a signature lookup, not check-rule enrolment: the bridged
+    # subclass stays outside RBS, so `call.undefined-method` / `call.wrong-arity` /
+    # `call.argument-type-mismatch` stay silent on every call shape below. The `dump.type` read in
+    # the same run proves the bridge itself is live, so the silence is not vacuous.
+    it "keeps the signature-reading call rules silent on a bridged subclass" do
+      source = <<~RUBY
+        class PostType < GraphQL::Schema::Object
+          Rigor.dump_type(field :title, String, null: false)
+          totally_undeclared_dsl :x
+          self.bogus_in_class_body
+          description "a", "b", "c"
+
+          def resolve_field
+            undeclared_in_instance_def :y
+          end
+        end
+
+        PostType.bogus_singleton
+        PostType.new.bogus_instance
+      RUBY
+      result = run_plugin(source: source)
+      expect(dump_type_strings(result.diagnostics)).to eq(["GraphQL::Schema::Field"])
+      expect(call_rule_diagnostics(result.diagnostics)).to be_empty
+    end
+
+    it "keeps the same silence through an intermediate source base class" do
+      source = <<~RUBY
+        class BaseObject < GraphQL::Schema::Object
+        end
+
+        class PostType < BaseObject
+          Rigor.dump_type(field :title, String, null: false)
+          totally_undeclared_dsl :x
+          self.bogus
+        end
+      RUBY
+      result = run_plugin(source: source)
+      expect(dump_type_strings(result.diagnostics)).to eq(["GraphQL::Schema::Field"])
+      expect(call_rule_diagnostics(result.diagnostics)).to be_empty
+    end
+
+    it "still reports the rules on an ordinary closed receiver" do
+      result = run_plugin(source: <<~RUBY)
+        "literal".no_such_method_on_string
+      RUBY
+      expect(call_rule_diagnostics(result.diagnostics).map(&:qualified_rule))
+        .to include("call.undefined-method")
     end
   end
 

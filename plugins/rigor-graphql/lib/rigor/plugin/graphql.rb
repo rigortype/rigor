@@ -77,8 +77,14 @@ module Rigor
         signature_paths: ["sig"],
         # ADR-43 WD4 — the classes the bundled sig covers completely enough that a Ruby-source subclass
         # (`class PostType < GraphQL::Schema::Object`) may bridge inherited calls to the RBS ancestor.
-        # Listing one turns on `call.undefined-method`/arity checks for inherited DSL calls on every
-        # subclass — justified here because the sig IS the authority (graphql-ruby ships none).
+        # The bridge is a signature lookup only: an inherited DSL call resolves to the declaration's
+        # return type and block parameters, and a subclass `def` overriding a declared method other
+        # than `initialize` binds its parameters from it (#2681). The subclass itself stays outside
+        # RBS, so `call.undefined-method`/arity checks do not fire on names the sig does not declare —
+        # undeclared calls stay silent, which is why `open_receivers:` is paired with this list. The
+        # risk runs the other way: a declared member that does not exist at runtime makes a genuinely
+        # failing call resolve silently, so the sig must be accurate — it IS the authority
+        # (graphql-ruby ships none).
         rbs_complete_ancestors: %w[
           GraphQL::Schema
           GraphQL::Schema::Member

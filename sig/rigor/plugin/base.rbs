@@ -14,7 +14,10 @@
 # existing `scope.nil?` guards in plugin source stay valid either way.
 #
 # Collaborators that have no RBS yet (FlowContribution) stay `untyped`;
-# the precision ceiling is the sparse `sig/` tree.
+# the precision ceiling is the sparse `sig/` tree. A parameter row stays
+# lenient even where its type IS declared — `cache_for`'s `?descriptor:` and
+# `IoBoundary#replay` both take a `Cache::Descriptor` and both read `untyped`
+# — by ADR-107 clause 2, not for want of a declaration.
 class Rigor::Plugin::Base
   # --- class-level declaration DSLs ---------------------------------
 

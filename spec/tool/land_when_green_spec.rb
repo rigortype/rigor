@@ -23,7 +23,30 @@ RSpec.describe "agents/pi-harness/scripts/land-when-green.sh" do
 
   after { FileUtils.rm_rf(root) }
 
-  def run_script(replies:, minutes: 1)
+  # A throwaway repository with one commit on top of another, holding the shipped script at the path it
+  # derives its own root from, so the head wait's `git` reads are answerable. The suite's own history
+  # cannot supply the pair: CI checks out shallow, where `git rev-parse HEAD~1` prints its argument on
+  # stdout and exits 128, which would read here as an unknown head.
+  def scratch_repo
+    repo = File.join(root, "repo")
+    FileUtils.mkdir_p(File.join(repo, "agents", "pi-harness", "scripts"))
+    FileUtils.cp(script, File.join(repo, "agents", "pi-harness", "scripts", "land-when-green.sh"))
+    git = lambda do |*args|
+      out, status = Open3.capture2e("git", "-C", repo, *args)
+      raise "git #{args.first}: #{out}" unless status.success?
+    end
+    git.call("init", "-q", "-b", "spec")
+    git.call("config", "user.email", "spec@example.invalid")
+    git.call("config", "user.name", "spec")
+    git.call("commit", "-q", "--allow-empty", "-m", "reviewed")
+    reviewed = Open3.capture2("git", "-C", repo, "rev-parse", "HEAD").first.strip
+    git.call("commit", "-q", "--allow-empty", "-m", "pushed on top")
+    on_top = Open3.capture2("git", "-C", repo, "rev-parse", "HEAD").first.strip
+    [File.join(repo, "agents", "pi-harness", "scripts", "land-when-green.sh"), reviewed, on_top]
+  end
+
+  # A stand-in `gh` first on PATH, answering each call with the next reply and logging its arguments.
+  def stub_gh(replies)
     bin = File.join(root, "bin")
     FileUtils.mkdir_p(bin)
     replies.each_with_index do |(out, status), i|
@@ -40,9 +63,15 @@ RSpec.describe "agents/pi-harness/scripts/land-when-green.sh" do
       exit "$(cat "#{root}/status-$n")"
     SH
     FileUtils.chmod(0o755, File.join(bin, "gh"))
+    bin
+  end
+
+  def run_script(replies:, minutes: 1, pr_sha: sha, script_path: script, head_seconds: nil)
+    bin = stub_gh(replies)
     env = { "PATH" => "#{bin}:#{ENV.fetch('PATH')}", "LAND_WAIT_INTERVAL" => "0", "LAND_PR_INTERVAL" => "0",
-            "LAND_WAIT_MINUTES" => minutes.to_s }
-    out, status = Open3.capture2e(env, script, "42", sha, stdin_data: "")
+            "LAND_WAIT_MINUTES" => minutes.to_s, "LAND_HEAD_WAIT_INTERVAL" => "0" }
+    env["LAND_HEAD_WAIT_SECONDS"] = head_seconds.to_s if head_seconds
+    out, status = Open3.capture2e(env, script_path, "42", pr_sha, stdin_data: "")
     [out, status.exitstatus]
   end
 
@@ -115,8 +144,30 @@ RSpec.describe "agents/pi-harness/scripts/land-when-green.sh" do
     expect(out).to include('"CI required" is FAILURE')
   end
 
-  it "stops with exit 3 and does not mark the PR ready when the head already moved" do
-    out, code = run_script(replies: [["c" * 40, 0]])
+  # Landing the reviewed SHA would drop the commit on top of it, so this one head is not waited out,
+  # however long the window. Both commits have to be real, hence the throwaway repository.
+  it "stops with exit 3 and does not mark the PR ready when a commit was pushed on top" do
+    path, reviewed, on_top = scratch_repo
+    out, code = run_script(replies: [[on_top, 0]], pr_sha: reviewed, script_path: path, head_seconds: 600)
+    expect([code, readied?]).to eq([3, false])
+    expect(out).to include("head moved")
+  end
+
+  # The #3132 and #3141 race: `gh` answers with the head just replaced, which this read as a move.
+  # `bin/lane-push` rebases before it pushes, so that head is no ancestor of the reviewed one either.
+  it "reads the head again when it answers with a head the pushed one is not ahead of" do
+    out, code = run_script(replies: [["c" * 40, 0], ["HTTP 502", 1]])
+    expect([code, readied?]).to eq([1, false])
+    expect(out).not_to include("head moved")
+  end
+
+  it "marks the PR ready once the head read resolves to the pushed one" do
+    _, code = run_script(replies: [["c" * 40, 0]] + start + poll("7 skipped 1"), minutes: 0)
+    expect([code, readied?]).to eq([5, true])
+  end
+
+  it "stops with exit 3 when the head has not become the pushed one by the deadline" do
+    out, code = run_script(replies: [["c" * 40, 0]], head_seconds: 0)
     expect([code, readied?]).to eq([3, false])
     expect(out).to include("head moved")
   end

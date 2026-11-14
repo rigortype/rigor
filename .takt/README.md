@@ -32,7 +32,9 @@ CI runners, not lanes or reviews, bound the throughput (about one full CI run fl
 the intake is pull-based:
 
 - `takt-enqueue.sh` refuses while open `takt/` PRs plus unfinished tasks plus the new ones exceed
-  `TAKT_MAX_UNLANDED` (default 5). `takt run` stays at two lanes.
+  `TAKT_MAX_UNLANDED` (default 5). It also refuses an issue another lane already holds — an open PR
+  closes it, an open `takt/<issue>/` branch is named for it, or a task in `tasks.yaml` has not
+  finished — and one listed twice in the same call. `takt run` stays at two lanes.
 - Review each lane when its Draft PR appears, not in batches. Put every fix-up in one push, and mark
   the PR ready only after that push; do not push after ready unless CI or the queue failed it.
 - Keep at most three takt PR runs in flight. A run superseded by a newer push can stay queued and

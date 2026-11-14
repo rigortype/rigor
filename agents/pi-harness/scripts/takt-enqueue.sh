@@ -27,6 +27,42 @@ if (( open_prs + ${queued:-0} + $# > max )); then
   exit 3
 fi
 
+# A second lane on an issue someone is already on is wasted twice over: it
+# spends a lane and a CI run, and one of the two PRs is then closed unmerged
+# (#3141 implemented #2783 while #3159 was open for it). Three claims, since a
+# lane holds its issue before it has a PR to close it: an open PR's closing
+# reference, an open takt/<issue>/ branch, and a task tasks.yaml has not
+# finished. A landed PR claims nothing, so this reads open PRs only, and a
+# local takt/ branch of a landed PR is not a claim either.
+claimed="$(cd "$REPO" && gh pr list --state open --limit 200 --json number,headRefName,closingIssuesReferences \
+  --jq '.[] | . as $p | [($p.closingIssuesReferences[]?.number), ($p.headRefName | capture("^takt/(?<n>[0-9]+)/") | .n | tonumber)?] | .[] | "\(.)\t\($p.number)"')"
+# Each unfinished task's issue. Buffered per record, so the field order within
+# an entry does not matter.
+queued="$(awk '
+  function flush() { if (issue != "" && (status == "pending" || status == "running")) print issue }
+  /^  - / { flush(); issue = ""; status = "" }
+  /^    issue: / { issue = $2 }
+  /^    status: / { status = $2 }
+  END { flush() }
+' "$REPO/.takt/tasks.yaml" 2>/dev/null || true)"
+
+seen=""
+for issue in "$@"; do
+  case " $seen " in
+    *" $issue "*) echo "takt-enqueue: #$issue is listed twice; one task per issue" >&2; exit 4 ;;
+  esac
+  seen="$seen $issue"
+  dup="$(printf '%s\n' "$claimed" | awk -F'\t' -v n="$issue" '$1 == n { print $2; exit }')"
+  if [[ -n "$dup" ]]; then
+    echo "takt-enqueue: #$issue is already claimed by open PR #$dup; land or close it first" >&2
+    exit 4
+  fi
+  if printf '%s\n' "$queued" | grep -qx -- "$issue"; then
+    echo "takt-enqueue: #$issue is already a queued or running takt task; let it finish first" >&2
+    exit 4
+  fi
+done
+
 REPO="$REPO" TAKT_MCP="$TAKT_MCP" WORKFLOW="${WORKFLOW:-rigor-ready-for-agent}" python3 -I - "$@" <<'PY'
 import json, os, subprocess, sys
 

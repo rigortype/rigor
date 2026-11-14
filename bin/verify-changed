@@ -47,11 +47,18 @@ base_ref=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --list-specs) list_only=1 ;;
+    -*) echo "verify-changed: unknown option $1" >&2; exit 2 ;;
     *) base_ref="$1" ;;
   esac
   shift
 done
 base_ref="${base_ref:-${VERIFY_BASE:-origin/master}}"
+# The hook replaces the diff, so outside --list-specs it would run the checks
+# over a selection that is not this tree's and still print OK.
+if [[ -n "${VERIFY_CHANGED_PATHS:-}" && -z "$list_only" ]]; then
+  echo "verify-changed: VERIFY_CHANGED_PATHS stands the diff in for --list-specs only" >&2
+  exit 2
+fi
 if ! merge_base="$(git merge-base HEAD "$base_ref" 2>/dev/null)"; then
   echo "verify-changed: cannot find a merge base with $base_ref (git fetch origin?)" >&2
   exit 2
@@ -135,6 +142,10 @@ add_spec() {
   esac
 }
 add_mirror_spec() { [[ -f "$1" ]] && add_spec "$1"; }
+# ere_literal <string>: the string as an ERE that matches only itself. A `.` in
+# a fixture directory name would otherwise match any character, and because a
+# coincidental hit counts as a match it would also suppress the stem fallback.
+ere_literal() { printf '%s' "$1" | sed 's/[^A-Za-z0-9_/-]/\\&/g'; }
 # spec_paths_matching <extended regex>: the spec files whose text matches, sorted.
 spec_paths_matching() { grep -rlE --include='*_spec.rb' "$1" spec | sort -u; }
 # add_specs_matching <extended regex>: every spec file whose text matches.
@@ -151,11 +162,17 @@ add_specs_matching() {
 # so a container name like `effects` cannot re-select every spec that says
 # "effects". The cap is on NEW specs per level; the deepest match is never
 # capped. Returns success when any level matched.
+#
+# A capped level is dropped whole, so this is correct only while a spec that
+# reads one project under a container names that project's own directory
+# (`fixtures/effects/rails`), not just the container. Every effects and sig_gen
+# spec does today. A spec that stopped doing so would lose its fixture here
+# with no gate noticing.
 fixture_dirs_matching() {
   local rest="$1" dir matches added result="" spec
   while [[ "$rest" == */* ]]; do
     dir="${rest%/*}"
-    matches="$(spec_paths_matching "(^|[^A-Za-z0-9_])${dir}([^A-Za-z0-9_]|$)")"
+    matches="$(spec_paths_matching "(^|[^A-Za-z0-9_])$(ere_literal "$dir")([^A-Za-z0-9_]|$)")"
     if [[ -n "$matches" ]]; then
       if [[ -z "$result" ]]; then
         result="$matches"
@@ -256,7 +273,18 @@ for path in ${changed[@]+"${changed[@]}"}; do
       if [[ "$path" == spec/fixtures/* || "$path" == spec/*/fixtures/* ]]; then
         fixture_dirs_matching "${path#*fixtures/}" && matched=1
       fi
-      [[ -z "$matched" ]] && add_specs_matching "$stem"
+      # The stem identifies the fixture only when it is distinctive. `demo` is
+      # the basename of 46 fixture directories and greps out ~113 specs — the
+      # ~18-minute run #3171 was filed for. Take it only while it selects few;
+      # otherwise add nothing, and the uncovered line below reports the path.
+      # An empty stem (a dotfile) needs no separate guard: it greps with an
+      # empty pattern, so it matches every spec and the same cap refuses it.
+      if [[ -z "$matched" ]]; then
+        stem_matches="$(spec_paths_matching "$(ere_literal "$stem")")"
+        if (( $(printf '%s' "$stem_matches" | grep -c .) <= 10 )); then
+          while IFS= read -r spec; do [[ -n "$spec" ]] && add_spec "$spec"; done <<< "$stem_matches"
+        fi
+      fi
       [[ "$specs$pool_specs$plugin_specs" == "$before" ]] && uncovered+="$path (no spec names it)"$'\n'
       ;;
     lib/*.rb)

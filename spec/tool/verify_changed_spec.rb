@@ -57,11 +57,46 @@ RSpec.describe "bin/verify-changed spec selection" do
     expect(specs).not_to include("spec/rigor/effects/rails_layer_spec.rb")
   end
 
-  it "falls back to the stem when no directory prefix names a spec" do
+  it "keeps the stem when no directory names a spec but the stem is distinctive" do
     ghost = %w[no_such_fixture 3171].join("_")
-    specs, uncovered = selection_for("spec/integration/fixtures/#{ghost}/demo.rb")
+    specs, uncovered = selection_for("spec/integration/fixtures/#{ghost}/and_assign_narrowing.rb")
     expect(uncovered).to be_empty
-    expect(specs).not_to be_empty
+    expect(specs).to include("spec/integration/type_construction_spec.rb")
+  end
+
+  # The directory match alone left #3171's symptom for the fixture directories no
+  # spec names: the stem fallback still ran, and `demo` is the basename of dozens
+  # of them, so those kept selecting ~113 files and ~18 minutes.
+  it "keeps every demo.rb fixture's selection small" do
+    demos = Dir.glob("spec/**/fixtures/**/demo.rb", base: root)
+    expect(demos.length).to be > 20
+    oversized = demos.filter_map do |path|
+      specs, = selection_for(path)
+      [path, specs.length] if specs.length > 10
+    end
+    expect(oversized).to be_empty
+  end
+
+  # An empty stem greps with an empty pattern, which selects the whole suite.
+  it "selects nothing for a dotfile no directory names" do
+    path = "spec/integration/fixtures/.rigor.yml"
+    specs, uncovered = selection_for(path)
+    expect(specs).to be_empty
+    expect(uncovered).to include(path)
+  end
+
+  it "refuses the stand-in diff outside --list-specs, rather than reporting OK" do
+    out, err, status = Bundler.with_unbundled_env do
+      Open3.capture3({ "VERIFY_CHANGED_PATHS" => "docs/nonexistent.md" }, script, "HEAD", chdir: root)
+    end
+    expect(status.exitstatus).to eq(2), "#{out}\n#{err}"
+    expect(err).to include("--list-specs only")
+  end
+
+  it "refuses an unknown option rather than reading it as a base ref" do
+    _, err, status = Bundler.with_unbundled_env { Open3.capture3(script, "--list-spec", chdir: root) }
+    expect(status.exitstatus).to eq(2)
+    expect(err).to include("unknown option --list-spec")
   end
 
   it "reports a fixture nothing names instead of selecting silently" do

@@ -1,0 +1,3 @@
+class Rigor::Analysis::CheckRules::RuleWalk::CollectorDriver
+  def initialize: (untyped) -> void
+end

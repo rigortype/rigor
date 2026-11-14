@@ -144,7 +144,11 @@ add_spec() {
 add_mirror_spec() { [[ -f "$1" ]] && add_spec "$1"; }
 # ere_literal <string>: the string as an ERE that matches only itself. A `.` in
 # a fixture directory name would otherwise match any character, and because a
-# coincidental hit counts as a match it would also suppress the stem fallback.
+# coincidental hit counts as a match it would also suppress the basename route.
+# 22 fixture basenames also select differently unescaped (`.keep` 5 against
+# 601), but every one of them sits under a directory a spec names, so the
+# directory route answers first and the basename call is unreachable for them
+# today — which is why only the directory call is pinned.
 ere_literal() { printf '%s' "$1" | sed 's/[^A-Za-z0-9_/-]/\\&/g'; }
 # spec_paths_matching <extended regex>: the spec files whose text matches, sorted.
 spec_paths_matching() { grep -rlE --include='*_spec.rb' "$1" spec | sort -u; }
@@ -262,6 +266,12 @@ for path in ${changed[@]+"${changed[@]}"}; do
       [[ "$path" == spec/support/ancestry_walker_scan.rb ]] && add_spec "$ancestry_walker_spec"
       ;;
     spec/*_spec.rb) add_spec "$path" ;;
+    spec/integration/snapshots/*)
+      # The only consumer enumerates this directory at run time
+      # (precision_snapshot_spec.rb's SNAPSHOTS_DIR), so no spec's text holds a
+      # snapshot's name and no identifier rule can reach it. Name it here.
+      add_spec "spec/integration/precision_snapshot_spec.rb"
+      ;;
     spec/*)
       # A fixture: run the specs that name it. Under a fixtures/ tree the
       # directory path is the identifier; a flat fixture (`fixtures/x.rb`) or a
@@ -279,13 +289,14 @@ for path in ${changed[@]+"${changed[@]}"}; do
       # the English word: `demo` greps out 113 specs, the ~18-minute run #3171
       # was filed for, against 71 for `demo.rb`. Four flat fixtures are named
       # only as `<basename>`, so dropping the extension loses them, and over
-      # every flat fixture in the tree the basename selects at most 3. Take it
+      # every flat fixture in the tree the basename selects at most 4 (one of
+      # which is this gate's own spec, which carries the name). Take it
       # only while it selects few, which refuses the generic basenames
       # (`demo.rb` 71, `.rigor.yml` 111, `a.rb` 227); otherwise add nothing,
       # and the uncovered line below reports the path. A dotfile needs no
       # separate guard: it is over the cap like the rest.
       if [[ -z "$matched" ]]; then
-        base_matches="$(spec_paths_matching "$(ere_literal "$base")")"
+        base_matches="$(spec_paths_matching "(^|[^A-Za-z0-9_])$(ere_literal "$base")([^A-Za-z0-9_]|$)")"
         if (( $(printf '%s' "$base_matches" | grep -c .) <= 10 )); then
           while IFS= read -r spec; do [[ -n "$spec" ]] && add_spec "$spec"; done <<< "$base_matches"
         fi

@@ -39,15 +39,21 @@ RSpec.describe "bin/verify-changed spec selection" do
     expect(specs).not_to include("spec/rigor/plugin_spec.rb")
   end
 
-  # Round 2: capping the bare stem dropped the one spec that names these four
-  # flat fixtures by file (assertions.rb, each_with_index.rb, hash_shape.rb,
-  # parity.rb), and the uncovered line then said nothing named them. A spec
-  # addresses a fixture as a file, so the extension is part of the identifier.
+  # Round 2: capping the bare stem dropped the one spec that names four flat
+  # fixtures by file, and the uncovered line then said nothing named them. A
+  # spec addresses a fixture as a file, so the extension is part of the
+  # identifier. The other three are spelled apart in the example below so this
+  # file does not join their selections.
   it "selects the specs that name a flat fixture by its file name" do
     specs, uncovered = selection_for("spec/integration/fixtures/hash_shape.rb")
     expect(uncovered).to be_empty
     expect(specs).to include("spec/integration/type_construction_spec.rb")
     expect(specs).to include("spec/rigor/inference/method_dispatcher/overload_selector_spec.rb")
+    %w[assertions each_with_index parity].each do |stem|
+      named, bare = selection_for("spec/integration/fixtures/#{stem}.rb")
+      expect(bare).to be_empty, stem
+      expect(named).to include("spec/integration/type_construction_spec.rb"), stem
+    end
     expect(specs.length).to be <= 5
   end
 
@@ -104,12 +110,32 @@ RSpec.describe "bin/verify-changed spec selection" do
     expect(oversized).to be_empty
   end
 
-  # An empty stem greps with an empty pattern, which selects the whole suite.
+  # Its basename is `.rigor.yml`, which 111 specs mention, so the cap refuses it.
   it "selects nothing for a dotfile no directory names" do
     path = "spec/integration/fixtures/.rigor.yml"
     specs, uncovered = selection_for(path)
     expect(specs).to be_empty
     expect(uncovered).to include(path)
+  end
+
+  # Round 3: without a boundary the basename matched inside a longer one, so this
+  # fixture selected the spec that merely mentions `self_core_prepend.rb`. The
+  # Both parts are assembled, so this file names neither: a directory it named
+  # would answer first and the basename would never be reached.
+  it "does not match a basename inside a longer one" do
+    dir = %w[no_such_fixture 3171].join("_")
+    base = %w[prepend rb].join(".")
+    specs, uncovered = selection_for("spec/integration/fixtures/#{dir}/#{base}")
+    expect(specs).to be_empty
+    expect(uncovered).not_to be_empty
+  end
+
+  # Round 3: these went to zero and were told nothing names them, while their
+  # one consumer enumerates the directory and so is named by no rule at all.
+  it "runs the snapshot gate for a changed snapshot" do
+    specs, uncovered = selection_for("spec/integration/snapshots/always_raises.yml")
+    expect(uncovered).to be_empty
+    expect(specs).to eq(["spec/integration/precision_snapshot_spec.rb"])
   end
 
   it "refuses the stand-in diff outside --list-specs, rather than reporting OK" do

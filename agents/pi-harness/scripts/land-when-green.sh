@@ -11,10 +11,14 @@
 #
 # Right after a push `gh pr view` can still answer with the pre-push head, and
 # reading that as a move cost two landings (#3132, #3141). So the first read
-# waits, for up to LAND_HEAD_WAIT_SECONDS (default 120), while the head it
-# sees is a commit of this clone that SHA is strictly ahead of: that is a read
-# of the head SHA replaced. Any other head is a move, including one this clone
-# does not have, so an unrelated or newer head still stops it at once. It then
+# waits for SHA, for up to LAND_HEAD_WAIT_SECONDS (default 60), and stops at
+# once only for the head that makes landing SHA wrong: a commit this clone has
+# that SHA is an ancestor of, pushed on top of the reviewed head. It cannot
+# instead wait only on a head SHA is ahead of: `bin/lane-push` rebases onto
+# origin/master before it pushes, so the head it replaces is usually no
+# ancestor of SHA either. Every other head is waited out and then read as a
+# move, which costs the window on a head that really moved elsewhere and lands
+# nothing: `gh pr ready` is reached only once the head reads as SHA. It then
 # polls once per 30s, for up to LAND_WAIT_MINUTES (default 60), the
 # newest "CI required" check run on SHA through bin/ci-required, the rule
 # bin/land-pr reads. It stops without landing when the head moved (exit 3),
@@ -94,21 +98,22 @@ advisory_state() {
   return 0
 }
 
-# Whether head $1 is the head SHA replaced, rather than a move: a commit this
-# clone has and SHA is strictly ahead of. An unknown commit is a move, so a
-# `gh` answer this clone cannot place never holds the loop.
-head_superseded() {
+# Whether head $1 was pushed on top of the reviewed SHA: a commit this clone
+# has that SHA is an ancestor of. Landing SHA would drop what came after it, so
+# this is the move that must not be waited out.
+head_landed_on() {
+  [[ "$1" != "$sha" ]] || return 1
   git cat-file -e "$1^{commit}" 2>/dev/null || return 1
-  [[ "$1" != "$sha" ]] && git merge-base --is-ancestor "$1" "$sha" 2>/dev/null
+  git merge-base --is-ancestor "$sha" "$1" 2>/dev/null
 }
 
 # Read the head until it is SHA. 0 it is, 1 a read failed, 2 it moved.
 wait_for_head() {
-  local deadline=$(( $(date +%s) + ${LAND_HEAD_WAIT_SECONDS:-120} ))
+  local deadline=$(( $(date +%s) + ${LAND_HEAD_WAIT_SECONDS:-60} ))
   while :; do
     head="$(head_of 2>/dev/null)" || return 1
     [[ "$head" == "$sha" ]] && return 0
-    head_superseded "$head" || return 2
+    head_landed_on "$head" && return 2
     (( $(date +%s) >= deadline )) && return 2
     sleep "${LAND_HEAD_WAIT_INTERVAL:-5}"
   done

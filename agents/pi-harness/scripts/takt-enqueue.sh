@@ -27,6 +27,21 @@ if (( open_prs + ${queued:-0} + $# > max )); then
   exit 3
 fi
 
+# A second lane on an issue someone is already landing is wasted twice over: it
+# spends a lane and a CI run, and one of the two PRs is then closed unmerged
+# (#3141 implemented #2783 while #3159 was open for it). An open PR claims an
+# issue by closing it, or by a takt/<issue>/ branch whose lane has not pushed a
+# closing reference yet.
+claimed="$(cd "$REPO" && gh pr list --state open --limit 200 --json number,headRefName,closingIssuesReferences \
+  --jq '.[] | . as $p | [($p.closingIssuesReferences[]?.number), ($p.headRefName | capture("^takt/(?<n>[0-9]+)/") | .n | tonumber)?] | .[] | "\(.)\t\($p.number)"')"
+for issue in "$@"; do
+  dup="$(printf '%s\n' "$claimed" | awk -F'\t' -v n="$issue" '$1 == n { print $2; exit }')"
+  [[ -z "$dup" ]] || {
+    echo "takt-enqueue: #$issue is already claimed by open PR #$dup; land or close it first" >&2
+    exit 4
+  }
+done
+
 REPO="$REPO" TAKT_MCP="$TAKT_MCP" WORKFLOW="${WORKFLOW:-rigor-ready-for-agent}" python3 -I - "$@" <<'PY'
 import json, os, subprocess, sys
 

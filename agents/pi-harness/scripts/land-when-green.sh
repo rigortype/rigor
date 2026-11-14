@@ -7,7 +7,15 @@
 # the full run starts only at `gh pr ready` (contribution-flow.md § "Landing
 # a pull request"). This reads the head first and stops before touching the
 # PR when it cannot (exit 1) or the head moved (exit 3); then it marks the PR
-# ready and polls once per 30s, for up to LAND_WAIT_MINUTES (default 60), the
+# ready.
+#
+# Right after a push `gh pr view` can still answer with the pre-push head, and
+# reading that as a move cost two landings (#3132, #3141). So the first read
+# waits, for up to LAND_HEAD_WAIT_SECONDS (default 120), while the head it
+# sees is a commit of this clone that SHA is strictly ahead of: that is a read
+# of the head SHA replaced. Any other head is a move, including one this clone
+# does not have, so an unrelated or newer head still stops it at once. It then
+# polls once per 30s, for up to LAND_WAIT_MINUTES (default 60), the
 # newest "CI required" check run on SHA through bin/ci-required, the rule
 # bin/land-pr reads. It stops without landing when the head moved (exit 3),
 # that check failed (exit 4) or the wait ran out (exit 5). SKIPPED and
@@ -86,8 +94,31 @@ advisory_state() {
   return 0
 }
 
-head="$(head_of 2>/dev/null)" || { echo "land-when-green: cannot read #$pr; not marking it ready"; exit 1; }
-[[ "$head" == "$sha" ]] || { echo "land-when-green: #$pr head moved to $head; not landing"; exit 3; }
+# Whether head $1 is the head SHA replaced, rather than a move: a commit this
+# clone has and SHA is strictly ahead of. An unknown commit is a move, so a
+# `gh` answer this clone cannot place never holds the loop.
+head_superseded() {
+  git cat-file -e "$1^{commit}" 2>/dev/null || return 1
+  [[ "$1" != "$sha" ]] && git merge-base --is-ancestor "$1" "$sha" 2>/dev/null
+}
+
+# Read the head until it is SHA. 0 it is, 1 a read failed, 2 it moved.
+wait_for_head() {
+  local deadline=$(( $(date +%s) + ${LAND_HEAD_WAIT_SECONDS:-120} ))
+  while :; do
+    head="$(head_of 2>/dev/null)" || return 1
+    [[ "$head" == "$sha" ]] && return 0
+    head_superseded "$head" || return 2
+    (( $(date +%s) >= deadline )) && return 2
+    sleep "${LAND_HEAD_WAIT_INTERVAL:-5}"
+  done
+}
+
+wait_for_head
+case $? in
+  1) echo "land-when-green: cannot read #$pr; not marking it ready"; exit 1 ;;
+  2) echo "land-when-green: #$pr head moved to $head; not landing"; exit 3 ;;
+esac
 gh pr ready "$pr" >/dev/null 2>&1 || true
 
 deadline=$(( $(date +%s) + ${LAND_WAIT_MINUTES:-60} * 60 ))

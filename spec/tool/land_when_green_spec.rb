@@ -23,7 +23,7 @@ RSpec.describe "agents/pi-harness/scripts/land-when-green.sh" do
 
   after { FileUtils.rm_rf(root) }
 
-  def run_script(replies:, minutes: 1)
+  def run_script(replies:, minutes: 1, pr_sha: sha)
     bin = File.join(root, "bin")
     FileUtils.mkdir_p(bin)
     replies.each_with_index do |(out, status), i|
@@ -41,8 +41,8 @@ RSpec.describe "agents/pi-harness/scripts/land-when-green.sh" do
     SH
     FileUtils.chmod(0o755, File.join(bin, "gh"))
     env = { "PATH" => "#{bin}:#{ENV.fetch('PATH')}", "LAND_WAIT_INTERVAL" => "0", "LAND_PR_INTERVAL" => "0",
-            "LAND_WAIT_MINUTES" => minutes.to_s }
-    out, status = Open3.capture2e(env, script, "42", sha, stdin_data: "")
+            "LAND_WAIT_MINUTES" => minutes.to_s, "LAND_HEAD_WAIT_INTERVAL" => "0" }
+    out, status = Open3.capture2e(env, script, "42", pr_sha, stdin_data: "")
     [out, status.exitstatus]
   end
 
@@ -119,6 +119,15 @@ RSpec.describe "agents/pi-harness/scripts/land-when-green.sh" do
     out, code = run_script(replies: [["c" * 40, 0]])
     expect([code, readied?]).to eq([3, false])
     expect(out).to include("head moved")
+  end
+
+  # The #3132 and #3141 race: `gh` answers with the pre-push head, which this read as a move.
+  it "reads the head again when it answers with a commit the pushed head is ahead of" do
+    repo = File.expand_path("../..", __dir__)
+    pushed, behind = %w[HEAD HEAD~1].map { |rev| `git -C #{repo} rev-parse #{rev}`.strip }
+    out, code = run_script(replies: [[behind, 0], ["HTTP 502", 1]], pr_sha: pushed)
+    expect([code, readied?]).to eq([1, false])
+    expect(out).not_to include("head moved")
   end
 
   it "stops with exit 3 when the head moves while it waits" do

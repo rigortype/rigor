@@ -7,8 +7,10 @@
 # selection without running the checks; VERIFY_CHANGED_PATHS stands the diff in,
 # so the examples read the real tree and never run RSpec through the script.
 #
-# The nonexistent fixture names below are spelled apart so this file does not
-# select itself: every literal here is a word the selection greps for.
+# The nonexistent fixture names below are spelled apart so a ghost path stays
+# unmatched: every literal here is text the selection greps for. The real
+# fixture paths in the other examples do select this file, which is why their
+# size assertions leave room for it.
 require "open3"
 require "spec_helper"
 
@@ -37,7 +39,32 @@ RSpec.describe "bin/verify-changed spec selection" do
     expect(specs).not_to include("spec/rigor/plugin_spec.rb")
   end
 
-  it "keeps the stem match for a flat fixture with a distinctive name" do
+  # Round 2: capping the bare stem dropped the one spec that names these four
+  # flat fixtures by file (assertions.rb, each_with_index.rb, hash_shape.rb,
+  # parity.rb), and the uncovered line then said nothing named them. A spec
+  # addresses a fixture as a file, so the extension is part of the identifier.
+  it "selects the specs that name a flat fixture by its file name" do
+    specs, uncovered = selection_for("spec/integration/fixtures/hash_shape.rb")
+    expect(uncovered).to be_empty
+    expect(specs).to include("spec/integration/type_construction_spec.rb")
+    expect(specs).to include("spec/rigor/inference/method_dispatcher/overload_selector_spec.rb")
+    expect(specs.length).to be <= 5
+  end
+
+  # The directory below is one `.` away from a real fixture directory, and it is
+  # assembled here so this file does not carry it as a literal. Unescaped, that
+  # `.` matches any character and the path selects interface_parity_spec.rb —
+  # and because a coincidental hit counts as a match, it would also suppress
+  # the basename route.
+  it "matches a fixture directory literally, not as a pattern" do
+    dir = %w[interfac _parity].join(".")
+    ghost = %w[unique_name 3171].join("_")
+    specs, uncovered = selection_for("spec/integration/fixtures/#{dir}/joins/#{ghost}.rb")
+    expect(specs).to be_empty
+    expect(uncovered).not_to be_empty
+  end
+
+  it "keeps the basename match for a flat fixture with a distinctive name" do
     specs, uncovered = selection_for("spec/integration/fixtures/and_assign_narrowing.rb")
     expect(uncovered).to be_empty
     expect(specs).to include("spec/integration/type_construction_spec.rb")
@@ -57,7 +84,7 @@ RSpec.describe "bin/verify-changed spec selection" do
     expect(specs).not_to include("spec/rigor/effects/rails_layer_spec.rb")
   end
 
-  it "keeps the stem when no directory names a spec but the stem is distinctive" do
+  it "keeps the basename when no directory names a spec but it is distinctive" do
     ghost = %w[no_such_fixture 3171].join("_")
     specs, uncovered = selection_for("spec/integration/fixtures/#{ghost}/and_assign_narrowing.rb")
     expect(uncovered).to be_empty

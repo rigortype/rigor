@@ -265,24 +265,29 @@ for path in ${changed[@]+"${changed[@]}"}; do
     spec/*)
       # A fixture: run the specs that name it. Under a fixtures/ tree the
       # directory path is the identifier; a flat fixture (`fixtures/x.rb`) or a
-      # directory lookup that names no spec falls back to the basename stem.
-      stem="$(basename "$path")"
-      stem="${stem%%.*}"
+      # directory lookup that names no spec falls back to the basename.
+      base="$(basename "$path")"
       before="$specs$pool_specs$plugin_specs"
       matched=""
       if [[ "$path" == spec/fixtures/* || "$path" == spec/*/fixtures/* ]]; then
         fixture_dirs_matching "${path#*fixtures/}" && matched=1
       fi
-      # The stem identifies the fixture only when it is distinctive. `demo` is
-      # the basename of 46 fixture directories and greps out ~113 specs — the
-      # ~18-minute run #3171 was filed for. Take it only while it selects few;
-      # otherwise add nothing, and the uncovered line below reports the path.
-      # An empty stem (a dotfile) needs no separate guard: it greps with an
-      # empty pattern, so it matches every spec and the same cap refuses it.
+      # The basename identifies the fixture, but only WITH its extension and
+      # only while it is distinctive. A spec names a fixture as a file —
+      # `fixtures/parity.rb`, or `hash_shape.rb:182` inside a describe string —
+      # so the extension is part of the identifier, while the bare stem matches
+      # the English word: `demo` greps out 113 specs, the ~18-minute run #3171
+      # was filed for, against 71 for `demo.rb`. Four flat fixtures are named
+      # only as `<basename>`, so dropping the extension loses them, and over
+      # every flat fixture in the tree the basename selects at most 3. Take it
+      # only while it selects few, which refuses the generic basenames
+      # (`demo.rb` 71, `.rigor.yml` 111, `a.rb` 227); otherwise add nothing,
+      # and the uncovered line below reports the path. A dotfile needs no
+      # separate guard: it is over the cap like the rest.
       if [[ -z "$matched" ]]; then
-        stem_matches="$(spec_paths_matching "$(ere_literal "$stem")")"
-        if (( $(printf '%s' "$stem_matches" | grep -c .) <= 10 )); then
-          while IFS= read -r spec; do [[ -n "$spec" ]] && add_spec "$spec"; done <<< "$stem_matches"
+        base_matches="$(spec_paths_matching "$(ere_literal "$base")")"
+        if (( $(printf '%s' "$base_matches" | grep -c .) <= 10 )); then
+          while IFS= read -r spec; do [[ -n "$spec" ]] && add_spec "$spec"; done <<< "$base_matches"
         fi
       fi
       [[ "$specs$pool_specs$plugin_specs" == "$before" ]] && uncovered+="$path (no spec names it)"$'\n'

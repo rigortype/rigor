@@ -188,7 +188,8 @@ RSpec.describe "Stable single-hop method-chain narrowing" do
       "a splatted multiple-assignment target" => "_a, *x.r = 1, 2",
       "a `for` target" => "for x.r in [nil]; end",
       "a `for` target among several" => "for _a, x.r in [[1, nil]]; end",
-      "a splatted `for` target" => "for *x.r in [nil]; end"
+      "a splatted `for` target" => "for *x.r in [nil]; end",
+      "a `rescue` reference" => "begin; w.go; rescue => x.r; end"
     }.each do |form, write|
       it "drops the root's chain fact under #{form}" do
         expect(chain_fact_after(write)).to be_nil

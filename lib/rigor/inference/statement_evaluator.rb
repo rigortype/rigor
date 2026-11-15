@@ -9816,6 +9816,9 @@ module Rigor
           scope.with_cvar(ref.name, exception_type)
         when Prism::IndexTargetNode
           widen_index_target(ref, exception_type, scope, type_scope: scope)
+        when Prism::CallTargetNode
+          # Issue #3205 — `rescue => x.r` calls `r=` on `x`, as `for x.r in` does (issue #2693).
+          widen_attribute_write(ref.receiver, ref.name, scope)
         else
           scope
         end

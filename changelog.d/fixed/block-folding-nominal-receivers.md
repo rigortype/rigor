@@ -1,0 +1,4 @@
+- **[inference]** A receiver's own `find`, `detect`, `find_index`, `count`, `all?`, `any?` or `none?` called with a constant block is now typed from its own return value rather than core's `nil`, `0` or boolean. ([#3249](https://github.com/rigortype/rigor/pull/3249))
+  - `Bag.new.find { false } + 1` no longer reports `call.undefined-method` for `nil` when `Bag#find` returns an Integer, and `Bag.new.count { false } == 0` no longer reads as always truthy.
+  - This covers project classes, subclasses of core collections, `Data.define` and `Struct.new` classes, and class objects defining the method as `def self.find`, for both a falsey and a truthy block (`all? { true }` included).
+  - Core collections and enumerables (`Array`, `Hash`, `Set`, `Range`, `Enumerator` and its subclasses, `Dir`, `ENV`), array and hash literals, and untyped receivers keep the folds.

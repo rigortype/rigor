@@ -3527,6 +3527,17 @@ RSpec.describe "Rigor type construction (integration)" do
       end
     end
 
+    # Issue #3242 — BlockFolding's receiver-blind folds (`find` / `detect` / `find_index` to `nil`, `count`
+    # to `0`, `all?` / `any?` / `none?` to a boolean) answered for a project class that defines the method.
+    describe "fixtures/block_folding_project_receivers.rb — a project class's own find / count / any?" do
+      let(:harness) { harness_for("block_folding_project_receivers") }
+
+      it "types each call from the project's method and keeps the core folds" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches).to be_empty
+      end
+    end
+
     # Issue #1412 — a repeating block or loop body that only mutates a capture in place was typed from its
     # pre-body contents on every pass, because only the ADR-56 write-back (which needs a rebind) laid the
     # WD2.13 unknown-store widening.

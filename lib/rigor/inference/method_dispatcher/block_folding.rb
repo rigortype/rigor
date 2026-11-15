@@ -2,6 +2,7 @@
 
 require_relative "../../type"
 require_relative "iterator_dispatch"
+require_relative "core_enumerable_receiver"
 
 module Rigor
   module Inference
@@ -79,8 +80,10 @@ module Rigor
           return nil if receiver.nil? || block_type.nil?
           return fold_edge_by(receiver, method_name, args) if EDGE_BY_METHODS.include?(method_name)
 
+          # Issue #3242 — the predicate, `find`-family and `count` folds read no receiver shape, so a class that
+          # may define the method itself declines (the filter folds already do, through `filter_receiver_kind`).
           truthiness = constant_truthiness(block_type)
-          return nil if truthiness.nil?
+          return nil if truthiness.nil? || CoreEnumerableReceiver.project_receiver?(receiver)
 
           if PREDICATE_METHODS.include?(method_name)
             fold_predicate(receiver, method_name, truthiness, args)

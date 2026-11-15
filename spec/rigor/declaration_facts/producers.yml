@@ -647,7 +647,7 @@ lib/rigor/inference/scope_indexer/class_cvars_collector.rb:
 lib/rigor/inference/scope_indexer/cvar_hierarchy.rb:
   computes: 'issue #3219, the in-file superclass tree the class-cvar census joins each class''s cvar entries along'
   producers:
-    Rigor::Inference::ScopeIndexer::CvarHierarchy#record: 'issue #3219, records, for the class-cvar census, the name a class or module header declares and a class header''s as-written superclass with the Module.nesting outside the header; it takes the prefix, singleton_cref and nesting from the walk''s DeclarationWalk::Context and body context and derives none of its own'
+    Rigor::Inference::ScopeIndexer::CvarHierarchy#record: 'issue #3219, records, for the class-cvar census, the name a class or module header declares and a class header''s as-written superclass with the Module.nesting outside the header; it takes the prefix and nesting from the walk''s DeclarationWalk::Context and body context and derives none of its own'
 lib/rigor/inference/scope_indexer/declared_param_writes.rb:
   computes: the ivar writes in one instance def whose value reads only parameters with a declared type
   producers:

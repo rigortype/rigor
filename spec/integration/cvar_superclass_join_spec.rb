@@ -77,4 +77,17 @@ RSpec.describe "class-cvar census superclass join (#3219)", type: :runner do
              "def set = @@c = 1\n#{reader.gsub(/^/, '  ')}  end\nend\n"
     expect(folds(source)).to eq([guard_line(source)])
   end
+
+  it "does not fold when the superclass's nearer candidate only a signature declares" do
+    # `Status` inside `module Process` is the core `Process::Status`, not the file's top-level `Status`. Ruby: with
+    # `class Process::Status; @@c = nil; end` elsewhere, `Process::Sub.allocate.failures` prints "clean".
+    source = "class Status; def x = @@c = :top; end\nmodule Process\n  class Sub < Status\n" \
+             "    def set = @@c = 1\n#{reader.gsub(/^/, '  ')}  end\nend\n"
+    expect(folds(source)).to eq([])
+  end
+
+  it "does not fold under an in-file reopen of a class a bundled signature declares" do
+    source = "class StandardError; end\nclass MyErr < StandardError\n  def set = @@c = 1\n#{reader}end\n"
+    expect(folds(source)).to eq([])
+  end
 end

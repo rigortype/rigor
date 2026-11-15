@@ -32,7 +32,8 @@ module Rigor
         # as-written superclass name ({ScopeIndexer.recorded_ancestor_name}, nil for a non-constant expression) and
         # `nesting` the `Module.nesting` outside the header, where Ruby resolves it (nil when the walk lost it).
         def record(headers, node, context, body)
-          return if body.singleton_cref || body.prefix.empty?
+          # A header below `class <<` that names no class leaves the prefix empty, `singleton_cref` included.
+          return if body.prefix.empty?
 
           name = body.prefix.join("::")
           klass = node.is_a?(Prism::ClassNode)
@@ -46,46 +47,62 @@ module Rigor
         # `accumulator` (the census before {ScopeIndexer#finished_cvar_census}) with each class's entries joined
         # along its tree, as a new Hash; `scope` answers whether a name is declared outside the file.
         def join(accumulator, headers, scope)
-          return accumulator if headers[:superclasses].empty?
+          return accumulator if accumulator.empty? || headers[:superclasses].empty?
 
           parents = headers[:superclasses].to_h { |name, sites| [name, parent(sites, headers, scope)] }
           roots = {}
-          root = ->(name) { roots[name] ||= root_of(name, parents) }
-          members = (accumulator.keys | parents.keys).group_by(&root)
+          root = ->(name) { roots[name] ||= root_of(name, parents, headers, scope) }
+          trees = (accumulator.keys | parents.keys).group_by(&root)
+          unions = {}
           accumulator.to_h do |class_name, entries|
-            tree_root, open = root.call(class_name)
-            tree = members.fetch([tree_root, open])
-            next [class_name, entries] if tree.size == 1 && !open
+            key = root.call(class_name)
+            tree = trees.fetch(key)
+            next [class_name, entries] if tree.size == 1 && !key[1]
 
-            [class_name, joined_entries(class_name, entries, tree, accumulator, open)]
+            [class_name, entries.to_h do |cvar, type|
+              next [cvar, type] if type.is_a?(JoinOnlyCvarWrite)
+
+              [cvar, unions[[key, cvar]] ||= tree_union(tree, cvar, accumulator, key[1])]
+            end]
           end
         end
 
-        # The entries a creating write made, each joined with the tree's other writes of that cvar.
-        def joined_entries(class_name, entries, tree, accumulator, open)
-          entries.to_h do |cvar, type|
-            next [cvar, type] if type.is_a?(JoinOnlyCvarWrite)
-
-            others = tree.filter_map do |member|
-              next if member == class_name
-
-              write = accumulator.dig(member, cvar)
-              write.is_a?(JoinOnlyCvarWrite) ? write.type : write
-            end
-            others << Type::Combinator.untyped if open
-            [cvar, others.empty? ? type : Type::Combinator.union(type, *others)]
+        # Every write of `cvar` in `tree`, `Dynamic[top]` too when the tree is open: the one seed each entry of the
+        # tree a creating write made joins to, built once per tree and cvar.
+        def tree_union(tree, cvar, accumulator, open)
+          writes = tree.filter_map do |member|
+            write = accumulator.dig(member, cvar)
+            write.is_a?(JoinOnlyCvarWrite) ? write.type : write
           end
+          writes << Type::Combinator.untyped if open
+          Type::Combinator.union(*writes)
         end
 
-        # `[root, open]`: the topmost class above `name` and whether it names a superclass the tree cannot follow.
-        def root_of(name, parents)
+        # `[root, open]`: the topmost class above `name` and whether the tree cannot see all of its superclass's
+        # writes: the topmost class names a superclass {.parent} cannot follow, or names none in this file while
+        # another source declares it ({.reopened_elsewhere?}), so its superclass is not known to be `Object`.
+        def root_of(name, parents, headers, scope)
           seen = [name]
           while (up = parents[name])
             return [name, true] if up == OPEN || seen.include?(up)
 
             seen << (name = up)
           end
-          [name, false]
+          [name, !parents.key?(name) && reopened_elsewhere?(name, headers, scope)]
+        end
+
+        # Whether a class this file reopens without a superclass header is declared elsewhere with one it may
+        # name: another file's header (`discovered_superclasses`) or a bundled signature (core, stdlib, a gem).
+        # A class only the project's own `sig/` declares stays rooted, as that signature mirrors the source.
+        def reopened_elsewhere?(name, headers, scope)
+          return false unless headers[:declared][name] == :class
+
+          return true if scope.discovered_superclasses.key?(name)
+
+          loader = scope.environment&.rbs_loader
+          !loader.nil? && loader.class_known?(name) && !loader.project_declared_class?(name)
+        rescue StandardError
+          true
         end
 
         # The in-file class every header of a class names as its superclass, nil for `Object` / `BasicObject`, or
@@ -104,7 +121,7 @@ module Rigor
           candidates.each do |candidate|
             kind = headers[:declared][candidate]
             return kind == :class ? candidate : OPEN if kind
-            return nil if candidate.equal?(candidates.last) && ROOTS.include?(candidate)
+            return nil if ROOTS.include?(candidate)
             return OPEN if declared_elsewhere?(scope, candidate)
           end
           OPEN
@@ -117,7 +134,7 @@ module Rigor
           true
         end
 
-        private_class_method :joined_entries, :root_of, :parent, :resolve, :declared_elsewhere?
+        private_class_method :tree_union, :root_of, :reopened_elsewhere?, :parent, :resolve, :declared_elsewhere?
       end
     end
   end

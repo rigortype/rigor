@@ -18,7 +18,7 @@
 
 ## Decision
 
-The first option. The row says what `record` reads and that the prefix, `singleton_cref` and nesting come from the walk's `DeclarationWalk::Context` and body context. #3218 added rows for the same census's class-body gather for the same kind of reason, and its entry was ratified on 2026-11-15 by #3238.
+The first option. The row says what `record` reads and that the prefix and nesting come from the walk's `DeclarationWalk::Context` and body context. #3218 added rows for the same census's class-body gather for the same kind of reason, and its entry (`lane-3204-cvar-class-body.md`) was ratified by [#3230](https://github.com/rigortype/rigor/pull/3230), "Ratify the sixteen gate-row entries".
 
 ## To undo
 

@@ -1,0 +1,4 @@
+- **[inference]** A single `for` target over an `each` that yields several values now binds the first value, as Ruby does, instead of the whole yield as a tuple. ([#3256](https://github.com/rigortype/rigor/pull/3256))
+  - Over an `Enumerator` (or `Enumerator::Lazy`, `Enumerator::Chain` or a subclass) whose element is a tuple, the target binds `Dynamic[top]`, because the type does not say whether `each` yields the slots or one array.
+  - The floor also covers the Enumerators that `Hash#each`, `Hash#each_pair`, `Struct#each_pair`, and `each`, `map`, `reverse_each` and `cycle` over an Array of pairs return, their Lazy forms (`pairs.lazy`, `hash.lazy`), and an element union such as `Enumerator[[A, B]?]`, so a mistake on such a target (`for kv in hash.each; kv.upcase; end`) is no longer reported.
+  - `rescue => x.r` now drops reader-chain narrowings on `x`, as `for x.r in` does.

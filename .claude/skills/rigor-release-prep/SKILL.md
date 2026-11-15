@@ -200,8 +200,9 @@ delete the internal detail, and restate the third as what a user can now do:
 Procedure — the enumeration is what makes the rewrite un-skippable, so do not
 shortcut it. With more than about 40 fragments, run steps 2–5 per group in
 parallel subagents while `make verify` runs. Keep step 5's section-wide checks,
-step 6 and the release summary yourself. [`references/delegation.md`](references/delegation.md) has
-the split, the brief, and which model fits each part.
+step 6 and the release summary yourself.
+[`references/delegation.md`](references/delegation.md) has the split, the
+brief, and which model fits each part.
 
 1. **Pull the cycle's merged PRs up front**, so linking is a lookup rather than
    a recall. Derive the range from the previous release's **tag**, never from

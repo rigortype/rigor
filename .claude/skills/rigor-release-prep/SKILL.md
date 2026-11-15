@@ -198,7 +198,11 @@ delete the internal detail, and restate the third as what a user can now do:
 ```
 
 Procedure — the enumeration is what makes the rewrite un-skippable, so do not
-shortcut it:
+shortcut it. With more than about 40 fragments, run steps 2–5 per group in
+parallel subagents while `make verify` runs. Keep step 5's section-wide checks,
+step 6 and the release summary yourself.
+[`references/delegation.md`](references/delegation.md) has the split, the
+brief, and which model fits each part.
 
 1. **Pull the cycle's merged PRs up front**, so linking is a lookup rather than
    a recall. Derive the range from the previous release's **tag**, never from
@@ -658,7 +662,7 @@ head state.
 
 ## File the next dev-loop post-mortem
 
-The development-loop post-mortem recurs after every release ([#2333](https://github.com/rigortype/rigor/issues/2333) was the first, after v0.4.7). Once the release is out, open an issue "Post-mortem the development loop after the vX.Y.Z release" in the following milestone, and compare against the previous window with the same metrics collected the same way. Use two read-only agents: a GitHub-side one (PR open-to-merge median and p90, issue-to-merge, force-push rounds, "Engine allocations" check-run annotations, PRs closed unmerged, merge-queue requeues) and a transcript-side one (compactions, reviewer reports per PR, severe findings and their clusters, lanes without a PR, coordinator edits against `SendMessage` resumes, fresh fixers, API errors). The previous numbers are in #2333's post-mortem comment; the maintainer's rulings from it are in `docs/agents/parallel-lanes.md`.
+The development-loop post-mortem recurs after every release ([#2333](https://github.com/rigortype/rigor/issues/2333) was the first, after v0.4.7). Once the release is out, open an issue "Post-mortem the development loop after the vX.Y.Z release" in the following milestone, and compare against the previous window with the same metrics collected the same way. Use two read-only agents, on the models [`references/delegation.md`](references/delegation.md) names: a GitHub-side one (PR open-to-merge median and p90, issue-to-merge, force-push rounds, "Engine allocations" check-run annotations, PRs closed unmerged, merge-queue requeues) and a transcript-side one (compactions, reviewer reports per PR, severe findings and their clusters, lanes without a PR, coordinator edits against `SendMessage` resumes, fresh fixers, API errors). The previous numbers are in #2333's post-mortem comment; the maintainer's rulings from it are in `docs/agents/parallel-lanes.md`.
 
 ## Quick Checklist
 

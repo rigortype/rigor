@@ -53,7 +53,8 @@ module Rigor
           @constants ||= begin
             literal_mutations = ScopeIndexer.collect_literal_receiver_mutations(@root)
             per_file = ScopeIndexer.widen_mutated_constants(
-              ScopeIndexer.build_in_source_constants(@root, @scope), literal_mutations[:constants]
+              ScopeIndexer.build_in_source_constants(@root, @scope), literal_mutations[:constants],
+              literal_mutations[:constant_elements]
             )
             ScopeIndexer.merge_seeded_constants(@scope.in_source_constants, per_file)
           end

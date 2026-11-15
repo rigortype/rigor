@@ -4822,6 +4822,21 @@ end
       result = census("module Admin\n  def self.fill(k) = Table::ROWS[k] = 1\nend\n")
       expect(result[:constants]).to eq(Set["Admin::Table::ROWS", "Table::ROWS"])
     end
+
+    # #3243 — a mutation of an element read off a constant or class variable records the read's root under the same
+    # candidates, with its steps, and leaves the whole-name sets alone.
+    it "records an element mutation's root and steps apart from the whole-name sets" do
+      result = census("module Admin\n  def self.grow(i) = T.dig(0, :k).first[i] << 1\nend\n")
+      key = Rigor::Inference::ScopeIndexer::MutatedElementCensus::KeyStep.new(:k)
+      expect(result[:constant_elements]).to eq(Set[["Admin::T", [0, key, :first, :all]], ["T", [0, key, :first, :all]]])
+      expect(result[:constants]).to be_empty
+    end
+
+    it "records a class variable's element mutation under its class, and none at the top level" do
+      result = census("class A\n  def self.grow = @@n[0][-1] << 2\nend\n@@t[0] << 2\n")
+      expect(result[:cvar_elements]).to eq({ "A" => Set[[:@@n, [0, -1]]] })
+      expect(result[:cvars]).to be_empty
+    end
   end
 
   # The census names what a call mutated, not what it stored, so a widened entry stops claiming its contents are

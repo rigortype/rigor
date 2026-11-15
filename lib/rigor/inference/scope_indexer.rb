@@ -54,6 +54,7 @@ require_relative "scope_indexer/declared_param_writes"
 require_relative "scope_indexer/constant_ivar_value"
 require_relative "scope_indexer/ivar_contributions"
 require_relative "scope_indexer/empty_seed"
+require_relative "scope_indexer/mutated_element_census"
 
 module Rigor
   module Inference
@@ -170,9 +171,10 @@ module Rigor
         # `ISPELL_STATUS[:key] = param` must not fold reads through the closed empty shape. One census walk
         # collects the mutated names; the two accumulators below widen their entries to the Dynamic-wrapped
         # form, contents unpinned ({#census_mutated_type}), so reads stay honest without licensing the negative rules.
-        literal_mutations = collect_literal_receiver_mutations(root)
+        mutations = collect_literal_receiver_mutations(root)
 
-        class_cvars = widen_mutated_cvars(build_class_cvar_index(root, seeded_scope), literal_mutations[:cvars])
+        class_cvars = widen_mutated_cvars(build_class_cvar_index(root, seeded_scope),
+                                          *mutations.values_at(:cvars, :cvar_elements))
         seeded_scope = seeded_scope.with_discovery(seeded_scope.discovery.with(class_cvars: class_cvars))
         seeded_scope = seed_program_globals(root, seeded_scope)
 
@@ -184,9 +186,8 @@ module Rigor
         # `pre_eval:` constant seed `Runner#project_scope_seed_tables` applies). Same-file declarations are the
         # most specific authority, exactly as `merged_classes` above resolves the same collision. Without the
         # merge, the assignment below would silently drop the project seed on every file.
-        in_source_constants = widen_mutated_constants(
-          build_in_source_constants(root, seeded_scope), literal_mutations[:constants]
-        )
+        in_source_constants = widen_mutated_constants(build_in_source_constants(root, seeded_scope),
+                                                      *mutations.values_at(:constants, :constant_elements))
         seeded_scope = seed_constant_tables(seeded_scope, default_scope, in_source_constants, root)
         seeded_scope = seed_published_constant_ivars(seeded_scope, root)
 
@@ -2789,9 +2790,13 @@ module Rigor
       #
       # @return `:constants` — a Set of candidate qualified names (each mutation
       #   contributes every lexical-resolution candidate, `A::B::C` outward to bare `C`, mirroring how the
-      #   reads resolve); `:cvars` — `{class_name => Set[Symbol]}`.
+      #   reads resolve); `:cvars` — `{class_name => Set[Symbol]}`. Issue #3243 — a mutation of an ELEMENT
+      #   read off one (`S[0] << "b"`) is recorded as `[name, steps]` instead ({MutatedElementCensus.path}):
+      #   `:constant_elements` — a Set of those pairs over the same candidates; `:cvar_elements` —
+      #   `{class_name => Set[[Symbol, steps]]}`.
       def collect_literal_receiver_mutations(root)
-        census = { constants: Set.new, cvars: Hash.new { |h, k| h[k] = Set.new } }
+        census = { constants: Set.new, cvars: Hash.new { |h, k| h[k] = Set.new },
+                   constant_elements: Set.new, cvar_elements: Hash.new { |h, k| h[k] = Set.new } }
         walk_literal_receiver_mutations(root, [], census, EMPTY_NESTING)
         census
       end
@@ -2934,18 +2939,28 @@ module Rigor
       # tables agree by construction. `nesting` is what a constant name must resolve through because the
       # ladder walks every rung, not just the innermost, and a rooted header drops the outer rungs from the
       # prefix while Ruby keeps them ([#708](https://github.com/rigortype/rigor/issues/708)).
+      #
+      # Issue #3243 — a receiver that is an element read (`S[0] << "b"`, `@@n.dig(0, 0)[1] = 2`) mutates the element
+      # the read reaches, and is recorded under the read's root with its steps, for the element widening.
       def record_literal_receiver_mutation(node, qualified_prefix, nesting, census)
         receiver = mutating_receiver_of(node)
         return if receiver.nil?
 
+        root, steps = MutatedElementCensus.path(receiver)
+        receiver = root if steps
+        names = steps ? [] : census[:constants]
         case receiver
         when Prism::ConstantReadNode
-          constant_mutation_candidates(receiver.name.to_s, nesting, census[:constants])
+          constant_mutation_candidates(receiver.name.to_s, nesting, names)
         when Prism::ConstantPathNode
-          path_mutation_candidates(receiver, nesting, census[:constants])
+          path_mutation_candidates(receiver, nesting, names)
         when Prism::ClassVariableReadNode
-          census[:cvars][qualified_prefix.join("::")] << receiver.name unless qualified_prefix.empty?
+          unless qualified_prefix.empty?
+            owner = qualified_prefix.join("::")
+            steps ? census[:cvar_elements][owner] << [receiver.name, steps] : census[:cvars][owner] << receiver.name
+          end
         end
+        names.each { |name| census[:constant_elements] << [name, steps] } if steps
       end
 
       # The lexical candidates a PATH spelling reaches, for the same reason the bare arm takes them:
@@ -2999,8 +3014,13 @@ module Rigor
         into << base_name
       end
 
-      def widen_mutated_constants(accumulator, mutated_names)
-        return accumulator if mutated_names.empty?
+      NO_ELEMENT_MUTATIONS = Set.new.freeze
+      NO_CVAR_ELEMENT_MUTATIONS = {}.freeze
+
+      # `mutated_elements` — the `[name, steps]` pairs of an element mutation (#3243), widened after every whole-name
+      # mutation and shallowest first, so the table is the same whichever order the program spells them in.
+      def widen_mutated_constants(accumulator, mutated_names, mutated_elements = NO_ELEMENT_MUTATIONS)
+        return accumulator if mutated_names.empty? && mutated_elements.empty?
 
         widened = accumulator.dup
         mutated_names.each do |name|
@@ -3009,27 +3029,40 @@ module Rigor
 
           widened[name] = census_mutated_type(existing)
         end
-        widened.freeze
+        widen_mutated_elements(widened, mutated_elements).freeze
       end
 
-      def widen_mutated_cvars(accumulator, mutated_by_class)
-        return accumulator if mutated_by_class.empty?
+      def widen_mutated_cvars(accumulator, mutated_by_class, elements_by_class = NO_CVAR_ELEMENT_MUTATIONS)
+        return accumulator if mutated_by_class.empty? && elements_by_class.empty?
 
         widened = accumulator.dup
-        mutated_by_class.each do |class_name, names|
+        (mutated_by_class.keys | elements_by_class.keys).each do |class_name|
           table = widened[class_name]
           next if table.nil?
 
           updated = table.dup
-          names.each do |cvar|
+          mutated_by_class.fetch(class_name, NO_ELEMENT_MUTATIONS).each do |cvar|
             existing = updated[cvar]
             next if existing.nil?
 
             updated[cvar] = census_mutated_type(existing)
           end
-          widened[class_name] = updated.freeze
+          widened[class_name] =
+            widen_mutated_elements(updated, elements_by_class.fetch(class_name, NO_ELEMENT_MUTATIONS)).freeze
         end
         widened.freeze
+      end
+
+      # `table` with the element each `[name, steps]` pair reaches widened ({MutatedElementCensus.widen}), as a copy;
+      # `table` itself when no pair reaches anything.
+      def widen_mutated_elements(table, mutated_elements)
+        return table if mutated_elements.empty?
+
+        MutatedElementCensus.ordered(mutated_elements).reduce(table) do |current, (name, steps)|
+          existing = current[name]
+          updated = existing && MutatedElementCensus.widen(existing, steps)
+          updated ? current.merge(name => updated) : current
+        end
       end
 
       # The type a mutated constant or class variable is read as. The census records the NAME a call mutated and not
@@ -3058,15 +3091,48 @@ module Rigor
 
       # A `Difference` / `Refined` member drops to its unpinned base: a mutation can falsify the removed value or the
       # refinement as well (`clear` empties a `non-empty-array`).
+      #
+      # Issue #3243 — a String literal floors to `String`, since the mutation can rewrite it (`S << "b"`), and an
+      # `Array` / `Hash` nominal first unpins the literal carriers its type arguments hold ({#census_unpinned_content}):
+      # `[[1]].shuffle`'s `Array[[1]]` is not value-pinned at the top, yet `SHUF[0].last` read the stale `1`.
       def census_unpinned_carrier(member)
         case member
         when Type::HashShape
           Type::Combinator.nominal_of("Hash", type_args: [Type::Combinator.untyped, Type::Combinator.untyped])
         when Type::Tuple then Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.untyped])
+        when Type::Constant then StringMutation.constant?(member) ? Type::Combinator.nominal_of("String") : member
         when Type::Nominal
+          member = census_unpinned_content(member)
           UnknownStoreWidening.value_pinned_collection?(member) ? UnknownStoreWidening.gradual_content(member) : member
         when Type::Difference, Type::Refined then census_unpinned_carrier(member.base)
         else member
+        end
+      end
+
+      CENSUS_CONTENT_CLASSES = %w[Array Hash].freeze
+
+      # An `Array` / `Hash` nominal with each literal carrier its type arguments hold, at any depth, unpinned as
+      # {#census_unpinned_carrier} unpins a member — `Array[[1]]` to `Array[Array[untyped]]` — and every other
+      # argument (`Hash.new(0)`'s `Dynamic[top]` and `Integer`) left as it is. Answers `nominal` itself when nothing
+      # in it is such a carrier.
+      def census_unpinned_content(nominal)
+        return nominal unless CENSUS_CONTENT_CLASSES.include?(nominal.class_name) && !nominal.type_args.empty?
+
+        args = nominal.type_args.map { |arg| census_unpinned_argument(arg) }
+        return nominal if args.each_with_index.all? { |arg, index| arg.equal?(nominal.type_args[index]) }
+
+        Type::Combinator.nominal_of(nominal.class_name, type_args: args)
+      end
+
+      def census_unpinned_argument(arg)
+        case arg
+        when Type::Tuple, Type::HashShape then census_unpinned_carrier(arg)
+        when Type::Constant then StringMutation.constant?(arg) ? Type::Combinator.nominal_of("String") : arg
+        when Type::Nominal then census_unpinned_content(arg)
+        when Type::Union
+          members = arg.members.map { |member| census_unpinned_argument(member) }
+          members.each_with_index.all? { |member, index| member.equal?(arg.members[index]) } ? arg : Type::Combinator.union(*members)
+        else arg
         end
       end
 

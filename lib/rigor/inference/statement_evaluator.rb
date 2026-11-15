@@ -4279,9 +4279,8 @@ module Rigor
         members = element.is_a?(Type::Union) ? element.members : [element]
         return element unless members.any? { |member| member.is_a?(Type::Tuple) && member.elements.size >= 2 }
         return element unless coll_type.is_a?(Type::Nominal)
-        return element unless %i[equal subclass].include?(scope.environment.class_ordering(coll_type.class_name, "Enumerator"))
-
-        Type::Combinator.untyped
+        ordering = scope.environment.class_ordering(coll_type.class_name, "Enumerator")
+        %i[equal subclass].include?(ordering) ? Type::Combinator.untyped : element
       end
 
       # Binds the `for` index variable(s) into `scope`. A single `LocalVariableTargetNode` is bound to `element_type`

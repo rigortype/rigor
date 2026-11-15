@@ -1,2 +1,0 @@
-- **[engine]** Every typing-state Table now declares how one of its entries is read and written, so a journal slice can be validated and replayed. ([#2873](https://github.com/rigortype/rigor/pull/2873))
-  - Groundwork for ADR-129's result memo; no output changes.

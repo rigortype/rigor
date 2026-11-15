@@ -111,6 +111,23 @@ carry several `CI required` check runs, so `bin/land-pr` reads the newest one by
 full run, so `land-when-green.sh` reads them there and stops before landing when either warns. The
 cost: a spec failure surfaces only after `gh pr ready`, and costs a fix push and another full run.
 
+*Amended 2026-11-15 (maintainer's decision).* The merge queue puts on `master` the very commit its
+`merge_group` run tested, so the `push` run that followed reran an identical full CI on every
+landing. On 2026-11-12 there were 26 such runs, beside 73 `merge_group` and 227 `pull_request` runs.
+On that day the queue's jobs spent 2,137 minutes waiting for a runner against 879 running, and five
+entries in the window left the queue on `checks_timed_out`. A `merge_group` run into `master` that
+passes `CI required` now attests its tree, like a `pull_request` run. The `push` run to `master`
+reuses that result, and skips the suite, only when the signer is a `merge_group` run whose
+certificate names the pushed commit itself as the commit whose `ci.yml` ran. Only GitHub's merge
+queue starts a `merge_group` run, on its own `gh-readonly-queue` ref. Each reader filters on the
+trigger: the queue accepts only a `pull_request` signer, and a push only a `merge_group` signer. A
+direct push, a failed lookup, and an attestation not written within two minutes run the full CI as
+before. A reused push run saves none of `master`'s caches (the shards' timing file, RuboCop's, the
+warm self-check's), so a daily `schedule` run checks `master` in full and refreshes them. The cost:
+a PR run on a busy day may restore caches up to a day older, which slows it but cannot change its
+result. The same day the queue's `check_response_timeout` in the `master merge queue` ruleset rose
+from 120 to 240 minutes, so an entry waiting for runners is no longer dropped and rebuilt.
+
 **2. Decisions below a stated line are made by precedent and ratified afterwards.** A decision
 that is not *serious* (the list in `contribution-flow.md` § "Decisions and the approval queue") is
 made by the coordinator, following the closest precedent, and lands with its PR. The PR carries an

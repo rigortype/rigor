@@ -2350,6 +2350,18 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
         expect(program_type(source, 1).describe).to eq("5")
       end
 
+      # One member with its own `send` is enough: `String#to_s` would answer `String` for the other.
+      it "does not read the target off a union with one such member" do
+        Dir.mktmpdir do |dir|
+          File.write(File.join(dir, "sock.rbs"), "class Sock\n  def send: (Symbol) -> Integer\nend\n")
+          rbs_scope = Rigor::Scope.empty(environment: Rigor::Environment.for_project(signature_paths: [dir]))
+          root = Prism.parse("x = rand(2).zero? ? Sock.new : \"a\"\nx.send(:to_s)\n").value
+          index = Rigor::Inference::ScopeIndexer.index(root, default_scope: rbs_scope)
+          node = root.statements.body[1]
+          expect(index[node].type_of(node).describe).to eq("Dynamic[top] | Integer")
+        end
+      end
+
       it "keeps reading `__send__` and `public_send` as their target" do
         expect(program_type("#{mailer_source}Mailer.new.__send__(:hello, 0)\n", 1).describe).to eq('"0"')
         expect(program_type("#{mailer_source}Mailer.new.public_send(:hello, 0)\n", 1).describe).to eq('"0"')

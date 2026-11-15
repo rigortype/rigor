@@ -67,6 +67,14 @@ lives in the PR body and the issues, which the coordinator reads only when a dec
    narrowest sound type, not fall through to a wider one (a declined `**` reached RBS `Numeric`,
    #2122); and a rule about "another object" must probe a receiver that may be `self` (#2077, four
    rounds). Done when every shape the review would probe has a row.
+
+   The table decides quality more than the implementer does. In November 2026 four outside
+   implementer models each took one easy and one hard issue (#2586, #3056) from the same plan, with
+   a blind review of each result. On the hard one all four shipped severe false positives, three of
+   them the same two. Rerun with an addendum that named those two false-positive classes and required
+   both fixes to fail open, every model met every addendum bullet, no two shipped the same remaining
+   defect, and two shipped none severe. Naming the failure modes in the brief bought more than
+   changing the model, at a cost: each rerun took two to four times as long and touched more files.
 3. **Map overlap, then batch.** List the modules each issue will touch, and include open PRs from
    other sessions (`gh pr list --state open`, then their files): an issue whose mechanism one of
    them changes waits for it to land or for its owner to hand over the lane. Two issues that change
@@ -170,6 +178,18 @@ lives in the PR body and the issues, which the coordinator reads only when a dec
    issues for six fixes, several of them unreproduced, so the backlog grew as fast as the lanes
    closed it. When a merged commit carried a `Fixes #N` for an issue the PR only partly fixed,
    reopen #N with what remains.
+
+## Workflow runs
+
+A Claude Code `Workflow` resume replays a finished `agent()` call by a hash of its `(prompt, opts)`.
+Adding `model:` or `effort:` to a stage's call changes that key for every agent in the stage, so the
+resume re-runs the ones that succeeded too; the journal records only the opaque hash, so failed
+entries cannot be re-targeted alone. In a September 2026 ADR audit a spend limit killed 168 of 436
+agents, and switching the verify stage's model on resume re-ran all 391 verifiers instead of the 167
+outstanding. Choose each stage's model before the first run; after a limit kill, resume unchanged
+first, and change a stage's options only when the whole stage is worth re-running. A stage whose
+verifiers all failed leaves its findings CONFIRMED with zero votes (`refutations: []` reads the same
+as verified clean), so check the failure list against the verdicts before trusting them.
 
 ## Lane contract
 

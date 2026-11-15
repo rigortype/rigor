@@ -4279,6 +4279,7 @@ module Rigor
         members = element.is_a?(Type::Union) ? element.members : [element]
         return element unless members.any? { |member| member.is_a?(Type::Tuple) && member.elements.size >= 2 }
         return element unless coll_type.is_a?(Type::Nominal)
+
         ordering = scope.environment.class_ordering(coll_type.class_name, "Enumerator")
         %i[equal subclass].include?(ordering) ? Type::Combinator.untyped : element
       end

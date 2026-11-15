@@ -1,0 +1,3 @@
+- **[inference]** A single `for` target over an `each` that yields several values now binds the first value, as Ruby does, instead of the whole yield as a tuple. ([#3256](https://github.com/rigortype/rigor/pull/3256))
+  - Over an `Enumerator` whose element is a tuple, such as `each_with_index`, the target binds `Dynamic[top]`, because the type does not say whether `each` yields the slots or one array.
+  - `rescue => x.r` now drops reader-chain narrowings on `x`, as `for x.r in` does.

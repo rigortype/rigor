@@ -81,6 +81,17 @@ module Rigor
           result
         end
 
+        # Issue #3198 — true when anything in this frame's body or parameter defaults may set its `$~`, by the broad
+        # reading ({MatchRebinding.broad_may_match?}: an unresolved constant may be a Regexp, a `[]` key may be one, a
+        # `yield` may run a C-function proc) or because the frame hands its slot to code the analyzer does not trace
+        # ({#self_call_fallback?}: `binding`, a forwarded `&block`). Only a frame for which this is false enters with
+        # `$~` bound ({MatchRebinding.frame_start}).
+        def may_set_match?(scope)
+          block_name = block_parameter_name
+          MatchRebinding.broad_may_match?(@body, scope, block_name) ||
+            MatchRebinding.broad_may_match?(@parameters, scope, block_name) || self_call_fallback?(scope)
+        end
+
         # {#matching_closure?} for `$_` ({LastLine.closure?}).
         def last_line_closure?(scope = nil)
           if @last_line_closure.nil?

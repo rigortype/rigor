@@ -62,8 +62,14 @@ module Rigor
                               pattern.is_a?(Prism::InterpolatedRegularExpressionNode)
           return scope if project_method?(call_node, operand_scope)
 
-          entry = call_node.name == :grep_v ? scope.forget_match_globals : Narrowing.yielded_match_scope(scope, pattern)
+          entry = call_node.name == :grep_v ? grep_v_entry(scope) : Narrowing.yielded_match_scope(scope, pattern)
           refined?(call_node, operand_scope) ? entry.untyped_match_globals : entry
+        end
+
+        # Issue #3198 — the failed `pattern === element` before each yield set `$~` to nil, which this reads as
+        # `MatchData?` as a method's own start does ({MatchRebinding.frame_start}); every other match global is unbound.
+        def grep_v_entry(scope)
+          scope.forget_match_globals.with_global(:$~, MatchRebinding.unmatched_type)
         end
 
         # True when the receiver answers the call with a method the project defines, or is a carrier whose class
@@ -93,7 +99,7 @@ module Rigor
           call_node.is_a?(Prism::CallNode) && !call_node.receiver.nil? &&
             block_node.is_a?(Prism::BlockNode) && call_node.block.equal?(block_node)
         end
-        private_class_method :string_entry, :grep_entry, :project_method?, :refined?, :pattern_argument,
+        private_class_method :string_entry, :grep_entry, :grep_v_entry, :project_method?, :refined?, :pattern_argument,
                              :own_block_call?
       end
     end

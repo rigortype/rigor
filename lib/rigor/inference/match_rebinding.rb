@@ -121,6 +121,24 @@ module Rigor
       end
       private_class_method :matching_node?
 
+      # Issue #3198 — the scope a method body enters with: `$~` bound to `MatchData?` (the type `Regexp.last_match`
+      # reads) when nothing in the frame may set it ({Frame#may_set_match?}), and `scope` itself otherwise. A method
+      # runs in a frame of its own, whose slot starts nil, so where the frame never matches every read of `$~` reads
+      # that slot as it started. Where it may match, a read is left untyped even before the first match: the
+      # statement-level rules forget a binding on narrower terms than the broad reading, and a correct program that
+      # reads `$~` after a match the analyzer does not see (`case line when CONSTANT_FROM_A_GEM`) must not report.
+      def frame_start(scope)
+        frame = scope.match_frame
+        return scope if frame.nil? || frame.may_set_match?(scope)
+
+        scope.with_global(:$~, unmatched_type)
+      end
+
+      # `MatchData | nil`: what `$~` holds where the analyzer knows no match it reads.
+      def unmatched_type
+        Type::Combinator.union(Type::Combinator.nominal_of("MatchData"), Type::Combinator.constant_of(nil))
+      end
+
       # A call that rebinds `$~` in the frame it is made in: an {ALWAYS_MATCHING} name, a {REGEXP_ARGUMENT} name
       # with a known Regexp argument, or `===` on a receiver that may be a Regexp — `a === b` is `a`'s method, so
       # `String === re` runs no match.

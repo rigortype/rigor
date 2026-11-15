@@ -9270,6 +9270,8 @@ module Rigor
         # Issue #1358 — the body runs in a frame of its own, whose match globals its blocks and closures share, and
         # so do its parameters' default expressions.
         fresh = fresh.with_match_frame(def_node.body, def_node.parameters)
+        # Issue #3198 — and that slot starts nil: where nothing in the frame may set `$~`, it reads `MatchData?`.
+        fresh = MatchRebinding.frame_start(fresh)
         # ADR-48 Struct slice 3 — install the method body's fold-safe-local set so a member read off a mutation-free
         # local folds during the in-body walk (the call-return inference path is seeded separately).
         fresh = fresh.with_struct_fold_safe(

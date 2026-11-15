@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../declaration_walk/traversal"
+require_relative "cvar_hierarchy"
 
 module Rigor
   module Inference
@@ -14,13 +15,15 @@ module Rigor
 
         def initialize
           @table = {}
+          @headers = CvarHierarchy.headers
         end
 
         # Issue #3204 — a `class` / `module` body's own writes, outside its `def`s, under the body's context;
         # each only joins an entry a `def` body's write creates. An unnameable cref (a header below
         # `class << expr`) leaves the prefix empty, and the gather skips it.
-        def on_declaration(node, _context, body)
+        def on_declaration(node, context, body)
           ScopeIndexer.collect_body_cvar_writes(node.body, body.prefix, body.scope, @table)
+          CvarHierarchy.record(@headers, node, context, body)
           DeclarationWalk::DESCEND
         end
 
@@ -36,6 +39,10 @@ module Rigor
 
         # The table as the discovery index holds it ({ScopeIndexer#finished_cvar_census}).
         def table = ScopeIndexer.finished_cvar_census(@table)
+
+        # Issue #3219 — {#table} with each class's entries joined along its in-file superclass tree
+        # ({CvarHierarchy.join}); the walk's root context must track `Module.nesting` for a superclass to resolve.
+        def hierarchy_table(scope) = ScopeIndexer.finished_cvar_census(CvarHierarchy.join(@table, @headers, scope))
       end
     end
   end

@@ -3479,6 +3479,61 @@ Unrelated
       expect(cvar_seeds("class C; begin; rescue => @@c; end; for @@f in [1]; end; end")).to eq({})
     end
 
+    # Issue #3219 — a class and its subclasses share one cvar slot, so each entry a `def` write creates joins the
+    # writes every class of its in-file superclass tree makes, and a tree whose top names a superclass outside the
+    # file joins the unknown floor.
+    it "joins a superclass's and a subclass's writes into each other's entries" do
+      expect(cvar_seeds(<<~RUBY)).to eq("B" => { :@@b => ":b | :s" }, "S" => { :@@c => "1?", :@@b => ":b | :s" })
+        class B; @@c = nil; def self.b = (@@b = :b); end
+        class S < B; def s = (@@c = 1); def t = (@@b = :s); end
+      RUBY
+    end
+
+    it "follows a grandparent through the superclass's lexical lookup" do
+      expect(cvar_seeds(<<~RUBY)).to eq("M::C" => { :@@c => "1?" })
+        module M
+          class A; @@c = nil; end
+          class B < A; end
+          class C < B; def s = (@@c = 1); end
+        end
+      RUBY
+    end
+
+    it "resolves a rooted superclass to the top-level class, not a nearer one" do
+      expect(cvar_seeds(<<~RUBY)).to eq("Base" => { :@@c => "1 | :top" }, "M::S" => { :@@c => "1 | :top" })
+        class Base; def x = (@@c = :top); end
+        module M
+          class Base; @@c = nil; end
+          class S < ::Base; def s = (@@c = 1); end
+        end
+      RUBY
+    end
+
+    it "floors an entry whose tree names a superclass the file does not declare" do
+      expect(cvar_seeds(<<~RUBY)).to eq("S" => { :@@c => "1 | Dynamic[top]" }, "T" => { :@@c => "2 | Dynamic[top]" })
+        class S < Unknown; def s = (@@c = 1); end
+        class T < Struct.new(:a); def s = (@@c = 2); end
+      RUBY
+    end
+
+    it "floors an entry whose superclass's nearer candidate another file declares" do
+      # `Ns::Base` is declared outside this file, so `class Sub < Base` in `Ns` names it, not the top-level `Base`.
+      elsewhere = Rigor::Scope.empty.with_discovery(
+        Rigor::Scope::DiscoveryIndex::EMPTY.with(discovered_classes: { "Ns::Base" => :class })
+      )
+      cvars = described_class.build_class_cvar_index(parse(<<~RUBY), elsewhere)
+        class Base; def x = (@@c = :top); end
+        module Ns
+          class Sub < Base; def s = (@@c = 1); end
+        end
+      RUBY
+      expect(cvars.fetch("Ns::Sub")[:@@c].describe).to eq("1 | Dynamic[top]")
+    end
+
+    it "ends a tree at an explicit `Object` superclass" do
+      expect(cvar_seeds("class S < Object; def s = (@@c = 1); end")).to eq("S" => { :@@c => "1" })
+    end
+
     it "types a class-body write with the class itself as `self`" do
       cvars = described_class.build_class_cvar_index(parse(<<~RUBY), Rigor::Scope.empty)
         class Klass

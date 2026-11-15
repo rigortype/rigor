@@ -85,7 +85,9 @@ silently".
   --branch <branch>` by matching `headSha` (`gh run list --commit` needs the full SHA; a short one
   returns `[]`). `gh run watch <id> --exit-status` can return while jobs are still running, so poll
   `gh run view <id> --json status` until it reads `completed`. On the master run after a merge,
-  which is always full, the run's `conclusion` and `headSha` are the verdict. `gh pr view --json merged` is not a field; read `state`, `mergedAt` or `mergeCommit`.
+  the run's `conclusion` and `headSha` are the verdict. It reuses the queue's result when the queue
+  attested that commit, and its "Detect code changes" job then says so (ADR-123, amended
+  2026-11-15). The daily `schedule` run is the full check of `master`. `gh pr view --json merged` is not a field; read `state`, `mergedAt` or `mergeCommit`.
 - **A cancelled full run reads FAILURE.** `CI required` runs under `if: always()`, so a full run
   that is cancelled still concludes it, as FAILURE ("A required job did not succeed (result:
   cancelled)"). A draft run that is cancelled concludes it CANCELLED instead. A newer push

@@ -2933,8 +2933,9 @@ module Rigor
       # Issue #3080 — the receiver's own `send`. A project `def send` comes before `Kernel#send` in every chain that
       # reaches it, so where the only declaration Ruby reaches is `Kernel#send` (or there is none) the body answers
       # the call, ahead of the `Kernel#send` declaration the ordinary dispatch would read off `Object`. Where an RBS
-      # `def send:` of the class's own reaches the receiver, that declaration is the contract (its `void`, its
-      # return type), so nil hands the call to the ordinary dispatch, as for any other declared method. Nil too
+      # `def send:` reaches the receiver from the class itself or from an ancestor (an overload included), that
+      # declaration is the contract (its `void`, its return type), so nil hands the call to the ordinary dispatch,
+      # as for any other declared method. Nil too
       # where no body can be read: a union or class-object receiver.
       def own_send_type(node, receiver, args)
         return nil unless user_inference_receiver?(receiver)

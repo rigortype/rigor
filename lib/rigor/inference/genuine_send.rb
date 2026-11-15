@@ -67,7 +67,15 @@ module Rigor
       def rbs_genuine?(class_name, kind, scope)
         definition = ExternalAncestorResolution.method_definition(class_name, :send, kind, scope: scope)
         definition ||= ExternalAncestorResolution.resolve(class_name, :send, kind, scope: scope)&.first
-        definition.nil? || GENUINE_OWNERS.include?(definition.defined_in.to_s)
+        definition.nil? || genuine_definition?(definition)
+      end
+
+      # True when the `send` declaration is implemented in `Kernel` / `BasicObject`. `defined_in` alone is not
+      # enough: an overload a class adds (`def send: (String, Integer) -> Integer | ...`) keeps `Kernel` as the
+      # method's `defined_in` while `implemented_in` names the class. An overload a reopened `module Kernel` adds
+      # stays genuine.
+      def genuine_definition?(definition)
+        GENUINE_OWNERS.include?((definition.implemented_in || definition.defined_in).to_s)
       end
 
       # The project `def send` Ruby reaches on `class_name`'s `kind` side, or nil.
@@ -78,7 +86,7 @@ module Rigor
           scope.user_def_through_ancestors(class_name, :send).first
         end
       end
-      private_class_method :class_side?, :project_definer
+      private_class_method :class_side?, :project_definer, :genuine_definition?
     end
   end
 end

@@ -2387,11 +2387,35 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
           end
         end
 
+        # Review round 2 — an overload a class adds keeps `Kernel` as the method's `defined_in`, but it is still the
+        # class's own `send`; one a reopened `module Kernel` adds is not.
+        # The target reading typed `String` (`Over#x`); the overload set answers the call instead.
+        it "reads a class's RBS `send` overload as its own `send`" do
+          rbs = "class Over\n  def send: (String, Integer) -> Integer | ...\n  def x: (Integer) -> String\nend\n"
+          expect(typed_with_rbs(rbs, "Over.new.send(:x, 0)\n", 0)).to eq("Dynamic[top]")
+        end
+
+        it "answers a class's RBS `send` overload over its source body" do
+          rbs = "class Over\n  def send: (Symbol) -> Integer | ...\nend\n"
+          source = "class Over\n  def send(name) = 0\nend\nOver.new.send(:ping)\n"
+          expect(typed_with_rbs(rbs, source, 1)).to eq("Integer")
+        end
+
+        it "keeps the target reading under an overload a reopened `module Kernel` adds" do
+          rbs = "module Kernel\n  def send: (Integer) -> Integer | ...\nend\n"
+          expect(typed_with_rbs(rbs, "Object.new.send(:to_s)\n", 0)).to eq("String")
+        end
+
         it "does not read the target through a project subclass of an RBS class declaring `send`" do
           rbs = "class ExtSock\n  def send: (Symbol) -> Integer\nend\n"
           source = "class Mine < ExtSock\n  def hello = \"x\"\nend\nMine.new.send(:hello)\n"
           expect(typed_with_rbs(rbs, source, 1)).to eq("Dynamic[top]")
         end
+      end
+
+      it "calls a Data member class's own `send`" do
+        source = "D = Data.define(:a) do\n  def send(x) = 1\n  def hello = \"x\"\nend\nD.new(a: 1).send(:hello)\n"
+        expect(program_type(source, 1).describe).to eq("1")
       end
 
       it "calls a Struct member class's own `send`" do

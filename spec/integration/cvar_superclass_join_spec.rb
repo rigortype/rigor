@@ -7,8 +7,8 @@ require "spec_helper"
 # correct code. Each "does not fold" source prints "clean" under Ruby 4.0.5 when its `failures` runs before the
 # write the census saw; each "folds" one is a control whose read can never be `nil`.
 RSpec.describe "class-cvar census superclass join (#3219)", type: :runner do
-  def folds(source)
-    analyze(files: { "code.rb" => source }).diagnostics
+  def folds(source, sig: {})
+    analyze(files: { "code.rb" => source }, sig: sig).diagnostics
                                            .select { |d| d.rule.to_s == "flow.always-truthy-condition" }
                                            .map(&:line)
   end
@@ -95,5 +95,11 @@ RSpec.describe "class-cvar census superclass join (#3219)", type: :runner do
     # Ruby: another file's `class StandardError; @@c = nil; end` shares the slot with this reopening.
     source = "class StandardError\n  def set = @@c = 1\n#{reader}end\n"
     expect(folds(source)).to eq([])
+  end
+
+  it "folds in a headerless class only the project's own signature declares (control)" do
+    source = "class Sidecar\n  def set = @@c = 1\n#{reader}end\n"
+    sig = { "sidecar.rbs" => "class Sidecar\n  def set: () -> Integer\n  def failures: () -> Integer\nend\n" }
+    expect(folds(source, sig: sig)).to eq([guard_line(source)])
   end
 end

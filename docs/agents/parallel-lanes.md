@@ -247,9 +247,20 @@ measured why: four fresh fixers started on PRs whose lane had finished (#2454, #
 against one in v0.4.6, and lanes #2503 and #2505, killed in an API outage, were redone by agents that
 re-derived the work (#2333).
 
-A PR from an external runner (takt, the Pi harness) has no lane to resume, so its fix round always
-takes this path (maintainer's decision, 2026-11-15, #2890). Brief the fixer as a takeover above,
-with the PR, its issue and the review report quoted. Pick the model by the findings: the small
-model when every finding is wording or specs, and the strongest when a fix touches Ruby-semantics
-logic (step 5). In the v0.4.8 window all five fresh fixers were for takt PRs (#3075, #3079, #3119,
-#3132, #3140), each briefed ad hoc, while those PRs drew one severe finding in 24.
+A takt PR has no lane to resume, so its fix round always takes this path
+([maintainer's ruling](https://github.com/rigortype/rigor/issues/2890#issuecomment-6897951109),
+2026-11-15). Make the brief a takeover brief, with the PR, its issue and the review report quoted,
+and with these changes:
+
+- Before spawning, confirm that no takt task is still running for that issue. Check with
+  `agents/pi-harness/scripts/takt-status.sh` or `takt-ledger.sh`, as the old lane's check above
+  does.
+- The fixer works in the takt worktree. When that is gone, it uses a `bin/rigor-worktree` checkout
+  of the branch.
+- From a takt worktree it pushes with `agents/pi-harness/scripts/takt-lane-push.sh <worktree>`
+  after committing, not `bin/lane-push`. A takt worktree marks `.takt/` files skip-worktree, so
+  `bin/lane-push` stops mid-rebase once `master` has changed one (`takt-lane-push.sh`'s header).
+- Route its model by step 4, with the findings as the lane's work.
+
+In the v0.4.8 window all five fresh fixers were for takt PRs (#3075, #3079, #3119, #3132, #3140).
+The 24 takt PRs drew one severe finding between them, so most of these fixes are contained work.

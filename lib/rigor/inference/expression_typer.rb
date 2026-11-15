@@ -2902,16 +2902,11 @@ module Rigor
       private_constant :LITERAL_SEND_SELECTORS
 
       def try_literal_send(node, receiver)
-        return nil unless LITERAL_SEND_SELECTORS.include?(node.name)
-        return nil unless node.block.nil?
-
-        args = node.arguments&.arguments
-        return nil unless args && args.first.is_a?(Prism::SymbolNode)
+        args = literal_send_arguments(node)
+        return nil if args.nil?
         return own_send_type(node, receiver, args) if node.name == :send && !GenuineSend.type?(receiver, scope)
 
         rest = args[1..]
-        return nil if rest.any? { |a| a.is_a?(Prism::SplatNode) || a.is_a?(Prism::ForwardingArgumentsNode) }
-
         inner_name = args.first.unescaped.to_sym
         inner_args = rest.map { |a| type_of(a) }
         MethodDispatcher.dispatch(
@@ -2920,6 +2915,19 @@ module Rigor
         ) ||
           try_user_method_inference(receiver, node, inner_args, method_name: inner_name) ||
           try_project_singleton_inference(receiver, node, inner_args, method_name: inner_name)
+      end
+
+      # The arguments of a literal-selector `send` / `__send__` / `public_send` call with no block and no splat or
+      # forwarded tail, or nil.
+      def literal_send_arguments(node)
+        return nil unless LITERAL_SEND_SELECTORS.include?(node.name)
+        return nil unless node.block.nil?
+
+        args = node.arguments&.arguments
+        return nil unless args && args.first.is_a?(Prism::SymbolNode)
+        return nil if args.any? { |a| a.is_a?(Prism::SplatNode) || a.is_a?(Prism::ForwardingArgumentsNode) }
+
+        args
       end
 
       # Issue #3080 — the receiver's own `send`. A project `def send` comes before `Kernel#send` in every chain that

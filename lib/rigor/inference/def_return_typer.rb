@@ -255,7 +255,8 @@ module Rigor
 
         type_return_node(node, scope_index, out, lookup_context: lookup_context) if node.is_a?(Prism::ReturnNode)
         # A barrier call's receiver and arguments still run in the method; only its block is cut off.
-        barrier_block = node.block if node.is_a?(Prism::CallNode) && ReturnBarrier.block_call?(node, scope: scope_index[node])
+        barrier = node.is_a?(Prism::CallNode) && ReturnBarrier.block_call?(node, scope: scope_index[node])
+        barrier_block = node.block if barrier
         node.rigor_each_child do |c|
           collect_return_types(c, scope_index, out, lookup_context: lookup_context) unless c.equal?(barrier_block)
         end

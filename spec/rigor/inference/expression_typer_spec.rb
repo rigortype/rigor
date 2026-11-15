@@ -2377,31 +2377,31 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
     # Issue #3081 — a `return` in `send(:lambda) { … }` leaves only the block where `send` is `Kernel#send`. With
     # the class's own yielding `send`, the block is an ordinary one and its `return` exits the method.
     describe "a `send(:lambda)` block on a class defining its own `send`" do
-      def runner_source(header, call)
-        "#{header}class Runner#{header.empty? ? "" : " < Base"}\n  def f\n    #{call} { return nil }\n    1\n" \
-          "  end\nend\nRunner.new.f\n"
+      def runner_source(header, call, superclass: nil)
+        "#{header}class Runner#{" < #{superclass}" if superclass}\n  def f\n    #{call} { return nil }\n    1\n  " \
+          "end\nend\nRunner.new.f\n"
       end
 
       it "credits the block's `return` to the method" do
-        source = "class Runner\n  def send(_name) = yield\n  def f\n    send(:lambda) { return nil }\n    1\n" \
-                 "  end\nend\nRunner.new.f\n"
+        source = "class Runner\n  def send(_name) = yield\n  def f\n    send(:lambda) { return nil }\n    1\n  " \
+                 "end\nend\nRunner.new.f\n"
         expect(program_type(source, 1).describe).to eq("1?")
       end
 
       it "credits it when the `send` is inherited from a superclass" do
-        source = runner_source("class Base\n  def send(_name) = yield\nend\n", "send(:lambda)")
+        source = runner_source("class Base\n  def send(_name) = yield\nend\n", "send(:lambda)", superclass: "Base")
         expect(program_type(source, 2).describe).to eq("1?")
       end
 
       it "credits it when the `send` comes from an included module" do
-        source = "module Yields\n  def send(_name) = yield\nend\nclass Runner\n  include Yields\n  def f\n" \
-                 "    send(:lambda) { return nil }\n    1\n  end\nend\nRunner.new.f\n"
+        source = "module Yields\n  def send(_name) = yield\nend\nclass Runner\n  include Yields\n  def f\n    " \
+                 "send(:lambda) { return nil }\n    1\n  end\nend\nRunner.new.f\n"
         expect(program_type(source, 2).describe).to eq("1?")
       end
 
       it "keeps `__send__(:lambda)` a barrier even with the class's own `send`" do
-        source = "class Runner\n  def send(_name) = yield\n  def f\n    __send__(:lambda) { return nil }\n    1\n" \
-                 "  end\nend\nRunner.new.f\n"
+        source = "class Runner\n  def send(_name) = yield\n  def f\n    __send__(:lambda) { return nil }\n    1\n  " \
+                 "end\nend\nRunner.new.f\n"
         expect(program_type(source, 1).describe).to eq("1")
       end
 

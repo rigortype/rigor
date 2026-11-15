@@ -3161,4 +3161,76 @@ module RefinedGrep3198
   end
 end
 
+# Issue #3198 — a method runs in a frame of its own, whose `$~` starts nil. Where nothing in the frame may set it,
+# by the broad reading (an unresolved constant may be a Regexp, a `[]` key may be one, a `yield` may run `&:=~`),
+# `$~` reads `MatchData?`, the type `Regexp.last_match` reads, in the body and in an iterator's block, and a copy of
+# it is reported (Ruby: nil). A `grep_v` block enters after a failed `===`, which sets `$~` to nil.
+module UnboundLastMatch3198
+  def self.never_matches
+    assert_type("MatchData?", $~)
+    [1].each { assert_type("MatchData?", $~) }
+    m = $~
+    m.pre_match # GENUINE-NIL
+  end
+
+  def self.grep_v_block(items)
+    items.grep_v(/(a)/) { assert_type("MatchData?", $~) }
+  end
+
+  # The frame may match, so a read is untyped even before the first match: the statement-level rules forget on
+  # narrower terms than the broad reading, and these correct reads follow a match the analyzer does not see.
+  def self.matches_later(s)
+    assert_type("Dynamic[top]", $~)
+    s =~ /x/
+  end
+
+  def self.unresolved_pattern(line)
+    case line
+    when UNRESOLVED_PATTERN_3198 then (m = $~; m.pre_match)
+    end
+  end
+
+  def self.lookup_key(table, key)
+    table.split(key)
+    m = $~
+    m.pre_match
+  end
+
+  def self.after_yield
+    yield
+    m = $~
+    m.pre_match
+  end
+
+  def self.hands_out_binding
+    eval_later(binding)
+    m = $~
+    m.pre_match
+  end
+
+  # A lambda or proc body reads the slot whenever it is called, perhaps after a match in its frame, and a
+  # `define_method` body reads the definer's: both stay untyped. So does a `grep_v` block under a refinement that
+  # defines `grep_v`, which may be the refined method's.
+  def self.closures
+    l = -> { assert_type("Dynamic[top]", $~) }
+    pr = proc { assert_type("Dynamic[top]", $~) }
+    define_singleton_method(:defined) { assert_type("Dynamic[top]", $~) }
+    [l, pr]
+  end
+end
+
+module RefinedGrepVRange3198
+  refine Range do
+    def grep_v(_pattern) = yield("x")
+  end
+end
+
+module RefinedGrepV3198
+  using RefinedGrepVRange3198
+
+  def self.refined
+    (1..3).grep_v(/(a)/) { assert_type("Dynamic[top]", $~) }
+  end
+end
+
 # rubocop:enable Style/PerlBackrefs

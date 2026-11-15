@@ -9,7 +9,7 @@ assertions:
   '6': Dynamic[top]
   '7': String
   '8': nil
-  '9': Dynamic[top]
+  '9': MatchData?
   '10': String
   '11': Dynamic[top]
   '12': String

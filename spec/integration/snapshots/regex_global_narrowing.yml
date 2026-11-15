@@ -408,3 +408,11 @@ assertions:
   '400': String
   '401': String
   '402': Dynamic[top]
+  '403': MatchData?
+  '404': MatchData?
+  '405': MatchData?
+  '406': Dynamic[top]
+  '407': Dynamic[top]
+  '408': Dynamic[top]
+  '409': Dynamic[top]
+  '410': Dynamic[top]

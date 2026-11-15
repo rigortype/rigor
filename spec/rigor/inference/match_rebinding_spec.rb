@@ -747,6 +747,36 @@ RSpec.describe Rigor::Inference::MatchRebinding do
     end
   end
 
+  # Issue #3198 — a method's `$~` starts nil, and reads `MatchData?` only where nothing in the frame may set it.
+  describe ".frame_start" do
+    def start(source)
+      def_node = last_statement(source)
+      described_class.frame_start(scope.with_match_frame(def_node.body, def_node.parameters)).global(:$~)
+    end
+
+    it "binds `$~` to `MatchData?` in a frame that never matches" do
+      expect(start("def m(s) = s.upcase")&.describe).to eq("MatchData?")
+      expect(start("def m(items) = items.each { |i| puts i }")&.describe).to eq("MatchData?")
+    end
+
+    it "leaves `$~` unbound where the frame may set it by the broad reading" do
+      expect(start("def m(s) = s =~ /(z)/")).to be_nil
+      expect(start("def m(s, f = s =~ /(z)/) = f")).to be_nil
+      expect(start("def m(line) = case line when SOME_RE then 1 end")).to be_nil
+      expect(start("def m(s, key) = s.split(key)")).to be_nil
+      expect(start("def m = yield")).to be_nil
+    end
+
+    it "leaves `$~` unbound where the frame hands its slot out" do
+      expect(start("def m = render(binding)")).to be_nil
+      expect(start("def m(&blk) = run(&blk)")).to be_nil
+    end
+
+    it "leaves a scope without a frame as it is" do
+      expect(described_class.frame_start(scope)).to equal(scope)
+    end
+  end
+
   describe ".block_entry" do
     let(:string) { Rigor::Type::Combinator.nominal_of("String") }
     let(:narrowed) { scope.with_global(:$1, string) }

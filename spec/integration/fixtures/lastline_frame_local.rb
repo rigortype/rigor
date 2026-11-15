@@ -48,9 +48,10 @@ def branches
   end
 end
 
-# A top-level `$~ = nil` no longer seeds method bodies: a method starts with its own `$~` (Ruby: nil), unbound here.
+# A top-level `$~ = nil` no longer seeds method bodies: a method starts with its own `$~` (Ruby: nil), which reads
+# `MatchData?` in a frame that never matches (issue #3198).
 $~ = nil
-def match_entry = assert_type("Dynamic[top]", $~)
+def match_entry = assert_type("MatchData?", $~)
 
 # A reader in a called Ruby method sets that method's `$_`, never its caller's (Ruby: the caller's line).
 def read_one(io) = io.gets

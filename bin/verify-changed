@@ -145,10 +145,11 @@ add_mirror_spec() { [[ -f "$1" ]] && add_spec "$1"; }
 # ere_literal <string>: the string as an ERE that matches only itself. A `.` in
 # a fixture directory name would otherwise match any character, and because a
 # coincidental hit counts as a match it would also suppress the basename route.
-# 22 fixture basenames also select differently unescaped (`.keep` 5 against
-# 601), but every one of them sits under a directory a spec names, so the
-# directory route answers first and the basename call is unreachable for them
-# today — which is why only the directory call is pinned.
+# Both calls are load-bearing. Under the anchored pattern each site uses, ten
+# fixture basenames select differently unescaped — `.keep` 0 against 39,
+# `a.rb` 179 against 180 — and one of them, `prepend.rb` under
+# `arity_differential/survivors/`, reaches the basename route at all, because
+# its directory names no spec. Dropping either escape is pinned.
 ere_literal() { printf '%s' "$1" | sed 's/[^A-Za-z0-9_/-]/\\&/g'; }
 # spec_paths_matching <extended regex>: the spec files whose text matches, sorted.
 spec_paths_matching() { grep -rlE --include='*_spec.rb' "$1" spec | sort -u; }
@@ -230,8 +231,16 @@ ancestry_walker_spec=spec/rigor/scope/ancestry_walker_detection_spec.rb
 dependency_recording_re='DependencyRecorder|parameter_envelopes_of|record_class_dependency|read_last_segment|read_missing|read_name\(|withhold|settle_by_(definitions|walk)|subclass_of|\(:mark,|"mark:'
 precision_assertion_re='affected[^ ]*\)?\.not_to include|not_to include\(File\.join|affected[^ ]*\)\.to (eq|be_empty|contain_exactly)|result\)\.not_to include'
 dependency_edit=""
+# The two gates that take their inputs by enumerating the fixture tree at run
+# time, rather than by naming a fixture: the precision snapshot gate walks
+# `spec/integration/fixtures/` (flat `*.rb`, and every directory carrying the
+# harness entry file), and the ADR-129 G4 reachability audit globs its flat
+# `*.rb`. Neither spec's text holds a fixture or snapshot name, so no identifier
+# rule below can reach them and both are named by path.
+snapshot_gate_spec=spec/integration/precision_snapshot_spec.rb
+flat_fixture_audit_spec=spec/rigor/typing_state_reachability_spec.rb
 engine_drift_specs=(
-  spec/integration/precision_snapshot_spec.rb
+  "$snapshot_gate_spec"
   spec/integration/type_construction_spec.rb
   spec/rigor/public_api_drift_spec.rb
   spec/rigor/ractor_readiness_spec.rb
@@ -270,7 +279,7 @@ for path in ${changed[@]+"${changed[@]}"}; do
       # The only consumer enumerates this directory at run time
       # (precision_snapshot_spec.rb's SNAPSHOTS_DIR), so no spec's text holds a
       # snapshot's name and no identifier rule can reach it. Name it here.
-      add_spec "spec/integration/precision_snapshot_spec.rb"
+      add_spec "$snapshot_gate_spec"
       ;;
     spec/*)
       # A fixture: run the specs that name it. Under a fixtures/ tree the
@@ -279,6 +288,27 @@ for path in ${changed[@]+"${changed[@]}"}; do
       base="$(basename "$path")"
       before="$specs$pool_specs$plugin_specs"
       matched=""
+      # The mirror of the snapshots arm above: both run-time-enumerating gates
+      # take this tree as their input, and a fixture with no golden FAILS, so a
+      # fixture that reaches neither is a hole the gate reports as covered-by-
+      # nothing while CI fails on it. Name them by each gate's own
+      # discriminator — a flat `*.rb` feeds both, a directory feeds the snapshot
+      # gate only when it carries the harness entry file, which is exactly what
+      # `FixtureHarness#load_project` requires — so a container of per-spec
+      # project trees (`fixtures/effects/`) is correctly left out. This does not
+      # set `matched`: the identifier routes still run, since these two gates
+      # are additional consumers, not the fixture's own spec.
+      if [[ "$path" == spec/integration/fixtures/* ]]; then
+        fixture_rest="${path#spec/integration/fixtures/}"
+        if [[ "$fixture_rest" != */* ]]; then
+          [[ "$fixture_rest" == *.rb ]] && {
+            add_spec "$snapshot_gate_spec"
+            add_spec "$flat_fixture_audit_spec"
+          }
+        elif [[ -f "spec/integration/fixtures/${fixture_rest%%/*}/demo.rb" ]]; then
+          add_spec "$snapshot_gate_spec"
+        fi
+      fi
       if [[ "$path" == spec/fixtures/* || "$path" == spec/*/fixtures/* ]]; then
         fixture_dirs_matching "${path#*fixtures/}" && matched=1
       fi
@@ -286,13 +316,14 @@ for path in ${changed[@]+"${changed[@]}"}; do
       # only while it is distinctive. A spec names a fixture as a file —
       # `fixtures/parity.rb`, or `hash_shape.rb:182` inside a describe string —
       # so the extension is part of the identifier, while the bare stem matches
-      # the English word: `demo` greps out 113 specs, the ~18-minute run #3171
-      # was filed for, against 71 for `demo.rb`. Four flat fixtures are named
+      # the English word: the unbounded `demo` of the ~18-minute run #3171 was
+      # filed for grepped out 113 specs, and `demo` still selects 98 under the
+      # pattern below, against 66 for `demo.rb`. Four flat fixtures are named
       # only as `<basename>`, so dropping the extension loses them, and over
       # every flat fixture in the tree the basename selects at most 4 (one of
       # which is this gate's own spec, which carries the name). Take it
       # only while it selects few, which refuses the generic basenames
-      # (`demo.rb` 71, `.rigor.yml` 111, `a.rb` 227); otherwise add nothing,
+      # (`demo.rb` 66, `.rigor.yml` 111, `a.rb` 179); otherwise add nothing,
       # and the uncovered line below reports the path. A dotfile needs no
       # separate guard: it is over the cap like the rest.
       if [[ -z "$matched" ]]; then

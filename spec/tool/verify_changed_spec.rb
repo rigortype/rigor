@@ -54,7 +54,9 @@ RSpec.describe "bin/verify-changed spec selection" do
       expect(bare).to be_empty, stem
       expect(named).to include("spec/integration/type_construction_spec.rb"), stem
     end
-    expect(specs.length).to be <= 5
+    # Six: this file, the three specs that name the fixture, and the two gates
+    # that enumerate the tree (see "runs the enumerating gates" below).
+    expect(specs.length).to be <= 6
   end
 
   # The directory below is one `.` away from a real fixture directory, and it is
@@ -120,8 +122,14 @@ RSpec.describe "bin/verify-changed spec selection" do
 
   # Round 3: without a boundary the basename matched inside a longer one, so this
   # fixture selected the spec that merely mentions `self_core_prepend.rb`. The
-  # Both parts are assembled, so this file names neither: a directory it named
-  # would answer first and the basename would never be reached.
+  # directory is a ghost, so the basename route is the one under test. Both
+  # parts are assembled, so this file names neither: a directory it named would
+  # answer first and the basename would never be reached.
+  #
+  # The ghost directory also carries no entry file, so this example is what pins
+  # the snapshot gate's discriminator: were the gate named for every path under
+  # `fixtures/`, rather than only for a flat `.rb` or a directory carrying
+  # `demo.rb`, the selection here would not be empty.
   it "does not match a basename inside a longer one" do
     dir = %w[no_such_fixture 3171].join("_")
     base = %w[prepend rb].join(".")
@@ -136,6 +144,49 @@ RSpec.describe "bin/verify-changed spec selection" do
     specs, uncovered = selection_for("spec/integration/snapshots/always_raises.yml")
     expect(uncovered).to be_empty
     expect(specs).to eq(["spec/integration/precision_snapshot_spec.rb"])
+  end
+
+  # Round 4: the basename site was anchored and pinned while its twin at the
+  # directory site was not. This ghost directory sits inside a longer real
+  # identifier (`self_core_prepend`) and nowhere on its own, so unanchored it
+  # selects that spec and suppresses the basename route; anchored, nothing names
+  # it. Assembled, so this file carries neither name.
+  it "does not match a fixture directory inside a longer identifier" do
+    dir = %w[ore prepend].join("_")
+    ghost = %w[unique_name 3171].join("_")
+    specs, uncovered = selection_for("spec/integration/fixtures/#{dir}/#{ghost}.rb")
+    expect(specs).to be_empty
+    expect(uncovered).not_to be_empty
+  end
+
+  # Round 4, the mirror of the snapshot finding on the fixtures side: both gates
+  # take this tree by enumerating it, so no identifier rule reaches either, and
+  # a fixture with no golden FAILS. A flat `.rb` is an input to both.
+  it "runs the enumerating gates for a flat fixture nothing else names" do
+    ghost = %w[unique_name 3171].join("_")
+    specs, uncovered = selection_for("spec/integration/fixtures/#{ghost}.rb")
+    expect(uncovered).to be_empty
+    expect(specs).to eq(["spec/integration/precision_snapshot_spec.rb",
+                         "spec/rigor/typing_state_reachability_spec.rb"])
+  end
+
+  # A project fixture is an input to the snapshot gate only, which discriminates
+  # on the harness entry file; the reachability audit globs the flat `*.rb` only.
+  it "runs the snapshot gate for a project fixture, and not the flat-fixture audit" do
+    specs, uncovered = selection_for("spec/integration/fixtures/always_raises/demo.rb")
+    expect(uncovered).to be_empty
+    expect(specs).to include("spec/integration/precision_snapshot_spec.rb")
+    expect(specs).not_to include("spec/rigor/typing_state_reachability_spec.rb")
+  end
+
+  # The gate hard-codes the entry file name the snapshot gate reads through
+  # `FixtureHarness::DEFAULT_ENTRY`; a change there would silently stop the gate
+  # naming project fixtures.
+  it "hard-codes the entry file name the harness declares" do
+    harness = File.read(File.join(root, "spec/integration/support/fixture_harness.rb"))
+    entry = harness[/DEFAULT_ENTRY = "(.+)"/, 1]
+    expect(entry).to eq("demo.rb")
+    expect(File.read(script)).to include("/#{entry}\" ]]")
   end
 
   it "refuses the stand-in diff outside --list-specs, rather than reporting OK" do

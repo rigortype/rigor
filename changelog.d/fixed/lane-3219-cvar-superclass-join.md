@@ -1,0 +1,2 @@
+- **[engine]** A class variable a subclass reads now joins what its superclasses in the same file assign, so `@@x.nil?` in a subclass no longer folds when a superclass set `@@x = nil`. ([#3253](https://github.com/rigortype/rigor/pull/3253))
+  - Under a superclass declared in another file, in a signature, or by an expression such as `Struct.new`, a class variable's reads keep their known type but are no longer folded.

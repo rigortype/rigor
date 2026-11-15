@@ -182,8 +182,8 @@ Once the change is implemented and `make verify-changed` passes:
    ([maintainer's ruling](https://github.com/rigortype/rigor/issues/2890#issuecomment-6897951109),
    2026-11-15). It covers any PR, code PRs included, that edits `AGENTS.md`, `CLAUDE.md`,
    `docs/agents/`, an ADR, a skill, a `.github/workflows/` or `.takt/` workflow, or a script a gate
-   runs. A spec edit that records an engine change is not in scope. The check has three parts, and
-   the PR body records each claim's result.
+   runs. An edit to `docs/type-specification/` or `docs/internal-spec/` that records an engine change
+   is not in scope. The check has three parts, and the PR body records each claim's result.
 
    - Run every read-only command the change documents, with its placeholders filled in, and record
      what it printed.

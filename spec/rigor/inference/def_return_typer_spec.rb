@@ -76,6 +76,14 @@ RSpec.describe Rigor::Inference::DefReturnTyper do
       out
     end
 
+    # The method's inferred return type, read with every node's scope from an indexed program.
+    def indexed_returns(source, name)
+      root = Prism.parse(source).value
+      index = Rigor::Inference::ScopeIndexer.index(root, default_scope: empty_scope)
+      def_node = Rigor::Source::NodeWalker.enum_for(:each, root).find { |n| n.is_a?(Prism::DefNode) && n.name.to_s == name }
+      described_class.call(def_node, index).describe
+    end
+
     it "does not recurse into a lambda literal (the inner return has no scope, so nothing is collected)" do
       source = <<~RUBY
         def outer
@@ -105,7 +113,6 @@ RSpec.describe Rigor::Inference::DefReturnTyper do
       "define_method(:x) { return }",
       "self.define_method(:x) { return }",
       "define_singleton_method(:x) { return }",
-      "send(:define_method, :x) { return }",
       "public_send(:lambda) { return }",
       "Kernel.lambda { return }",
       "klass.define_method(:x) { return }",
@@ -117,6 +124,20 @@ RSpec.describe Rigor::Inference::DefReturnTyper do
       it "does not credit a `return` inside `#{barrier}`" do
         expect(collected_returns("def m; #{barrier}; 2; end")).to be_empty
       end
+    end
+
+    # Issue #3081 — through `send`, the block is a barrier only where the scope shows `Kernel#send`.
+    it "does not credit a `return` inside `send(:define_method, :x) { return }` on the genuine `send`" do
+      expect(indexed_returns("def m; send(:define_method, :x) { return }; 2; end", "m")).to eq("2")
+    end
+
+    it "credits a `return` inside `send(:lambda) { return nil }` on a class's own `send`" do
+      source = "class Runner\n  def send(_name) = yield\n  def f\n    send(:lambda) { return nil }\n    1\n  end\nend\n"
+      expect(indexed_returns(source, "f")).to eq("1?")
+    end
+
+    it "credits a `return` inside `send(:define_method, :x) { return }` without a scope for the call" do
+      expect(collected_returns("def m; send(:define_method, :x) { return }; 2; end").size).to eq(1)
     end
 
     it "credits a `return` inside a `lambda` block on a receiver that is not `Kernel`" do

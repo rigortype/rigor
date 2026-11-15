@@ -20,8 +20,6 @@ RSpec.describe Rigor::Inference::ReturnBarrier do
       "klass.define_method(:x)",
       "self.class.define_method(:x)",
       "mod.define_singleton_method(:x)",
-      "send(:define_method, :x)",
-      "klass.send(:define_method, :x)",
       "__send__(:lambda)",
       "Kernel.__send__(:lambda)",
       "public_send(:define_singleton_method, :x)",
@@ -37,6 +35,28 @@ RSpec.describe Rigor::Inference::ReturnBarrier do
       it "is false for `#{call} { }`" do
         expect(described_class.block_call?(call_node("#{call} { }"))).to be(false)
       end
+    end
+  end
+
+  # Issue #3081 — through `send`, only a genuine `Kernel#send` keeps the block from the method, and only a scope can
+  # show that. The scoped reading of a class's own `send` is pinned end to end in expression_typer_spec.rb.
+  describe ".block_call? through `send`" do
+    let(:scope) { Rigor::Scope.empty }
+
+    ["send(:define_method, :x)", "klass.send(:define_method, :x)", "send(:lambda)"].each do |call|
+      it "is true for `#{call} { }` where the scope shows the genuine `send`" do
+        expect(described_class.block_call?(call_node("#{call} { }"), scope: scope)).to be(true)
+      end
+
+      it "is false for `#{call} { }` without a scope" do
+        expect(described_class.block_call?(call_node("#{call} { }"))).to be(false)
+      end
+    end
+
+    it "does not type an explicit receiver under `typed: false`" do
+      node = call_node("klass.send(:define_method, :x) { }")
+      expect(described_class.block_call?(node, scope: scope, typed: false)).to be(false)
+      expect(described_class.block_call?(call_node("send(:lambda) { }"), scope: scope, typed: false)).to be(true)
     end
   end
 

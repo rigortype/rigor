@@ -3836,7 +3836,7 @@ module Rigor
       # from the widened binding reaches it ({#loop_break_arms}); without it the method inferred `true` and a
       # caller's test on it folded always-truthy on correct code.
       def later_pass_returns?(statements)
-        !typing_state[RETURN_SINK].nil? && ReturnBarrier.exits_method?(statements)
+        !typing_state[RETURN_SINK].nil? && ReturnBarrier.exits_method?(statements, scope)
       end
 
       # Joins each `break` arm's body-written local bindings into the loop continuation, so a `break`-path binding the
@@ -5512,7 +5512,7 @@ module Rigor
       # The block calls whose body `return` leaves only the block ({ReturnBarrier.block_call?}). Like a `->` body
       # ({#eval_lambda}), each runs with the enclosing method's return sink suspended.
       def return_barrier_block?(node)
-        ReturnBarrier.block_call?(node)
+        ReturnBarrier.block_call?(node, scope: scope)
       end
 
       # Runs the block with the method's return sink suspended, for a body whose `return` is not the method's.
@@ -7384,7 +7384,7 @@ module Rigor
       # anonymous-class checks are defensive guards: no such call repeats under that rule today.
       def repeated_block_return_candidate?(call_node, block)
         return false unless block.is_a?(Prism::BlockNode)
-        return false unless ReturnBarrier.exits_method?(block.body)
+        return false unless ReturnBarrier.exits_method?(block.body, scope)
         return false if return_barrier_block?(call_node) || refined_class_context(call_node)
         return false if AnonymousMetaClass.name_for(call_node, scope.source_path)
         return true if BlockCallTiming.kernel_loop?(call_node) || !repeating_block_class(call_node).nil?

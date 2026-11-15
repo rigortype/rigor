@@ -2,6 +2,7 @@
 
 require "spec_helper"
 require "prism"
+require "tmpdir"
 
 RSpec.describe Rigor::Inference::ExpressionTyper do
   let(:scope) { Rigor::Scope.empty }
@@ -2318,6 +2319,97 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
       variable = program_type("#{box_source}name = :open\nBox.new.send(name)\n", 2)
       expect(variable.describe(:short)).to eq("Dynamic[top]")
       expect(program_type("#{box_source}Box.new.send(:missing_method)\n", 1).describe(:short)).to eq("Dynamic[top]")
+    end
+
+    # Issue #3080 — `send` reads as its target only where it is `Kernel#send`. A class's own `send` is called like
+    # any other method; `__send__` and `public_send` keep the reading.
+    describe "on a receiver whose class defines its own `send`" do
+      let(:mailer_source) do
+        "class Mailer\n  def send(message, flags) = message.size + flags\n  def hello(x) = x.to_s\nend\n"
+      end
+
+      it "calls the class's own `send`" do
+        expect(program_type("#{mailer_source}Mailer.new.send(:hello, 0)\n", 1).describe).to eq("5")
+      end
+
+      it "calls a `send` inherited from a project superclass" do
+        source = "class Base\n  def send(message, flags) = message.size + flags\nend\n" \
+                 "class Sub < Base\n  def hello(x) = x.to_s\nend\nSub.new.send(:hello, 0)\n"
+        expect(program_type(source, 2).describe).to eq("5")
+      end
+
+      it "calls a `send` from an included module" do
+        source = "module Sends\n  def send(message, flags) = message.size + flags\nend\n" \
+                 "class Inc\n  include Sends\n  def hello(x) = x.to_s\nend\nInc.new.send(:hello, 0)\n"
+        expect(program_type(source, 2).describe).to eq("5")
+      end
+
+      it "calls a class method `send` on the class object" do
+        source = "class Box\n  def self.send(message, flags) = message.size + flags\n  def self.hello(x) = x.to_s\n" \
+                 "end\nBox.send(:hello, 0)\n"
+        expect(program_type(source, 1).describe).to eq("5")
+      end
+
+      it "keeps reading `__send__` and `public_send` as their target" do
+        expect(program_type("#{mailer_source}Mailer.new.__send__(:hello, 0)\n", 1).describe).to eq('"0"')
+        expect(program_type("#{mailer_source}Mailer.new.public_send(:hello, 0)\n", 1).describe).to eq('"0"')
+      end
+
+      it "keeps reading the genuine `send` as its target (controls)" do
+        expect(scope.type_of(parse_expression("Object.new.send(:to_s)")).describe).to eq("String")
+        source = "class Plain\n  def hello(x) = x.to_s\nend\nPlain.new.send(:hello, 0)\n"
+        expect(program_type(source, 1).describe).to eq('"0"')
+      end
+
+      it "dispatches to a `send` an RBS declaration gives the class" do
+        Dir.mktmpdir do |dir|
+          File.write(File.join(dir, "sock.rbs"),
+                     "class Sock\n  def send: (Symbol, Integer) -> Integer\n  def x: (Integer) -> String\nend\n")
+          rbs_scope = Rigor::Scope.empty(environment: Rigor::Environment.for_project(signature_paths: [dir]))
+          root = Prism.parse("s = Sock.new\ns.send(:x, 0)\n").value
+          index = Rigor::Inference::ScopeIndexer.index(root, default_scope: rbs_scope)
+          node = root.statements.body[1]
+          expect(index[node].type_of(node).describe).to eq("Integer")
+        end
+      end
+    end
+
+    # Issue #3081 — a `return` in `send(:lambda) { … }` leaves only the block where `send` is `Kernel#send`. With
+    # the class's own yielding `send`, the block is an ordinary one and its `return` exits the method.
+    describe "a `send(:lambda)` block on a class defining its own `send`" do
+      def runner_source(header, call)
+        "#{header}class Runner#{header.empty? ? "" : " < Base"}\n  def f\n    #{call} { return nil }\n    1\n" \
+          "  end\nend\nRunner.new.f\n"
+      end
+
+      it "credits the block's `return` to the method" do
+        source = "class Runner\n  def send(_name) = yield\n  def f\n    send(:lambda) { return nil }\n    1\n" \
+                 "  end\nend\nRunner.new.f\n"
+        expect(program_type(source, 1).describe).to eq("1?")
+      end
+
+      it "credits it when the `send` is inherited from a superclass" do
+        source = runner_source("class Base\n  def send(_name) = yield\nend\n", "send(:lambda)")
+        expect(program_type(source, 2).describe).to eq("1?")
+      end
+
+      it "credits it when the `send` comes from an included module" do
+        source = "module Yields\n  def send(_name) = yield\nend\nclass Runner\n  include Yields\n  def f\n" \
+                 "    send(:lambda) { return nil }\n    1\n  end\nend\nRunner.new.f\n"
+        expect(program_type(source, 2).describe).to eq("1?")
+      end
+
+      it "keeps `__send__(:lambda)` a barrier even with the class's own `send`" do
+        source = "class Runner\n  def send(_name) = yield\n  def f\n    __send__(:lambda) { return nil }\n    1\n" \
+                 "  end\nend\nRunner.new.f\n"
+        expect(program_type(source, 1).describe).to eq("1")
+      end
+
+      it "keeps the genuine `send(:lambda)` a barrier (controls)" do
+        expect(program_type(runner_source("", "send(:lambda)"), 1).describe).to eq("1")
+        expect(program_type(runner_source("", "Kernel.send(:lambda)"), 1).describe).to eq("1")
+        expect(program_type(runner_source("", "self.class.send(:define_method, :g)"), 1).describe).to eq("1")
+      end
     end
 
     it "resolves a call through `alias_method :new, :old` with the original def's return" do

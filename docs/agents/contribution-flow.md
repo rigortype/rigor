@@ -260,22 +260,23 @@ Once the change is implemented and `make verify-changed` passes:
 
    **Four reports also stop the delta loop** (maintainer's decision, 2026-11-15, #2890). Every
    reviewer report on the PR counts: the first review, each delta re-ask, each confirmation pass,
-   and each member of a reviewer pair. A run of non-severe re-asks therefore cannot outlast the
-   round rule. The three-round rule did not stop #2993 (18 reports from one reviewer) or #2980
+   and each member of a reviewer pair. A run of non-severe re-asks therefore cannot run past four
+   reports the way it ran past the round rule. The three-round rule did not stop #2993 (18 reports from one reviewer) or #2980
    (8 rounds, 5 of them with a severe finding), and in the v0.4.8 window 16 PRs reached a fourth
    report. The coordinator keeps the count where a compaction cannot lose it. Each report's
    `Severe N | Moderate N | Minor N | Nit N` and `Severe remaining:` lines go into a PR comment
    headed `Review report k`.
 
-   The fourth report needs no successor when it reads `Severe remaining: no` and its fixes change
-   only wording or specs: triage it as step 3 says and land. Otherwise ask for no fifth delta. Use
+   The round that brings the count to four needs no successor when every report in it reads
+   `Severe remaining: no` and its fixes change only wording or specs: triage it as step 3 says and
+   land. Otherwise ask for no fifth delta. Use
    the same escalation wherever this step would hold the PR as Draft for the user. Spawn one fresh
    reviewer on the strongest model under the full step 2 brief, rules and `rigor-reviewer` skill
    included. Add one list of the findings so far, each as its one-line failure scenario, its
    severity and whether it was fixed. Leave out the earlier reviewers' verdicts and their reading
-   of the design. It returns the fixed report, and its Verdict answers two questions. Is the design
-   converging? If so, what is the conservative cut: the change minus every part a severe finding
-   touched, with every remaining fix conservative in the sense above?
+   of the design. It returns the fixed report. Its Verdict says whether the design is converging,
+   and a line added after the report names the conservative cut: the change minus every part a
+   severe finding touched, with every remaining fix conservative in the sense above.
 
    If it names such a cut, apply the cut. That same reviewer then runs this step's delta check
    limited to the fix commits, once, and the PR lands per step 6 only when that check passes as

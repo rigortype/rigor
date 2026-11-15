@@ -139,8 +139,8 @@ lives in the PR body and the issues, which the coordinator reads only when a dec
    logic to the strongest model by resuming the lane on it only when the lane already runs that model.
    Delta rounds go to the same reviewer with SendMessage and follow
    contribution-flow.md steps 4–5: three rounds at most, and four reports (each counted in a
-   `Review report k` PR comment) before one fresh strongest-model review judges convergence and the
-   conservative cut, ahead of any hold for the user; after round 3, a narrow severe finding with
+   `Review report k` PR comment). At four reports, or before step 5 would hold the PR for the user,
+   one fresh strongest-model review judges convergence and names the conservative cut; after round 3, a narrow severe finding with
    a conservative fix lands only through one fix-only delta check that finds nothing severe, and a
    non-converging design goes to the user. When a lane stops at a gate or an open choice, decide it
    per contribution-flow.md § "Decisions and the approval queue" and send the lane the decision with

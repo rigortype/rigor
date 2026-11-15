@@ -26,9 +26,11 @@ separates the two cases. The issue did not say what to bind there.
   false positive the issue reports.
 - **Bind the first slot.** This is right for `each_with_index` and wrong for `Hash#each`. It moves the
   false positive to `for kv in h.each; kv.first; end`.
-- **Bind the union `A | [A, B]`.** This is unsound. `Hash#each_with_index` answers
-  `Enumerator[[[K, V], Integer]]`, and neither member is the right `[K, V]`. Every call on the target
-  would also have to hold on both members.
+- **Bind the union `A | [A, B]`.** One member is always right, and calls on the target stay silent:
+  `x.upcase` and `x.first` both pass on `String | [String, Integer]`. A value that reaches a
+  declared type does not. With `ret: (bool) -> String`, returning the loop variable reports
+  `def.return-type-mismatch` ("declared String, inferred String | [String, Integer]"), a false
+  positive on correct code.
 - **Bind `Dynamic[top]`.** This is correct in both cases and drops precision in both. It also loses
   one true positive: `for kv in h.hs.each; kv.upcase; end` (`Hash[String, String]`) no longer
   reports `upcase` on the pair.
@@ -36,7 +38,8 @@ separates the two cases. The issue did not say what to bind there.
 ## Decision
 
 Bind `Dynamic[top]`. A finding that fires on correct programs costs more than a lost precise type
-(ADR-5, and the false-positive rule in `AGENTS.md`). The floor covers `Enumerator` and every
+(ADR-5, and the false-positive rule in `AGENTS.md`), and the union produces one when the target is
+returned from a method with a declared return type. The floor covers `Enumerator` and every
 descendant, checked by ancestry: `Enumerator::Lazy`, `Enumerator::Chain` and user subclasses. It also
 covers an element union that has a tuple member. A multi-target or splat index keeps the tuple,
 because Ruby decomposes it the same way in both cases. The coordinator ruled on this in the PR's

@@ -135,8 +135,10 @@ lives in the PR body and the issues, which the coordinator reads only when a dec
    non-converging design goes to the user. When a lane stops at a gate or an open choice, decide it
    per contribution-flow.md § "Decisions and the approval queue" and send the lane the decision with
    its approval-queue entry to commit; only a serious decision goes to the user.
-7. **Land through the merge queue**: after the last reviewed fix-up push, `gh pr ready` starts the
-   full CI; once its `CI required` passes, run `bin/land-pr N <reviewed-head-sha>` in the background
+7. **Land through the merge queue**: after the last reviewed fix-up push, run `gh pr ready` only
+   once that push's run has started (contribution-flow.md § "GitHub and git traps", "A cancelled
+   full run reads FAILURE"); it starts the full CI. Once its `CI required` passes, run
+   `bin/land-pr N <reviewed-head-sha>` in the background
    (contribution-flow.md step 6 and § "GitHub and git traps"; `land-when-green.sh` does all three,
    and holds on an advisory warning per step 6). The PR stays ready after a failure or a hold, so
    each fix push then costs a full run.

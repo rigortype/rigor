@@ -2362,6 +2362,43 @@ RSpec.describe Rigor::Inference::ExpressionTyper do
         end
       end
 
+      # Review round 1 — a class's own RBS `def send:` is the contract, ahead of its source body, as for any other
+      # declared method: its return type, its `void`, and a body that only raises do not leak through.
+      describe "with both a source `def send` and an RBS `def send:`" do
+        def typed_with_rbs(rbs, source, index)
+          Dir.mktmpdir do |dir|
+            File.write(File.join(dir, "a.rbs"), rbs)
+            rbs_scope = Rigor::Scope.empty(environment: Rigor::Environment.for_project(signature_paths: [dir]))
+            root = Prism.parse(source).value
+            node = root.statements.body[index]
+            Rigor::Inference::ScopeIndexer.index(root, default_scope: rbs_scope)[node].type_of(node).describe
+          end
+        end
+
+        {
+          "Integer" => ["(Symbol) -> Integer", "0", "Integer"],
+          "void" => ["(Symbol) -> void", "1", "top"],
+          "a raising body" => ["(Symbol) -> Integer", "raise(NotImplementedError)", "Integer"]
+        }.each do |label, (signature, body, expected)|
+          it "answers the declaration over the body (#{label})" do
+            rbs = "class Transport\n  def send: #{signature}\nend\n"
+            source = "class Transport\n  def send(name) = #{body}\nend\nTransport.new.send(:ping)\n"
+            expect(typed_with_rbs(rbs, source, 1)).to eq(expected)
+          end
+        end
+
+        it "does not read the target through a project subclass of an RBS class declaring `send`" do
+          rbs = "class ExtSock\n  def send: (Symbol) -> Integer\nend\n"
+          source = "class Mine < ExtSock\n  def hello = \"x\"\nend\nMine.new.send(:hello)\n"
+          expect(typed_with_rbs(rbs, source, 1)).to eq("Dynamic[top]")
+        end
+      end
+
+      it "calls a Struct member class's own `send`" do
+        source = "S = Struct.new(:a) do\n  def send(x) = 1\n  def hello = \"x\"\nend\nS.new(1).send(:hello)\n"
+        expect(program_type(source, 1).describe).to eq("1")
+      end
+
       it "keeps reading `__send__` and `public_send` as their target" do
         expect(program_type("#{mailer_source}Mailer.new.__send__(:hello, 0)\n", 1).describe).to eq('"0"')
         expect(program_type("#{mailer_source}Mailer.new.public_send(:hello, 0)\n", 1).describe).to eq('"0"')

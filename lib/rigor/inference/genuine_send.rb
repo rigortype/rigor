@@ -51,15 +51,20 @@ module Rigor
             scope.type_of(receiver_node)
           end
         !receiver_type.nil? && type?(receiver_type, scope)
-      rescue StandardError
-        false
       end
 
       def class_side?(class_name, kind, scope)
         return true if class_name.nil? || scope.nil?
-
         return false unless project_definer(class_name, kind, scope).nil?
 
+        rbs_genuine?(class_name, kind, scope)
+      end
+
+      # True when the RBS declaration of `send` Ruby reaches on `class_name`'s `kind` side, on the class or through
+      # the project's ancestry to an external one, is `Kernel`'s or `BasicObject`'s, or when none is found. The
+      # typer asks this alone before letting a project `def send` body answer: a project RBS `def send:` is the
+      # contract and outranks the body, as it does for any other method.
+      def rbs_genuine?(class_name, kind, scope)
         definition = ExternalAncestorResolution.method_definition(class_name, :send, kind, scope: scope)
         definition ||= ExternalAncestorResolution.resolve(class_name, :send, kind, scope: scope)&.first
         definition.nil? || GENUINE_OWNERS.include?(definition.defined_in.to_s)

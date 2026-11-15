@@ -78,6 +78,14 @@ RSpec.describe Rigor::Inference::ReturnBarrier do
       end
     end
 
+    # Issue #3081 — the scope is the enclosing body's, so only an implicit or `self` receiver is judged by it; an
+    # explicit receiver is not typed there and its `send` block is not a barrier.
+    it "judges a `send` barrier by the enclosing scope's `self` alone" do
+      scope = Rigor::Scope.empty
+      expect(described_class.exits_method?(body("send(:define_method, :x) { return }"), scope)).to be(false)
+      expect(described_class.exits_method?(body("klass.send(:define_method, :x) { return }"), scope)).to be(true)
+    end
+
     it "is false for nil" do
       expect(described_class.exits_method?(nil)).to be(false)
     end

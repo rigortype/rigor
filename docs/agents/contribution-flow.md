@@ -178,6 +178,28 @@ Once the change is implemented and `make verify-changed` passes:
    on every later push to the ready PR, and in the merge queue. Read the result for the head commit,
    not the branch (how: § "GitHub and git traps"). The changelog fragment needs the PR link, so it
    is a second push.
+
+   **A PR that changes agent guidance or a gate checks its own claims before review**
+   ([maintainer's ruling](https://github.com/rigortype/rigor/issues/2890#issuecomment-6897951109),
+   2026-11-15). It covers any PR, code PRs included, that edits `AGENTS.md`, `CLAUDE.md`,
+   `docs/agents/`, an ADR, a skill, a `.github/workflows/` or `.takt/` workflow, or a script a gate
+   runs. An edit to `docs/type-specification/` or `docs/internal-spec/` that records an engine change
+   is not in scope. The check has three parts, and the PR body records each claim's result.
+
+   - Run every read-only command the change documents, with its placeholders filled in, and record
+     what it printed.
+   - Re-derive every number by the method the text states.
+   - Open every rule the change quotes or paraphrases from another file, and compare.
+
+   Never run a command that pushes, merges, marks a PR ready, re-runs CI, publishes or posts just to
+   check it. Check its syntax and preconditions instead (`--help`, a `gh api` read, a dry run) and
+   record it as `not run: <reason>`. A claim blocked by missing data or network is recorded as
+   `not checked: <what blocked it>`. `read, not run` stays the reviewer contract's label for a claim
+   no run could show. In the v0.4.8 window, PRs that changed docs, skills, gates or ADRs made up 10
+   of the 58 PRs with a severe finding. On 2026-11-15 the reviews of #3267, #3270 and #3271 found
+   figures that did not reproduce (#3271), a snippet whose placeholders collided (#3267), a
+   recovery step without the lookup it needed (#3270), and a `CLAUDE.md` rule quoted as its
+   opposite (#3267). Each one would have surfaced under one of the three parts.
 2. **Start the adversarial review at the same time**, not after CI: the two are independent. The
    review reads the light run plus the local `make verify-changed`; the full run at `gh pr ready`
    and the merge queue's run on the merged result check what lands. The

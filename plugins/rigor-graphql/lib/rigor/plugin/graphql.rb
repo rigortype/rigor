@@ -84,10 +84,9 @@ module Rigor
         # `call.undefined-method`, `call.wrong-arity` and `call.argument-type-mismatch` all stay
         # silent, while the same calls on a listed class AS THE DIRECT RECEIVER still report.
         # `open_receivers:` is what covers those direct receivers; it is not what silences the
-        # subclass. ADR-43 and `docs/internal-spec/inference-engine.md` still say the normal rules
-        # apply to inherited contract calls, which the engine does not do — #3246 holds that
-        # question open. The
-        # risk runs the other way: a declared member that does not exist at runtime makes a genuinely
+        # subclass — the receiver gate is (ADR-43 Context § "Amendment 2026-11-15", which withdrew
+        # the claim that the rules follow the resolution). So listing a class here cannot cost a
+        # false positive on a subclass. The risk runs the other way: a declared member that does not exist at runtime makes a genuinely
         # failing call resolve silently, so the sig must be accurate — it IS the authority
         # (graphql-ruby ships none).
         rbs_complete_ancestors: %w[

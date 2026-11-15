@@ -1,6 +1,10 @@
 # ADR-43 — RBS-complete ancestor resolution (allow-list inherited-method dispatch)
 
-Status: **Accepted — fully landed (WD1–WD7), 2026-06-03.** WD7 and the `rbs_complete_extends:` half of WD4 landed with #1097. WD8 (block, override and reader positions) amended 2026-11-04 with #2681. Rejected alternative A is partially
+Status: **Accepted — fully landed (WD1–WD7), 2026-06-03.** WD7 and the `rbs_complete_extends:` half of WD4 landed with #1097. WD8 (block, override and reader positions) amended 2026-11-04 with #2681. The
+Decision's claim that the bridge carries the negative call rules onto a subclass receiver is
+**withdrawn, 2026-11-15 with [#3240](https://github.com/rigortype/rigor/pull/3240)** — see
+Context § "Amendment 2026-11-15"; the bridge carries precision only, which ADR-5 says is the right
+side to be on. Rejected alternative A is partially
 superseded by [ADR-114](114-core-stdlib-ancestor-dispatch.md) (2026-09-20), which narrows it to the
 gem case and keeps this ADR's allow-list as the bypass of its declines.
 Lets `rigor check` resolve a Ruby-source subclass's *inherited* method calls
@@ -95,12 +99,57 @@ Whether or not the `Dynamic[top]` fallback was a conscious decision, its
 **effect is false-positive protection** and removing it globally is unsafe:
 `class MyController < ActionController::Base` calling `params`, `render`,
 `head`, … against a *partial* gem RBS would turn every inherited method the RBS
-omits into a `call.undefined-method` false positive on working code. The
-precision gain (resolving inherited return types) and the risk (firing
-`undefined-method` on inherited calls) flow through the **same** resolution
-path — you cannot get one without the other. This is the crux the design must
-respect, and it is why a blanket fix is rejected (WD-rejected-A) and a scoped,
-allow-listed one is proposed.
+omits into a `call.undefined-method` false positive on working code. That is
+why a blanket fix is rejected (WD-rejected-A) and a scoped, allow-listed one is
+proposed.
+
+This section originally added that the precision gain and the risk "flow through the same
+resolution path — you cannot get one without the other", and the Decision was written on that
+premise. The implementation does not work that way; see the amendment below.
+
+### Amendment 2026-11-15 — precision and rule-firing are not coupled
+
+Resolution and rule-gating live in different layers, and the implementation gates them
+independently. `RbsDispatch` resolves the inherited member and hands back its type. Every
+signature-reading call rule then asks a separate question in `CheckRules`: is the **receiver's own**
+class RBS-known?
+
+```ruby
+# lib/rigor/analysis/check_rules.rb
+return nil unless Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
+```
+
+A bridged subclass is by construction absent from the RBS environment — that absence is the
+precondition the bridge exists to work around — so that line makes `call.undefined-method`,
+`call.wrong-arity` and `call.argument-type-mismatch` decline on **every** call whose receiver is the
+subclass, declared members included, however completely the ancestor's RBS declares them. The gate
+predates this ADR and is not a deliberate guard for it; the silence is incidental.
+
+So the dual framing above holds, but the knobs are not symmetric. The bridge delivers precision:
+the declared member's return type and block parameters at the call site, the types that flow
+downstream from it, and the parameter binding of an overriding `def` (WD8, #2681). It does not
+deliver teeth on a subclass receiver.
+
+The teeth the ADR was written for do exist, on the receiver the motivating case actually uses. A
+directly constructed `Rigor::Plugin::Manifest.new(...)` types as `Nominal[Manifest]`, an RBS-known
+class, and `m.totally_bogus_method` fires `call.undefined-method` today — the spike's finding (fact
+1 above) and the end-to-end `manifest.bogus` check in WD6 both read that receiver, not a subclass
+one. What was never measured is the subclass receiver, and that is the case the Decision's wording
+claimed.
+
+**The engine's behaviour is kept and the claim withdrawn, on ADR-5.** Arming the three rules on a
+subclass receiver means threading false-positive protection through four resolution paths that
+currently need none, on classes whose real surface is wider than any signature: all three consumers
+of `rbs_complete_ancestors:` / `rbs_complete_extends:` (rigor-grape, rigor-graphql, rigor-sorbet)
+wrap DSLs whose method surface is generated at runtime, and graphql-ruby ships no RBS at all, so the
+plugin's own bundled signature is the whole authority. A finding on a correct program costs more
+than a missed finding, so the asymmetry falls on the side the engine already takes.
+
+One narrower option stays open, and is deliberately not decided here: `call.wrong-arity` and
+`call.argument-type-mismatch` for a call to a name the allow-listed ancestor's RBS **declares** —
+arity and argument types checked against the declaration, without `call.undefined-method` and
+without any claim that the subclass's surface is closed. That is a different question from the one
+this ADR answers, and it needs its own false-positive measurement over the three consumers.
 
 This sits beside ADR-26's `open_receivers:`, which is the *inverse* knob:
 ADR-26 marks a receiver **open** to *suppress* diagnostics on a class whose
@@ -115,9 +164,14 @@ Add **scoped inherited-method resolution**: when dispatch on a `Nominal[Sub]`
 receiver finds `Sub` is not RBS-known, consult `Sub`'s discovered superclass
 chain; if an ancestor is on an **RBS-complete allow-list**, resolve the method
 against that ancestor's RBS definition (return type + arity + visibility), so
-the normal `call.undefined-method` / `call.wrong-arity` / override rules apply
-to inherited contract calls. Every ancestor *not* on the allow-list keeps the
-current `Dynamic[top]` fallback unchanged.
+the precision that declaration carries reaches the call site and the override
+rules apply to inherited contract calls. Every ancestor *not* on the allow-list
+keeps the current `Dynamic[top]` fallback unchanged.
+
+The negative call rules are **not** part of what the bridge delivers on a subclass receiver:
+`call.undefined-method`, `call.wrong-arity` and `call.argument-type-mismatch` decline there on the
+receiver's own class, not on the resolution (Context § "Amendment 2026-11-15"). They apply when the
+receiver is the allow-listed class itself, which is the misuse case this ADR was written for.
 
 The allow-list's membership criterion is **"this class's RBS is authoritative
 and complete — a call it does not declare is genuinely a mistake."** That is
@@ -160,9 +214,14 @@ RBS omits.
   `GraphQL::Schema::Object` and friends, and a source `class PostType <
   GraphQL::Schema::Object` resolves inherited `field`/`argument`/… calls
   through the bridge. The constant remains the seed for the engine's own
-  `Plugin::Base` contract. Listing a class is a claim of completeness:
-  pairing it with `open_receivers:` (as rigor-graphql does) keeps genuinely
-  absent methods diagnostic-free while declared signatures still type-check.
+  `Plugin::Base` contract. Listing a class is a claim of completeness, and an
+  inaccurate one costs precision rather than reports: a declared member that
+  does not exist at runtime makes a genuinely failing call resolve silently.
+  It does not arm a rule on the subclass, so it cannot cost a false positive
+  there, and `open_receivers:` is not what keeps absent methods
+  diagnostic-free — the receiver gate is (Context § "Amendment 2026-11-15").
+  Pairing the two (as rigor-graphql does) covers the calls whose receiver IS
+  the listed class.
   **#1097** adds the extend-edge twin, `rbs_complete_extends:`: `extend M`
   lifts M's *instance* surface onto the class object's singleton, so a
   singleton-lookup miss walks discovered `extend` edges (plus RBS
@@ -174,9 +233,11 @@ RBS omits.
   superclasses are not searched. That matches `MacroBlockSelfType`'s owner
   walk so DeclBuilder binding and RBS dispatch cannot disagree.
 
-- **WD5 — Measurement gate before flag-on.** Because precision and
-  `undefined-method`-firing are coupled (Context), the change ships behind a
-  measured-clean bar, not on assertion: (a) full `rigor check lib` stays green;
+- **WD5 — Measurement gate before flag-on.** The change ships behind a
+  measured-clean bar, not on assertion. It was written believing precision and
+  `undefined-method`-firing to be coupled; they are not (Context § "Amendment
+  2026-11-15"), so the bar measures what the bridge can actually move — the
+  types it resolves, and the rules that read them on a receiver RBS knows: (a) full `rigor check lib` stays green;
   (b) the bundled plugin tree (`plugins/*`, `examples/*`) under `rigor check`
   surfaces only *genuine* contract misuse, zero FP on conforming plugins; (c) a
   real-project sweep (Redmine / Mastodon `app + lib`, per the

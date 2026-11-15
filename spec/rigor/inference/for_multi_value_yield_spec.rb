@@ -84,8 +84,12 @@ RSpec.describe "a `for` index over a multi-value yield (#3205)" do
           def table: () -> Hash[String, Integer]
           def singles: () -> Enumerator[[String], void]
           def my_enum: () -> MyEnum
+          def sub2: () -> Sub2
         end
         class MyEnum < Enumerator[[String, Integer], void]
+        end
+        class Sub2 < Enumerator[[Integer, String], void]
+          def each: () { ([Integer, String], Symbol) -> void } -> void
         end
       RBS
     end
@@ -106,6 +110,12 @@ RSpec.describe "a `for` index over a multi-value yield (#3205)" do
       pair = t.tuple_of(t.nominal_of("String"), t.nominal_of("Integer"))
       expect(bound("#{prefix}for p in h.pairs; end", :p, rbs: rbs)).to eq([pair])
       expect(bound("#{prefix}for kv in h.table; end", :kv, rbs: rbs)).to eq([pair])
+    end
+
+    # A subclass's own `each` declared to yield several values binds the first, even when that value is a tuple.
+    it "keeps the first declared value of an Enumerator subclass whose each yields several" do
+      expect(bound("#{prefix}for b in h.sub2; end", :b, rbs: rbs))
+        .to eq([t.tuple_of(t.nominal_of("Integer"), t.nominal_of("String"))])
     end
 
     it "keeps a one-slot tuple element of an Enumerator" do

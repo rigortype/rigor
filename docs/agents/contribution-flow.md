@@ -34,7 +34,7 @@ a changelog entry. It is the conditional detail pointed to by `AGENTS.md`.
   an explicit refspec, `git push origin HEAD:refs/heads/<branch>`, never `-u`; the
   [`rigor-worktree`](../../.claude/skills/rigor-worktree/SKILL.md) skill says why and how to recover.
   The `master merge queue` ruleset lets the admin repository role bypass it (`bypass_mode: always`),
-  so for a maintainer's account nothing on GitHub stops a push that lands on `master`. The refspec
+  so for an admin's account nothing on GitHub stops a push that lands on `master`. The refspec
   fixes the destination, not the source: `git push origin HEAD:refs/heads/master` pushes whatever
   `HEAD` is, and in the shared main clone `HEAD` is whichever branch another session switched to
   last. Check the current branch right before any push whose destination is `master`.
@@ -49,8 +49,9 @@ a changelog entry. It is the conditional detail pointed to by `AGENTS.md`.
   review was still running. Under Claude Code, find the owner before touching a PR or tree you did not
   create: `ListAgents`, `git worktree list`, and a grep of the session transcripts
   (`~/.claude/projects/**/*.jsonl`) for the branch name; the transcript search tool does not index
-  tool inputs. The desktop app files an app-created worktree's sessions under
-  `~/.claude/projects/<main-clone-dir>--claude-worktrees-<name>/`.
+  tool inputs. Each project directory there is the session's absolute path with `/` turned into
+  `-`, so an app-created worktree's sessions are under
+  `~/.claude/projects/*--claude-worktrees-<name>/`.
 - A bug-report fix credits the reporter with `Co-Authored-By: Name <email>` on every fix commit,
   including fragments, and `thank you @handle!` in the changelog. Ask for a missing email; never guess.
   Give the credit when committing. A plan, brief or handoff may say that a fix traces to a report and
@@ -155,11 +156,11 @@ silently".
 - **The main clone is shared.** Uncommitted edits in it follow every branch switch and are swept in
   by the next `git add -A`. Each parallel worker gets its own worktree.
 - **An app-created worktree is not a Rigor worktree.** A folder the Claude desktop app creates under
-  `.claude/worktrees/<name>` is a bare `git worktree add`: it has no `vendor/bundle` and no
+  `.claude/worktrees/<name>` is a bare `git worktree add`: it usually has no `vendor/bundle` and no
   `.bundle/config`, so every Flake `bundle exec` there fails with `Bundler::GemNotFound`. It has also
   been removed mid-session (2026-09-24, and during the v0.4.5 cut); the shell then reports that its
-  working directory is gone, and `gh` needs `--repo rigortype/rigor`. The session's working
-  directory cannot be moved out of it. For anything longer than a probe, work in a
+  working directory is gone, and `gh` needs `--repo rigortype/rigor`. A Bash `cd` does
+  not move the session's working directory out of it. For anything longer than a probe, work in a
   `bin/rigor-worktree <branch>` tree under `rigor-wt/` through absolute paths, and commit early.
 
 ## Landing a pull request

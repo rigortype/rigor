@@ -39,6 +39,7 @@ RSpec.describe "a `for` index over a multi-value yield (#3205)" do
       expect(bound("#{prefix}for b in k; end", :b, rbs: rbs)).to eq([t.nominal_of("Integer")])
     end
 
+    # Guard (#3205 does not change it): a multi-target or splat index takes every value.
     it "binds a multi-target index to each value" do
       source = "#{prefix}for a, c in k; end"
       expect(bound(source, :a, rbs: rbs)).to eq([t.nominal_of("Integer")])

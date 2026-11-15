@@ -193,7 +193,7 @@ The same failure inside the suite: a green example that would stay green with th
   Spawn through `RubyRun.capture` (`spec/support/ruby_run.rb`) or `Bundler.with_unbundled_env`.
 - **A decline assertion (`to be_nil`) passes on any construction error**, which also yields nil.
   Pair it with the neighbouring case that must succeed.
-- **A formatter hook rewrites the `.rb` file you just edited.** `.claude/settings.json` is not
+- **A local formatter hook can rewrite the `.rb` file you just edited.** `.claude/settings.json` is not
   tracked, but a local one may run `rubocop --autocorrect` after each Edit or Write of a
   `.rb` file, and even safe-only autocorrect changes what a fixture says: multi-line `->(x) do`
   becomes `lambda do |x|` (`Style/Lambda`), `/a\-b/` loses its escape

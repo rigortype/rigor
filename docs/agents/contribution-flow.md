@@ -159,8 +159,8 @@ silently".
   `.claude/worktrees/<name>` is a bare `git worktree add`: it usually has no `vendor/bundle` and no
   `.bundle/config`, so every Flake `bundle exec` there fails with `Bundler::GemNotFound`. It has also
   been removed mid-session (2026-09-24, and during the v0.4.5 cut); the shell then reports that its
-  working directory is gone, and `gh` needs `--repo rigortype/rigor`. A Bash `cd` does
-  not move the session's working directory out of it. For anything longer than a probe, work in a
+  working directory is gone, and `gh` needs `--repo rigortype/rigor`. A Bash `cd` does not move
+  the session's working directory out of it. For anything longer than a probe, work in a
   `bin/rigor-worktree <branch>` tree under `rigor-wt/` through absolute paths, and commit early.
 
 ## Landing a pull request

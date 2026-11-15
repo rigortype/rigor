@@ -59,11 +59,17 @@ module Rigor
             tree = trees.fetch(key)
             next [class_name, entries] if tree.size == 1 && !key[1]
 
-            [class_name, entries.to_h do |cvar, type|
-              next [cvar, type] if type.is_a?(JoinOnlyCvarWrite)
+            [class_name, joined_entries(entries, key, tree, accumulator, unions)]
+          end
+        end
 
-              [cvar, unions[[key, cvar]] ||= tree_union(tree, cvar, accumulator, key[1])]
-            end]
+        # The entries a creating write made, each replaced by its tree's union, which `unions` holds once per tree
+        # (`key`) and cvar for every member to share.
+        def joined_entries(entries, key, tree, accumulator, unions)
+          entries.to_h do |cvar, type|
+            next [cvar, type] if type.is_a?(JoinOnlyCvarWrite)
+
+            [cvar, unions[[key, cvar]] ||= tree_union(tree, cvar, accumulator, key[1])]
           end
         end
 
@@ -136,7 +142,8 @@ module Rigor
           true
         end
 
-        private_class_method :tree_union, :root_of, :reopened_elsewhere?, :parent, :resolve, :declared_elsewhere?
+        private_class_method :joined_entries, :tree_union, :root_of, :reopened_elsewhere?, :parent, :resolve,
+                             :declared_elsewhere?
       end
     end
   end

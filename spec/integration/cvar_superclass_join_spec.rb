@@ -9,8 +9,8 @@ require "spec_helper"
 RSpec.describe "class-cvar census superclass join (#3219)", type: :runner do
   def folds(source, sig: {})
     analyze(files: { "code.rb" => source }, sig: sig).diagnostics
-                                           .select { |d| d.rule.to_s == "flow.always-truthy-condition" }
-                                           .map(&:line)
+                                                     .select { |d| d.rule.to_s == "flow.always-truthy-condition" }
+                                                     .map(&:line)
   end
 
   def reader(name = "@@c", singleton: false)
@@ -81,8 +81,8 @@ RSpec.describe "class-cvar census superclass join (#3219)", type: :runner do
   it "does not fold when the superclass's nearer candidate only a signature declares" do
     # `Status` inside `module Process` is the core `Process::Status`, not the file's top-level `Status`. Ruby: with
     # `class Process::Status; @@c = nil; end` elsewhere, `Process::Sub.allocate.failures` prints "clean".
-    source = "class Status; def x = @@c = :top; end\nmodule Process\n  class Sub < Status\n" \
-             "    def set = @@c = 1\n#{reader.gsub(/^/, '  ')}  end\nend\n"
+    source = "class Status; def x = @@c = :top; end\nmodule Process\n  class Sub < Status\n    " \
+             "def set = @@c = 1\n#{reader.gsub(/^/, '  ')}  end\nend\n"
     expect(folds(source)).to eq([])
   end
 

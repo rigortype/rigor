@@ -66,6 +66,51 @@ RSpec.describe "a `for` index over a multi-value yield (#3205)" do
       expect(bound(source, :a)).to eq([t.tuple_of(t.constant_of(1), t.constant_of(2))])
       expect(bound(source, :c)).to eq([t.nominal_of("Integer")])
     end
+
+    # Guard (#3205 does not change it): a splat index takes every value, which is the tuple either way.
+    it "still binds a splat index to the tuple" do
+      expect(bound("for *s in [[1, 2]].each_with_index; end", :s))
+        .to eq([t.tuple_of(t.tuple_of(t.constant_of(1), t.constant_of(2)), t.nominal_of("Integer"))])
+    end
+  end
+
+  # The floor reads `Enumerator`'s ancestry and the declared element, not the receiver's spelling.
+  describe "a declared receiver" do
+    let(:rbs) do
+      <<~RBS
+        class Holder
+          def strs: () -> Array[String]
+          def pairs: () -> Array[[String, Integer]]
+          def table: () -> Hash[String, Integer]
+          def singles: () -> Enumerator[[String], void]
+          def my_enum: () -> MyEnum
+        end
+        class MyEnum < Enumerator[[String, Integer], void]
+        end
+      RBS
+    end
+    let(:prefix) { "h = Holder.new\newi = h.strs.each_with_index\n" }
+
+    {
+      "an Enumerator::Lazy" => "ewi.lazy",
+      "an Enumerator::Chain from `+`" => "ewi + ewi",
+      "an Enumerator::Chain from `chain`" => "ewi.chain(ewi)",
+      "a declared subclass of Enumerator" => "h.my_enum"
+    }.each do |label, collection|
+      it "binds a single target over #{label} with a tuple element to Dynamic[top]" do
+        expect(bound("#{prefix}for b in #{collection}; end", :b, rbs: rbs)).to eq([t.untyped])
+      end
+    end
+
+    it "keeps the pair of an Array of pairs and of a Hash" do
+      pair = t.tuple_of(t.nominal_of("String"), t.nominal_of("Integer"))
+      expect(bound("#{prefix}for p in h.pairs; end", :p, rbs: rbs)).to eq([pair])
+      expect(bound("#{prefix}for kv in h.table; end", :kv, rbs: rbs)).to eq([pair])
+    end
+
+    it "keeps a one-slot tuple element of an Enumerator" do
+      expect(bound("#{prefix}for s in h.singles; end", :s, rbs: rbs)).to eq([t.tuple_of(t.nominal_of("String"))])
+    end
   end
 
   # Guard (#3205 does not change it): an Array or a Hash yields one value per element.

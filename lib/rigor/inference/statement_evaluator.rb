@@ -4245,12 +4245,12 @@ module Rigor
       # Issue #3205 — the index binds as a block's parameters do: a single target (`for b in`) takes the first yielded
       # value, a multi-target (`for a, b in`) or splat (`for *s in`) index all of them. So an `each` declared to yield
       # several values (`{ (A, B) -> void }`) binds a single target to `A`, and an `Enumerator` whose element is a
-      # tuple binds it to `Dynamic[top]` ({#ambiguous_enumerator_yield?}).
+      # tuple binds it to `Dynamic[top]` ({#enumerator_floor}).
       def for_iteration_element_type(coll_type, index)
         single = !index.is_a?(Prism::MultiTargetNode) && !index.is_a?(Prism::SplatNode)
         structural = collection_element_type(coll_type)
         unless Type::Combinator.untyped?(structural)
-          return single && ambiguous_enumerator_yield?(coll_type, structural) ? Type::Combinator.untyped : structural
+          return single ? enumerator_floor(coll_type, structural) : structural
         end
 
         block_params = MethodDispatcher.expected_block_param_types(
@@ -4261,7 +4261,7 @@ module Rigor
           scope: scope
         )
         return structural if block_params.nil? || block_params.empty?
-        return block_params.first if single
+        return block_params.size == 1 ? enumerator_floor(coll_type, block_params.first) : block_params.first if single
 
         block_params.size == 1 ? block_params.first : Type::Combinator.tuple_of(*block_params)
       rescue StandardError
@@ -4270,10 +4270,18 @@ module Rigor
 
       # An `Enumerator[[A, B]]` does not say whether its `each` yields the two values (`each_with_index`,
       # `each_with_object`, `Hash#select`: a single target binds `A`) or one array (`Hash#each`, `Array#each` over
-      # pairs: it binds `[A, B]`). A single target over such an enumerator binds neither guess.
-      def ambiguous_enumerator_yield?(coll_type, element)
-        coll_type.is_a?(Type::Nominal) && coll_type.class_name == "Enumerator" &&
-          element.is_a?(Type::Tuple) && element.elements.size >= 2
+      # pairs: it binds `[A, B]`). A single target over such an enumerator, or over an `Enumerator::Lazy`,
+      # `Enumerator::Chain` or other descendant of `Enumerator`, binds neither guess but `Dynamic[top]`.
+      #
+      # An element union with such a tuple member (`ewi.chain(ewi)` reads `Enumerator::Chain[Dynamic[top] | [A, B]]`)
+      # floors as a whole.
+      def enumerator_floor(coll_type, element)
+        members = element.is_a?(Type::Union) ? element.members : [element]
+        return element unless members.any? { |member| member.is_a?(Type::Tuple) && member.elements.size >= 2 }
+        return element unless coll_type.is_a?(Type::Nominal)
+        return element unless %i[equal subclass].include?(scope.environment.class_ordering(coll_type.class_name, "Enumerator"))
+
+        Type::Combinator.untyped
       end
 
       # Binds the `for` index variable(s) into `scope`. A single `LocalVariableTargetNode` is bound to `element_type`

@@ -102,4 +102,9 @@ RSpec.describe "class-cvar census superclass join (#3219)", type: :runner do
     sig = { "sidecar.rbs" => "class Sidecar\n  def set: () -> Integer\n  def failures: () -> Integer\nend\n" }
     expect(folds(source, sig: sig)).to eq([guard_line(source)])
   end
+
+  it "folds in a reopened bundled module, which no superclass tree reaches (control)" do
+    source = "module Kernel\n  def set = @@c = 1\n#{reader}end\n"
+    expect(folds(source)).to eq([guard_line(source)])
+  end
 end

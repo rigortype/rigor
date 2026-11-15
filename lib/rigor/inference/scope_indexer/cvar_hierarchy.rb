@@ -28,13 +28,11 @@ module Rigor
         # {.record} as the census walk enters each header.
         def headers = { declared: {}, superclasses: {} }
 
-        # A header that names its class: an unnameable one (below `class <<`) keys no census entry. `raw` is the
-        # as-written superclass name ({ScopeIndexer.recorded_ancestor_name}, nil for a non-constant expression) and
-        # `nesting` the `Module.nesting` outside the header, where Ruby resolves it (nil when the walk lost it).
+        # A header's declared name and kind, and a class header's superclass: `raw` is the as-written name
+        # ({ScopeIndexer.recorded_ancestor_name}, nil for a non-constant expression) and `nesting` the
+        # `Module.nesting` outside the header, where Ruby resolves it (nil when the walk lost it). A header below
+        # `class <<` that names no class records under the empty name, which no candidate and no census entry spells.
         def record(headers, node, context, body)
-          # A header below `class <<` that names no class leaves the prefix empty, `singleton_cref` included.
-          return if body.prefix.empty?
-
           name = body.prefix.join("::")
           klass = node.is_a?(Prism::ClassNode)
           headers[:declared][name] = klass ? :class : (headers[:declared][name] || :module)
@@ -51,7 +49,7 @@ module Rigor
 
           parents = headers[:superclasses].to_h { |name, sites| [name, parent(sites, headers, scope)] }
           roots = {}
-          root = ->(name) { roots[name] ||= root_of(name, parents, headers, scope) }
+          root = ->(name) { root_of(name, parents, headers, scope, roots) }
           trees = (accumulator.keys | parents.keys).group_by(&root)
           unions = {}
           accumulator.to_h do |class_name, entries|
@@ -87,14 +85,25 @@ module Rigor
         # `[root, open]`: the topmost class above `name` and whether the tree cannot see all of its superclass's
         # writes: the topmost class names a superclass {.parent} cannot follow, or names none in this file while
         # another source declares it ({.reopened_elsewhere?}), so its superclass is not known to be `Object`.
-        def root_of(name, parents, headers, scope)
-          seen = [name]
-          while (up = parents[name])
-            return [name, true] if up == OPEN || seen.include?(up)
+        def root_of(name, parents, headers, scope, roots)
+          path = {}
+          current = name
+          result = nil
+          until result
+            result = roots[current]
+            break if result
 
-            seen << (name = up)
+            path[current] = true
+            up = parents[current]
+            result =
+              if up.nil? then [current, !parents.key?(current) && reopened_elsewhere?(current, headers, scope)]
+              elsif up == OPEN || path.key?(up) then [current, true]
+              end
+            current = up
           end
-          [name, !parents.key?(name) && reopened_elsewhere?(name, headers, scope)]
+          # Every class on the walked path shares the root, so a deep chain is walked once per `join`.
+          path.each_key { |member| roots[member] = result }
+          result
         end
 
         # Whether a class this file reopens without a superclass header is declared elsewhere with one it may

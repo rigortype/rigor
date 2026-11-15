@@ -1,0 +1,3 @@
+- **[engine]** An unbound `$~` reads `MatchData?` in a method body that never matches and in a `grep_v` block, instead of `Dynamic[top]`. ([#3255](https://github.com/rigortype/rigor/pull/3255))
+  - A method body that may run a match, or that hands its frame to `binding` or a forwarded block, still reads an unbound `$~` as `Dynamic[top]`, even before its first match.
+  - Lambda, proc and `define_method` bodies still read it as `Dynamic[top]`, because they may run after a match in their frame.

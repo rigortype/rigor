@@ -42,6 +42,12 @@ on:
   # the PR is a draft its runs are the light gate (changes' `full` output),
   # which is what the review reads beside a local verify-changed.
   merge_group:
+  # A push to master reuses the merge queue's attested result (the changes
+  # job), and a reused push run neither saves master's caches (the timing
+  # file, RuboCop's and the warm self-check's) nor checks master in full.
+  # This daily run does both, at a quiet hour for the queue.
+  schedule:
+    - cron: "37 18 * * *"
 
 # A release or feature branch is validated through its pull request (the
 # `pull_request` event), so release/** is deliberately NOT listed under
@@ -73,15 +79,16 @@ jobs:
   # lets a no-code *push* skip the whole workflow (paths-ignore
   # above). But `pull_request` cannot use paths-ignore: a paths-filtered
   # required check hangs pending and blocks the merge. So this job always
-  # runs, and the code jobs gate on its `code` output. Non-PR events
-  # (master push) always run the suite. On any detection error we fail
+  # runs, and the code jobs gate on its `code` output. Non-PR events run
+  # the suite, except a master push of a commit the merge queue already
+  # passed and attested (the reuse block below). On any detection error we fail
   # safe to `code=true` — never skip on doubt (false-positive discipline:
   # a skipped suite that should have run is worse than a redundant run).
   changes:
     name: Detect code changes
     runs-on: ubuntu-latest
-    # attestations: read lets a merge_group run find the attestation of the
-    # tree it is about to test (the reuse block below).
+    # attestations: read lets a merge_group run, or a push to master, find
+    # the attestation of the tree it is about to test (the reuse blocks below).
     permissions:
       contents: read
       attestations: read
@@ -98,7 +105,7 @@ jobs:
       # attests. The
       # full run starts at `gh pr ready` (ready_for_review above), on every
       # push to a ready PR, and in the merge queue. Push and merge_group runs
-      # are always full.
+      # are always full, though either may reuse an attested result.
       full: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.draft) }}
     steps:
       - name: Checkout
@@ -130,6 +137,51 @@ jobs:
           # `code` because the build is unrelated to most PRs and compiles
           # Ruby cold, so it should not run on every code PR.
           nix_inputs='^(nix/|flake\.nix$|flake\.lock$|\.github/workflows/ci\.yml$|lib/rigor/version\.rb$)'
+          # Maintainer decision (2026-11-15): the merge queue puts on master
+          # the very commit its merge_group run tested, so the push run that
+          # follows reran an identical full CI on every landing (26 times on
+          # 2026-11-12, competing with the queue for the same ~20 runners).
+          # A merge_group run into master that passed "CI required" attests
+          # its tree (the tested-tree job below). A push to master reuses that
+          # result only when the signer is a merge_group run of this exact
+          # commit: its certificate names this commit as the one whose ci.yml
+          # ran, and only GitHub's merge queue starts merge_group runs. Any
+          # other push (a direct push, a lookup or verification that fails,
+          # an attestation not yet written) runs in full, and the daily
+          # scheduled run refreshes master's caches with a full run.
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/master" ]; then
+            push_tree=$(git rev-parse --verify -q "$GITHUB_SHA^{tree}" || true)
+            if [ -n "$push_tree" ]; then
+              printf '%s' "$push_tree" > "$RUNNER_TEMP/tested-tree"
+              # The queue merges as soon as "CI required" passes, and the
+              # attestation is written just after it, so wait briefly for it.
+              for attempt in 1 2 3 4 5 6; do
+                signers=$(gh attestation verify "$RUNNER_TEMP/tested-tree" --repo "$REPO" \
+                    --signer-workflow "$REPO/.github/workflows/ci.yml" --deny-self-hosted-runners \
+                    --limit 100 --format json 2>/dev/null \
+                  | jq -r --arg cfg "https://github.com/$REPO/.github/workflows/ci.yml@refs/heads/gh-readonly-queue/master/" '
+                      .[].verificationResult.signature.certificate
+                      | select(.buildTrigger == "merge_group"
+                          and (.buildConfigURI | startswith($cfg))
+                          and .buildSignerURI == .buildConfigURI
+                          and .buildConfigDigest == .sourceRepositoryDigest
+                          and .buildSignerDigest == .sourceRepositoryDigest)
+                      | .sourceRepositoryDigest' \
+                  | grep -E '^[0-9a-f]{40}$' | sort -u) || signers=""
+                if grep -qx "$GITHUB_SHA" <<<"$signers"; then
+                  echo "The merge queue's run of this commit ($GITHUB_SHA) passed CI required on tree $push_tree and its ci.yml attested it: reusing it."
+                  {
+                    echo "reused=true"
+                    echo "code=false"
+                    echo "nix=false"
+                  } >> "$GITHUB_OUTPUT"
+                  exit 0
+                fi
+                [ "$attempt" -lt 6 ] && sleep 20
+              done
+            fi
+            echo "No merge_group attestation of commit $GITHUB_SHA (tree '${push_tree:-?}'): running the full suite."
+          fi
           if [ "${{ github.event_name }}" != "pull_request" ] && [ "${{ github.event_name }}" != "merge_group" ]; then
             echo "Non-PR event — running the full suite."
             echo "code=true" >> "$GITHUB_OUTPUT"
@@ -1265,12 +1317,14 @@ jobs:
           done
           exit $failed
 
-  # ── Attestation for the merge queue (ADR-123, amended 2026-10-19) ───
+  # ── Attestation for the merge queue (ADR-123, amended 2026-10-19 and 2026-11-15) ───
   # A pull_request run into master that passed "CI required" signs an
   # artifact attestation whose subject is the tree it tested (GITHUB_SHA's
   # tree). A merge_group run whose merged tree has such an attestation,
   # signed by a workflow whose own commit has that tree, reuses the result
-  # (the changes job above). The job's name carries the tree for people
+  # (the changes job above). A merge_group run that passed attests the same
+  # way, and the push to master of the commit it tested reuses that result.
+  # The job's name carries the tree for people
   # reading the checks; the queue does not read check runs, which any
   # workflow of the repository can write.
   tested-tree:
@@ -1286,8 +1340,12 @@ jobs:
     # sign anything. The queue accepts only a signer whose own commit has the
     # queued tree, so such a run either ran another ci.yml (another tree) or
     # ran this one, whose base_ref condition here refuses it. The tree check
-    # relies on that condition: keep it.
-    if: always() && github.event_name == 'pull_request' && github.base_ref == 'master' && github.event.pull_request.head.repo.full_name == github.repository && needs.required.result == 'success' && needs.changes.outputs.tree != ''
+    # relies on that condition: keep it. A merge_group run into master attests
+    # too (amended 2026-11-15), for the push run of the commit it tested; each
+    # reader filters on the trigger, so the queue never takes a merge_group
+    # attestation and a push never takes a pull_request one. Only GitHub's
+    # merge queue starts a merge_group run, on its own gh-readonly-queue ref.
+    if: always() && needs.required.result == 'success' && needs.changes.outputs.tree != '' && ((github.event_name == 'pull_request' && github.base_ref == 'master' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'merge_group' && github.event.merge_group.base_ref == 'refs/heads/master'))
     runs-on: ubuntu-latest
     permissions:
       contents: read

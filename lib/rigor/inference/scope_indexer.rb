@@ -2418,10 +2418,13 @@ module Rigor
       # checks it against {#legacy_class_cvar_index}.
       def build_class_cvar_index(root, default_scope)
         collector = ClassCvarsCollector.new
-        DeclarationWalk.run(root, [collector], DeclarationWalk::Context.root(scope: default_scope))
+        DeclarationWalk.run(root, [collector],
+                            DeclarationWalk::Context.root(scope: default_scope, nesting: EMPTY_NESTING))
         DeclarationWalk::Shadow.verified(:class_cvars, default_scope.source_path, collector.table) do
           legacy_class_cvar_index(root, default_scope)
         end
+        # Issue #3219 — the per-class census the shadow oracle checks, then joined along each superclass tree.
+        collector.hierarchy_table(default_scope)
       end
 
       # The walker {ClassCvarsCollector} replaced, kept as the shadow harness's oracle until ADR-116 WD5 has
@@ -2586,8 +2589,9 @@ module Rigor
         end
         record_reflective_cvar_write(node, scope, class_name, accumulator) if node.is_a?(Prism::CallNode)
         # Issue #1217 — `rescue => @@c` / `for @@c in xs` write through a target node. Each enters as the
-        # `Dynamic[top]` floor, the rescue reference too: the census keys each class alone, so a superclass's
-        # `@@c = nil` is not in a subclass's entry, and a typed exception entry would read as non-nil there.
+        # `Dynamic[top]` floor, the rescue reference too. The floor dates from when the census keyed each class
+        # alone, so a superclass's `@@c = nil` was not in a subclass's entry; #3219's {CvarHierarchy} join now
+        # adds it, and the floor is kept.
         BindingTargets.names(node, Prism::ClassVariableTargetNode).each do |name|
           record_cvar_write(accumulator, class_name, name, Type::Combinator.untyped, join_only: join_only)
         end

@@ -4529,6 +4529,143 @@ Unrelated
   # #682 — the per-declaration table `Scope#ancestor_name_candidates` reads. It records the nesting the
   # HEADER is written in, so the two spellings of one qualified name are distinguishable afterwards, which
   # is exactly what the peel it replaces could not do.
+  # Issue #3219 — a class and its subclasses share one cvar slot, so each entry a `def` write creates joins the writes
+  # every class of its in-file superclass tree makes, and a tree whose top names a superclass outside the file joins the
+  # unknown floor.
+  describe "class-cvar census superclass join (#3219)" do
+    def cvar_seeds(source)
+      described_class.build_class_cvar_index(parse(source), Rigor::Scope.empty)
+                     .transform_values { |entries| entries.transform_values(&:describe) }
+    end
+
+    it "joins a superclass's and a subclass's writes into each other's entries" do
+      expect(cvar_seeds(<<~RUBY)).to eq("B" => { :@@b => ":b | :s" }, "S" => { :@@c => "1?", :@@b => ":b | :s" })
+        class B; @@c = nil; def self.b = (@@b = :b); end
+        class S < B; def s = (@@c = 1); def t = (@@b = :s); end
+      RUBY
+    end
+
+    it "follows a grandparent through the superclass's lexical lookup" do
+      expect(cvar_seeds(<<~RUBY)).to eq("M::C" => { :@@c => "1?" })
+        module M
+          class A; @@c = nil; end
+          class B < A; end
+          class C < B; def s = (@@c = 1); end
+        end
+      RUBY
+    end
+
+    it "resolves a rooted superclass to the top-level class, not a nearer one" do
+      expect(cvar_seeds(<<~RUBY)).to eq("Base" => { :@@c => "1 | :top" }, "M::S" => { :@@c => "1 | :top" })
+        class Base; def x = (@@c = :top); end
+        module M
+          class Base; @@c = nil; end
+          class S < ::Base; def s = (@@c = 1); end
+        end
+      RUBY
+    end
+
+    it "floors an entry whose tree names a superclass the file does not declare" do
+      expect(cvar_seeds(<<~RUBY)).to eq("S" => { :@@c => "1 | Dynamic[top]" }, "T" => { :@@c => "2 | Dynamic[top]" })
+        class S < Unknown; def s = (@@c = 1); end
+        class T < Struct.new(:a); def s = (@@c = 2); end
+      RUBY
+    end
+
+    it "floors an entry whose superclass's nearer candidate another file declares" do
+      # `Ns::Base` is declared outside this file, so `class Sub < Base` in `Ns` names it, not the top-level `Base`.
+      elsewhere = Rigor::Scope.empty.with_discovery(
+        Rigor::Scope::DiscoveryIndex::EMPTY.with(discovered_classes: { "Ns::Base" => :class })
+      )
+      cvars = described_class.build_class_cvar_index(parse(<<~RUBY), elsewhere)
+        class Base; def x = (@@c = :top); end
+        module Ns
+          class Sub < Base; def s = (@@c = 1); end
+        end
+      RUBY
+      expect(cvars.fetch("Ns::Sub")[:@@c].describe).to eq("1 | Dynamic[top]")
+    end
+
+    it "ends a tree at an explicit `Object` superclass" do
+      expect(cvar_seeds("class S < Object; def s = (@@c = 1); end")).to eq("S" => { :@@c => "1" })
+    end
+
+    it "joins a sibling's write into another sibling's entry" do
+      expect(cvar_seeds(<<~RUBY)).to eq("B" => { :@@c => "1?" }, "C" => { :@@c => "1?" })
+        class A; end
+        class B < A; def s = (@@c = 1); end
+        class C < A; def s = (@@c = nil); end
+      RUBY
+    end
+
+    it "floors a class whose headers name different superclasses" do
+      # Ruby raises `superclass mismatch` at the second header; the census reads neither as the superclass.
+      expect(cvar_seeds(<<~RUBY).fetch("S")).to eq(:@@c => "1 | Dynamic[top]")
+        class A; end
+        class B; @@c = nil; end
+        class S < A; def s = (@@c = 1); end
+        class S < B; end
+      RUBY
+    end
+
+    it "floors a class whose superclass name is a module the file declares" do
+      expect(cvar_seeds(<<~RUBY).fetch("S")).to eq(:@@c => "1 | Dynamic[top]")
+        module M; @@c = nil; end
+        class S < M; def s = (@@c = 1); end
+      RUBY
+    end
+
+    it "floors an entry whose superclass's nearer candidate another file's header declares" do
+      elsewhere = Rigor::Scope.empty.with_discovery(
+        Rigor::Scope::DiscoveryIndex::EMPTY.with(discovered_superclasses: { "Ns::Base" => "Object" })
+      )
+      cvars = described_class.build_class_cvar_index(parse(<<~RUBY), elsewhere)
+        class Base; def x = (@@c = :top); end
+        module Ns
+          class Sub < Base; def s = (@@c = 1); end
+        end
+      RUBY
+      expect(cvars.fetch("Ns::Sub")[:@@c].describe).to eq("1 | Dynamic[top]")
+    end
+
+    it "floors a tree whose headerless top class another file's header gives a superclass" do
+      elsewhere = Rigor::Scope.empty.with_discovery(
+        Rigor::Scope::DiscoveryIndex::EMPTY.with(discovered_superclasses: { "Base" => "Parent" })
+      )
+      cvars = described_class.build_class_cvar_index(parse(<<~RUBY), elsewhere)
+        class Base; end
+        class Sub < Base; def s = (@@c = 1); end
+      RUBY
+      expect(cvars.fetch("Sub")[:@@c].describe).to eq("1 | Dynamic[top]")
+    end
+
+    # A guard: a name lookup that raises reads as declared elsewhere, which only widens.
+    it "reads a name lookup that raises as declared elsewhere" do
+      loader = Object.new
+      def loader.class_known?(_name) = raise(ArgumentError, "boom")
+      scope = Struct.new(:discovered_classes, :discovered_superclasses, :environment)
+                    .new({}, {}, Struct.new(:rbs_loader).new(loader))
+      hierarchy = described_class::CvarHierarchy
+      headers = { declared: { "Base" => :class }, superclasses: {} }
+      expect(hierarchy.send(:declared_elsewhere?, scope, "Ns::Base")).to be(true)
+      expect(hierarchy.send(:reopened_elsewhere?, "Base", headers, scope)).to be(true)
+    end
+
+    it "keeps a class `class << self` nests out of the tree" do
+      # `class Base` below `class << self` opens `#<Class:Outer>::Base`, which keys nothing, so `Sub < Base`
+      # names the top-level `Base`, whose writes hold no `nil`.
+      expect(cvar_seeds(<<~RUBY).fetch("Sub")).to eq(:@@c => "1")
+        class Outer
+          class << self
+            class Base; @@c = nil; def b = (@@c = nil); end
+          end
+        end
+        class Base; end
+        class Sub < Base; def s = (@@c = 1); end
+      RUBY
+    end
+  end
+
   describe ".build_superclass_tables" do
     def unkeyed = Rigor::Scope::DiscoveryIndex::UNKEYED_HEADER_NESTING
 

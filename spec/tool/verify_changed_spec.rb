@@ -90,6 +90,10 @@ RSpec.describe "bin/verify-changed spec selection" do
     expect(uncovered).to be_empty
     expect(specs).to include("spec/rigor/effects/tracer_collection_spec.rb")
     expect(specs).not_to include("spec/rigor/effects/rails_layer_spec.rb")
+    # Round 4: once a directory has matched, the basename route must not also
+    # run. `loud.rb` is the basename of fixtures in other trees, so without that
+    # guard it adds this non-reader on top of the precise selection.
+    expect(specs).not_to include("spec/integration/refinement_using_scope_spec.rb")
   end
 
   it "keeps the basename when no directory names a spec but it is distinctive" do

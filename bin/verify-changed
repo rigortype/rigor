@@ -168,6 +168,11 @@ add_specs_matching() {
 # "effects". The cap is on NEW specs per level; the deepest match is never
 # capped. Returns success when any level matched.
 #
+# Neither cap is tight: over every path in the tree today any shallower-level
+# cap from 1 to 80, and any basename cap from 5 up, give the same selection
+# (the largest basename count taken is 4). They are there to refuse a container
+# word, not calibrated, so a future reviewer need not reverse-engineer the 10.
+#
 # A capped level is dropped whole, so this is correct only while a spec that
 # reads one project under a container names that project's own directory
 # (`fixtures/effects/rails`), not just the container. Every effects and sig_gen

@@ -138,7 +138,8 @@ lives in the PR body and the issues, which the coordinator reads only when a dec
    [When a lane has ended or died](#when-a-lane-has-ended-or-died). Route a severe fix in intricate
    logic to the strongest model by resuming the lane on it only when the lane already runs that model.
    Delta rounds go to the same reviewer with SendMessage and follow
-   contribution-flow.md steps 4–5: three rounds at most; after round 3, a narrow severe finding with
+   contribution-flow.md steps 4–5: three rounds at most and four reports in all, after which one
+   fresh strongest-model review decides convergence; after round 3, a narrow severe finding with
    a conservative fix lands only through one fix-only delta check that finds nothing severe, and a
    non-converging design goes to the user. When a lane stops at a gate or an open choice, decide it
    per contribution-flow.md § "Decisions and the approval queue" and send the lane the decision with

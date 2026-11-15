@@ -257,6 +257,20 @@ Once the change is implemented and `make verify-changed` passes:
    stays Draft for the user. A non-severe finding from that check is fixed only in wording or specs;
    anything that would change behaviour is filed as an issue. Other fixes made after round 3 land
    without another round.
+
+   **The cap counts reports, not rounds** (maintainer's decision, 2026-11-15, #2890). Every
+   reviewer report on the PR counts, from the first review, a delta re-ask, a confirmation pass or a
+   reviewer pair, so a run of non-severe re-asks cannot get past the cap. In the v0.4.8 window the
+   three-round rule held on paper while #2993 drew 18 reports from one reviewer and #2980 drew 8,
+   and 16 PRs reached a fourth report. When a PR has four reports and the last one is not clean,
+   ask for no fifth delta. Escalate once instead: spawn a fresh reviewer on the strongest model, with
+   no earlier report in its brief. Give it the PR, its issue and the list of findings so far, and
+   ask it one question. Is the design converging? If so, what is the conservative cut, the change
+   minus every part a severe finding touched? The coordinator then takes one of three paths. If the
+   design converges, it lands the conservative cut through the one fix-only check above. If the
+   remainder splits off cleanly, it splits the PR and files the rest. Otherwise it closes the PR
+   and files the gap. A PR whose only open path is a serious decision (§ "Decisions and the
+   approval queue") stays Draft for the user. The escalated review is the PR's last full review.
 6. **Merge through the queue** (`gh pr ready`, then `bin/land-pr N <reviewed-head-sha>` once the
    full run's `CI required` passes; see § "GitHub and git traps") once the light run is green on the
    head commit and the review has stopped, and when the landing point is settled: a

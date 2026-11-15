@@ -28,6 +28,7 @@ require_relative "def_node_resolver"
 require_relative "dynamic_origin"
 require_relative "error_info"
 require_relative "external_ancestor_resolution"
+require_relative "genuine_send"
 require_relative "origin_lookup"
 require_relative "../effects/collector"
 require_relative "fallback"
@@ -2892,19 +2893,20 @@ module Rigor
       # success path of a call that would raise on a private method is ADR-5 optimism). Declines: a
       # non-literal selector, a splat / forwarded tail (positional correspondence unknown), or a block at
       # the call site (block forwarding is out of this slice).
+      #
+      # Issue #3080 — `send` reads as its target only where the receiver's `send` is `Kernel#send`
+      # ({GenuineSend.type?}). A class with its own `send` (`def send(message, flags)`, `UDPSocket#send`, a project
+      # RBS `def send:`) is called like any other method. `__send__` and `public_send` are other methods and keep
+      # the reading.
       LITERAL_SEND_SELECTORS = %i[send __send__ public_send].freeze
       private_constant :LITERAL_SEND_SELECTORS
 
       def try_literal_send(node, receiver)
-        return nil unless LITERAL_SEND_SELECTORS.include?(node.name)
-        return nil unless node.block.nil?
-
-        args = node.arguments&.arguments
-        return nil unless args && args.first.is_a?(Prism::SymbolNode)
+        args = literal_send_arguments(node)
+        return nil if args.nil?
+        return own_send_type(node, receiver, args) if node.name == :send && !GenuineSend.type?(receiver, scope)
 
         rest = args[1..]
-        return nil if rest.any? { |a| a.is_a?(Prism::SplatNode) || a.is_a?(Prism::ForwardingArgumentsNode) }
-
         inner_name = args.first.unescaped.to_sym
         inner_args = rest.map { |a| type_of(a) }
         MethodDispatcher.dispatch(
@@ -2913,6 +2915,33 @@ module Rigor
         ) ||
           try_user_method_inference(receiver, node, inner_args, method_name: inner_name) ||
           try_project_singleton_inference(receiver, node, inner_args, method_name: inner_name)
+      end
+
+      # The arguments of a literal-selector `send` / `__send__` / `public_send` call with no block and no splat or
+      # forwarded tail, or nil.
+      def literal_send_arguments(node)
+        return nil unless LITERAL_SEND_SELECTORS.include?(node.name)
+        return nil unless node.block.nil?
+
+        args = node.arguments&.arguments
+        return nil unless args && args.first.is_a?(Prism::SymbolNode)
+        return nil if args.any? { |a| a.is_a?(Prism::SplatNode) || a.is_a?(Prism::ForwardingArgumentsNode) }
+
+        args
+      end
+
+      # Issue #3080 — the receiver's own `send`. A project `def send` comes before `Kernel#send` in every chain that
+      # reaches it, so where the only declaration Ruby reaches is `Kernel#send` (or there is none) the body answers
+      # the call, ahead of the `Kernel#send` declaration the ordinary dispatch would read off `Object`. Where an RBS
+      # `def send:` reaches the receiver from the class itself or from an ancestor (an overload included), that
+      # declaration is the contract (its `void`, its return type), so nil hands the call to the ordinary dispatch,
+      # as for any other declared method. Nil too
+      # where no body can be read: a union or class-object receiver.
+      def own_send_type(node, receiver, args)
+        return nil unless user_inference_receiver?(receiver)
+        return nil unless GenuineSend.rbs_genuine?(receiver.class_name, :instance, scope)
+
+        try_user_method_inference(receiver, node, args.map { |a| type_of(a) })
       end
 
       def try_user_method_inference(receiver, call_node, arg_types, method_name: call_node.name, block_type: nil)

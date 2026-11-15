@@ -1,0 +1,4 @@
+- **[engine]** A class that defines its own `send` no longer has `obj.send(:m, …)` typed as a call of `m`, or a `send(:lambda) { return … }` block read as a lambda. ([#3254](https://github.com/rigortype/rigor/pull/3254))
+  - `Mailer.new.send(:hello, 0)` now runs `Mailer#send`, which removes a false `call.undefined-method` on its result. This also applies to a `send` inherited from a project superclass, to one from an included module named at top level, as a sibling or fully qualified, to a class-method `send`, and to a `send` declared in RBS, which wins over the source body.
+  - In such a class, a `return` inside `send(:lambda) { … }` exits the method and joins its return type.
+  - `__send__`, `public_send` and the genuine `Kernel#send` keep the old reading.

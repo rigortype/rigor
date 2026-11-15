@@ -1,1 +1,0 @@
-- **[rigor lsp]** The language server no longer reads a stale declared type for an unchanged alias after a `.rbs` edit changes an alias nested inside it, which could last until Ruby garbage-collected the previous signatures. ([#2821](https://github.com/rigortype/rigor/pull/2821))

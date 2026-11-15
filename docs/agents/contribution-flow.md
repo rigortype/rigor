@@ -258,19 +258,30 @@ Once the change is implemented and `make verify-changed` passes:
    anything that would change behaviour is filed as an issue. Other fixes made after round 3 land
    without another round.
 
-   **The cap counts reports, not rounds** (maintainer's decision, 2026-11-15, #2890). Every
-   reviewer report on the PR counts, from the first review, a delta re-ask, a confirmation pass or a
-   reviewer pair, so a run of non-severe re-asks cannot get past the cap. In the v0.4.8 window the
-   three-round rule held on paper while #2993 drew 18 reports from one reviewer and #2980 drew 8,
-   and 16 PRs reached a fourth report. When a PR has four reports and the last one is not clean,
-   ask for no fifth delta. Escalate once instead: spawn a fresh reviewer on the strongest model, with
-   no earlier report in its brief. Give it the PR, its issue and the list of findings so far, and
-   ask it one question. Is the design converging? If so, what is the conservative cut, the change
-   minus every part a severe finding touched? The coordinator then takes one of three paths. If the
-   design converges, it lands the conservative cut through the one fix-only check above. If the
-   remainder splits off cleanly, it splits the PR and files the rest. Otherwise it closes the PR
-   and files the gap. A PR whose only open path is a serious decision (§ "Decisions and the
-   approval queue") stays Draft for the user. The escalated review is the PR's last full review.
+   **Four reports also stop the delta loop** (maintainer's decision, 2026-11-15, #2890). Every
+   reviewer report on the PR counts: the first review, each delta re-ask, each confirmation pass,
+   and each member of a reviewer pair. A run of non-severe re-asks therefore cannot outlast the
+   round rule. The three-round rule did not stop #2993 (18 reports from one reviewer) or #2980
+   (8 rounds, 5 of them with a severe finding), and in the v0.4.8 window 16 PRs reached a fourth
+   report. The coordinator keeps the count where a compaction cannot lose it. Each report's
+   `Severe N | Moderate N | Minor N | Nit N` and `Severe remaining:` lines go into a PR comment
+   headed `Review report k`.
+
+   The fourth report needs no successor when it reads `Severe remaining: no` and its fixes change
+   only wording or specs: triage it as step 3 says and land. Otherwise ask for no fifth delta. Use
+   the same escalation wherever this step would hold the PR as Draft for the user. Spawn one fresh
+   reviewer on the strongest model under the full step 2 brief, rules and `rigor-reviewer` skill
+   included. Add one list of the findings so far, each as its one-line failure scenario, its
+   severity and whether it was fixed. Leave out the earlier reviewers' verdicts and their reading
+   of the design. It returns the fixed report, and its Verdict answers two questions. Is the design
+   converging? If so, what is the conservative cut: the change minus every part a severe finding
+   touched, with every remaining fix conservative in the sense above?
+
+   If it names such a cut, apply the cut. That same reviewer then runs this step's delta check
+   limited to the fix commits, once, and the PR lands per step 6 only when that check passes as
+   above. If it names no cut, or the check fails, the PR stays Draft for the user, as above and as
+   § "Decisions and the approval queue" requires of a design still not converging. The escalated
+   review is the PR's last full review.
 6. **Merge through the queue** (`gh pr ready`, then `bin/land-pr N <reviewed-head-sha>` once the
    full run's `CI required` passes; see § "GitHub and git traps") once the light run is green on the
    head commit and the review has stopped, and when the landing point is settled: a

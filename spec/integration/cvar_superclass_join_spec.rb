@@ -90,4 +90,10 @@ RSpec.describe "class-cvar census superclass join (#3219)", type: :runner do
     source = "class StandardError; end\nclass MyErr < StandardError\n  def set = @@c = 1\n#{reader}end\n"
     expect(folds(source)).to eq([])
   end
+
+  it "does not fold in an in-file reopen of a class a bundled signature declares" do
+    # Ruby: another file's `class StandardError; @@c = nil; end` shares the slot with this reopening.
+    source = "class StandardError\n  def set = @@c = 1\n#{reader}end\n"
+    expect(folds(source)).to eq([])
+  end
 end

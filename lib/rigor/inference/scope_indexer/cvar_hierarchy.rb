@@ -47,7 +47,7 @@ module Rigor
         # `accumulator` (the census before {ScopeIndexer#finished_cvar_census}) with each class's entries joined
         # along its tree, as a new Hash; `scope` answers whether a name is declared outside the file.
         def join(accumulator, headers, scope)
-          return accumulator if accumulator.empty? || headers[:superclasses].empty?
+          return accumulator if accumulator.empty?
 
           parents = headers[:superclasses].to_h { |name, sites| [name, parent(sites, headers, scope)] }
           roots = {}
@@ -112,8 +112,10 @@ module Rigor
           resolved.size == 1 ? resolved.first : OPEN
         end
 
-        # Ruby's lexical lookup of a superclass name: the first candidate this file declares, else the first that
-        # something outside the file declares, read as {OPEN}.
+        # A superclass name resolved against declarations only: the `Module.nesting` outside the header, innermost
+        # first, then the top level. The first candidate this file declares is the superclass (a module is {OPEN}),
+        # and one only something outside the file declares is {OPEN}. Ruby's lookup also searches the innermost
+        # cref's ancestors before the top level and finds a constant an assignment binds; neither is followed.
         def resolve(raw, nesting, headers, scope)
           return OPEN if raw.nil? || nesting.nil?
 

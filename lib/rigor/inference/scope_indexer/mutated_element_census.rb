@@ -159,15 +159,14 @@ module Rigor
           widened_any ? Type::Tuple.new(elements) : nil
         end
 
-        # An out-of-range index selects nothing: the read answers `nil`, and the mutation raises on it.
+        # An out-of-range index selects no element, and so widens nothing: the read answers `nil`, and the mutation
+        # raises on it.
         def tuple_positions(size, step)
           case step
           when :all, KeyStep then (0...size).to_a
           when :first then size.zero? ? [] : [0]
           when :last then size.zero? ? [] : [size - 1]
-          else
-            position = step.negative? ? step + size : step
-            position.between?(0, size - 1) ? [position] : []
+          else [step.negative? ? step + size : step]
           end
         end
 

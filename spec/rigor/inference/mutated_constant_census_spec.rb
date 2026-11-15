@@ -443,7 +443,7 @@ RSpec.describe "Mutated constant census widening", type: :runner do
       expected = [
         '{ a: Dynamic[String], b: "y" }', '{ "a" => Dynamic[String], "b" => "y" }',
         '{ 1 => Dynamic[String], 2 => "y" }', "{ a: #{wide}, b: [2] }", "{ a: #{wide}, b: #{wide} }",
-        "{ a: [1] }"
+        "{ a: [1] }", "{ a: Dynamic[String], b: Dynamic[String] }"
       ]
       expect(dumped_types(<<~RUBY)).to eq(expected)
         H = { a: +"x", b: +"y" }.freeze
@@ -452,15 +452,17 @@ RSpec.describe "Mutated constant census widening", type: :runner do
         HF = { a: [1], b: [2] }.freeze
         HP = { a: [1], b: [2] }.freeze
         HN = { a: [1] }.freeze
-        def grow
+        HA = { a: +"x", b: +"y" }.freeze
+        def grow(key)
           H[:a] << "z"
           HS["a"] << "z"
           HI[1] << "z"
           HF.fetch(:a) << 2
           HP.first[1] << 2
           HN.first << 2
+          HA[key] << "z"
         end
-        dump_type(H); dump_type(HS); dump_type(HI); dump_type(HF); dump_type(HP); dump_type(HN)
+        dump_type(H); dump_type(HS); dump_type(HI); dump_type(HF); dump_type(HP); dump_type(HN); dump_type(HA)
       RUBY
     end
 
@@ -547,6 +549,19 @@ RSpec.describe "Mutated constant census widening", type: :runner do
         puts "one" if SHUF[0].last == 1
         puts "one" if GROWN[0].last == 1
         puts "one" if KEPT[0].last == 1
+      RUBY
+    end
+
+    it "unpins a String literal or a nested nominal's literal an Array nominal's element type holds" do
+      expect(dumped_types(<<~RUBY)).to eq(["Array[String]", 'Array["a"]', "Array[Array[Array[Dynamic[top]]]]"])
+        NS = ["a"].shuffle
+        NK = ["a"].shuffle
+        NN = [[[1]].shuffle].shuffle
+        def grow
+          NS[0] << "c"
+          NN[0][0] << 2
+        end
+        dump_type(NS); dump_type(NK); dump_type(NN)
       RUBY
     end
 

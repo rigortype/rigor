@@ -532,8 +532,6 @@ gh pr create --draft --base master --head release/x.y.z \
 gh pr ready <pr>                 # at once: a Draft PR's CI is only the light gate
 # wait for the full run's required ci.yml gate on the head, not `gh pr checks --watch`
 # (docs/agents/contribution-flow.md § "GitHub and git traps"); repeat until SUCCESS or FAILURE
-# once no run on the head is in progress. A FAILURE whose run was cancelled is not red: re-run it
-# (that § "A cancelled full run reads FAILURE")
 bin/ci-required <full-head-sha>
 # only on the user's explicit word to land it, CI green, no stop instruction; bin/land-pr
 # refuses a release/** PR without RIGOR_RELEASE_APPROVED=1, so set it only on that word

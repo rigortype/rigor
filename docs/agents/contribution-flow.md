@@ -74,15 +74,18 @@ silently".
   returns `[]`). `gh run watch <id> --exit-status` can return while jobs are still running, so poll
   `gh run view <id> --json status` until it reads `completed`. On the master run after a merge,
   which is always full, the run's `conclusion` and `headSha` are the verdict. `gh pr view --json merged` is not a field; read `state`, `mergedAt` or `mergeCommit`.
-- **A cancelled full run reads FAILURE.** A push followed within seconds by `gh pr ready` starts
-  both runs in the same second, and the push's draft run can cancel the full one. That run's
-  `CI required` still runs, concludes FAILURE ("A required job did not succeed (result:
-  cancelled)"), and the surviving light run then adds SKIPPED (#3267, 2026-11-15). So
-  `bin/ci-required` prints FAILURE, then SKIPPED, and the head never gets a full run. Before
-  reading FAILURE as red, list the head's runs (`gh run list --commit <full-head-sha> --json
-  databaseId,conclusion`). Re-run a cancelled one with `gh run rerun <id>`, and wait for every run
-  on the head to complete before reading the verdict. Mark a PR ready only once its last push's run
-  has started.
+- **A cancelled full run reads FAILURE.** `CI required` runs under `if: always()`, so a full run
+  that is cancelled still concludes it, as FAILURE ("A required job did not succeed (result:
+  cancelled)"). A draft run that is cancelled concludes it CANCELLED instead. A newer push
+  superseding the head makes this harmless. The trap is a push followed within seconds by
+  `gh pr ready` on a non-release PR: both runs start in the same second, and the push's draft run
+  can cancel the full one. `bin/ci-required` then prints FAILURE, and once the light run finishes
+  SKIPPED, so the head never gets a full result (#3267, 2026-11-15). A `release/**` PR is exempt,
+  because `cancel-in-progress` is off for it. To recover, re-run the run whose `CI required` job
+  concluded FAILURE, found by the check-suite id `bin/ci-required` printed or with `gh run view
+  <id> --json jobs`. Do not re-run a cancelled draft run: a re-run keeps its draft payload, adds a
+  newer SKIPPED `CI required`, and that newest check becomes the verdict. To avoid the race, mark
+  a PR ready only once its last push's run has started.
 - **Stacked PRs.** Delete a parent branch only after the parent reads `MERGED` and its merge commit is
   an ancestor of `origin/master`: a queued parent is not merged yet, and deleting a queued PR's branch
   closes it. That applies to both kinds below. Two kinds of stack. A GitHub-native stack (`gh stack`)

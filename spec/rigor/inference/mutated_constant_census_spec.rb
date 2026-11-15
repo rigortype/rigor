@@ -393,22 +393,27 @@ RSpec.describe "Mutated constant census widening", type: :runner do
       RUBY
     end
 
-    it "widens the slot `dig`, `at`, `fetch`, a safe-navigated read or an unknown index reaches" do
-      expected = ["[[1], [#{wide}]]", "[#{wide}, [2]]", "[#{wide}, [2]]", "[#{wide}, [2]]", "[#{wide}, #{wide}]"]
+    it "widens the slot `dig`, `at`, `fetch`, a safe-navigated or parenthesised read or an unknown index reaches" do
+      expected = ["[[1], [#{wide}]]", "[#{wide}, [2]]", "[#{wide}, [2]]", "[[1], #{wide}]", "[#{wide}, [2]]",
+                  "[#{wide}, [2]]", "[#{wide}, #{wide}]"]
       expect(dumped_types(<<~RUBY)).to eq(expected)
         E = [[1], [[2]]].freeze
         F = [[1], [2]].freeze
         G = [[1], [2]].freeze
+        GB = [[1], [2]].freeze
         J = [[1], [2]].freeze
+        P = [[1], [2]].freeze
         I = [[1], [2]].freeze
         def grow(i)
           E.dig(1, 0) << 3
           F.at(0) << 3
           G.fetch(0, []) << 3
+          GB.fetch(1) { [] } << 3
           J&.[](0)&.<<(3)
+          (P[0]) << 3
           I[i] << 3
         end
-        dump_type(E); dump_type(F); dump_type(G); dump_type(J); dump_type(I)
+        dump_type(E); dump_type(F); dump_type(G); dump_type(GB); dump_type(J); dump_type(P); dump_type(I)
       RUBY
     end
 

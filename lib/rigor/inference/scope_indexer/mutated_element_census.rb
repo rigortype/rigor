@@ -63,12 +63,15 @@ module Rigor
         NO_ARGUMENTS = [].freeze
         private_constant :NO_ARGUMENTS
 
+        # A block is not looked at: the containers the census tracks are core `Array` / `Hash` values, whose readers
+        # ignore one or, as `fetch`'s does, answer a default only where no element exists. A splatted argument reads
+        # as a step that is not a literal, which can only widen more.
         def call_steps(call)
           arity = READERS[call.name]
-          return nil if arity.nil? || call.receiver.nil? || call.block
+          return nil if arity.nil? || call.receiver.nil?
 
           args = call.arguments&.arguments || NO_ARGUMENTS
-          return nil unless arity.cover?(args.size) && args.none? { |arg| spread?(arg) }
+          return nil unless arity.cover?(args.size)
 
           case call.name
           when :first, :last then [call.name]
@@ -76,8 +79,6 @@ module Rigor
           else [step_of(args.first)]
           end
         end
-
-        def spread?(arg) = arg.is_a?(Prism::SplatNode) || arg.is_a?(Prism::KeywordHashNode)
 
         def step_of(node)
           case node
@@ -102,16 +103,13 @@ module Rigor
           case type
           when Type::Tuple then widen_tuple(type, steps)
           when Type::HashShape then widen_hash_shape(type, steps)
-          when Type::Union then widen_members(type.members, steps) { |members| Type::Combinator.union(*members) }
-          when Type::Intersection
-            widen_members(type.members, steps) { |members| Type::Combinator.intersection(*members) }
+          when Type::Union then widen_members(type.members, steps)
           when Type::Dynamic
             inner = widen(type.static_facet, steps)
             inner && Type::Combinator.dynamic(inner)
           when Type::Difference
             inner = widen(type.base, steps)
             inner && Type::Combinator.difference(inner, type.removed)
-          when Type::Refined then widen(type.base, steps)
           # A nominal names no position, so whichever element was mutated, every one of them stops being pinned.
           when Type::Nominal then changed(type, ScopeIndexer.census_unpinned_content(type))
           end
@@ -144,7 +142,7 @@ module Rigor
             widened_any = true
             widened
           end
-          widened_any ? yield(rebuilt) : nil
+          widened_any ? Type::Combinator.union(*rebuilt) : nil
         end
 
         def widen_tuple(tuple, steps)

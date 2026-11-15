@@ -4900,6 +4900,26 @@ end
     end
   end
 
+  # #3243 — the containers a step passes through on the way to the element, asserted on the types because no read
+  # of a constant built in source spells these wrappers. The read-side face is
+  # `spec/rigor/inference/mutated_constant_census_spec.rb`.
+  describe "MutatedElementCensus.widen" do
+    let(:combinator) { Rigor::Type::Combinator }
+    let(:census) { Rigor::Inference::ScopeIndexer::MutatedElementCensus }
+    let(:nested) { combinator.tuple_of(combinator.tuple_of(combinator.constant_of(1)), combinator.constant_of(2)) }
+
+    it "widens through a Dynamic wrapper and a removal over a nominal, keeping both" do
+      expect(census.widen(combinator.dynamic(nested), [0]).describe)
+        .to eq("Dynamic[[Dynamic[Array[Dynamic[top]]], 2]]")
+      expect(census.widen(combinator.non_empty_array(nested), [:all, 0]).describe)
+        .to eq("non-empty-array[Array[Dynamic[top]]]")
+    end
+
+    it "leaves an immutable nominal element pinned" do
+      expect(census.widen(combinator.tuple_of(combinator.nominal_of("Integer")), [0])).to be_nil
+    end
+  end
+
   # Issue #1123 — the instance-side prepend table: `{class => [module names, as written]}` in
   # instance-ancestor SEARCH order. It adds the prepend ORDER and KIND the include table cannot carry
   # (that one keeps every mixin in search order since #1173 — prepends ahead of includes — but is read

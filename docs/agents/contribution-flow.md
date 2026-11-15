@@ -177,6 +177,17 @@ Once the change is implemented and `make verify-changed` passes:
    on every later push to the ready PR, and in the merge queue. Read the result for the head commit,
    not the branch (how: § "GitHub and git traps"). The changelog fragment needs the PR link, so it
    is a second push.
+
+   **A docs, skill or gate PR checks its own claims before review** (maintainer's decision,
+   2026-11-15, #2890). This covers a PR whose change is guidance an agent follows, such as
+   `docs/agents/`, an ADR, a skill, a workflow or a gate script. Run every command the change
+   documents, exactly as written, and re-derive every number with the method the text states.
+   Record what ran and what it printed in the PR body. If a claim cannot be checked locally, mark it
+   as read, not run. In the v0.4.8 window this cluster drew 10 of the 58 PRs with a severe finding.
+   On 2026-11-15 the reviews of #3267, #3270 and #3271 found figures that did not reproduce
+   (#3271), a command that could not run as written (#3267), a recovery step without the lookup it
+   needed (#3270), and another document's rule quoted wrongly (#3267). Each reviewer found its
+   finding by running what the author had not.
 2. **Start the adversarial review at the same time**, not after CI: the two are independent. The
    review reads the light run plus the local `make verify-changed`; the full run at `gh pr ready`
    and the merge queue's run on the merged result check what lands. The

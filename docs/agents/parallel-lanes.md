@@ -246,3 +246,10 @@ the existing PR. The v0.4.7 window
 measured why: four fresh fixers started on PRs whose lane had finished (#2454, #2584, #2594, #2587),
 against one in v0.4.6, and lanes #2503 and #2505, killed in an API outage, were redone by agents that
 re-derived the work (#2333).
+
+A PR from an external runner (takt, the Pi harness) has no lane to resume, so its fix round always
+takes this path (maintainer's decision, 2026-11-15, #2890). Brief the fixer as a takeover above,
+with the PR, its issue and the review report quoted. Pick the model by the findings: the small
+model when every finding is wording or specs, and the strongest when a fix touches Ruby-semantics
+logic (step 5). In the v0.4.8 window all five fresh fixers were for takt PRs (#3075, #3079, #3119,
+#3132, #3140), each briefed ad hoc, while those PRs drew one severe finding in 24.

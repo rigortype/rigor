@@ -44,10 +44,11 @@ on:
   merge_group:
   # A push to master reuses the merge queue's attested result (the changes
   # job), and a reused push run neither saves master's caches (the timing
-  # file, RuboCop's and the warm self-check's) nor checks master in full.
-  # This daily run does both, at a quiet hour for the queue.
+  # file, RuboCop's, the warm self-check's, every Ruby job's bundle cache,
+  # the Nix store) nor checks master in full. This daily run does both, at
+  # 04:37 UTC, inside the 03-07 UTC band when ci.yml runs least.
   schedule:
-    - cron: "37 18 * * *"
+    - cron: "37 4 * * *"
 
 # A release or feature branch is validated through its pull request (the
 # `pull_request` event), so release/** is deliberately NOT listed under
@@ -154,7 +155,7 @@ jobs:
             if [ -n "$push_tree" ]; then
               printf '%s' "$push_tree" > "$RUNNER_TEMP/tested-tree"
               # The queue merges as soon as "CI required" passes, and the
-              # attestation is written just after it, so wait briefly for it.
+              # attestation is written just after it, so wait about 100s for it.
               for attempt in 1 2 3 4 5 6; do
                 signers=$(gh attestation verify "$RUNNER_TEMP/tested-tree" --repo "$REPO" \
                     --signer-workflow "$REPO/.github/workflows/ci.yml" --deny-self-hosted-runners \
@@ -1201,7 +1202,7 @@ jobs:
   # Cold this compiles Ruby 4.0 from source (5m14s in run 38463001705,
   # 4m43s of it the build); a warm store cache makes a rerun much
   # cheaper. It is gated because it is unrelated to most PRs, not because
-  # it is prohibitive. Master pushes run it too, as a post-merge check.
+  # it is prohibitive. A full master push and the daily scheduled run also run it, as a post-merge check.
   nix-package:
     name: Nix package
     needs: changes

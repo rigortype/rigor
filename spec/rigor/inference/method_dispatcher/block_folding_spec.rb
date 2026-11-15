@@ -307,36 +307,58 @@ RSpec.describe Rigor::Inference::MethodDispatcher::BlockFolding do
   # Issue #3242 — a class outside the core collections may define these methods itself, so the folds that
   # read no receiver shape decline on its nominal and the RBS / project tier answers.
   describe "receivers outside the core collections" do
-    def project_nominal = Rigor::Type::Combinator.nominal_of("Bag")
+    c = Rigor::Type::Combinator
+    project = c.nominal_of("Bag")
+    core = c.nominal_of("Array", type_args: [c.nominal_of("Integer")])
+    member = { x: c.nominal_of("Integer") }
 
-    %i[find detect find_index count all? any? none?].each do |method|
-      it "declines `#{method} { false }` on a project nominal" do
-        expect(fold(receiver: project_nominal, method: method, block: false_const)).to be_nil
+    # Each receiver here may define these methods itself (or, for a scalar, lack them), so every fold declines.
+    {
+      "a project nominal" => project,
+      "a union holding a project nominal" => c.union(c.tuple_of(c.nominal_of("Integer")), project),
+      "a Difference over a project nominal" => c.difference(project, c.tuple_of),
+      "a Refined over a project nominal" => Rigor::Type::Refined.new(project, :non_empty),
+      "an Intersection with a project nominal" => Rigor::Type::Intersection.new([project, c.nominal_of("Comparable")]),
+      "a Dynamic over a project nominal" => c.dynamic(project),
+      "a Singleton (a class object's own `def self.find`)" => c.singleton_of("Repo"),
+      "a DataInstance" => c.data_instance_of(members: member, class_name: "Point"),
+      "a DataClass" => c.data_class_of(members: member.keys, class_name: "Point"),
+      "a StructInstance" => c.struct_instance_of(members: member, class_name: "Cell"),
+      "a StructClass" => c.struct_class_of(members: member.keys, class_name: "Cell"),
+      "a non-collection Constant" => c.constant_of(1)
+    }.each do |label, receiver|
+      %i[find detect find_index count all? any? none?].each do |method|
+        it "declines `#{method} { false }` on #{label}" do
+          expect(fold(receiver: receiver, method: method, block: false_const)).to be_nil
+        end
       end
 
-      it "declines `#{method} { false }` on a union holding a project nominal" do
-        receiver = Rigor::Type::Combinator.union(tuple_of(integer_nominal), project_nominal)
-        expect(fold(receiver: receiver, method: method, block: false_const)).to be_nil
+      %i[count all? any? none?].each do |method|
+        it "declines `#{method} { true }` on #{label}" do
+          expect(fold(receiver: receiver, method: method, block: true_const)).to be_nil
+        end
       end
     end
 
-    it "declines on a Difference over a project nominal" do
-      receiver = Rigor::Type::Combinator.difference(project_nominal, tuple_of)
-      expect(fold(receiver: receiver, method: :find, block: false_const)).to be_nil
-    end
-
-    # Guard: the allowlist and the Dynamic path keep folding (fails only if a core name is dropped).
-    it "keeps the folds on core nominals and on a Dynamic receiver" do
-      %w[Array Hash Set Range Enumerator Enumerator::Lazy Enumerable].each do |name|
-        receiver = Rigor::Type::Combinator.nominal_of(name)
+    # Each receiver here is a core collection or enumerable, so the folds stand.
+    {
+      "Top" => c.top,
+      "Dynamic[top]" => c.untyped,
+      "a Constant Range" => c.constant_of(1..3),
+      "a Difference over a core nominal" => c.non_empty_array(c.nominal_of("Integer")),
+      "a Refined over a core nominal" => Rigor::Type::Refined.new(core, :non_empty),
+      "an Intersection of core nominals" => Rigor::Type::Intersection.new([core, c.nominal_of("Enumerable")]),
+      "a union of core carriers" => c.union(c.tuple_of(c.nominal_of("Integer")), c.constant_of(1..3)),
+      **%w[
+        Array Hash Set Range Enumerable Enumerator Enumerator::Lazy Enumerator::ArithmeticSequence
+        Enumerator::Chain Enumerator::Product Dir RBS::Unnamed::ENVClass
+      ].to_h { |name| ["the core nominal #{name}", c.nominal_of(name)] }
+    }.each do |label, receiver|
+      it "keeps the find / count / any? folds on #{label}" do
         expect(fold(receiver: receiver, method: :find, block: false_const)).to eq(constant_of(nil))
         expect(fold(receiver: receiver, method: :count, block: false_const)).to eq(constant_of(0))
         expect(fold(receiver: receiver, method: :any?, block: false_const)).to eq(false_const)
       end
-      dynamic = Rigor::Type::Combinator.untyped
-      expect(fold(receiver: dynamic, method: :find, block: false_const)).to eq(constant_of(nil))
-      expect(fold(receiver: dynamic, method: :count, block: false_const)).to eq(constant_of(0))
-      expect(fold(receiver: non_empty_array(integer_nominal), method: :all?, block: false_const)).to eq(false_const)
     end
   end
 

@@ -4076,7 +4076,7 @@ module Rigor
       # expression is the collection's `each` value joined with every `break` value ({#for_value}, issue #1216).
       def eval_for(node)
         coll_type, post_coll = sub_eval(node.collection, scope)
-        body_entry = for_body_entry(node, for_iteration_element_type(coll_type), post_coll)
+        body_entry = for_body_entry(node, for_iteration_element_type(coll_type, node.index), post_coll)
 
         if node.statements.nil?
           return [for_value(node, coll_type, post_coll, NO_BREAK_ARMS),
@@ -4241,9 +4241,17 @@ module Rigor
       # consult RBS and the iterator dispatch table (they know, e.g., that `Hash[K, V]#each` yields `[K, V]` even when
       # the receiver is not a literal Hash carrier in our local lattice). When the dispatcher returns nothing (no
       # signature, unknown receiver) the structural answer stands.
-      def for_iteration_element_type(coll_type)
+      #
+      # Issue #3205 — the index binds as a block's parameters do: a single target (`for b in`) takes the first yielded
+      # value, a multi-target (`for a, b in`) or splat (`for *s in`) index all of them. So an `each` declared to yield
+      # several values (`{ (A, B) -> void }`) binds a single target to `A`, and an `Enumerator` whose element is a
+      # tuple binds it to `Dynamic[top]` ({#ambiguous_enumerator_yield?}).
+      def for_iteration_element_type(coll_type, index)
+        single = !index.is_a?(Prism::MultiTargetNode) && !index.is_a?(Prism::SplatNode)
         structural = collection_element_type(coll_type)
-        return structural unless Type::Combinator.untyped?(structural)
+        unless Type::Combinator.untyped?(structural)
+          return single && ambiguous_enumerator_yield?(coll_type, structural) ? Type::Combinator.untyped : structural
+        end
 
         block_params = MethodDispatcher.expected_block_param_types(
           receiver_type: coll_type,
@@ -4253,10 +4261,19 @@ module Rigor
           scope: scope
         )
         return structural if block_params.nil? || block_params.empty?
+        return block_params.first if single
 
         block_params.size == 1 ? block_params.first : Type::Combinator.tuple_of(*block_params)
       rescue StandardError
         Type::Combinator.untyped
+      end
+
+      # An `Enumerator[[A, B]]` does not say whether its `each` yields the two values (`each_with_index`,
+      # `each_with_object`, `Hash#select`: a single target binds `A`) or one array (`Hash#each`, `Array#each` over
+      # pairs: it binds `[A, B]`). A single target over such an enumerator binds neither guess.
+      def ambiguous_enumerator_yield?(coll_type, element)
+        coll_type.is_a?(Type::Nominal) && coll_type.class_name == "Enumerator" &&
+          element.is_a?(Type::Tuple) && element.elements.size >= 2
       end
 
       # Binds the `for` index variable(s) into `scope`. A single `LocalVariableTargetNode` is bound to `element_type`

@@ -181,15 +181,18 @@ Once the change is implemented and `make verify-changed` passes:
    **A PR that changes agent guidance or a gate checks its own claims before review**
    ([maintainer's ruling](https://github.com/rigortype/rigor/issues/2890#issuecomment-6897951109),
    2026-11-15). It covers any PR, code PRs included, that edits `AGENTS.md`, `CLAUDE.md`,
-   `docs/agents/`, an ADR, the binding specs, a skill, a `.github/workflows/` or `.takt/` workflow,
-   or a script a gate runs. The check has three parts, and the PR body records each claim's result.
+   `docs/agents/`, an ADR, a skill, a `.github/workflows/` or `.takt/` workflow, or a script a gate
+   runs. A spec edit that records an engine change is not in scope. The check has three parts, and
+   the PR body records each claim's result.
+
    - Run every read-only command the change documents, with its placeholders filled in, and record
      what it printed.
    - Re-derive every number by the method the text states.
    - Open every rule the change quotes or paraphrases from another file, and compare.
+
    Never run a command that pushes, merges, marks a PR ready, re-runs CI, publishes or posts just to
    check it. Check its syntax and preconditions instead (`--help`, a `gh api` read, a dry run) and
-   record it as not run, with the reason. A claim blocked by missing data or network is recorded as
+   record it as `not run: <reason>`. A claim blocked by missing data or network is recorded as
    `not checked: <what blocked it>`. `read, not run` stays the reviewer contract's label for a claim
    no run could show. In the v0.4.8 window, PRs that changed docs, skills, gates or ADRs made up 10
    of the 58 PRs with a severe finding. On 2026-11-15 the reviews of #3267, #3270 and #3271 found

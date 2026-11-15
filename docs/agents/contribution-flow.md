@@ -82,8 +82,11 @@ silently".
   can cancel the full one. `bin/ci-required` then prints FAILURE, and once the light run finishes
   SKIPPED, so the head never gets a full result (#3267, 2026-11-15). A `release/**` PR is exempt,
   because `cancel-in-progress` is off for it. To recover, re-run the run whose `CI required` job
-  concluded FAILURE, found by the check-suite id `bin/ci-required` printed or with `gh run view
-  <id> --json jobs`. Do not re-run a cancelled draft run: a re-run keeps its draft payload, adds a
+  concluded FAILURE. List the head's `CI required` checks with their suites (`gh api
+  "repos/rigortype/rigor/commits/<full-head-sha>/check-runs?check_name=CI%20required&filter=all"
+  --jq '.check_runs[]|[.conclusion,.check_suite.id]'`), then map the FAILURE one's suite to its
+  run (`gh api "repos/rigortype/rigor/actions/runs?check_suite_id=<id>" --jq
+  '.workflow_runs[].id'`) and `gh run rerun` it. Do not re-run a cancelled draft run: a re-run keeps its draft payload, adds a
   newer SKIPPED `CI required`, and that newest check becomes the verdict. To avoid the race, mark
   a PR ready only once its last push's run has started.
 - **Stacked PRs.** Delete a parent branch only after the parent reads `MERGED` and its merge commit is

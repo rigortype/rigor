@@ -193,6 +193,18 @@ The same failure inside the suite: a green example that would stay green with th
   Spawn through `RubyRun.capture` (`spec/support/ruby_run.rb`) or `Bundler.with_unbundled_env`.
 - **A decline assertion (`to be_nil`) passes on any construction error**, which also yields nil.
   Pair it with the neighbouring case that must succeed.
+- **A local formatter hook can rewrite the `.rb` file you just edited.** `.claude/settings.json` is not
+  tracked, but a local one may run `rubocop --autocorrect` after each Edit or Write of a
+  `.rb` file, and even safe-only autocorrect changes what a fixture says: multi-line `->(x) do`
+  becomes `lambda do |x|` (`Style/Lambda`), `/a\-b/` loses its escape
+  (`Style/RedundantRegexpEscape`), and void literals and unused assignments are deleted
+  (`Lint/Void`, `Lint/UselessAssignment`). The mangled code still runs and still passes. Under an
+  earlier RuboCop the `*` was stripped from `tuple(*Array.new(65) { … })`, leaving a one-element
+  tuple, so the example tested a shape decline instead of the 64-pair limit it claimed, and shipped
+  that way (fb4aca115); `Lint/RedundantSplatExpansion` still strips `tuple(*[a, b])` and
+  `[*Array.new(n) { … }]`. Write syntax-sensitive fixtures and repros through a shell heredoc (or as
+  `.txt`, then copy), re-read the region after any Edit or Write of a `.rb` file, and prefer a
+  construction with nothing to strip (`Rigor::Type::Tuple.new(array)` over `tuple(*array)`).
 - **A failure that passes when its file runs alone is spec order.** Rerun the pair with `--order
   defined` to find the spec that polluted shared state; v0.4.3's `lens_spec` failed only after a spec
   that required the plugin directly, which left the plugin loader's gem-to-id memo unrecorded.

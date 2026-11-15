@@ -47,6 +47,13 @@ the WD6 condition ③ check that the engine survives the WASI sandbox:
 rake smoke          # prints the /check JSON for `x = nil; x.upcase`
 ```
 
+To check the page from an agent in the Claude desktop app's Browser pane, serve it through
+`preview_start`: the pane's tools cannot attach to a `file://` page, and navigating to a raw
+`http://localhost:PORT` is blocked. Add a static-server entry to `.claude/launch.json` (ignored by
+git) running `python3 -m http.server <port> --directory apps/rigor-playground/wasm`, start it by
+name, and inline any data the page fetches. Without a built `.wasm` the engine reports "Engine
+failed" while the editor and UI still render.
+
 ## Why a from-source build (the load-bearing detail)
 
 Rigor's only C-extension runtime dependencies are **`prism`** (CRuby's parser —

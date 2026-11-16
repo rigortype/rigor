@@ -176,8 +176,9 @@ point after which undoing costs users something, so it is where post-hoc approva
   remains. CI's change detection fails any run that changes `lib/rigor/version.rb` while an entry
   remains, the merge-queue run included, which no branch-name check can see. The serious list
   covers its own edits, so the line cannot be moved by precedent.
-- **WD5 — the queue's settings.** Merge method "merge commit", required check `CI required`,
-  groups of up to five, all entries green. The repository administrator role may bypass, which keeps
+- **WD5 — the queue's settings.** Merge method "merge commit", required checks `CI required` and,
+  since 2026-11-16 (maintainer's decision, #2620), `verify-lockfile`; groups of up to five, all
+  entries green. The repository administrator role may bypass, which keeps
   Markdown-only commits straight to `master` possible; agents do not use `gh pr merge --admin`.
   Auto-merge stays off, so a PR enters the queue only when an agent or the maintainer queues it.
 

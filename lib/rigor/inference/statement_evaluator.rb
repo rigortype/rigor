@@ -3500,6 +3500,7 @@ module Rigor
         result
       end
 
+      # A loop's evaluation, with its value recorded for `ExpressionTyper#type_of_loop` ({LoopValueRecord}).
       def eval_recorded_loop(node) = record_loop_value(node, eval_loop(node))
 
       def eval_recorded_for(node) = record_loop_value(node, eval_repeating_for(node))
@@ -6701,8 +6702,8 @@ module Rigor
       # applies when either mutates. Ruby calls only the singleton side, but the hand-offs that reach an instance def
       # from there (`new.call(acc)`, `instance.helper(acc)`) and the singleton defs the index does not record
       # (`module_function :poke`, `define_singleton_method`, `alias_method` in `class << self`) are not followed, and
-      # dropping the instance def floored too little on correct code (ratified in #2394). An instance-side body resolves
-      # to instance defs only.
+      # dropping the instance def floored too little on correct code (decided in #2394, ratified in #2501). An
+      # instance-side body resolves to instance defs only.
       #
       # A `send(:name, ...)` / `public_send(:name, ...)` with a symbol literal resolves as the self-call `name(...)`,
       # offset 1, on each side that has no def of the `send` / `public_send` name itself; on a side that has one, it is
@@ -6977,6 +6978,7 @@ module Rigor
         node.is_a?(Prism::ConstantPathNode) && node.parent.nil? && FRESH_CONSTRUCTED.include?(node.name)
       end
 
+      # The calls whose result {#callee_write_census} reads as a new object rather than an alias of the receiver.
       FRESH_DUPLICATORS = %i[dup clone].to_set.freeze
       FRESH_CONSTRUCTED = %i[Array Hash String Set].to_set.freeze
       FRESH_COPIERS = %i[map collect select reject merge + -].to_set.freeze

@@ -6921,7 +6921,9 @@ module Rigor
       end
 
       # The two flags an eval-family block body gives a def-owning walk: the
-      # `in_singleton_class` its calls on the receiver-as-module inherit, and the
+      # `in_singleton_class` its calls on the receiver-as-module inherit (a named receiver opens
+      # that class's OWN body, so `false`; a bare or `self` receiver keeps the enclosing context, so
+      # `class << self; class_eval { include M }` stays a singleton-ancestor edge), and the
       # `defs_singleton` its `def`/`alias` leaves record under — `true` when they
       # bind on the receiver's singleton, `:unnameable` when that singleton is one
       # nothing names. `instance_eval` splits the surfaces for a class receiver —
@@ -8641,8 +8643,8 @@ module Rigor
       # `[[owner, side], …]` — the ancestry sides a mixin call reshapes. `self` and the implicit receiver
       # are the enclosing class (`:include` for `include` / `prepend`, `:extend` for `extend`; inside
       # `class << self` `include` / `prepend` flip to `:extend` and `extend` names no owner); `singleton_class` is the
-      # singleton side; a constant is that class; any other receiver is unknown, so it may be the class that includes
-      # this one from a hook (`base.include M`) and taints both sides of the enclosing class.
+      # singleton side; a constant is that class; any other receiver reshapes nothing, except a hook parameter
+      # (`base.include M` in `self.included(base)`), which taints both sides of the enclosing class.
       def mixin_effects(node, kind, qualified_prefix, current_class, accumulator, in_singleton:)
         receiver = node.receiver
         side = kind == :extend ? :extend : :include

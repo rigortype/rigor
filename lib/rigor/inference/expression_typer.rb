@@ -3796,6 +3796,32 @@ module Rigor
       )
       private_constant :SUMMARY_CONSULT_DEPTHS
 
+      # ADR-129 WD3 — the return memo's entry protocol. The slot holds `[generation, bucket]` ({#return_memo_bucket}),
+      # and a journal record keys an entry on `[def_node, memo_key]`. A replay writes into the bucket the slot holds: a
+      # `type_of` memo entry lives no longer than its file's analysis, inside one run generation, so a slot with no
+      # bucket means the entry outlived its run, which is a defect to surface rather than a bucket to invent.
+      module ReturnMemoEntries
+        module_function
+
+        def entry(slot_value, key)
+          per_def = slot_value&.[](1)&.[](key[0])
+          per_def.nil? ? TypingState::ABSENT : per_def.fetch(key[1], TypingState::ABSENT)
+        end
+
+        def put(slot_value, key, value)
+          (slot_value[1][key[0]] ||= {})[key[1]] = value
+        end
+
+        def delete(slot_value, key)
+          per_def = slot_value && slot_value[1][key[0]]
+          per_def&.delete(key[1])
+        end
+
+        def container(state, slot)
+          state[slot] || raise(ArgumentError, "no return memo bucket to replay into: its entry outlived its run")
+        end
+      end
+
       # ADR-57 follow-up — run-scoped memo for resolved user-method return types. The ADR-57 gate-open made
       # every resolved in-body self-call adopt the callee's inferred return, which re-types the callee body
       # once per call site. With a project-wide discovery index, file N re-types callees defined in files
@@ -3843,32 +3869,7 @@ module Rigor
       # when it ends ({RunScopedSlots}; `Runner#run` keeps its bucket for `#return_summaries`).
       # `ExpressionTyper` is rebuilt per `Scope#type_of`, so the store lives in the thread's {TypingState}; fork-pool
       # workers are separate processes, so it never crosses a project boundary (ADR-84 WD5).
-      # ADR-129 WD3 — the return memo's entry protocol. The slot holds `[generation, bucket]` ({#return_memo_bucket}),
-      # and a journal record keys an entry on `[def_node, memo_key]`. A replay writes into the bucket the slot holds: a
-      # `type_of` memo entry lives no longer than its file's analysis, inside one run generation, so a slot with no
-      # bucket means the entry outlived its run, which is a defect to surface rather than a bucket to invent.
-      module ReturnMemoEntries
-        module_function
-
-        def entry(slot_value, key)
-          per_def = slot_value&.[](1)&.[](key[0])
-          per_def.nil? ? TypingState::ABSENT : per_def.fetch(key[1], TypingState::ABSENT)
-        end
-
-        def put(slot_value, key, value)
-          (slot_value[1][key[0]] ||= {})[key[1]] = value
-        end
-
-        def delete(slot_value, key)
-          per_def = slot_value && slot_value[1][key[0]]
-          per_def&.delete(key[1])
-        end
-
-        def container(state, slot)
-          state[slot] || raise(ArgumentError, "no return memo bucket to replay into: its entry outlived its run")
-        end
-      end
-
+      #
       # ADR-129 WD1 — a Table, not a Memo: its WD3 serves a standalone result where a fresh compute inside a cycle
       # would be tainted, and its WD6 serves a stored `untyped`, so it is not extensional. Its reads and stores are
       # journaled ({#log_return_memo}).

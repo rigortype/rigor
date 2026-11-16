@@ -206,7 +206,7 @@ module Rigor
           end
         end
 
-        # ADR-10 § "Diagnostic prefix family" / 5d — surfaces `Configuration::Dependencies` warnings
+        # ADR-10 § "Public-API drift surface" — surfaces `Configuration::Dependencies` warnings
         # accumulated during `from_h` deduplication of the `includes:`-chain source_inference array. Each
         # warning describes a per-gem mode conflict that the merge resolved right-wins; the user sees one
         # diagnostic per conflict. `:warning` matches the user's "warn but don't block" preference per the

@@ -3130,6 +3130,7 @@ module Rigor
       mine.merge(theirs).freeze
     end
 
+    # ADR-58 WD1 — set/clear the declaration-sourced provenance mark.
     def add_declaration_sourced(kind, name)
       ref = [kind.to_sym, name.to_sym]
       return @declaration_sourced if @declaration_sourced.include?(ref)

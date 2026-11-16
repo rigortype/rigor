@@ -49,9 +49,9 @@ Local runs are targeted; the full gate is CI on the pull request.
 
 - Between edits: `make verify-quick` — whitespace, RuboCop, and the specs the diff names directly: a
   changed spec, a changed file's mirror spec and mirror directory (up to 30 specs), the specs reading
-  a changed fixture, and for a plugin or example file the integration specs that load it. For a `lib/`, `sig/` or `data/` change it adds none
-  of the whole-engine drift specs (a plugin or fixture path still selects the gates named for it), the
-  "flip this when" pins, the incremental not-re-checked specs, the two all-plugin conformance specs,
+  a changed fixture, and for a plugin or example file the integration specs that load it. For a `lib/`, `sig/` or `data/`
+  change it adds none of the whole-engine drift specs (a plugin or fixture path still selects the gates
+  named for it), the "flip this when" pins, the incremental not-re-checked specs, the two all-plugin conformance specs,
   `spec/docs/` or the `rigor check` self-check, and says so; it is not a pre-push check. One measured
   run: 5 s for a one-line edit to `lib/rigor/inference/statement_evaluator.rb`, which selects one spec
   file (load average about 6).

@@ -1,0 +1,35 @@
+# Line budgets for every lib/ Ruby file of 1,000 or more lines (ADR-116 WD0, #1192).
+#
+# One row per file: `<path>: <budget>`. The gate is spec/docs/lib_file_budgets_spec.rb, and its
+# header states the rule: a budget is a multiple of 100, at least the file's line count and less than
+# 200 above it. The rows below are the smallest multiple of 100 that holds each file when they were set;
+# the gate accepts any multiple in that range.
+# A file that grows past its budget fails the gate; a split lowers its row; a new file of 1,000 lines
+# gets a row. Raising a budget is a reviewed diff in the PR that needs it, with the reason in its body.
+#
+# Counts are `wc -l` (physical lines), taken at the commit this file was last regenerated against.
+lib/rigor/analysis/check_rules.rb: 5300
+lib/rigor/analysis/incremental_session.rb: 2100
+lib/rigor/analysis/rule_catalog.rb: 1300
+lib/rigor/analysis/runner.rb: 3100
+lib/rigor/analysis/runner/diagnostic_aggregator.rb: 1600
+lib/rigor/analysis/runner/pool_coordinator.rb: 1200
+lib/rigor/cli/check_command.rb: 1300
+lib/rigor/configuration.rb: 1400
+lib/rigor/environment/rbs_loader.rb: 4100
+lib/rigor/inference/acceptance.rb: 1400
+lib/rigor/inference/expression_typer.rb: 7300
+lib/rigor/inference/method_dispatcher.rb: 1900
+lib/rigor/inference/method_dispatcher/constant_folding.rb: 2100
+lib/rigor/inference/method_dispatcher/rbs_dispatch.rb: 2600
+lib/rigor/inference/method_dispatcher/shape_dispatch.rb: 2400
+lib/rigor/inference/narrowing.rb: 4200
+lib/rigor/inference/scope_indexer.rb: 14200
+lib/rigor/inference/statement_evaluator.rb: 10400
+lib/rigor/plugin/base.rb: 1400
+lib/rigor/scope.rb: 3300
+lib/rigor/scope/resolution_chain.rb: 2000
+lib/rigor/sig_gen/generator.rb: 3100
+lib/rigor/sig_gen/writer.rb: 1100
+lib/rigor/type/combinator.rb: 1300
+lib/rigor/typing_state.rb: 1100

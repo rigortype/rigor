@@ -1,7 +1,7 @@
 # ADR-116 — Restructuring the engine's hot files: declare each growing kind once, walk each traversal once
 
-Status: **Accepted, 2026-09-23; WD5 amended 2026-09-27 (context-rule variants, below).** WD5 is in
-progress. Its first slice (#1517: the discovery-table shadow harness, the context model,
+Status: **Accepted, 2026-09-23; WD5 amended 2026-09-27 (context-rule variants, below).** WD0 (#1192) has landed.
+WD5 is in progress. Its first slice (#1517: the discovery-table shadow harness, the context model,
 `class_cvars`) and its second (#1522: the superclass tables, with the first variants) put two tables
 on the walk. Its third (#1527: the def-nesting and member-layout tables) makes the walk shared: it
 builds five tables in one run per file. This ADR fixes the direction, the three criteria, and the
@@ -94,6 +94,11 @@ never chooses the cut.
 
   The inline cop disables stay; the ratchet is the control. It lands first, so the budgets exist
   before the splits shrink them.
+  WD0 has landed: the gate is `spec/docs/lib_file_budgets_spec.rb`, its budgets are in
+  `spec/docs/lib_file_budgets.yml`. A budget is a multiple of 100 that is at least its file's line count and less than 200 above it,
+  not the exact count: a bucket keeps in-flight PRs on one file from editing the same row. The rows
+  start at the smallest such multiple; growth inside a bucket is not gated. The rule and its reasons
+  are in the gate's header.
 - **WD1 — `CheckRules` by rule (#1193).** `call_node_diagnostics` (`check_rules.rb` ~L267) already
   calls ten rule entries in sequence. Each rule becomes a `check_rules/<rule>.rb` module with one entry.
   Suppression parsing (~L447–660) becomes one more module, and the shared receiver predicates

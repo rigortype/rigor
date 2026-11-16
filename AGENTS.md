@@ -56,8 +56,10 @@ Local runs are targeted; the full gate is CI on the pull request.
   run: 5 s for a one-line edit to `lib/rigor/inference/statement_evaluator.rb`, which selects one spec
   file (load average about 6).
 - Before pushing: `make verify-changed` — whitespace, RuboCop, the affected specs, `spec/docs/`, and
-  `rigor check` over what the branch changed, in under a minute. It lists what it cannot cover; CI
-  decides those. Give it, and any rspec run, stdin from `/dev/null`: an agent shell's stdin never
+  `rigor check` over what the branch changed. It takes under a minute for a change outside the engine
+  and about three for one under `lib/`, `sig/` or `data/`, which adds the whole-engine drift specs
+  (195 s measured for `lib/rigor/inference/statement_evaluator.rb`, 2026-11-17). It lists what it
+  cannot cover; CI decides those. Give it, and any rspec run, stdin from `/dev/null`: an agent shell's stdin never
   closes, so a spec that reads it hangs at 0% CPU.
 - Do not run `make verify`, `make check`, or the whole suite locally. Parallel sessions each running
   it were the bottleneck (five at once took 12–20 minutes each), and CI runs a superset. Run one

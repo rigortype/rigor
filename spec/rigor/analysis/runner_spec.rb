@@ -703,8 +703,8 @@ RSpec.describe Rigor::Analysis::Runner do
     # which does not exist in this test at all; what protects `Widget.new.ttl.round` here is
     # `CheckRules::ReceiverPredicates::GEM_OVERLAY_OPEN_RECEIVERS`, GATED on the loaded RBS actually
     # including the `data/gem_overlay/activesupport/` directory (`ReceiverPredicates.gem_overlay_loaded?`) —
-    # which this test's Gemfile.lock (below) makes true. The must-NOT-protect sibling right after this one locks NO gem at
-    # all and shows the same class name getting NO exemption without that.
+    # which this test's Gemfile.lock (below) makes true. The must-NOT-protect sibling right after this one locks NO
+    # gem at all and shows the same class name getting NO exemption without that.
     def run_duration_reader_project(tmpdir)
       FileUtils.mkdir_p(File.join(tmpdir, "sig"))
       File.write(File.join(tmpdir, "Gemfile.lock"), gemfile_lock_content("activesupport"))

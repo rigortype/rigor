@@ -1,4 +1,4 @@
-.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test test-binpacker test-ractor-pool lint check check-plugins check-incremental check-mutation-cache docs-check verify verify-changed verify-parallel check-json extract-builtin-catalogs catalog-diff steep-install steep-check steep cache-clean
+.PHONY: setup install init-git-config init-submodules pull-submodules doctor-submodules test test-binpacker test-ractor-pool lint check check-plugins check-incremental check-mutation-cache docs-check verify verify-changed verify-quick verify-parallel check-json extract-builtin-catalogs catalog-diff steep-install steep-check steep cache-clean
 
 REFERENCE_SUBMODULES := \
 	references/rbs \
@@ -296,6 +296,12 @@ verify-sequential: test test-ractor-pool test-integration-plugins lint check che
 # full gate stays the PR's full CI run (at gh pr ready); see bin/verify-changed.
 verify-changed:
 	@bin/verify-changed
+
+# The edit-loop tier of verify-changed: the directly selected specs only, in
+# seconds. It skips the drift specs, pins, spec/docs/ and the self-check, so it
+# is not the pre-push gate; run `make verify-changed` before pushing.
+verify-quick:
+	@bin/verify-changed --quick
 
 # Backward-compatible alias for the previous `verify-parallel`
 # target name. Identical to `verify` now that parallel is the

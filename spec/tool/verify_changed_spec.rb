@@ -19,10 +19,11 @@ RSpec.describe "bin/verify-changed spec selection" do
   let(:root) { File.expand_path("../..", __dir__) }
 
   # [selected spec paths, uncovered fixture paths] for the given changed paths.
-  def selection_for(*paths)
+  def selection_for(*paths, quick: false)
     env = { "VERIFY_CHANGED_PATHS" => paths.join("\n") }
+    args = ["HEAD", *("--quick" if quick), "--list-specs"]
     out, err, status = Bundler.with_unbundled_env do
-      Open3.capture3(env, script, "HEAD", "--list-specs", chdir: root)
+      Open3.capture3(env, script, *args, chdir: root)
     end
     expect(status.exitstatus).to eq(0), "#{out}\n#{err}"
     specs = out.lines.map(&:strip).reject(&:empty?)
@@ -214,5 +215,98 @@ RSpec.describe "bin/verify-changed spec selection" do
     specs, uncovered = selection_for(path)
     expect(specs).to be_empty
     expect(uncovered).to include(path)
+  end
+
+  # #3277: a module with a spec directory and no same-named spec. Before the
+  # directory rule, check_rules.rb selected none of spec/rigor/analysis/check_rules/.
+  describe "the directory mirror rule" do
+    it "selects every spec under the mirror directory when there is no same-named spec" do
+      expect(File.exist?(File.join(root, "spec/rigor/analysis/check_rules_spec.rb"))).to be(false)
+      expected = Dir.glob("spec/rigor/analysis/check_rules/**/*_spec.rb", base: root)
+      expect(expected.length).to be > 5
+      [false, true].each do |quick|
+        specs, = selection_for("lib/rigor/analysis/check_rules.rb", quick: quick)
+        expect(specs).to include(*expected), "quick=#{quick}"
+      end
+    end
+
+    it "adds the directory to the same-named spec when both exist" do
+      expect(File.exist?(File.join(root, "spec/rigor/inference/method_dispatcher_spec.rb"))).to be(true)
+      specs, = selection_for("lib/rigor/inference/method_dispatcher.rb", quick: true)
+      expect(specs).to include("spec/rigor/inference/method_dispatcher_spec.rb")
+      expect(specs).to include("spec/rigor/inference/method_dispatcher/argument_distribution_spec.rb")
+    end
+
+    it "does not pull in a sibling module's directory" do
+      specs, = selection_for("lib/rigor/analysis/check_rules.rb", quick: true)
+      expect(specs.grep(%r{\Aspec/rigor/analysis/(?!check_rules/)})).to be_empty
+    end
+
+    it "selects nothing for a path with no spec and no spec directory" do
+      specs, = selection_for("lib/rigor/zz_no_such_module_3277.rb", quick: true)
+      expect(specs).to be_empty
+    end
+  end
+
+  # #3277: the quick tier is the edit-loop check; the default mode keeps every
+  # selection it had.
+  describe "--quick" do
+    let(:engine_path) { "lib/rigor/inference/statement_evaluator.rb" }
+    let(:drift) do
+      %w[spec/integration/precision_snapshot_spec.rb spec/rigor/public_api_drift_spec.rb
+         spec/rigor/sig_gen/provenance_spec.rb spec/rigor/scope/ancestry_walker_detection_spec.rb]
+    end
+
+    it "selects only the mirror spec for an engine path, where the default adds the drift set" do
+      quick, = selection_for(engine_path, quick: true)
+      expect(quick).to eq(["spec/rigor/inference/statement_evaluator_spec.rb"])
+      full, = selection_for(engine_path)
+      expect(full).to include("spec/rigor/inference/statement_evaluator_spec.rb", *drift)
+    end
+
+    it "omits the incremental not-re-checked specs that a dependency-recording edit adds by default" do
+      path = "lib/rigor/analysis/dependency_recorder.rb"
+      quick, = selection_for(path, quick: true)
+      full, = selection_for(path)
+      incremental = full.grep(/incremental/)
+      expect(incremental).not_to be_empty
+      expect(quick.grep(/incremental/)).to be_empty
+    end
+
+    it "still runs a changed spec file" do
+      spec = "spec/rigor/inference/statement_evaluator_spec.rb"
+      quick, = selection_for(spec, quick: true)
+      expect(quick).to eq([spec])
+    end
+
+    it "keeps the fixture selection, and drops only the two all-plugin conformance specs for a plugin" do
+      path = "spec/integration/fixtures/and_assign_narrowing.rb"
+      expect(selection_for(path, quick: true)).to eq(selection_for(path))
+      plugin = Dir.glob("plugins/rigor-*/lib/**/*.rb", base: root).first
+      quick, = selection_for(plugin, quick: true)
+      full, = selection_for(plugin)
+      conformance = %w[spec/integration/all_plugins_load_spec.rb spec/integration/plugin_contract_conformance_spec.rb]
+      expect(full).to include(*conformance)
+      expect(quick).not_to include(*conformance)
+      expect(quick).to eq(full - conformance)
+    end
+
+    it "says in its banner and closing lines that it is not the pre-push gate" do
+      body = File.read(script)
+      expect(body).to include("EDIT-LOOP tier, not the pre-push gate")
+      expect(body).to include("run \\`make verify-changed\\` before pushing")
+    end
+
+    it "is not accepted or forwarded by bin/lane-push" do
+      expect(File.read(File.join(root, "bin/lane-push"))).not_to include("--quick")
+    end
+
+    it "still refuses the stand-in diff outside --list-specs" do
+      _, err, status = Bundler.with_unbundled_env do
+        Open3.capture3({ "VERIFY_CHANGED_PATHS" => "docs/nonexistent.md" }, script, "HEAD", "--quick", chdir: root)
+      end
+      expect(status.exitstatus).to eq(2)
+      expect(err).to include("--list-specs only")
+    end
   end
 end

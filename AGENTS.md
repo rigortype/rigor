@@ -132,6 +132,9 @@ body happens to return — here or in upstream RBS — unless the library docume
   recovery.
 - `docs/handbook/`, `docs/manual/`, and `docs/types.md` are informational. The type and internal specs
   are binding.
+- Before planning a change under `lib/rigor/`, read [`docs/agents/code-map.md`](docs/agents/code-map.md):
+  what each namespace is responsible for, which files a new rule, command, config key, plugin hook,
+  discovery table or dispatch tier edits, and which spec style to write.
 
 ## Where the Current State Lives
 

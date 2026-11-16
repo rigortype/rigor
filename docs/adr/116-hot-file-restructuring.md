@@ -7,7 +7,8 @@ on the walk. Its third (#1527: the def-nesting and member-layout tables) makes t
 builds five tables in one run per file. This ADR fixes the direction, the three criteria, and the
 slice order (WD0–WD7). Each slice lands as its own PR in the `v0.4.x` milestone, tracked by
 #1192–#1199 (WD0–WD7). WD0–WD5 and WD7 preserve behaviour; WD6 changes it and carries its own corpus
-diff.
+diff. **Amended 2026-11-17** after a re-measurement: criterion C4 and slices WD8–WD13 are added
+([below](#amendment-2026-11-17--what-the-re-measurement-added)).
 
 Grounding: [`docs/notes/20260923-hot-file-churn-audit.md`](../notes/20260923-hot-file-churn-audit.md)
 (the 60-day churn, growth and co-change measurement, and the mechanisms M1–M6 cited below); its
@@ -258,6 +259,126 @@ never chooses the cut.
   - `RbsLoader`'s stateless class-level environment assembly (~L64–1410) separates from its instance
     query and failure-report surface.
 
+## Amendment, 2026-11-17 — what the re-measurement added
+
+Eight weeks after acceptance the files this ADR targets had grown, not shrunk. Only WD3 had closed;
+WD5 was partly ported, as the status paragraph records.
+
+| File | 2026-09-23 | 2026-11-17 |
+| --- | --- | --- |
+| `inference/scope_indexer.rb` | 8,317 | 14,181 |
+| `inference/statement_evaluator.rb` | 3,995 | 10,343 |
+| `inference/expression_typer.rb` | 4,713 | 7,279 |
+| `analysis/check_rules.rb` | 3,746 | 5,228 |
+| `scope.rb` | 1,883 | 3,207 |
+
+Of the 665 first-parent merges that touched `lib/` in the 60 days to 2026-11-17, 293 (44%) touched
+one of the first three files. The method is the churn audit's; the numbers were taken at `master`
+`0a843c261`. A reference count below is a `grep` for the name over the files named, outside comments. The line numbers in the working decisions above are from September and are stale: find
+a cluster by its method names.
+
+The direction, C1–C3 and the guardrails stand. The re-measurement found four things they do not
+cover.
+
+1. **Nothing stopped the growth.** WD0 was the control and had not landed. It lands first, before
+   any other slice here.
+2. **The growth is wiring, not traversal.** A floor, census or widening feature puts its AST scan in
+   a sibling file under `inference/` (135 files were added there in the window), and leaves in
+   `StatementEvaluator` the decision of which statement kinds call it. `StatementEvaluator` names 62
+   of the modules that sit beside it in `inference/`, at 379 sites outside comments (`CapturedLocals`
+   at 51, `MutationWidening` at 21). In `ScopeIndexer` the `walk_*` methods are a minority of each
+   unported walker cluster and the fact-recording logic is the rest, so WD5 removes the copies of
+   the context rules but little of the volume.
+3. **Names do not predict content.** About 5% of `scope_indexer.rb` is the per-node scope index
+   (`index`, `propagate`); the rest is project-wide declaration discovery, and `module_function`
+   makes each of its roughly 800 methods public, and files outside `inference/scope_indexer/` call
+   more than forty of them. `inference/` and `scope/` name `Analysis::DependencyRecorder` about 185
+   times, against the layering. The
+   dispatch tier order is split between `ExpressionTyper#call_result_type_for` and
+   `MethodDispatcher#resolve`, in two tier shapes.
+4. **The specs do not follow the modules.** 310 of 686 `lib/` files have no same-named spec, and 345
+   of 721 spec files under `spec/rigor/` name no `lib/` file. An example that runs the whole runner
+   costs 200–400 ms, one that types a snippet against `Scope.empty` 1–3 ms, and one on plain data
+   under 1 ms (the runs are in the code map); about 90 of the 126 spec files under `spec/rigor/analysis/` use the runner, including all
+   282 examples of `runner_check_rules_spec.rb`, although `CheckRules` is a stateless module.
+
+### C4 — A module that leaves takes its specs with it
+
+A slice that moves a cluster into a module also gives that module a spec named for it, in the
+cheapest style that can see its behaviour (the three styles are in
+[`docs/agents/code-map.md`](../agents/code-map.md)). The examples that pinned the cluster through
+the runner move there when they can be rewritten against the module's interface without losing
+what they check, and stay where they are otherwise. *Test:* after the slice, editing the module
+selects its spec in `make verify-changed` by the mirror rule, and that spec fails when the module's
+behaviour is broken.
+
+C4 is why splitting alone does not shorten the edit loop: the cost is in the example style and in
+which specs an edit selects, not in file size. #3277 adds the tier that runs only the selected
+specs.
+
+### Added slices
+
+Pure moves, each byte-identical under the guardrails and independent of the others. Each was
+measured on 2026-11-17 as already self-contained: its out-calls can be named.
+
+- **WD1** stands as written. `check_rules.rb` shares about ten helpers between rules
+  (`concrete_class_name`, `lookup_method`, `receiver_signature`, `trustworthy_signature`,
+  `strip_root`, …); they become the shared module WD1 names. Each collector's message builder moves
+  next to its collector.
+- **WD4 and WD7** stand. Further candidates of the same kind: `ExpressionTyper`'s plain per-node
+  typers, which call only `type_of` and `dynamic_top`; `StatementEvaluator`'s pattern-matching and
+  rescue binding, its class-body and method-entry scope, and its def-argument and assertion
+  clusters; `Narrowing`'s leaf clusters; `Runner`'s run key and dependency descriptor, its seed
+  tables, and its effect-cache serve and store; `Configuration`'s validators, defaults and loader;
+  `ScopeIndexer.propagate`.
+
+Slices that need a design before they start. Each amends this ADR with its interface first, as WD5's
+amendment rule requires.
+
+- **WD8 — A statement-kind hook point for `StatementEvaluator` (C1 applied to wiring).** A flow
+  feature declares which statement kinds it attaches to and what it does to the scope there, and
+  `StatementEvaluator` iterates the declarations at each kind. *Done when:* a new floor or census
+  feature is its own file and one declaration. *Open:* the features do not share one shape today
+  (some rewrite the scope after a statement, some gate a narrowing, some run a census before the
+  walk), and the order they run in matters; the design has to find the kinds and say which features
+  stay hand-wired. It follows the declaration guardrail: plain data and module functions, no
+  generated methods.
+- **WD9 — The declaration-context rules leave `ScopeIndexer`.** A small set of methods
+  (`unnameable_decl?`, `self_anchored_decl_prefix`, the `meta_new_*` family, `eval_receiver_prefix`,
+  `unnameable_eval_self?`, …) is called from most of the walker clusters, and
+  `DeclarationWalk::Context` calls back into them, so the walk and the indexer depend on each other.
+  They move to the walk's side. This is WD5's "extract the context model first", finished, and it
+  is what lets the per-table clusters leave.
+- **WD10 — `ScopeIndexer` splits by responsibility.** The per-node scope index keeps the name. The
+  declaration collectors, the cross-file fold and the seed-bundle codec become a discovery namespace.
+  The methods other files call today are the starting inventory for its interface, not the
+  interface. It follows WD2 and WD9. Path-keyed gates
+  move in the same PR: the `scope_indexer.rb` entry of
+  `spec/rigor/declaration_facts/producers.yml` is 326 lines.
+- **WD11 — The engine's services leave `analysis/`.** `DependencyRecorder`, the flow `FactStore` and
+  the rule guards that `inference/` calls move below the engine, so that `inference/` and `scope/`
+  no longer reference `Analysis`. A rename with no behaviour change, but it touches about 190 sites,
+  so it lands alone.
+- **WD12 — One dispatch ladder (C1).** The tier order is declared in one place, including the tiers
+  that run from `ExpressionTyper#call_result_type_for` today. Most tiers already share
+  `try_dispatch(CallContext)`; whether the rest can take that shape is the design question.
+- **WD13 — C1 for the remaining hand-listed kinds:** a rule id, a CLI command, a
+  configuration key and a plugin hook. The lists are in the code map. Each kind is its own slice,
+  taken when its files next become a co-change hotspot, as WD7 is.
+
+### Order and procedure
+
+1. WD0, the quick tier of `verify-changed` (#3277) and the code map (#3278), which move no code.
+2. The pure moves, WD1 first. Up to three run at a time on different files. Each is small-model lane
+   work: the contract is byte-identical output, and the review checks that nothing but the location
+   changed.
+3. WD9, then WD2, then WD10; WD8 as soon as its design is accepted, since it is the largest lever on
+   `StatementEvaluator`'s growth. WD11–WD13 as they become hotspots.
+
+A slice on one of the six hottest files is announced before it starts and lands within the day:
+about fifteen PRs merge a day, and a move that stays open collides with each of them. Feature
+lanes on that file wait for it or rebase onto it.
+
 ## Rejected / deferred alternatives
 
 | Candidate | Status | Reason |
@@ -269,6 +390,8 @@ never chooses the cut.
 | Start before v0.4.0 | Deferred (maintainer decision) | v0.4.0 carries the allocation-band work (#1046, #775, #820) and run-level row fixes (#980, #789) in these files, plus corpus diffs for type-model changes. A concurrent restructuring would confound each of those measurements and conflict with their branches. |
 | Unify block evaluation inside WD4 | Rejected | It would mix a behaviour change into a move. |
 | Rewrite all of `ScopeIndexer` as one generic visitor at once | Rejected | Port walker by walker behind the shadow harness instead (WD5). |
+| A new top-down module design for the whole of `lib/rigor/` (2026-11-17) | Rejected | The measured faults are local: three files, one missing hook point, one misnamed namespace, one inverted dependency. A global re-layout would move the files that are already well placed and well mirrored (`type/`, `cache/`, `plugin/`), and collide with every open branch. |
+| Split the hot files to make the specs fast (2026-11-17) | Rejected as a goal | `scope_indexer.rb` alone has 53 `require_relative` lines, so a module split out of it still loads the engine, and the time is in runner-style examples. C4 and the quick tier address the loop; the splits address locality. |
 
 ## Consequences
 

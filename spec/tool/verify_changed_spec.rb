@@ -11,12 +11,37 @@
 # unmatched: every literal here is text the selection greps for. The real
 # fixture paths in the other examples do select this file, which is why their
 # size assertions leave room for it.
+require "fileutils"
 require "open3"
+require "tmpdir"
 require "spec_helper"
 
 RSpec.describe "bin/verify-changed spec selection" do
   let(:script) { File.expand_path("../../bin/verify-changed", __dir__) }
   let(:root) { File.expand_path("../..", __dir__) }
+
+  # A GIT_DIR-free environment, so a temporary repository cannot reach this one.
+  def clean_env
+    ENV.keys.grep(/\AGIT_/).to_h { |key| [key, nil] }.merge("VERIFY_BASE" => nil, "VERIFY_CHANGED_PATHS" => nil)
+  end
+
+  # Yields a committed temporary repository holding the script and `files`.
+  def with_temp_repo(files)
+    Dir.mktmpdir("verify-changed-spec") do |dir|
+      FileUtils.mkdir_p(File.join(dir, "bin"))
+      FileUtils.cp(script, File.join(dir, "bin/verify-changed"))
+      files.each do |path, text|
+        FileUtils.mkdir_p(File.dirname(File.join(dir, path)))
+        File.write(File.join(dir, path), text)
+      end
+      git = ["git", "-c", "user.name=t", "-c", "user.email=t@t.invalid", "-c", "commit.gpgsign=false"]
+      [["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "x"]].each do |cmd|
+        _, err, status = Open3.capture3(clean_env, *git, *cmd, chdir: dir)
+        raise err unless status.success?
+      end
+      yield dir
+    end
+  end
 
   # [selected spec paths, uncovered fixture paths] for the given changed paths.
   def selection_for(*paths, quick: false)
@@ -230,16 +255,62 @@ RSpec.describe "bin/verify-changed spec selection" do
       end
     end
 
-    it "adds the directory to the same-named spec when both exist" do
-      expect(File.exist?(File.join(root, "spec/rigor/inference/method_dispatcher_spec.rb"))).to be(true)
-      specs, = selection_for("lib/rigor/inference/method_dispatcher.rb", quick: true)
-      expect(specs).to include("spec/rigor/inference/method_dispatcher_spec.rb")
-      expect(specs).to include("spec/rigor/inference/method_dispatcher/argument_distribution_spec.rb")
-    end
-
     it "does not pull in a sibling module's directory" do
       specs, = selection_for("lib/rigor/analysis/check_rules.rb", quick: true)
       expect(specs.grep(%r{\Aspec/rigor/analysis/(?!check_rules/)})).to be_empty
+    end
+
+    # The bound, on a temporary repository so the counts are exact: the real
+    # directories drift (cli 49, check_rules 21 at the time of writing).
+    describe "its bound" do
+      def spec_files(dir, count, nested: false)
+        count.times.to_h { |i| ["#{dir}#{'/deep/er' if nested && i.odd?}/s#{i}_spec.rb", "# spec\n"] }
+      end
+
+      def list_in_temp_repo(files, path, quick:)
+        with_temp_repo(files) do |dir|
+          env = { "VERIFY_CHANGED_PATHS" => path }
+          args = ["HEAD", *("--quick" if quick), "--list-specs"]
+          out, err, status = Open3.capture3(clean_env.merge(env), "bin/verify-changed", *args, chdir: dir)
+          expect(status.exitstatus).to eq(0), err
+          # The default tier also names the drift specs, which this repository lacks.
+          [out.lines.map(&:strip).reject(&:empty?).select { |spec| File.exist?(File.join(dir, spec)) }, err]
+        end
+      end
+
+      [false, true].each do |quick|
+        context "with quick=#{quick}" do
+          it "selects nothing for the unit-spec root" do
+            files = { "lib/rigor.rb" => "", "spec/rigor/a_spec.rb" => "# spec\n" }
+            specs, err = list_in_temp_repo(files, "lib/rigor.rb", quick: quick)
+            expect(specs).to be_empty
+            expect(err).not_to include("bound")
+          end
+
+          it "selects every spec of a directory at the bound, nested ones included" do
+            files = { "lib/rigor/mod.rb" => "" }.merge(spec_files("spec/rigor/mod", 30, nested: true))
+            specs, err = list_in_temp_repo(files, "lib/rigor/mod.rb", quick: quick)
+            expect(specs.length).to eq(30)
+            expect(specs.grep(%r{/deep/er/}).length).to eq(15)
+            expect(err).not_to include("bound")
+          end
+
+          it "selects none from a directory over the bound and says so, naming the directory and the count" do
+            files = { "lib/rigor/mod.rb" => "" }.merge(spec_files("spec/rigor/mod", 31, nested: true))
+            specs, err = list_in_temp_repo(files, "lib/rigor/mod.rb", quick: quick)
+            expect(specs).to be_empty
+            expect(err).to include("spec/rigor/mod/ (31 specs")
+            expect(err).to include("run the ones your change touches yourself")
+          end
+
+          it "adds the directory to a same-named spec" do
+            files = { "lib/rigor/mod.rb" => "", "spec/rigor/mod_spec.rb" => "# spec\n" }
+                    .merge(spec_files("spec/rigor/mod", 2))
+            specs, = list_in_temp_repo(files, "lib/rigor/mod.rb", quick: quick)
+            expect(specs).to include("spec/rigor/mod_spec.rb", "spec/rigor/mod/s0_spec.rb", "spec/rigor/mod/s1_spec.rb")
+          end
+        end
+      end
     end
 
     it "selects nothing for a path with no spec and no spec directory" do
@@ -291,10 +362,30 @@ RSpec.describe "bin/verify-changed spec selection" do
       expect(quick).to eq(full - conformance)
     end
 
-    it "says in its banner and closing lines that it is not the pre-push gate" do
-      body = File.read(script)
-      expect(body).to include("EDIT-LOOP tier, not the pre-push gate")
-      expect(body).to include("run \\`make verify-changed\\` before pushing")
+    # A real run in a throwaway repository: with nothing changed it executes only
+    # the whitespace checks, so no rspec or RuboCop starts.
+    it "runs, labels itself the edit-loop tier, lists what it adds none of, and fails when a check fails" do
+      with_temp_repo({}) do |dir|
+        run = lambda do
+          Open3.capture3(clean_env, "bin/verify-changed", "--quick", "HEAD", chdir: dir)
+        end
+        out, err, status = run.call
+        expect(status.exitstatus).to eq(0), "#{out}\n#{err}"
+        expect(out).to include("verify-changed --quick: the EDIT-LOOP tier, not the pre-push gate.")
+        expect(out).to include("adds none of these on its own")
+        %w[drift pinned incremental spec/docs/ self-check conformance].each { |word| expect(out).to include(word) }
+        expect(out).to include("run `make verify-changed` before pushing.")
+        expect(out).to include("the checks it ran passed. Not the pre-push gate.")
+        expect(out).not_to include("verify-changed: OK.")
+
+        File.write(File.join(dir, "bad.txt"), "trailing \n")
+        out, err, status = run.call
+        expect(status.exitstatus).to eq(1), "#{out}\n#{err}"
+        expect(out).to include("verify-changed: FAILED")
+        expect(out).to include("whitespace (untracked files)")
+        expect(out).to include("run `make verify-changed` before pushing.")
+        expect(out).not_to include("the checks it ran passed")
+      end
     end
 
     it "is not accepted or forwarded by bin/lane-push" do

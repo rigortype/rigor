@@ -13,7 +13,9 @@
 #   3. RSpec on the changed specs; the mirror spec of a changed lib/ or tool/ file,
 #      and every spec under its mirror directory (`lib/rigor/a/b.rb` selects
 #      `spec/rigor/a/b_spec.rb` and every `*_spec.rb` below `spec/rigor/a/b/`,
-#      for the files that have no same-named spec);
+#      whether or not a same-named spec exists). The directory is bounded: never
+#      the unit-spec root itself (`lib/rigor.rb`), and only a directory holding at
+#      most 30 specs (mirror_dir_cap); a larger one is reported as not selected;
 #      the specs that name a changed fixture — by its directory path when it
 #      lives under a fixtures/ tree, since `demo.rb` alone names dozens of
 #      fixture directories; for a changed plugin or example,
@@ -171,10 +173,26 @@ add_mirror_spec() { [[ -f "$1" ]] && add_spec "$1"; }
 # add_mirror_dir_specs <spec path without .rb>: every spec below the mirror
 # directory, for a module that has a spec directory and no same-named spec
 # (`lib/rigor/analysis/check_rules.rb` and `spec/rigor/analysis/check_rules/`).
+#
+# Bounded, identically in both tiers. The unit-spec root (`lib/rigor.rb` ->
+# `spec/rigor/`, 721 specs) never applies, and a directory over the cap is named in
+# the not-covered report instead. The cap exists because a mirror directory is
+# a whole module's specs: a `--quick` run for `lib/rigor/cli.rb` selected 50 and
+# took 9 min 7 s on a loaded host. Counts at the time of writing: cli 49,
+# method_dispatcher 49, effects 45, environment 40 (all over); plugin 27, type
+# 26, sig_gen 25, check_rules 21 (selected).
+unit_spec_root=spec/rigor
+mirror_dir_cap=30
 add_mirror_dir_specs() {
-  local spec
-  [[ -d "$1" ]] || return 0
-  while IFS= read -r spec; do add_spec "$spec"; done < <(find "$1" -name '*_spec.rb' | sort)
+  local spec count found
+  [[ -d "$1" && "$1" != "$unit_spec_root" ]] || return 0
+  found="$(find "$1" -name '*_spec.rb' | sort)"
+  count="$(printf '%s' "$found" | grep -c .)"
+  if ((count > mirror_dir_cap)); then
+    uncovered+="$1/ ($count specs, over the $mirror_dir_cap-spec mirror-directory bound, none selected by the directory rule: run the ones your change touches yourself)"$'\n'
+    return 0
+  fi
+  while IFS= read -r spec; do [[ -n "$spec" ]] && add_spec "$spec"; done <<< "$found"
 }
 # ere_literal <string>: the string as an ERE that matches only itself. A `.` in
 # a fixture directory name would otherwise match any character, and because a
@@ -516,8 +534,9 @@ if [[ -n "$uncovered" ]]; then
   lines "$uncovered" | sed 's/^/  - /'
 fi
 if [[ -n "$quick" ]]; then
-  echo "verify-changed --quick: SKIPPED, so this is NOT the pre-push gate:"
-  echo "  - the whole-engine drift specs (public API, ractor readiness, provenance, declaration facts, ancestry walker, snapshot gate, type construction)"
+  echo "verify-changed --quick: NOT the pre-push gate. It adds none of these on its own"
+  echo "(a path may still have selected some of them directly, e.g. the snapshot gate for a fixture):"
+  echo "  - the whole-engine drift specs a lib/, sig/ or data/ change adds (public API, ractor readiness, provenance, declaration facts, ancestry walker, snapshot gate, type construction)"
   echo "  - the \"flip this when #N\" pinned examples"
   echo "  - the incremental \"not re-checked\" specs"
   echo "  - spec/docs/"

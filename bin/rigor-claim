@@ -1,0 +1,358 @@
+#!/usr/bin/env bash
+# Claim a ticket number for one session, so two coordinator loops do not work the
+# same issue or PR at once.
+#
+# The factory runs several Claude Code sessions in sibling worktrees of one clone.
+# Nothing told them apart: on 2026-11-15 one session reviewed, fixed and landed
+# PRs #3253, #3254 and #3256 while another spent a reviewer subagent on each of the
+# same three PRs and filed overlapping issues. Both loops were correct; neither
+# could see the other, because the session list and `ListAgents` answer which
+# subagents a session spawned and which single PR its bar bound, not what a sibling
+# session owns. One of those reviewers also read a pre-rebase head of #3254: the
+# patches were identical, but the base was eight hours old.
+#
+# The mutex is a git ref under refs/rigor/claim/. That is the one store every
+# session in the clone already shares and can write atomically:
+#
+#   * `.git` is shared by every worktree (git-worktree(1) REFS: refs/bisect,
+#     refs/worktree and refs/rewritten are the only per-worktree ref namespaces),
+#     so a claim taken in one worktree is visible in all of them, with no network
+#     and no daemon;
+#   * `git update-ref <ref> <new> <old>` is a compare-and-swap under a lockfile, so
+#     two sessions racing to take or steal the same number cannot both win. Raced
+#     eight claimants per number on both the `files` and `reftable` backends, under
+#     concurrent `git pack-refs --all --prune` and `git gc --prune=now`: exactly
+#     one winner every round;
+#   * a ref keeps its blob reachable, so `git gc` cannot drop a claim's metadata,
+#     and under this clone's fetch refspec `git fetch --prune` only touches
+#     refs/remotes. (`git push --mirror` would publish these refs; this clone
+#     configures no mirror.)
+#
+# A plain O_EXCL lockfile under the common dir would give mutual exclusion too.
+# The ref wins on `steal`: replacing a dead holder has to be a compare-and-swap
+# over the value the claimant read, which a lockfile cannot express.
+#
+# The holder's identity lives in the blob the ref points at, not in the ref name,
+# so `check` can name the session a coordinator has to talk to.
+#
+# Scope and limits, all deliberate:
+#
+#   * A PR and its closing issues are one claim set, not one key. GitHub numbers
+#     them together but assigns the PR number only at `gh pr create`, so a session
+#     holding issue #3219 does not thereby hold PR #3253. Pass `--pr <n>` and the
+#     expansion is done for you (`gh pr view --json closingIssuesReferences`).
+#   * Local to this clone. A cloud session, or a session on another machine, does
+#     not see these refs. Claims are not pushed: a remote ref would add network
+#     latency to every check for a case the factory does not run today.
+#   * Claude Code sessions only. An unattended harness (takt lanes run on other
+#     providers) has no CLAUDE_CODE_SESSION_ID; it must pass RIGOR_CLAIM_SESSION
+#     explicitly, with an id a human can trace back to a run, or not claim at all.
+#   * No lease expiry. A session that dies holds its claim until someone drops it.
+#     A timeout long enough for a real review round is too long to unblock a crash,
+#     and one short enough to unblock a crash would steal a live claim mid-round.
+#     `check` prints the holder's session id, its pid, whether that pid is still
+#     alive, and when the claim was taken, as evidence for a `steal` decision.
+#
+# Usage:
+#   bin/rigor-claim check 3253 3254         # read-only; who holds each number
+#   bin/rigor-claim check --pr 3253         # the PR and its closing issues
+#   bin/rigor-claim take --pr 3253 --note 'review round'
+#   bin/rigor-claim drop 3253               # release a claim this session holds
+#   bin/rigor-claim drop --mine             # release every claim this session holds
+#   bin/rigor-claim list                    # every claim in the clone
+#   bin/rigor-claim steal 3253 --from <40-hex blob>
+#
+# Exit codes: 0 free or mine, 10 held by another session or a refused CAS,
+# 2 usage, environment or git error.
+
+set -euo pipefail
+
+readonly ZERO=0000000000000000000000000000000000000000
+readonly PREFIX=refs/rigor/claim
+
+# The Claude Code harness exports these into every tool shell, and a subagent
+# inherits them — which is right, because the session owns the ticket, not the
+# agent it spawned. Outside the harness, set RIGOR_CLAIM_SESSION by hand.
+session_id=${RIGOR_CLAIM_SESSION:-${CLAUDE_CODE_SESSION_ID:-}}
+host_id=${RIGOR_CLAIM_HOST:-${CLAUDE_CODE_HOST_SESSION_ID:-}}
+own_pid=${RIGOR_CLAIM_PID:-${CLAUDE_PID:-}}
+
+# Fields of the claim `read_claim` last read.
+c_session='' c_host='' c_pid='' c_worktree='' c_since='' c_note=''
+
+die() {
+  printf 'rigor-claim: %s\n' "$1" >&2
+  exit "${2:-2}"
+}
+
+require_session() {
+  [[ -n $session_id ]] ||
+    die 'no session id: set RIGOR_CLAIM_SESSION (CLAUDE_CODE_SESSION_ID is unset outside the Claude Code harness, and an unattended harness must pass an id a human can trace to a run)'
+}
+
+require_repo() {
+  git rev-parse --git-common-dir >/dev/null 2>&1 ||
+    die "not a git repository: $PWD (claims live in the clone's shared .git)"
+}
+
+# A leading zero would make 007 a key of its own, racing 7 for the same ticket.
+validate_number() {
+  [[ $1 =~ ^[1-9][0-9]{0,9}$ ]] || die "not a ticket number: $1"
+}
+
+# Tab and space are IFS whitespace, so a field-per-line blob is the only parse
+# that survives an empty field: reading tab-separated fields collapsed an unset
+# `host` and shifted `since` into its place.
+read_claim() {
+  local blob=$1 line
+  c_session='' c_host='' c_pid='' c_worktree='' c_since='' c_note=''
+  while IFS= read -r line; do
+    case ${line%%=*} in
+      session) c_session=${line#*=} ;;
+      host) c_host=${line#*=} ;;
+      pid) c_pid=${line#*=} ;;
+      worktree) c_worktree=${line#*=} ;;
+      since) c_since=${line#*=} ;;
+      note) c_note=${line#*=} ;;
+    esac
+  done < <(git cat-file blob "$blob" 2>/dev/null || true)
+}
+
+held_blob() {
+  git rev-parse --quiet --verify "$PREFIX/$1" 2>/dev/null || true
+}
+
+# A dead pid is evidence for a steal, never a licence: the pid is this machine's,
+# and a session resumed under a new process still holds its claim legitimately.
+pid_state() {
+  local pid=$1
+  if [[ ! $pid =~ ^[0-9]+$ ]]; then
+    echo unknown
+  elif kill -0 "$pid" 2>/dev/null; then
+    echo alive
+  else
+    echo gone
+  fi
+}
+
+# A newline would let a note forge a `session=` line and hand the claim to a
+# session that cannot drop it; a tab only corrupts a reader's columns.
+sanitise_note() {
+  printf '%s' "$1" | tr -d '\n\r\t'
+}
+
+write_blob() {
+  printf 'session=%s\nhost=%s\npid=%s\nworktree=%s\nsince=%s\nnote=%s\n' \
+    "$session_id" "$host_id" "$own_pid" "$(git rev-parse --show-toplevel)" \
+    "$(date -Iseconds)" "$(sanitise_note "$1")" |
+    git hash-object -w --stdin
+}
+
+# A PR number is born at `gh pr create`, so a session that claimed the issue does
+# not hold the PR. Expanding here is what keeps the two from drifting apart.
+expand_pr() {
+  local pr=$1 issues
+  validate_number "$pr"
+  command -v gh >/dev/null || die '--pr needs the gh CLI on PATH'
+  issues=$(gh pr view "$pr" --json closingIssuesReferences \
+    -q '.closingIssuesReferences[].number' 2>/dev/null) ||
+    die "cannot read PR #$pr through gh; pass the numbers explicitly"
+  # shellcheck disable=SC2086  # splitting gh's newline-separated numbers is the point
+  printf '%s\n' "$pr" $issues
+}
+
+do_check() {
+  local held=0 number blob
+  for number in "$@"; do
+    blob=$(held_blob "$number")
+    if [[ -z $blob ]]; then
+      printf '#%s\tfree\n' "$number"
+      continue
+    fi
+    read_claim "$blob"
+    if [[ -n $session_id && $c_session == "$session_id" ]]; then
+      printf '#%s\tmine\tsince=%s\tnote=%s\n' "$number" "$c_since" "$c_note"
+    else
+      held=1
+      printf '#%s\tHELD\tsession=%s\tpid=%s(%s)\tsince=%s\tblob=%s\tnote=%s\n' \
+        "$number" "$c_session" "$c_pid" "$(pid_state "$c_pid")" "$c_since" "$blob" "$c_note"
+    fi
+  done
+  ((held == 0)) || return 10
+}
+
+# All-or-nothing: a coordinator that cannot take every number in a batch should
+# not hold part of it, so a refusal releases what this run took — only what this
+# run took, since a number this session already held stays held. `main` sorts the
+# numbers first, so two batches claiming the same pair in opposite orders cannot
+# refuse each other into both holding nothing.
+do_take() {
+  local note=$1 taken=() number blob undo
+  shift
+  for number in "$@"; do
+    if git update-ref "$PREFIX/$number" "$(write_blob "$note")" "$ZERO" 2>/dev/null; then
+      taken+=("$number")
+      printf '#%s\ttaken\n' "$number"
+      continue
+    fi
+    blob=$(held_blob "$number")
+    # The CAS failed but nothing holds the ref: a stale lock, a name git will not
+    # accept, or a broken repository. Report it as the error it is, not as HELD by
+    # an empty session — re-running without 2>/dev/null surfaces git's own words.
+    if [[ -z $blob ]]; then
+      git update-ref "$PREFIX/$number" "$(write_blob "$note")" "$ZERO" || true
+      die "cannot claim #$number and nothing holds it; see git's error above"
+    fi
+    read_claim "$blob"
+    if [[ $c_session == "$session_id" ]]; then
+      printf '#%s\tmine\tsince=%s\n' "$number" "$c_since"
+      continue
+    fi
+    for undo in "${taken[@]+"${taken[@]}"}"; do
+      git update-ref -d "$PREFIX/$undo" "$(held_blob "$undo")"
+      printf '#%s\treleased (batch refused)\n' "$undo"
+    done
+    printf '#%s\tHELD\tsession=%s\tpid=%s(%s)\tsince=%s\n' \
+      "$number" "$c_session" "$c_pid" "$(pid_state "$c_pid")" "$c_since" >&2
+    exit 10
+  done
+}
+
+do_drop() {
+  local number blob
+  for number in "$@"; do
+    blob=$(held_blob "$number")
+    if [[ -z $blob ]]; then
+      printf '#%s\tfree already\n' "$number"
+      continue
+    fi
+    read_claim "$blob"
+    [[ $c_session == "$session_id" ]] ||
+      die "#$number is held by ${c_session:-an unreadable claim}, not this session; steal it if it is dead" 10
+    git update-ref -d "$PREFIX/$number" "$blob"
+    printf '#%s\tdropped\n' "$number"
+  done
+}
+
+do_drop_mine() {
+  local ref blob number any=0
+  while read -r ref blob; do
+    [[ -n $ref ]] || continue
+    read_claim "$blob"
+    [[ $c_session == "$session_id" ]] || continue
+    number=${ref#"$PREFIX/"}
+    git update-ref -d "$ref" "$blob"
+    printf '#%s\tdropped\n' "$number"
+    any=1
+  done < <(git for-each-ref --format='%(refname) %(objectname)' "$PREFIX/")
+  ((any)) || echo 'no claims held by this session'
+}
+
+do_list() {
+  local ref blob number
+  while read -r ref blob; do
+    [[ -n $ref ]] || continue
+    number=${ref#"$PREFIX/"}
+    read_claim "$blob"
+    printf '#%s\tsession=%s\thost=%s\tpid=%s(%s)\tworktree=%s\tsince=%s\tblob=%s\tnote=%s\n' \
+      "$number" "$c_session" "$c_host" "$c_pid" "$(pid_state "$c_pid")" \
+      "$c_worktree" "$c_since" "$blob" "$c_note"
+  done < <(git for-each-ref --sort=refname --format='%(refname) %(objectname)' "$PREFIX/")
+}
+
+# Stealing is a CAS over the value `check` printed, not a delete-then-take: that
+# way two coordinators who both decided the holder is dead cannot both win, and a
+# holder that woke up and re-took its claim in between is not overwritten. The
+# full sha is required because a rev expression (`refs/rigor/claim/30`) or forty
+# zeros would resolve to whatever is there now, which is the race back again.
+do_steal() {
+  local number=$1 from=$2 note=$3
+  [[ -n $from ]] || die 'steal needs --from <blob>, the 40-hex sha that check printed'
+  [[ $from =~ ^[0-9a-f]{40}$ ]] || die "steal needs a full 40-hex blob sha, not: $from"
+  [[ $from != "$ZERO" ]] || die 'steal --from must name a held claim, not forty zeros'
+  git update-ref "$PREFIX/$number" "$(write_blob "$note")" "$from" 2>/dev/null ||
+    die "#$number no longer holds $from; re-run \`check\`" 10
+  printf '#%s\tstolen from %s\n' "$number" "$from"
+}
+
+# Arrays are filled with a while-read loop, not bash 4+ builtins, because macOS
+# ships /bin/bash 3.2 and the script must not depend on which bash `env` finds.
+
+main() {
+  local command=${1:-} note='' from='' mine=0 pr=''
+  [[ -n $command ]] ||
+    die 'usage: rigor-claim {check|take|drop|list|steal} [--pr N] [--mine] [number…]'
+  shift
+
+  local numbers=()
+  while (($#)); do
+    case $1 in
+      # Every option value is checked before the shift. `shift 2` with the value
+      # missing fails under `set -e`, which exited 1 printing nothing at all.
+      --note) (($# >= 2)) || die '--note needs a value'; note=$2; shift 2 ;;
+      --from) (($# >= 2)) || die '--from needs a value'; from=$2; shift 2 ;;
+      --pr) (($# >= 2)) || die '--pr needs a number'; pr=$2; shift 2 ;;
+      --mine) mine=1; shift ;;
+      --) shift; while (($#)); do numbers+=("$1"); shift; done ;;
+      -*) die "unknown option: $1" ;;
+      *) numbers+=("$1"); shift ;;
+    esac
+  done
+
+  require_repo
+
+  if [[ -n $pr ]]; then
+    local expanded=() line
+    while IFS= read -r line; do
+      [[ -n $line ]] && expanded+=("$line")
+    done < <(expand_pr "$pr")
+    ((${#expanded[@]})) || die "cannot expand PR #$pr; pass the numbers explicitly"
+    numbers+=("${expanded[@]}")
+  fi
+
+  # Validate the whole batch before the first update-ref, so an invalid argument
+  # at the end cannot leave the numbers before it claimed.
+  local number
+  for number in "${numbers[@]+"${numbers[@]}"}"; do validate_number "$number"; done
+  if ((${#numbers[@]})); then
+    local sorted=() line
+    while IFS= read -r line; do
+      [[ -n $line ]] && sorted+=("$line")
+    done < <(printf '%s\n' "${numbers[@]}" | sort -nu)
+    numbers=("${sorted[@]}")
+  fi
+
+  case $command in
+    check)
+      ((${#numbers[@]})) || die 'check needs at least one number, or --pr N'
+      do_check "${numbers[@]}"
+      ;;
+    take)
+      require_session
+      ((${#numbers[@]})) || die 'take needs at least one number, or --pr N'
+      do_take "$note" "${numbers[@]}"
+      ;;
+    drop)
+      require_session
+      if ((mine)); then
+        ((${#numbers[@]} == 0)) || die 'drop takes --mine or numbers, not both'
+        do_drop_mine
+      else
+        ((${#numbers[@]})) || die 'drop needs at least one number, --pr N, or --mine'
+        do_drop "${numbers[@]}"
+      fi
+      ;;
+    list)
+      ((${#numbers[@]} == 0)) || die 'list takes no numbers'
+      do_list
+      ;;
+    steal)
+      require_session
+      ((${#numbers[@]} == 1)) || die 'steal takes exactly one number'
+      do_steal "${numbers[0]}" "$from" "$note"
+      ;;
+    *) die "unknown command: $command" ;;
+  esac
+}
+
+main "$@"

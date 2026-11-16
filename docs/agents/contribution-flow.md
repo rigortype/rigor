@@ -168,6 +168,14 @@ silently".
 
 ## Landing a pull request
 
+Before a review round, a fix round or a landing run: `bin/rigor-claim check --pr <number>` and, if it
+is free, `take --pr <number>`, which covers the PR and the issues it closes. Several sessions share
+this clone, and a sibling session's work on a PR is invisible to `ListAgents` and shows as one stale
+bound PR in the session list. Without that check, one session spent a reviewer subagent on each of
+three PRs another was landing at the time (2026-11-15). `bin/land-pr` drops the claim on a successful
+merge. [`parallel-lanes.md`](parallel-lanes.md) § "Claim the numbers before spending anything on
+them" has the rules, including what to do with a `HELD` number.
+
 Once the change is implemented and `make verify-changed` passes:
 
 1. **Push and open the Draft PR.** CI on a Draft PR is a light gate: change detection plus `lint` on

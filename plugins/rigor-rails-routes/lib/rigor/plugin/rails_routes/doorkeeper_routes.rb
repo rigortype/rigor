@@ -23,8 +23,8 @@ module Rigor
       # - Does NOT yet honour custom `as:` / `at:` on `use_doorkeeper` itself.
       module DoorkeeperRoutes
         # Per-controller helper catalogue. Keys are the `skip_controllers :<key>` names; values are the
-        # entries (name + arity + path + http_method). Both `_path` and `_url` variants are paired by
-        # `RoutesParser` after registration.
+        # entries (name + arity + path + http_method + action). Both `_path` and `_url` variants are
+        # listed explicitly.
         CONTROLLER_HELPERS = {
           authorizations: [
             ["oauth_authorization_path", 0, "/oauth/authorize", :get, :show],

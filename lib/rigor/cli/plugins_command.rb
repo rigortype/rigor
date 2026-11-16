@@ -46,7 +46,7 @@ module Rigor
     # integrations).
     #
     # Exit codes:
-    # - `0` — every configured plugin loaded.
+    # - `0` — every configured plugin loaded, or `--strict` was not passed.
     # - `1` — at least one plugin failed to load AND `--strict`
     #   was passed. Without `--strict` the command always exits 0;
     #   load errors are reported but not treated as a gate failure

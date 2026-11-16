@@ -49,7 +49,7 @@ module Rigor
     # answer anything new. That leaves #1570's redundant `include` with the answer master gave, since the two
     # worlds disagree there; ADR-119's arity decision point is where it gets fixed.
     #
-    # Two things the tables do not record, so the chain cannot reproduce them:
+    # What the tables do not record, so the chain cannot reproduce it:
     #
     # - The interleaving of a body's `include` and `prepend` statements, and whether a class both includes and
     #   prepends one module (`include M; prepend M` is `[M, C, M]` in Ruby; the tables record it as a plain
@@ -63,8 +63,10 @@ module Rigor
     #   CRuby also propagates a later prepend into the includers of a prepended module and leaves a trailing
     #   duplicate (`module M0; prepend M3; end; class Base; prepend M0; end; module M0; prepend M4; end` is
     #   `[M4, M3, M0, M4, Base]`); the first-occurrence order is the chain's, and the duplicate is not modelled.
-    # - `class << self; prepend P`, which the extends table records (and the extends fold copies) as an
-    #   `extend`: the chain places `P` after the singleton, where Ruby places it before.
+    #
+    # A singleton-side `prepend P` is filed in the extends table beside the `extend`s (and the extends fold copies it)
+    # and told apart by its `ENVELOPE_SINGLETON_PREPEND_KIND` envelope entry (#2998): the chain places it ahead of the
+    # class object, as Ruby does.
     #
     # An ancestor the project does not declare (`Enumerable`, `< ActiveRecord::Base`) is an EXTERNAL entry at
     # its Ruby position, carrying the name as written and the names that spelling can denote; its own RBS

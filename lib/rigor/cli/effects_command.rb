@@ -29,8 +29,8 @@ module Rigor
     # - `rigor effects {update,check,diff,explain}` — the committed **effect snapshot** and its drift
     #   gate, in {EffectsSnapshotCommand}.
     #
-    # Neither emits a diagnostic nor enters `rigor check`'s stream; the report always exits 0, and only
-    # `check` ever exits non-zero (1 on drift, 64 on a usage error).
+    # Neither emits a diagnostic nor enters `rigor check`'s stream; a report that ran exits 0, and of the
+    # snapshot verbs only `check` exits 1 (on drift). A usage error exits 64 on either surface.
     #
     # The command turns collection on for its own run by loading the project's configuration and enabling
     # an implicit `effects: {}` when the file carries no `effects:` block — the ad-hoc mode ADR-103 WD14

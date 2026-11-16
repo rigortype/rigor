@@ -1705,10 +1705,11 @@ module Rigor
           catalog_allows?(receiver_value, method_name)
         end
 
-        # Consults the offline numeric catalog (data/builtins/ruby_core/numeric.yml) as a superset of the
-        # hand-rolled unary/binary allow lists. The catalog's `leaf` / `trivial` / `leaf_when_numeric`
-        # entries promise the underlying CRuby implementation does not call back into user-redefinable Ruby
-        # methods, so executing them on a literal Integer/Float is safe regardless of monkey-patching.
+        # Consults the offline per-class catalogs (`CATALOG_BY_CLASS`, e.g. data/builtins/ruby_core/numeric.yml
+        # for Integer / Float) as a superset of the hand-rolled unary/binary allow lists. The catalog's `leaf` /
+        # `trivial` / `leaf_when_numeric` entries promise the underlying CRuby implementation does not call back
+        # into user-redefinable Ruby methods, so executing them on a literal receiver is safe regardless of
+        # monkey-patching.
         #
         # Resolution order:
         #
@@ -1817,7 +1818,8 @@ module Rigor
           receiver_value.is_a?(String) && receiver_value.bytesize >= STRING_FOLD_BYTE_LIMIT
         end
 
-        # Scalar / String / Symbol values fold; everything else (Array, Hash, Proc, Range, ...) is held back
+        # The listed classes fold (scalars, String, Symbol, Regexp, Pathname, Set, Date, Time); everything else
+        # (Array, Hash, Proc, Range, ...) is held back
         # because `Type::Constant` does not model those carriers and surfacing one would mis-type downstream
         # calls. `Range`, `Array`, and friends have their own shape carriers; this method picks the
         # conservative envelope of "values that already round-trip through `Type::Combinator.constant_of`".

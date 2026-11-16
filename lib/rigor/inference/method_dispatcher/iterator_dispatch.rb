@@ -169,10 +169,6 @@ module Rigor
         # substitution; this tier exists so Tuple- and HashShape-shaped receivers reach the block body with
         # the precise per-position element union / `Tuple[K, V]` pair rather than the projected
         # `Array[union]` / `Hash[K, V]` widening.
-        #
-        # NOTE: `Plugin::NodeRuleWalk` (ADR-52 WD4) is now in place as the intended migration target for
-        # these Enumerable projections. The four methods (group_by, partition, each_slice, each_cons) remain
-        # here pending that migration.
         def single_element_block_params(receiver)
           element = element_type_of(receiver)
           return nil if element.nil?
@@ -182,8 +178,7 @@ module Rigor
 
         # `each_slice(n) { |slice| … }` and `each_cons(n) { |window| … }` both yield an `Array[element]`
         # once per iteration. The tier ignores the slice-size argument (a Constant<Integer> `n` could in
-        # principle bound the slice's length, but a tighter Tuple-of-`n` carrier is reserved for the plugin
-        # tier per the NOTE above).
+        # principle bound the slice's length, but a tighter Tuple-of-`n` carrier is not modelled).
         def slice_block_params(receiver)
           element = element_type_of(receiver)
           return nil if element.nil?

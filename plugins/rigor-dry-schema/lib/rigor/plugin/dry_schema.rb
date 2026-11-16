@@ -57,7 +57,7 @@ module Rigor
     #   enclosing constant chain.
     # - `required(:key).<predicate>(:type_symbol_or_constant)` rows for the canonical-type vocabulary
     #   above.
-    # - Publishes the table; no user-facing diagnostics yet.
+    # - Publishes the table; no diagnostics in this slice.
     #
     # Landed since: typed `result.to_h` returns, via the {.dynamic_return} rule below rather than the
     # ADR-16 Tier C substrate the README originally projected — Tier C synthesises methods on a class

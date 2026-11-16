@@ -7,10 +7,11 @@ require "prism"
 module Rigor
   module Plugin
     class RailsRoutes < Rigor::Plugin::Base
-      # Walks the configured `helper_paths:` directories (default `app/`) and extracts every public
-      # module-level method name so the analyzer's `unknown-helper` rule does not false-fire on calls to
-      # project-defined `*_path` / `*_url` helpers (the canonical Rails pattern: a `UrlHelper` module
-      # exposing `full_asset_url`, `host_to_url`, `frontend_asset_url`, and so on).
+      # Walks the configured `helper_paths:` directories (default `app/`) and extracts every instance-method
+      # name ending in `_path` / `_url` defined at module / class level (any visibility) so the analyzer's
+      # `unknown-helper` rule does not false-fire on calls to project-defined `*_path` / `*_url` helpers
+      # (the canonical Rails pattern: a `UrlHelper` module exposing `full_asset_url`, `host_to_url`,
+      # `frontend_asset_url`, and so on).
       #
       # The discoverer is deliberately conservative:
       #

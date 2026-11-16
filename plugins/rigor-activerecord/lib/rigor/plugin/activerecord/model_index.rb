@@ -29,7 +29,8 @@ module Rigor
       # {Entry} resolves its table from the root model and inherits the chain's declared associations /
       # enums / aliases / scopes / validations / callbacks / macro methods.
       class ModelIndex
-        # `associations` is a frozen list of rows `{ name:, kind:, target:, nullable: }`:
+        # `associations` is a frozen list of rows `{ name:, kind:, target:, nullable:, ... }` (the further
+        # keys — `polymorphic`, `macro`, `class_name_option`, `through`, ... — feed {AssociationRoots}):
         #
         # - `name`   — the association method name as the user invokes it (`"posts"`).
         # - `kind`   — `:singular` (`belongs_to` / `has_one`) or `:collection` (`has_many`).

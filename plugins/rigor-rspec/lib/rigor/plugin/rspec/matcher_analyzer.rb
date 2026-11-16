@@ -14,15 +14,16 @@ module Rigor
       # The supported matchers are the lowest-false-positive floor of the RSpec matcher DSL:
       #
       # - `be_a(T)` / `be_kind_of(T)` — `x is_a?(T)` style class membership; narrows `x` to `T`.
-      # - `be_instance_of(T)` — exact-class match; narrows `x` to `T` (the engine currently treats
-      #   Nominal[T] uniformly, so the distinction with `be_a` is observed at the carrier level but not the
-      #   runtime).
+      # - `be_instance_of(T)` / `be_an_instance_of(T)` — exact-class match; narrows `x` to `T` (the engine
+      #   currently treats Nominal[T] uniformly, so the distinction with `be_a` is observed at the carrier
+      #   level but not the runtime).
       # - `be_nil` — narrows `x` to `Constant<nil>`.
       # - `eq(LITERAL)` / `eql(LITERAL)` for a literal-value argument — meets `x` with `Constant<literal>`
       #   (see "Equality is the local's own method" below).
+      # - `match(/regex/)` — a meet with the local's members (see `regex_match_type`).
       #
       # The matchers below this floor (`be_truthy` / `be_falsey` / `be_within` / `be > / < / >=` /
-      # `include` / `start_with` / `match(regex)` / `raise_error` / receive-style mocks) require either
+      # `include` / `start_with` / `raise_error` / receive-style mocks) require either
       # edge-aware fragments (`truthy_facts` / `falsey_facts` rather than `post_return_facts`) or
       # diagnostic-only enforcement; both are queued for follow-up slices.
       #
@@ -293,15 +294,17 @@ module Rigor
 
         # --- `match(/regex/)` (#2033) ---
         #
-        # RSpec's `match` passes when `expected === actual`, when `actual == expected`, or when `actual` responds to
-        # `match` and `actual.match(expected)` is truthy. `Regexp#===` matches a Symbol by its name, so a Symbol
-        # passes too, and keeps being a Symbol. The positive fact is therefore a meet with the local's members, as
-        # `eq`'s is: a String or Symbol member is kept as it is, and a member of a core class that has no `match` or
-        # `to_str` and whose `==` never equals a Regexp (`nil`, `true`, `false`, the numerics) is dropped, unless the
-        # project defines one of those methods on it or a core ancestor. An `Object`, `BasicObject`, `Kernel` or
-        # `Comparable` member reads `String | Symbol` ({#module_match_member}); any other module means no fact. Any other member (a user class, `Dynamic`) may pass, and
-        # the analyzer emits no fact; so does a subject none of whose members can pass (a `nil` local stays `nil`). The negative form emits none either: a String that does not match passes
-        # `not_to match`, so nothing leaves the local.
+        # RSpec's `match` passes when `expected === actual`, when `actual == expected`, or when `actual` responds
+        # to `match` and `actual.match(expected)` is truthy. `Regexp#===` matches a Symbol by its name, so a
+        # Symbol passes too, and keeps being a Symbol. The positive fact is therefore a meet with the local's
+        # members, as `eq`'s is: a String or Symbol member is kept as it is, and a member of a core class that
+        # has no `match` or `to_str` and whose `==` never equals a Regexp (`nil`, `true`, `false`, the numerics)
+        # is dropped, unless the project defines one of those methods on it or a core ancestor. An `Object`,
+        # `BasicObject`, `Kernel` or `Comparable` member reads `String | Symbol` ({#module_match_member}); any
+        # other module means no fact. Any other member (a user class, `Dynamic`) may pass, and the analyzer
+        # emits no fact; so does a subject none of whose members can pass (a `nil` local stays `nil`). The
+        # negative form emits none either: a String that does not match passes `not_to match`, so nothing
+        # leaves the local.
         REGEX_MATCH_KEPT_CLASSES = %w[String Symbol].freeze
         REGEX_MATCH_METHODS = %i[match to_str].freeze
         Ractor.make_shareable(REGEX_MATCH_KEPT_CLASSES)

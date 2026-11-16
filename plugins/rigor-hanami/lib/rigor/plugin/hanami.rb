@@ -26,8 +26,9 @@ module Rigor
     #    engine substitutes these types for the usual `Dynamic[Top]` fallback, so misuse of `request` or
     #    `response` inside an action body surfaces as a core diagnostic.
     #
-    # 2. **Check** that every class under `app/actions/` defines `#handle`. Missing definitions emit
-    #    `missing-handle-method`.
+    # 2. **Check** that every class under `app/actions/` defines `#handle` with exactly two required
+    #    parameters. Missing definitions emit `missing-handle-method`; any other required-parameter count
+    #    emits `handle-arity-mismatch`.
     #
     # Return-type conformance is NOT checked — Hanami actions are void by contract, and checking a void
     # return would produce false positives on every `if` branch that doesn't end with an explicit `nil`.
@@ -44,6 +45,7 @@ module Rigor
     # | Event                                    | Severity | Rule                    |
     # | ---                                      | ---      | ---                     |
     # | action class defines no `#handle`        | `:error` | `missing-handle-method` |
+    # | `#handle` lacks exactly 2 required params | `:error` | `handle-arity-mismatch` |
     # | `request` / `response` misuse in body    | core engine diagnostic  |
     #
     # A misused `request` or `response` (e.g. `request.no_such_method`) surfaces as a standard engine

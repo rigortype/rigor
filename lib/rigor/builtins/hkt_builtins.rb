@@ -11,7 +11,7 @@ module Rigor
     # authors register more URIs through their manifests; user `.rbs` overlays register through the
     # `%a{rigor:v1:hkt_register}` / `%a{rigor:v1:hkt_define}` annotations Slice 1 ships.
     #
-    # Today's contents:
+    # Today's contents (`csv::parsed[K]` and `csv::row[K]` are described at their bodies below):
     #
     # - `json::value[K]` — the recursive sum stdlib's `JSON.parse` returns. Body:
     #
@@ -151,8 +151,9 @@ module Rigor
       # handful of stdlib methods whose RBS declarations
       # cannot be cleanly overridden via RBS overlay merging.
       #
-      # Each entry maps to a hash with `:uri` and `:args`
-      # (an array of Ruby class names). The dispatcher
+      # Each entry maps to a hash with `:uri`, `:args`
+      # (an array of Ruby class names), `:discriminator` and
+      # `:post_reduce`. The dispatcher
       # builds `Type::App.new(uri, args.map { Nominal })`,
       # then reduces via the env's `hkt_registry` so the
       # caller observes the unfolded form

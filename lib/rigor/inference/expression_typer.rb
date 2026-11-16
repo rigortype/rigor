@@ -1408,7 +1408,7 @@ module Rigor
 
       # v0.0.7 — non-interpolated regex literals lift to `Constant<Regexp>` so `Constant<String>#scan(/regex/)`
       # / `#match(/regex/)` etc. can fold through the catalog tier. Interpolated regexes (`/foo#{x}/`) reach
-      # the second `Prism::InterpolatedRegularExpressionNode` arm which keeps the conservative
+      # the early return for any node that is not a `Prism::RegularExpressionNode`, which keeps the conservative
       # `Nominal[Regexp]` answer.
       def type_of_regexp(node)
         return Type::Combinator.nominal_of(Regexp) unless node.is_a?(Prism::RegularExpressionNode)
@@ -1671,7 +1671,7 @@ module Rigor
       # Three conditions, and the third is the blast radius. Clause A of the ADR (an own source `def`, no
       # own declaration) does NOT by itself stay clear of [ADR-43]: `class Foo; def each; end` inheriting
       # `Enumerable#each` satisfies it, and disqualifying bundled declarations that way is the blanket fix
-      # ADR-43 rejected — the same reason {#instance_self_answers?}'s RBS arm is own-class only. So the
+      # ADR-43 rejected — the same reason {#singleton_self_answers?}'s RBS arm is own-class only. So the
       # ancestor whose declaration is being disqualified must itself be PROJECT-declared: a project sidecar
       # describes the source under analysis, while a bundled signature describes a class the project does
       # not own, where a project `def` is a monkey-patch and [ADR-17] owns the question.
@@ -1842,8 +1842,8 @@ module Rigor
 
       # Issue #527 slice 0 — the RBS lookup, its `rescue`, and the `::Object` MRO cut-off moved to
       # {ExternalAncestorResolution}, which the dispatch side reads too. These stay as this class's
-      # spelling of them, because three other tiers here (`try_overriding_def_dispatch`,
-      # {#singleton_self_answers?}) ask the own-class question without the ancestor walk.
+      # spelling of them, because three other tiers here ({#overriding_own_def?}, {#singleton_self_answers?},
+      # {#core_finder_member?}) ask the own-class question without the ancestor walk.
       def safe_rbs_method_definition(class_name, method_name, kind)
         ExternalAncestorResolution.method_definition(class_name, method_name, kind, scope: scope)
       end
@@ -2564,7 +2564,7 @@ module Rigor
       end
 
       # The post-dispatch tiers for a call `MethodDispatcher` could not answer, in their historical
-      # order; extracted from {#call_dispatch_type_for} whole.
+      # order; extracted from {#call_result_type_for} whole.
       def dispatch_miss_result(node, receiver, arg_types, block_type = nil)
         # v0.0.2 #5 — inter-procedural inference for user-defined methods. When dispatch misses but the
         # receiver is a user class with a `def` body, re-type the body with the call's argument types bound
@@ -2794,21 +2794,12 @@ module Rigor
       # The resolved return type is adopted UNCONDITIONALLY — a resolved user-method call site reads the
       # callee's inferred return, exactly as a toplevel call has since v0.0.3.
       #
-      # ADR-24 WD3 originally gated this: inside a class / method body only a `Bot` return was adopted,
-      # everything else stayed `Dynamic[top]`, because an early unconditional-adoption experiment regressed
-      # `rigor check lib` by 16 diagnostics. ADR-55 / ADR-56 then chipped the gate open for the
-      # recursive-fixpoint summary and the value-pinned unroll envelope. ADR-57 closed the arc: it re-ran the
-      # gate-open experiment per engine generation and adjudicated every firing as genuine-or-artifact,
-      # fixing the artifacts at their root — the tail-only body evaluator dropping explicit `return` (slice
-      # 1), multi-value returns not contributing a Tuple (slice 1), escaping block-captured content mutation
-      # surviving as a precise seed both inline and across a method boundary (slices 2/3), two over-strict
-      # self-authored RBS signatures (slice 1), and an over-optional tuple-slot destructure (slice 3). With
-      # the residual all genuine-or-win, the gate opened permanently on 2026-06-12 (ADR-57 WD2): the
-      # gate-open `rigor check lib` + plugin self-check delta is zero, and the Mastodon / haml / kramdown
-      # corpora show only adjudicated wins (a more precise error message; FP removals).
+      # ADR-24 WD3 originally gated this (inside a class / method body only a `Bot` return was adopted,
+      # everything else stayed `Dynamic[top]`). ADR-55 / ADR-56 chipped the gate open, and ADR-57 adjudicated
+      # every remaining firing as genuine-or-artifact, fixing the artifacts at their root; the gate opened
+      # permanently on 2026-06-12 (ADR-57 WD2) with a zero `rigor check lib` + plugin self-check delta.
       #
-      # The historical `adoptable_self_call_result?` predicate (its `self_type.nil?` / `Bot` /
-      # fixpoint-summary / unroll special cases) is now subsumed by unconditional adoption and removed;
+      # The `adoptable_self_call_result?` predicate is subsumed by unconditional adoption and removed;
       # `try_local_def_dispatch` / `try_user_method_inference` simply return the inferred return.
       # `clamp_unroll_result` still backstops an untrustworthy unrolled value independently of adoption.
 
@@ -2853,7 +2844,7 @@ module Rigor
       end
 
       # The three receiver-shaped block folds, in their historical order (extracted whole from
-      # `call_dispatch_type_for` for method-length budget).
+      # `call_result_type_for` for method-length budget).
       def try_receiver_block_folds(node, receiver, arg_types)
         rebound = rebound_operand_typer(node)
         return rebound.send(:try_receiver_block_folds, node, receiver, arg_types) if rebound
@@ -3383,7 +3374,7 @@ module Rigor
         unless slot && slot[0].equal?(discovery)
           # `self_pure` is issue #525's grant scan (identity-keyed by def node); it belongs here because it
           # is a pure function of the same frozen index — the sibling resolver it walks reads nothing else.
-          # `singleton_def` is added lazily by {#singleton_def_through_ancestors}'s caller.
+          # `singleton_def` is added lazily by {#resolve_singleton_def_with_owner}.
           slot = [discovery, fresh_class_graph_buckets]
           state[CLASS_GRAPH_CACHE] = slot
         end
@@ -3399,8 +3390,8 @@ module Rigor
       # a conditional include, a fork, an external ancestor that may answer first) is `[nil, nil]` and the call
       # types `Dynamic` instead of from a definer Ruby may not reach. ABSENT is the same `[nil, nil]`: at a typing
       # site "no definer" and "cannot say" both fall through to `dispatch_miss_result`. Existence reads
-      # ({#resolve_user_def_through_ancestors}, the self-purity scan) stay on the union memo above: an existence
-      # read turning false there could ADD a `call.undefined-method` firing.
+      # ({#resolve_user_def_through_ancestors}, the self-purity scan) stay on {#resolve_user_def_with_owner}'s
+      # memo: an existence read turning false there could ADD a `call.undefined-method` firing.
       #
       # UNKNOWN carries a third element, the `bot` exception's definers ({#every_project_definer}): the def nodes
       # of every project entry on the chain that defines the name, or nil where the exception cannot apply.
@@ -5831,8 +5822,8 @@ module Rigor
       # The identity-keyed set of `next` nodes whose value is THIS block's value — reachable from the body
       # without crossing a {JUMP_BOUNDARY_NODES} construct that retargets them — or nil for "do not join".
       #
-      # nil means "do not join": a body with no block-level `next` keeps today's path exactly, and pays only
-      # the allocation-free scan that answers so. A co-resident block-level `break` used to decline here as
+      # A body with no block-level `next` keeps today's path exactly, and pays only the allocation-free scan
+      # that answers so. A co-resident block-level `break` used to decline here as
       # well, because its value was dropped and joining the `next` arms would have dressed a still-incomplete
       # answer as a complete one; since issue #853 the `break` arms are unioned into the yielding call
       # ({#call_break_arm_types}), so the two exits are modelled at their own levels and neither blocks the
@@ -6088,12 +6079,12 @@ module Rigor
       CLOSURE_NODES = Set[Prism::BlockNode, Prism::LambdaNode].freeze
       private_constant :CLOSURE_NODES
 
-      # v0.0.6 phase 2 — per-element block fold for Tuple receivers under `:map` / `:collect`. Walks every
-      # Tuple position, binds the block parameter to that element's type, and re-types the block body. The
-      # per-position results are assembled into `Tuple[U_1..U_n]`, strictly tighter than the RBS-projected
-      # `Array[union]`.
+      # Per-element block fold for Tuple (and short finite `Constant<Range>`) receivers under the methods in
+      # `PER_ELEMENT_TUPLE_METHODS`. Walks every position, binds the block parameter to that element's type,
+      # and re-types the block body. The per-position results are assembled into a `Tuple` (`map`:
+      # `Tuple[U_1..U_n]`), strictly tighter than the RBS-projected `Array[union]`.
       #
-      # Declines (returns nil) when the receiver is not a `Tuple` with at least one element, when the call
+      # Declines (returns nil) when the receiver pins no finite non-empty element list, when the call
       # has no `Prism::BlockNode`, when the method is outside the supported set, when the call carries an
       # argument, when block typing raises mid-loop, or when the block has no body. The decline path leaves the
       # dispatch chain untouched.
@@ -6897,8 +6888,8 @@ module Rigor
       # surviving elements assemble into a `Tuple`, strictly tighter than the RBS-projected `Array[Elem]`.
       #
       # Folds tightly only when EVERY position is a `Constant`: a single non-`Constant` position leaves the
-      # result cardinality unknown (the element might or might not survive), so the dispatcher declines and
-      # the RBS tier widens to `Array[Elem]`. `[].select` style empty results are sound — an empty `Tuple`
+      # result cardinality unknown (the element might or might not survive), so this assembler declines and
+      # {#undecided_fold_floor} answers `Array[Elem]`. `[].select` style empty results are sound — an empty `Tuple`
       # is the empty-array carrier.
       def assemble_filter_result(per_position, element_types, keep_on_truthy:)
         return nil unless per_position.all?(Type::Constant)

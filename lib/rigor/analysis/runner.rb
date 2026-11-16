@@ -820,7 +820,7 @@ module Rigor
       # - the whole result is nil for a pool run, whose workers typed the calls in memos this process never sees.
       #
       # @return the summaries keyed by `[path, "Class#method"]` (or `"Class.method"`), each holding `keys:`,
-      #   `returns:` and `effects:`, or nil; nil for a pool run.
+      #   `returns:`, `effects:` and `guard_constants:`, or nil; nil for a pool run.
       def return_summaries
         return nil if pool_mode?
 
@@ -2322,9 +2322,9 @@ module Rigor
 
       # Wires the three responsibility collaborators. Called at the end of construction (after every state
       # ivar is seeded). The per-run varying state (the plugin registry, dependency-source / scanner
-      # indexes, prepare-diagnostic snapshot, and the four end-of-pass snapshots) is reached through reader
-      # procs so each collaborator observes the live ivar value at call time without a back-reference
-      # cycle. The reporter accumulators and the {RunSnapshots} sink are shared mutable instances.
+      # indexes, prepare-diagnostic snapshot) is reached through reader procs so each collaborator observes
+      # the live ivar value at call time without a back-reference cycle. The reporter accumulators and the
+      # {RunSnapshots} sink are shared mutable instances.
       def build_collaborators # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
         @pre_passes = ProjectPrePasses.new(
           configuration: @configuration, cache_store: @cache_store, buffer: @buffer,

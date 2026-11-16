@@ -33,8 +33,9 @@ module Rigor
   # evaluator, so a slot read is an ivar and an array index. Each slot constant is the slot's integer index, which
   # keeps the declaration Ractor-shareable and the read an `Array#[]`.
   #
-  # Stage 1 (ADR-129 WD6) adds no caching: no capture is opened outside the specs, so the journal stays empty and
-  # every touch is a size check.
+  # Nothing is served from a capture (ADR-129 WD6): the only captures outside the specs are the opt-in shadow
+  # memo's ({TypeOfMemo}, `RIGOR_TYPE_OF_SHADOW`), so with it off the journal stays empty and every touch is a size
+  # check.
   module TypingState
     KINDS = %i[frame table resource memo].freeze
     READ_EXEMPTIONS = %i[id_determined delta_internal].freeze

@@ -10,7 +10,8 @@ require_relative "type_of_memo/serving"
 module Rigor
   # ADR-129 stage 3 — the `ExpressionTyper#type_of` result memo in **shadow** form (WD5's G1, stage-3 form). It keys a
   # computation on `(scope identity, node identity, state id)` (WD2), opens a journal capture around it, and stores
-  # what an unrefused computation read and wrote (WD3). It never serves anything: on a would-be hit, an entry whose read
+  # what an unrefused computation read and wrote (WD3). It never serves anything (bar {enable!}'s `serve:` form for specs
+  # and audit tools, see {Serving}): on a would-be hit, an entry whose read
   # slice still holds, production computes as usual inside a priors window, and G1 checks afterwards that
   # - the type equals the entry's;
   # - the live tables equal their pre-computation state with the entry's write slice replayed;

@@ -868,8 +868,8 @@ module Rigor
     # ADR-103 WD13 — the `effects:` block, or nil when the key is absent or explicitly `false`. A
     # present-but-empty key (`effects:` alone, which YAML parses as nil) and `effects: {}` are the same
     # thing: collection on, every sub-key defaulted. A non-Hash body is normalised to `{}` rather than
-    # rejected — the sub-keys have no reader yet, so there is nothing a malformed body could break, and
-    # tier 1 (the schema) is where its shape is answered.
+    # rejected here: tier 1 (the schema) is where the body's shape is answered, and each sub-key reader
+    # below validates its own value.
     #
     # ADR-103 WD15 — a loaded file that carries no `effects:` key AT ALL (`effects_key_present == false`,
     # so `value` can only be the `false` DEFAULTS fallback here, never a user's own explicit `false`) behaves
@@ -1151,9 +1151,6 @@ module Rigor
       raise ConfigurationError, "parallel.workers must be a non-negative Integer, got #{value.inspect} (#{e.message})"
     end
 
-    # ADR-22 WD2 (b) — `baseline: <path>` activates the file; `baseline: false` is the explicit-disable form
-    # (useful in `.rigor.yml` to override an upstream `.rigor.dist.yml` that names a baseline). `nil`
-    # (default / absent key) is also "no baseline".
     # Issue #2517 — the directory's existence and contents are checked where the environment is built
     # ({Environment::CoreRoot.validate!}), not here: `rigor init`, `rigor doctor` and the language server's reload
     # load a configuration without building an environment, and must still be able to read one naming a core that
@@ -1166,6 +1163,9 @@ module Rigor
       value.dup.freeze
     end
 
+    # ADR-22 WD2 (b) — `baseline: <path>` activates the file; `baseline: false` is the explicit-disable form
+    # (useful in `.rigor.yml` to override an upstream `.rigor.dist.yml` that names a baseline). `nil`
+    # (default / absent key) is also "no baseline".
     def coerce_baseline_path(value)
       return nil if value.nil? || value == false
 
@@ -1173,9 +1173,8 @@ module Rigor
     end
 
     # ADR-87 WD1 — `cache.validation` is `"auto"` (default), `"stat"`, or `"digest"`. An unrecognised value
-    # fails soft to the default rather than aborting a check over a typo — the strict `"digest"` behaviour is
-    # the safe fallback either way, and the always-available `RIGOR_STRICT_VALIDATION=1` env escape hatch does
-    # not depend on this value being valid.
+    # fails soft to `"auto"` rather than aborting a check over a typo, and the always-available
+    # `RIGOR_STRICT_VALIDATION=1` env escape hatch does not depend on this value being valid.
     VALID_CACHE_VALIDATIONS = %w[auto stat digest].freeze
     private_constant :VALID_CACHE_VALIDATIONS
 

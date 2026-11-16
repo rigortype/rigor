@@ -10,13 +10,14 @@ module Rigor
     # (ADR-103 WD1 / WD12; the lanes and the exhaustiveness bit are normative in
     # `docs/type-specification/effect-labels.md`).
     #
-    # Three carriers and one projection:
+    # The fields, and one projection:
     #
     # - {#bundles} — `{Origin => LabelSet}`, the labels kept **per origin** so the judgment can discharge
     #   policy per origin (tolerating what an origin was *for* frees its transport, WD14; {Discharge}).
-    # - {#declared_bundles} — the same shape for the `≤` lane, and {#declared} its flat projection. Its one
-    #   producer today is the project's `effects.attribution:` table (#385), whose origins carry
-    #   {Origin::ATTRIBUTION}; a *nominal supertype's* envelope joins it with #386. The lane is kept apart
+    # - {#declared_bundles} — the same shape for the `≤` lane, and {#declared} its flat projection. Its producers
+    #   are the project's `effects.attribution:` table (#385), whose origins carry {Origin::ATTRIBUTION},
+    #   a callee's imported envelope (#386, {Origin::ENVELOPE}) and a plugin's `effect_attributions:`
+    #   (#387, {Origin::PLUGIN}). The lane is kept apart
     #   from {#bundles} because nothing declared is ever proven: diagnostics read {#proven} only, so an
     #   attributed label can never manufacture an `effect.envelope-exceeded`.
     # - {#exhaustive} — false when some call this method makes could not be resolved.

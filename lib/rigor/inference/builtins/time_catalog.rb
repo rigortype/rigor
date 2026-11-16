@@ -11,9 +11,9 @@ module Rigor
       # surface, and the Ruby-side prelude `references/ruby/timev.rb` contributes the class-side
       # constructors (`Time.now`, `Time.at`, `Time.new`) through Primitive cexpr stubs.
       #
-      # Time receivers are not lifted to a `Constant` carrier today (there is no `Time` literal node — the
-      # closest is `Time.now` / `Time.new(...)`, which produce `Nominal[Time]`). The catalog wiring
-      # therefore mostly governs:
+      # There is no `Time` literal node, so a Time receiver is a `Constant` carrier only when deterministic
+      # constructor folding built it (`Time.utc`); `Time.now` / `Time.new(...)` produce `Nominal[Time]`. The
+      # catalog wiring therefore mostly governs:
       #
       # 1. The size-projection-equivalent reader surface (`#year`, `#month`, `#hour`, `#sec`, `#wday`, …)
       #    — RBS-declared `Integer` is preserved through dispatch.

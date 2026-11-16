@@ -19,8 +19,9 @@ module Rigor
     # plugin's `IoBoundary`, walks each `.rb` file with Prism, and collects `has_one_attached :avatar` /
     # `has_many_attached :photos` macros into an {AttachmentIndex} keyed by class name. The walker is
     # stand-alone (mirrors `rigor-activerecord`'s `ModelDiscoverer`) so the plugin works even when
-    # `rigor-activerecord` is not loaded; when it IS loaded, the published `:model_index` fact (ADR-9
-    # cross-plugin API) drives the same class set so the two plugins agree on what counts as a model.
+    # `rigor-activerecord` is not loaded. The manifest declares an optional `consumes` on that plugin's
+    # published `:model_index` fact (ADR-9 cross-plugin API), but nothing reads the fact yet: the class set
+    # comes from this plugin's own discovery pass alone.
     #
     # ## Configuration
     #

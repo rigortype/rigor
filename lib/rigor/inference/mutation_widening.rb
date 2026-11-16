@@ -535,14 +535,15 @@ module Rigor
       # Straight-line evidence is ALWAYS incomplete, so a straight-line join may never close the
       # parameter it contributes to.
       #
-      # This seam sees ONE store — the call being evaluated. The widening it feeds is a one-way
-      # door: it replaces the literal carrier with a `Nominal`, and {#widen_for_mutator} declines a
-      # `Nominal` outright, so the NEXT store is invisible. Closing over one sample of a growing
+      # This seam sees ONE store — the call being evaluated. The widening it feeds replaces the
+      # literal carrier with a `Nominal`, and {MutationRejoin.widen_nominal} re-grows a `Nominal`
+      # only while a parameter still carries a gradual arm, so a join that closed the parameter
+      # would leave the NEXT store invisible. Closing over one sample of a growing
       # population is therefore a wrong type, not an imprecise one:
       #
       #     a = []
       #     a.push(1)          # joins -> Array[Integer]
-      #     a.push("s")        # DECLINED -- pre-state is a Nominal now
+      #     a.push("s")        # DECLINED -- pre-state is a closed Nominal now
       #     a.last.upcase      # correct Ruby, prints "S"
       #
       # closed to `Array[Integer]` and drew `undefined method 'upcase' for Integer` on code that

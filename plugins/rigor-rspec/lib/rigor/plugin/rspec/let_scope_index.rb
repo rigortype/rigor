@@ -15,9 +15,10 @@ module Rigor
       # - `outer_range`: `Range[Integer]` of line numbers covered by the describe's block body
       #   (start_line..end_line).
       # - `describe_const`: the model constant string named in `RSpec.describe SomeModel do` / `describe
-      #   SomeModel do`, or `nil` when the describe's first arg is a String (`describe ".foo"`).
-      # - `lets`: `Hash{Symbol => Prism::BlockNode}` of `let(:name) { ... }` and `subject(:name) { ... }`
-      #   declarations. `:subject` is the key for the implicit `subject { ... }`.
+      #   SomeModel do`; a describe whose first arg is a String (`describe ".foo"`) inherits the enclosing
+      #   describe's constant, so it is `nil` only when no enclosing describe names one.
+      # - `lets`: `Hash{Symbol => Prism::BlockNode}` of `let(:name) { ... }`, `let!(:name) { ... }` and
+      #   `subject(:name) { ... }` declarations. `:subject` is the key for the implicit `subject { ... }`.
       #
       # Used by the plugin's let-binding `dynamic_return` rule to bind `let`-named method-shape calls
       # inside `it` bodies to the let block's inferred type.

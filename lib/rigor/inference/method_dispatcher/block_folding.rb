@@ -14,7 +14,8 @@ module Rigor
       # typing for the same methods continues to be answered by `IteratorDispatch` (this module concerns the
       # *return* of the call, not the block-param binding).
       #
-      # The methods covered fall in two families:
+      # The methods covered fall in two main families (`find` / `index` and block-taking `count` also fold, on a
+      # constant block; see their constants below):
       #
       # - **Filter-shaped** (`select` / `filter` / `reject` / `take_while` / `drop_while`): the block's
       #   truthiness selects the all-or-nothing endpoints — either every element kept or every element
@@ -183,7 +184,7 @@ module Rigor
         end
 
         # Predicate folds. The decision table mirrors Ruby's actual semantics on `Enumerable#all?` / `#any?` /
-        # `#none?` — see the table at the top of the module. A pattern argument declines: Ruby then tests
+        # `#none?` — see the module comment. A pattern argument declines: Ruby then tests
         # `pattern === element` and ignores the block, so `[1, 2].all?(String) { true }` is `false`.
         def fold_predicate(receiver, method_name, truthiness, args)
           return nil unless args.empty?

@@ -15,9 +15,11 @@ module Rigor
     # signature tree.
     #
     # ADR-14 slice 2: the writer parses the target with `RBS::Parser` to find the matching class declaration and
-    # inserts new method declarations just before the class's closing `end` keyword. Existing declarations are
-    # NEVER touched unless `--overwrite` is set and the candidate is eligible for replacement (see
-    # {#eligible_for_replacement?}).
+    # inserts new method declarations just before the class's closing `end` keyword. An existing member is
+    # NEVER replaced unless `--overwrite` is set and the candidate is eligible for replacement (see
+    # {#eligible_for_replacement?}). Two structural edits do not need it: a bare generic class header gets its type
+    # parameters ({#repair_generic_headers}), and a declaration this run touched moves under its parent's
+    # ({#collapse_nested_declarations}).
     #
     # The slice does NOT re-render the whole file through `RBS::Writer`. That would lose comments / blank-line
     # formatting per upstream design; the byte-range insertion approach taken here preserves untouched
@@ -855,9 +857,9 @@ module Rigor
         end
       end
 
-      # Inserts each new method line one column before the class declaration's `end` keyword. The insertion
-      # text carries its own leading indent + trailing newline so the surrounding source's whitespace stays
-      # intact.
+      # Inserts each new method line just before the class declaration's closing `end`, one indent level
+      # deeper than the declaration's keyword. The insertion text carries its own leading indent + trailing
+      # newline so the surrounding source's whitespace stays intact.
       def insert_into_class(source, decl, new_methods)
         return source if new_methods.empty?
 

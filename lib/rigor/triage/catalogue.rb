@@ -4,9 +4,9 @@ require_relative "hint"
 
 module Rigor
   module Triage
-    # ADR-23 § "Heuristic catalogue" — the six v1 recognisers.
+    # ADR-23 § "Heuristic catalogue" — the recognisers: H1–H7, plus H2K (the engine-proven variant of H2).
     #
-    # {.recognise} runs them in order over the diagnostic stream. Each recogniser sees only the diagnostics not yet
+    # {.recognise} runs them in {.recognisers} order over the diagnostic stream. Each recogniser sees only the diagnostics not yet
     # claimed by an earlier one, so a `5.minutes` diagnostic counted by H1 (ActiveSupport) is not re-counted by H2
     # (monkey-patch).
     #

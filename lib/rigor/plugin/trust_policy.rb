@@ -17,7 +17,8 @@ module Rigor
     # ## Fields
     #
     # - `trusted_gems`: gem names the user has authorised. Derived from the `plugins:` section of `.rigor.yml`
-    #   plus any gems they reach transitively. Used today for documentation and future trust diagnostics.
+    #   (the gem-name half of each entry; transitive dependencies are not added). Used today for
+    #   documentation and future trust diagnostics.
     # - `allowed_read_roots`: absolute paths plugin code may read from through the {IoBoundary}. The default
     #   set covers the project root, the project's `signature_paths`, and each trusted
     #   gem's `Gem::Specification#full_gem_path`. The user extends this with `.rigor.yml`'s

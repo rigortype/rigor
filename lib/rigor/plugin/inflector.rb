@@ -15,8 +15,8 @@ module Rigor
     # Per ADR-39 this is a permitted *target-library* invocation: the methods called are a fixed, pure,
     # allow-listed set ({ALLOWED_METHODS}) on a trusted gem the consuming plugins declare as a dependency.
     # (`ActiveSupport::Inflector` is loaded, not the analyzed application's code; project-specific inflection
-    # rules are ingested by *statically parsing* `config/initializers/inflections.rb` in a later slice, never
-    # by executing it.)
+    # rules are ingested by *statically parsing* `config/initializers/inflections.rb` — `rigor-rails-routes`
+    # reads the acronyms that way — never by executing it.)
     #
     # **Absence is silence, never a guess.** ActiveSupport is resolved from Rigor's host gem environment
     # first, then from the analyzed project's own bundler install tree ({Isolation.target_bundle_root},

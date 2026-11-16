@@ -17,8 +17,8 @@ module Rigor
     # - Notification (`id` absent) → NEVER gets a response. The dispatcher's return value is discarded.
     #
     # JSON parse errors at the framing boundary surface as an LSP `ParseError` (-32700) response with
-    # `id: null` per JSON-RPC spec § 5.1; the loop continues so a corrupt frame doesn't poison the rest of the
-    # session.
+    # `id: null` per JSON-RPC spec § 5.1. The parse happens inside the reader's own read loop, so the exception
+    # unwinds it and `#run` returns after writing the error; the loop does not resume reading.
     class Loop
       def initialize(reader:, writer:, server:)
         @reader = reader

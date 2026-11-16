@@ -54,7 +54,7 @@ module Rigor
         # Frozen bundle of the cross-file discovery tables the two whole-project parse passes produce. Split
         # out of {Result} so the {Runner} can defer these to the analysis (miss) path — a warm cache HIT never
         # consumes them and so never pays the double parse (see {#discover} + `Runner#ensure_project_discovery`).
-        # The slot names mirror the discovery half of {Result} exactly.
+        # Each slot is adopted onto the {Runner}'s matching `@project_*` discovery ivar.
         Discovery = Data.define(
           :discovered_classes, :discovered_def_nodes, :discovered_def_nestings, :discovered_singleton_def_nodes,
           :discovered_def_sources, :discovered_singleton_def_sources, :discovered_superclasses,
@@ -69,7 +69,7 @@ module Rigor
         # environment build (and therefore the cache key): plugin load + `#prepare`, the ADR-10
         # dependency-source index, the ADR-16 synthetic-method scanner, and the ADR-17 project-patched
         # scanner. The cross-file discovery tables are NOT built here (they are consumed only on the analysis
-        # path, so they defer to {#discover}); the {Result} carries `nil` for them, matching {#adopt_prebuilt}.
+        # path, so they defer to {#discover}); the {Result} has no slot for them.
         # Extracted so `#prepare_project_scan` and the prebuilt-less `#run` path share one implementation.
         def run(expansion:)
           # ADR-90 — resolve the target project's bundle for the plugin isolation layer BEFORE any plugin
@@ -355,9 +355,7 @@ module Rigor
 
         # Loads project-configured plugins through {Rigor::Plugin::Loader} and returns the resulting
         # {Rigor::Plugin::Registry}. Loader failures are isolated: each surfaces as a `:plugin_loader`
-        # diagnostic on the run's `Result` rather than aborting the analysis. Plugins that load successfully
-        # but contribute no protocol hooks are inert in slice 1; later v0.1.0 slices wire the contribution
-        # merger through this registry.
+        # diagnostic on the run's `Result` rather than aborting the analysis.
         def load_plugins
           return Plugin::Registry::EMPTY if @configuration.plugins.empty?
 

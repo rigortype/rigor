@@ -6,7 +6,7 @@ module Rigor
     # cannot surface at the point of failure (the parsers are fail-soft, returning `nil` so call sites fall back
     # to the RBS-declared type).
     #
-    # Owns three event streams:
+    # Owns four event streams:
     #
     # - `#unresolved_payloads` — `rigor:v1:*` directive payloads the resolver could not turn into a
     #   {Rigor::Type}. Surface as `dynamic.rbs-extended.unresolved` `:info` diagnostics, except an
@@ -33,7 +33,7 @@ module Rigor
     class Reporter
       # Every entry carries its position as `(path, line, column)` primitives, flattened from the parser's
       # `RBS::Location` by {.position_of} at record time. Issues #785 (hkt) and #805 (the two older streams).
-      # Two reasons, and either alone decides it. All three streams are drained out of every fork-pool worker
+      # Two reasons, and either alone decides it. All four streams are drained out of every fork-pool worker
       # ({Rigor::Analysis::WorkerSession#drain_reporters}), and an `RBS::Location` is a C-extension object with
       # no `_dump`, so a `Marshal.dump` of the drain payload raises `TypeError` — which kills the worker at
       # drain time and degrades the run to in-process re-analysis. And an `RBS::Location` compares equal only

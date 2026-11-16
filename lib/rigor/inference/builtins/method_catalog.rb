@@ -14,7 +14,7 @@ module Rigor
       # `safe_for_folding?(class_name, selector, kind:)` returns true when:
       # 1. The catalog has an entry for `(class_name, selector, kind)`,
       # 2. The entry's `purity` is one of `leaf` / `trivial` / `leaf_when_numeric`,
-      # 3. The selector is NOT in the per-class mutation blocklist.
+      # 3. The selector is NOT in `NON_REPRODUCIBLE_SELECTORS` or the per-class mutation blocklist.
       #
       # Missing catalog files (e.g. in a bare gem install where data was opted out) degrade to `false` so
       # the dispatcher falls back to its hand-rolled allow lists.
@@ -105,8 +105,8 @@ module Rigor
         end
 
         def blocked?(class_name, selector)
-          # Bang-suffixed selectors are mutating by Ruby convention (`upcase!`, `concat`, etc. are listed
-          # explicitly below; this catches the rest). We bias toward false negatives: losing a fold
+          # Bang-suffixed selectors are mutating by Ruby convention (non-bang mutators such as `concat`
+          # are listed in each topic's blocklist; this catches the rest). We bias toward false negatives: losing a fold
           # opportunity is acceptable; folding a mutator is not.
           selector_str = selector.to_s
           return true if selector_str.end_with?("!")

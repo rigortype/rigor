@@ -14,8 +14,8 @@ module Rigor
       # - `<ChannelClass>.broadcast_to(record, data)` — class-targeted broadcast. The class must exist
       #   in the index.
       # - `ActionCable.server.broadcast(stream_name, data)` — string-targeted broadcast. When
-      #   `stream_name` is a literal string and the index has at least one channel with no dynamic
-      #   stream registrations, we check that the name appears in `index.all_stream_names`. Otherwise
+      #   `stream_name` is a literal string and no discovered channel has a dynamic
+      #   stream registration, we check that the name appears in `index.all_stream_names`. Otherwise
       #   the `unknown-stream` warning is suppressed (we can't prove absence).
       module Analyzer
         # `ActionCable.server.broadcast(...)` — the receiver path we recognise as a server-targeted

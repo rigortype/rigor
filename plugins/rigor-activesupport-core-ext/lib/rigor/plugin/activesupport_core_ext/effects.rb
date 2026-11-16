@@ -91,7 +91,7 @@ module Rigor
                                                 why: "rewrites the process/fiber's time zone for everything downstream"),
             row(TIME, :use_zone, ["global.write"], singleton: true,
                                                    why: "swaps the zone around a block; the block's own origins join by containment"),
-            # Issue #658 declares these three in the RBS bundle, so they get their attributions here for
+            # Issue #658 declares these four in the RBS bundle, so they get their attributions here for
             # the same reason `DateTime#in_time_zone` did: the impurity is invisible at the signature.
             row(TIME, :zone_default, ZONE_READ, singleton: true,
                                                 why: "the `attr_accessor` behind `Time.zone`'s fallback — the same mutable process state"),

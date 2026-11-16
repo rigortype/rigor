@@ -17,14 +17,14 @@ module Rigor
     # The analysis is deliberately **flow-insensitive and whole-body**: a local that escapes anywhere
     # disqualifies, even if the escape happens after the mutation. That is strictly more conservative than
     # the "escaped before the mutating call" reading, which is the direction false positives are budgeted
-    # in ([ADR-5](../adr/5-robustness-principle.md)) — an unproven local mutation becomes an
+    # in ([ADR-5](../../../docs/adr/5-robustness-principle.md)) — an unproven local mutation becomes an
     # `unknown-ownership` taint, never a proven `mutate` label.
     #
     # This is the tracer slice's approximation, not the eventual answer. `ClosureEscapeAnalyzer` answers a
     # different question (fact retention, not "does the code contain") and is deliberately left alone.
     module LocalOwnership
       # Assignment right-hand sides that witness a fresh allocation. `.dup` / `.clone` follow
-      # [ADR-76](../adr/76-effect-modeling-freeze-dup-shape-preservation.md)'s reading of `dup` as the
+      # [ADR-76](../../../docs/adr/76-effect-modeling-freeze-dup-shape-preservation.md)'s reading of `dup` as the
       # allocation witness; `.new` is {constructor?}'s, because only a class object's `new` is `Class#new`.
       COPYING_SELECTORS = %i[dup clone].to_set.freeze
 

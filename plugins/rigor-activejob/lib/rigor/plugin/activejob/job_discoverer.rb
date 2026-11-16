@@ -14,7 +14,7 @@ module Rigor
       # For each discovered class, the discoverer also reads the `#perform` method's parameter list and
       # computes the arity envelope.
       #
-      # Limitations (intentional for v0.1.0):
+      # Limitations (intentional):
       #
       # - Only direct-superclass matches. `class WelcomeJob < BaseJob` where `BaseJob < ApplicationJob`
       #   is NOT discovered. List `BaseJob` in `job_base_classes` if needed.

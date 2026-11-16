@@ -616,9 +616,8 @@ module Rigor
         # `enforce_sigil` follow-up — when on (default), files at `:false` (or sigil-less, which Sorbet
         # treats as `:false`) are STILL walked so parse-error diagnostics surface, but sigs flow into a
         # discardable catalog rather than the per-run one. Sorbet itself doesn't enforce types at `#
-        # typed: false`, and Rigor mirrors that for sig contributions. Assertion recognisers (`T.let` /
-        # `T.cast` / `T.must` / `T.bind` / `T.assert_type!`) stay live regardless of sigil — the user
-        # wrote those deliberately.
+        # typed: false`, and Rigor mirrors that for sig contributions. Call-site assertion recognition
+        # (`T.let` / `T.cast` / …) is gated separately by `assertion_enforced_here?`.
         sig_catalog = if @enforce_sigil && !SigilDetector.enforced?(level)
                         Catalog.new
                       else
@@ -658,7 +657,7 @@ module Rigor
       end
 
       # ADR-11 light follow-up — `T.reveal_type(expr)` records the inferred type at recogniser time so the
-      # per-file diagnostic hook can surface the human-facing message. The reveal call's contribution
+      # node rule can surface the human-facing message. The reveal call's contribution
       # already preserved the inferred type for downstream chaining; this hash carries the *display*
       # string that the diagnostic shows.
       def record_reveal_type_call(call_node, return_type)

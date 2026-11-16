@@ -20,6 +20,7 @@ module Rigor
     #   checkstyle — Checkstyle XML, the broad lint-interchange format that
     #                reviewdog (`-f=checkstyle`) and Jenkins/etc. consume
     #   junit      — JUnit XML, the test-report format many CI systems render
+    #   teamcity   — TeamCity inspection service messages (`##teamcity[…]`)
     #
     # Severity maps once per format from Rigor's `:error` / `:warning` / `:info`; the qualified rule
     # (`<source_family>.<rule>` or the bare rule for the builtin family) is the stable identifier, nil only for the
@@ -65,8 +66,8 @@ module Rigor
         SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
         INFORMATION_URI = "https://github.com/rigortype/rigor"
 
-        # SARIF defines exactly three result levels; Rigor's `:info` is a `note` (the SARIF spelling for advisory
-        # findings).
+        # Rigor emits SARIF's `error` / `warning` / `note` levels; its `:info` is a `note` (the SARIF spelling for
+        # advisory findings).
         LEVELS = { error: "error", warning: "warning", info: "note" }.freeze
 
         def initialize(result)

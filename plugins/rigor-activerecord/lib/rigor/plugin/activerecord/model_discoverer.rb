@@ -33,7 +33,7 @@ module Rigor
       # anchors with the plain constant rendering (#583: the rooted `"::User"` key used to make all three
       # Hash consumers miss such models silently).
       #
-      # Limitations (intentional for v0.1.0 of the plugin):
+      # Limitations (intentional):
       #
       # - `self.table_name = "..."` recognised only when the RHS is a String literal. Computed names
       #   (`self.table_name = "#{tenant}_users"`) are skipped.
@@ -687,7 +687,8 @@ module Rigor
         # - The final bare-name fall-back attributes BY SPELLING. A nearer constant declared outside
         #   `model_search_paths` — `Account::Suspensions` in `lib/`, say, while the concern roots hold a
         #   top-level `Suspensions` — is invisible to this walker, so the wrong one can win. Reading
-        #   further than the model roots needs its own cache descriptor (see {#discover}'s `watch:` note),
+        #   further than the model roots needs its own cache descriptor (see the `producer :model_index`
+        #   `watch:` block),
         #   so the spelling is trusted instead.
         def resolve_concern_name(raw, from_name)
           name = strip_root(raw)
@@ -1529,8 +1530,8 @@ module Rigor
         end
 
         # `validates :name, presence: true, length: { maximum: 100 }`. Records the attribute name (the
-        # validator option set is ignored — the value here is the diagnostic `validates :unknown_attr`
-        # surfacing when the attribute isn't a column on the table).
+        # validator option set is ignored). The names ride on the published `:model_index` fact as
+        # `validations:`; this plugin's own {Analyzer} does not read them.
         def lookup_validations(body)
           return [] if body.nil?
 
@@ -1546,8 +1547,8 @@ module Rigor
         end
 
         # `before_save :foo`, `after_create :bar`, etc. Records the referenced method name (a Symbol
-        # literal). The diagnostic value is "did you forget to `def` this?". Block callbacks
-        # (`before_save { ... }`) decline.
+        # literal), published as `callbacks:` on the `:model_index` fact for consumers that check the named
+        # method exists. Block callbacks (`before_save { ... }`) decline.
         CALLBACK_METHODS = %i[
           before_validation after_validation
           before_save after_save around_save

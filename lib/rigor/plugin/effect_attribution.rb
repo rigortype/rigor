@@ -18,7 +18,7 @@ module Rigor
     #
     # ## The receiver
     #
-    # `receiver` is spelled one of two ways, and the spelling picks the matching rule:
+    # `receiver` is spelled one of three ways, and the spelling picks the matching rule:
     #
     # - a **class name** (`"ActiveRecord::Base"`, `"I18n"`) matches the class the call's receiver
     #   projects to, **through the project's inheritance chain**: an `ActiveRecord::Base` row applies to

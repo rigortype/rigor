@@ -11,7 +11,7 @@ module Rigor
   module Plugin
     # rigor-rails-i18n — validates `t('key.path')` / `I18n.t(...)` calls against `config/locales/*.yml`.
     #
-    # Tier 1B of the [Rails plugins roadmap](../../../../docs/design/20260508-rails-plugins-roadmap.md).
+    # Tier 1B of the [Rails plugins roadmap](../../../../../docs/design/20260508-rails-plugins-roadmap.md).
     # Statically reads every YAML file under `locale_search_paths` (default `config/locales/`), builds a
     # flat `dotted_key => Entry` index keyed by the leaf key path, and validates every `t(literal_key, ...)`
     # call site against the catalogue. No Rails runtime dependency.

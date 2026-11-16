@@ -12,8 +12,9 @@ module Rigor
       # `RSpec.describe`), a `Scope` value with the `let` and `subject` declarations recorded inside that
       # scope.
       #
-      # Scope hierarchy is preserved: each `Scope` carries a list of its `nested_scopes`. The analyzer uses
-      # the hierarchy to detect cross-scope shadowing.
+      # Scope hierarchy is preserved: each `Scope` carries a list of its `nested_scopes`. The analyzer visits
+      # every scope in the tree but checks each one's declarations on their own; it does not compare across
+      # scopes.
       #
       # Recognised scope methods (when called without a receiver, or with `RSpec` as the receiver):
       #

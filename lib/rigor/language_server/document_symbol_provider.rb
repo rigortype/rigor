@@ -30,10 +30,9 @@ module Rigor
         @project_context = project_context
       end
 
-      # @return LSP document symbols for the
-      #   buffer at `uri`. Returns nil when the URI isn't open or
-      #   doesn't parse cleanly enough to surface symbols — LSP
-      #   clients fall back to no-outline in that case.
+      # @return LSP document symbols for the buffer at `uri`. Returns nil when the URI isn't open (or is
+      #   desynchronised) — LSP clients fall back to no-outline in that case. A buffer with parse errors still
+      #   yields whatever outline Prism recovered.
       def provide(uri)
         path, entry = buffer_for(uri)
         return nil if entry.nil?
@@ -125,8 +124,7 @@ module Rigor
       end
 
       # LSP `Range` is 0-based start + end with `character` in UTF-16 code units. This implementation emits
-      # byte columns (correct for ASCII source); UTF-16 conversion stays queued per design doc § "Open
-      # questions".
+      # byte columns (correct for ASCII source); UTF-16 conversion is not implemented here.
       def range_from(location)
         {
           start: { line: location.start_line - 1, character: location.start_column },

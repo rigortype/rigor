@@ -1527,9 +1527,6 @@ module Rigor
             record_optimistic_nil_free(method_definition, method_type, scope, call_node)
           end
 
-          # The two method-level type-parameter binding positions, layered in precedence order over the
-          # receiver-derived `type_vars`: the block return type first, then the argument positions (which
-          # never displace an existing key). See {#compose_arg_type_vars} for the argument envelope.
           # Issue #521 — more than one candidate means a `Dynamic[Top]` argument made the overloads
           # indistinguishable; pinning the first answered a wrong precise type the runtime can contradict
           # (`[true] * n` read as String). The join is the candidates' return union wrapped in `Dynamic`,
@@ -1571,6 +1568,10 @@ module Rigor
             Type::Combinator.dynamic(Type::Combinator.union(*distinct))
           end
 
+          # The two method-level type-parameter binding positions, layered in precedence order over the
+          # receiver-derived `type_vars`: the block return type first, then the argument positions (which
+          # never displace an existing key). See {#compose_arg_type_vars} for the argument envelope.
+          #
           # `positional` is `args` less a keyword hash the overload takes as its keywords (#1727). The block-return
           # rule reads every argument, the keyword hash included: a keyword parameter naming the block's variable
           # (`[T] (?default: T) { () -> T } -> T`) is an argument reaching it. The positional binding reads only the
@@ -2214,11 +2215,6 @@ module Rigor
             end
           end
 
-          # The block's type less the falsey values the declared return spells beside the variable: its
-          # truthy fragment for `nil | false`, its non-nil fragment for `nil` alone. A `Dynamic` block type
-          # passes through unchanged, so an untyped block still binds `Dynamic[top]`. A block that answers
-          # only the stripped values binds `bot`, so `filter_map { nil }` is `Array[bot]`: an Array that
-          # holds no element.
           # Whether the receiver class's Ruby source defines the dispatched method, the probe
           # {#arg_binding_permitted?} also reads. Without a scope there is no discovery to consult.
           def project_redefined?(scope, call_site)
@@ -2230,6 +2226,11 @@ module Rigor
             scope.discovered_method?(class_name, method_name, kind)
           end
 
+          # The block's type less the falsey values the declared return spells beside the variable: its
+          # truthy fragment for `nil | false`, its non-nil fragment for `nil` alone. A `Dynamic` block type
+          # passes through unchanged, so an untyped block still binds `Dynamic[top]`. A block that answers
+          # only the stripped values binds `bot`, so `filter_map { nil }` is `Array[bot]`: an Array that
+          # holds no element.
           def strip_falsey_arms(block_type, arms)
             return block_type if arms.empty?
             return Narrowing.narrow_truthy(block_type) if arms.include?(:false) # rubocop:disable Lint/BooleanSymbol

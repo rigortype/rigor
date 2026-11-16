@@ -16,7 +16,8 @@ module Rigor
       # (non-static key, out-of-range index, multi-arg `dig`, ...) the tier returns `nil` so the
       # surrounding pipeline falls through to {RbsDispatch} and the projection-based answer.
       #
-      # Catalogue (Slice 5 phase 2):
+      # Original catalogue (Slice 5 phase 2); `TUPLE_HANDLERS` and `HASH_SHAPE_HANDLERS` below are the current,
+      # much wider tables, and `RECEIVER_HANDLERS` lists the other receiver carriers the tier reads:
       #
       # - Tuple#`first`, Tuple#`last` (no-arg, or a single `Constant[Integer]` count lifting to a
       #   sub-`Tuple`, the `take`/`drop` shape), Tuple#`size`/`length`/`count`: no-block.
@@ -1397,8 +1398,6 @@ module Rigor
             false
           end
 
-          # `tuple + other` — concatenates two Tuples. Both sides must be `Type::Tuple`. Returns a new
-          # Tuple whose elements are those of the receiver followed by those of the argument.
           # `at(n)` — the strict single-Integer accessor. Deliberately NOT an alias of {#tuple_index}: `[]`
           # and `slice` accept a Range or a `(start, length)` pair, while `Array#at` raises `ArgumentError`
           # on anything but one Integer, and a fold must never invent a value for a call that raises.
@@ -1499,6 +1498,8 @@ module Rigor
           end
           # rubocop:enable Style/ReturnNilInPredicateMethodDefinition
 
+          # `tuple + other` — concatenates two Tuples. Both sides must be `Type::Tuple`. Returns a new
+          # Tuple whose elements are those of the receiver followed by those of the argument.
           def tuple_concat(tuple, _method_name, args)
             return nil unless args.size == 1
 

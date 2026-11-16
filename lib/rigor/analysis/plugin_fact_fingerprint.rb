@@ -21,10 +21,10 @@ module Rigor
     #   (a) every ADR-9 fact-store publication `(plugin_id, name) -> value` (a producer/consumer fact such as
     #       `activerecord :model_index`, `dry-types :dry_type_aliases`),
     #   (b) every declared ADR-60 producer's computed value (`sorbet :catalog`, `actionpack :controller_index`),
-    #   (c) each plugin's optional {Plugin::Base#incremental_state_fingerprint} — a hook for internal catalog
-    #       state that lives in neither (a) nor (b).
+    #   (c) each plugin's optional `incremental_state_fingerprint` hook (not defined on {Plugin::Base}; a plugin
+    #       opts in by defining it) — a hook for internal catalog state that lives in neither (a) nor (b).
     #
-    # The digest rides the {Cache::IncrementalSnapshot} (schema 9); a warm recheck compares it and, on a
+    # The digest rides the {Cache::IncrementalSnapshot} (since schema 9); a warm recheck compares it and, on a
     # mismatch, invalidates the snapshot and runs a full analysis (the conservative, sound direction).
     #
     # OPAQUE plugins: a plugin that CONTRIBUTES per-call types (`dynamic_return` / `narrowing_facts`) but
@@ -226,8 +226,8 @@ module Rigor
         true
       end
 
-      # Channel (c): the optional {Plugin::Base#incremental_state_fingerprint} hook. Returns true when the plugin
-      # defines it (it has a surface).
+      # Channel (c): the optional `incremental_state_fingerprint` hook, probed with `respond_to?`. Returns true when
+      # the plugin defines it (it has a surface).
       # rubocop:disable-next Naming/PredicateMethod -- reports has-surface AND appends parts (a side-effecting builder)
       def collect_hook_part(plugin, id, parts, reasons)
         return false unless plugin.respond_to?(:incremental_state_fingerprint)

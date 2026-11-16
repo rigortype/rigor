@@ -34,8 +34,8 @@ module Rigor
       #
       # `widen_value_pinned` (ADR-55/56) collapses `Constant`/`IntegerRange` operands to their nominal base
       # before dispatch so the result is the operator's nominal return (`Integer`) rather than a
-      # constant-folded `Constant[120]` — full constant folding of the reduction is out of scope, the
-      # precision target is the carrier (`Integer`), not the value.
+      # constant-folded `Constant[120]` — this nominal fold targets the carrier (`Integer`), not the value; a
+      # fully-constant receiver is folded to its value earlier, by `try_constant_reduce`.
       module ReduceFolding
         module_function
 
@@ -227,8 +227,7 @@ module Rigor
           # The seed itself is the result when the collection is empty (`[].reduce(s, :op) == s`), so a
           # 2-arg fold's static type is the operator result joined with the seed. The seed is widened
           # (`Constant[0]` -> `Integer`) for the join so the carrier stays the precision target rather than
-          # leaking a value-pinned member (`0 | Integer`) — full constant folding of the fold is out of
-          # scope.
+          # leaking a value-pinned member (`0 | Integer`).
           return result if seed.nil?
 
           Type::Combinator.union(Type::Combinator.widen_value_pinned(seed), result)

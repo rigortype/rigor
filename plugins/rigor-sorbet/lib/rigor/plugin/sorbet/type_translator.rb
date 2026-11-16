@@ -218,7 +218,7 @@ module Rigor
 
         # `T::Class[T]` — Sorbet's "any class object whose instances are at least `T`". Rigor has no exact
         # analogue (Singleton names a specific class); the closest faithful translation is `Singleton[name]`
-        # when `T` is a constant, or `Singleton[Object]` for broader applications. Lossy — the
+        # when `T` is a constant, or `Singleton[Class]` for any other argument. Lossy — the
         # `dynamic.sorbet.degraded` diagnostic for this case is deferred.
         def translate_t_class_subscript(args)
           inner = args.first

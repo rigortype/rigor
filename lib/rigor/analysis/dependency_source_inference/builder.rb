@@ -30,10 +30,8 @@ module Rigor
           state.to_index(dependencies)
         end
 
-        # Per-build mutable accumulator. The original inline variables (`resolved` / `unresolvable` /
-        # `catalog` / `class_to_gem` / `budget_exceeded` / `gem_modes`) pushed the method past the AbcSize
-        # budget; the struct collects the same fields, narrows `absorb`'s branching, and yields one
-        # `Index.new(...)` call from `to_index`.
+        # Per-build mutable accumulator: collects each gem's outcome and yields one `Index.new(...)` call from
+        # `to_index`.
         class BuildState
           def initialize
             @resolved = []

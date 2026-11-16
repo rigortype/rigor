@@ -1878,13 +1878,8 @@ module Rigor
         @cache_store = cache_store
         @virtual_rbs = virtual_rbs.map { |name, content| [name.to_s.dup.freeze, content.to_s.dup.freeze].freeze }.freeze
         # Per-loader memoization bucket. Held as a single mutable Hash so the loader instance itself can be
-        # `.freeze`d (per ADR-15 reflection-facade contract) without losing the lazy-memo behaviour. Slot
-        # names currently consulted: `:env`, `:env_loaded`, `:env_build_warned`, `:definition_build_warned`,
-        # `:definition_build_details`, `:definition_build_reported`, `:definition_build_failures`,
-        # `:definition_build_deferred_count`, `:definition_build_deferred_first`,
-        # `:definition_build_summary_warned`, `:member_consistency`, `:member_consistency_proven`, `:internal_demand`,
-        # `:internal_demand_status`, `:builder`, `:reflection`,
-        # `:instance_definitions_table`, `:singleton_definitions_table`.
+        # `.freeze`d (per ADR-15 reflection-facade contract) without losing the lazy-memo behaviour. Slots are
+        # created on first use by the `@state[:name]` readers below, so there is no fixed list.
         # Constructed via `Hash.new` (NOT a `{ ... }` literal) so Rigor's `HashShape` narrowing doesn't
         # infer a fixed key set from the initial state and fold post-initial slot reads (e.g.
         # `@state[:env_loaded]`) to a constant `nil`.
@@ -3243,7 +3238,7 @@ module Rigor
       # The Reflection consumes the loader's already-warmed cache producers (or, when no `cache_store` is
       # set, eagerly walks the env). Once constructed, the Reflection carries the derived tables
       # independently and never re-consults the loader — making it safe to share across Ractors while the
-      # loader stays per- process / per-Ractor for write-path operations.
+      # loader stays per-process / per-Ractor for write-path operations.
       def reflection
         @state[:reflection] ||= begin
           require_relative "reflection"

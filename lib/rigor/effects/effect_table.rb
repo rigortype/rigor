@@ -10,7 +10,7 @@ module Rigor
     #
     # An EffectTable is **not a diagnostic and never enters `rigor check`'s stream**. It hangs off the
     # runner for the report of this slice and the snapshot of #381 to read, exactly as
-    # [ADR-102](../adr/102-unused-code-reachability-report.md) draws the report-versus-diagnostic line.
+    # [ADR-102](../../../docs/adr/102-unused-code-reachability-report.md) draws the report-versus-diagnostic line.
     class EffectTable
       # One method's row.
       #

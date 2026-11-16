@@ -10,7 +10,7 @@ module Rigor
   module LanguageServer
     # Answers `textDocument/foldingRange` requests. Walks the Prism AST and emits one `FoldingRange` per
     # foldable construct: `class` / `module` / `def` / `singleton class << self` / block (`do…end` or `{…}`).
-    # Skips single-line constructs (start_line == end_line) since there's nothing to fold.
+    # Skips constructs with no body line to hide (single-line, or opener directly followed by `end`).
     #
     # Ranges are LSP 0-based. `startLine` is the line containing the opening keyword (`class`, `def`); `endLine`
     # is the last line OF the body — one line before the `end` keyword — so collapsed view shows the opener
@@ -55,8 +55,8 @@ module Rigor
         loc = node.location
         start_line = loc.start_line - 1
         # `end_line` includes the line of the `end` keyword. Folding should hide the body and leave both the
-        # opener AND the `end` keyword visible — so endLine is one line before `end`. When the body is a single
-        # line, that makes start == end (one-line fold), which most editors skip; we filter those out.
+        # opener AND the `end` keyword visible — so endLine is one line before `end`. When there is no body line
+        # between opener and `end`, that makes endLine <= startLine, so we filter those out.
         end_line = loc.end_line - 2
         return if end_line <= start_line
 

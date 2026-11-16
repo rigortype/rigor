@@ -17,7 +17,8 @@ module Rigor
       #   for helpers that span multiple methods (a `resources` show helper isn't HTTP-method-specific in
       #   the helper sense — it's path-sensitive only).
       # - `action`: `:index` / `:show` / `:new` / `:edit` / `:create` / `:update` / `:destroy` for
-      #   resourceful routes; `:custom` for explicit `get`/`post`/etc.; `:root` for the root route.
+      #   resourceful routes; `:custom` for explicit `get`/`post`/etc.; `:root` for the root route; `:mount` for
+      #   a `mount` point's `as:` helper.
       #
       # Both `_path` and `_url` forms share the same metadata — the table records each helper twice (once
       # with `_path`, once with `_url`) for `O(1)` lookup at the call site.
@@ -26,7 +27,7 @@ module Rigor
 
         attr_reader :entries, :custom_helpers, :devise_resources
 
-        # @param entries — freshly built; the factory below is the canonical construction path.
+        # @param entries — the route-helper {Entry} rows.
         # @param custom_helpers — names of project-defined helper methods (typically
         #   pulled from `app/helpers/**/*.rb` by {HelperDiscoverer}) that the analyzer should treat as
         #   known — they do NOT correspond to a route but their presence MUST NOT fire `unknown-helper`. No

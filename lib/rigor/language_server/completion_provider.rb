@@ -49,7 +49,7 @@ module Rigor
       #   "no completions available," distinct from `[]` which
       #   means "we tried and got nothing".
       def provide(uri:, line:, character:, trigger_character: nil)
-        _ = trigger_character # Trigger info logged-not-routed in v1.
+        _ = trigger_character # Trigger info accepted but not routed.
         path, entry = buffer_for(uri)
         return nil if entry.nil?
 
@@ -211,8 +211,8 @@ module Rigor
 
       # Slice B2 — `Foo::|` constant-path completion. The cursor sits on a `ConstantPathNode` whose `parent`
       # resolves to a class / module FQN; we enumerate every known class whose name is an immediate child of
-      # that parent. Top-level constants (`::Foo`) and parent-less paths are not yet supported (queued for
-      # slice 6 follow-up).
+      # that parent. A parent-less path (`::|`, completing a top-level constant) is not supported and yields
+      # nil; a leading `::` on the parent (`::Foo::|`) is ignored.
       def constant_path_completion_for(const_path_node)
         parent_fqn = parent_fqn_of(const_path_node)
         return nil if parent_fqn.nil?
@@ -226,7 +226,7 @@ module Rigor
 
       def parent_fqn_of(const_path_node)
         # ConstantPathNode#parent is the LHS of the `::`. For `Foo::Bar` it's the ConstantReadNode for `Foo`;
-        # for `Foo::Bar::Baz` it's a ConstantPathNode. We render either to the dotted FQN string.
+        # for `Foo::Bar::Baz` it's a ConstantPathNode. We render either to the `::`-joined FQN string.
         parent = const_path_node.parent
         return nil if parent.nil?
 
@@ -253,8 +253,8 @@ module Rigor
         return [] if loader.nil?
 
         names = loader.send(:known_class_names_set)
-        # RBS canonical names carry a leading `::` (so the table holds `::Process::Status` etc.). Match
-        # against both forms so the prefix walk works regardless of which form the caller passes.
+        # RBS canonical names carry a leading `::` (so the table holds `::Process::Status` etc.), hence the
+        # `::`-prefixed match key.
         prefix = "::#{parent_fqn}::"
         names.filter_map do |fqn|
           next nil unless fqn.start_with?(prefix)
@@ -382,8 +382,8 @@ module Rigor
           detail: detail,
           insertText: label,
           filterText: label,
-          # Inherited methods rank below own-class methods; the `defs.first.implemented_in` carries the
-          # declaring class. Inheritance-distance ranking is queued (design doc § "sortText").
+          # Every method gets the same `1_` rank; owner-proximity ranking (own-class before inherited, using
+          # `defs.first.implemented_in`) described in the design doc § "sortText" is not implemented.
           sortText: "1_#{label}"
         }
       end

@@ -33,6 +33,7 @@ module Rigor
     # - `:mutation` / `:invalidation` / `:role` — Union; dedupe by equality.
     # - `:exception` — Single-valued. Two non-`nil` non-equal exceptional effects record an
     #   `:exceptional_disagreement` conflict.
+    # - `:effects` — Union (label-set join) across every tier; never a conflict.
     #
     # ## Cross-tier contradictions
     #

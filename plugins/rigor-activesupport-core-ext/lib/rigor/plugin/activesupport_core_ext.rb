@@ -13,9 +13,10 @@ module Rigor
     # root and `Environment.for_project` merges it into the RBS environment, so the ActiveSupport
     # core-extension selectors (`3.days`, `"x".squish`, `Time.current`, …) resolve.
     #
-    # The one exception is the {DURATION_MULTIPLIERS} pair of `dynamic_return` rules, which give `1.day` /
-    # `5.minutes` an `ActiveSupport::Duration` nominal and keep the arithmetic around it honest. They
-    # cannot live in the RBS bundle; see the comment on that constant for why.
+    # The exception is the `dynamic_return` rules: the {DURATION_MULTIPLIERS} rule and the Duration
+    # arithmetic rule give `1.day` / `5.minutes` an `ActiveSupport::Duration` nominal and keep the arithmetic
+    # around it honest (see the comment on that constant for why they are not RBS), and the
+    # `symbolize_keys` / `to_options` rule maps each key member ({SymbolizeKeys}).
     #
     # Issue #632 — `sig/active_support/core_ext.rbs` now ALSO declares `ActiveSupport::Duration` itself
     # (the reader surface: `ago`/`until`/`since`/`from_now`/`before`/`after`, `to_i`/`in_seconds`, `to_f`,
@@ -114,7 +115,7 @@ module Rigor
 
       # The nominal every multiplier returns. It is a *lenient* nominal: the site becomes a concrete
       # receiver that `coverage --protection` counts, and `call.undefined-method` never fires against it
-      # (ADR-26 `open_receivers:` below) regardless of what its RBS does or doesn't enumerate. Issue #632
+      # (ADR-26 `open_receivers:` above) regardless of what its RBS does or doesn't enumerate. Issue #632
       # gave `ActiveSupport::Duration` an actual (partial) RBS declaration — `sig/active_support/
       # core_ext.rbs`'s reader surface, `to_i` / `in_seconds` / `to_f` / the `in_minutes` family / `iso8601`
       # / `parts` — so THOSE now resolve precisely instead of to `Dynamic`. `ago` / `until` / `before` /
@@ -144,7 +145,7 @@ module Rigor
 
       # ## Duration arithmetic — a correction, not a feature
       #
-      # Typing the multiplier alone REGRESSES three shapes, measured on a fixture before this rule existed.
+      # Typing the multiplier alone REGRESSES four shapes, measured on a fixture before this rule existed.
       # A Duration is an ordinary argument to the core operators, and the overload selector has to choose
       # among `Time#-`'s `(Time) -> Float` / `(Numeric) -> Time` with an argument whose class it has no RBS
       # for. Given `Dynamic[top]` — the pre-#534 answer — it widened to the union of the returns and stayed

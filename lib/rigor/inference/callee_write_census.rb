@@ -43,7 +43,7 @@ module Rigor
     # parameter to a new object (`h = h.dup`): a node that starts after it no longer reaches the caller's argument,
     # read as `StatementEvaluator#after_rebind?` reads it.
     #
-    # {Census#aliases} answers the parameters a read may be (not a part of), so a hand-off of an alias (`poke(other)`)
+    # {.handed_aliases} answers the parameters a read may be (not a part of), so a hand-off of an alias (`poke(other)`)
     # is followed as the parameter's own hand-off.
     module CalleeWriteCensus
       # `written` is the parameter names written; `alias_table` maps a key (`[local, level]`, `[ivar, :ivar]` or
@@ -620,7 +620,7 @@ module Rigor
 
         private
 
-        # The names {Census#aliases} can answer for: every key's name.
+        # The names {.handed_aliases} can answer for: every key's name.
         def alias_names(table)
           names = Set.new
           table.each_key { |key| names << key.first }

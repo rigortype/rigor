@@ -1131,7 +1131,7 @@ module Rigor
           define_method_written_ivars(def_node.body, singleton_written)
         end
 
-        # B2.3 — collect per-method evidence for the read-before- write nil contribution. The accumulator-level decision
+        # B2.3 — collect per-method evidence for the read-before-write nil contribution. The accumulator-level decision
         # ("is this ivar truly read-before-write across the class lifetime?") is finalised at
         # `contribute_read_before_write_nil!` after the whole class body has been walked, using `init_writes` as the
         # soundness gate (an ivar written in `initialize` is initialised before any other method body runs).
@@ -1553,9 +1553,10 @@ module Rigor
         end
       end
 
-      # Records `@ivar.<method>(...)` calls whose method is in `MutationWidening::SHAPE_MUTATORS`.
+      # Records `@ivar.<method>(...)` calls whose method is in `MutationWidening::SHAPE_MUTATORS` or
+      # `SetMutation::MUTATORS` ({#ivar_census_mutator?}).
       # The class-ivar pre-pass uses the resulting set to widen the post-collected accumulator entries (see
-      # {.widen_mutated_ivar_entries!}). Always-safe to over- collect: any name that the widening primitive declines is
+      # {.widen_mutated_ivar_entries!}). Always-safe to over-collect: any name that the widening primitive declines is
       # ignored at finalization.
       def record_ivar_mutator_call(node, class_name, mutated_ivars)
         method_name, receiver = mutation_target(node)
@@ -3743,9 +3744,8 @@ module Rigor
       #     table; singleton defs and `define_method` are intentionally
       #     skipped — `record_def_node` filters them).
       #
-      # `walk_methods` and `walk_def_nodes` had byte-identical class / module / singleton / meta-block descents (both
-      # stop at `DefNode`), so a single combined walk records both accumulators at once instead of traversing every file
-      # twice.
+      # Both tables share the class / module / singleton / meta-block descent (it stops at `DefNode`), so one combined
+      # walk records both accumulators instead of traversing every file twice.
       #
       # Issue #992 — and a third, `envelopes`: `{class_name => {[kind, method] => envelope}}`, the
       # {Source::ParameterEnvelope} of every name the existence table records, plus the class-wide
@@ -3956,7 +3956,6 @@ module Rigor
         offsets.freeze
       end
 
-      # Is one of the ascending `offsets` in `[start, stop)`?
       # The `[start, end)` byte span of every block and lambda in `root`.
       def block_spans(root)
         spans = []
@@ -3971,6 +3970,7 @@ module Rigor
         spans
       end
 
+      # Is one of the ascending `offsets` in `[start, stop)`?
       def offset_in?(offsets, start, stop)
         index = offsets.bsearch_index { |offset| offset >= start }
         !index.nil? && offsets[index] < stop
@@ -4443,10 +4443,9 @@ module Rigor
       end
 
       # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength
-      # Combined `walk_methods` + `walk_def_nodes` descent. The two walks had identical class / module / singleton-class
-      # / meta-block traversals and both stopped at `DefNode`; the only divergences are leaf actions (recorded into the
-      # right accumulator) and the original `walk_methods` returning at `AliasMethodNode` (its symbol-only children
-      # carry no def / class node, so not descending them is byte-identical for `def_nodes` too). See
+      # Combined methods / def-nodes descent: both tables share one class / module / singleton-class / meta-block
+      # traversal that stops at `DefNode`; only the leaf actions differ (each recorded into its own accumulator). An
+      # `AliasMethodNode` is not descended (its symbol-only children carry no def / class node). See
       # {#build_methods_and_def_nodes}.
       # `def_owner_prefix` overrides the prefix def-ish leaves record under — inside a
       # `*_eval` / `*_exec` block body it is the receiver's prefix while `qualified_prefix`
@@ -5748,7 +5747,6 @@ module Rigor
         body.body.any? { |statement| concern_extend?(statement, child_prefix) }
       end
 
-      #
       # Issue #3005 — `self.extend ActiveSupport::Concern` and a receiverless or `self.` `send` / `public_send` /
       # `__send__(:extend, ActiveSupport::Concern)` run the same `extend` on the module ({#mixin_call_view}).
       def concern_extend?(statement, child_prefix)
@@ -6108,7 +6106,6 @@ module Rigor
       # same-named local method.
       TOP_LEVEL_DEF_KEY = "<toplevel>"
 
-      #
       # ADR-119 WD3 — the slot follows its writer (later-wins): a certain write clears the key from
       # `contested_discovered_def_nodes` and a possible one adds it ({MethodTables#certain}, set for `def_node`).
       def record_def_node(def_node, qualified_prefix, in_singleton_class, accumulator, tables = nil)
@@ -6212,7 +6209,7 @@ module Rigor
                            tables.nil? || tables.certain)
       end
 
-      # Module-singleton call resolution (ADR-57 follow-up) — the SINGLETON-side mirror of `build_discovered_def_nodes`.
+      # Module-singleton call resolution (ADR-57 follow-up) — the SINGLETON-side mirror of the def-node table {#build_methods_and_def_nodes} builds.
       # Records the `Prism::DefNode` for every singleton-side method (`def self.x`, `def Foo.x`, a `class << self` body,
       # and a `module_function` method) keyed by qualified class/module name → method → node, so `ExpressionTyper` can
       # re-type the body when a `Singleton[Foo]` receiver dispatches `Foo.x`. The instance-side table is kept
@@ -6912,10 +6909,6 @@ module Rigor
         !(node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
       end
 
-      # The `in_singleton_class` flag an eval-family block body inherits: a named receiver opens
-      # that class's OWN body (`false`), while a bare or `self` receiver stays in whatever context
-      # the enclosing body already is — `class << self; class_eval { … }` opens the singleton's
-      # body, so `include` inside is still a singleton-ancestor edge.
       # Whether `def`/`alias` leaves in an eval block body bind on the receiver's SINGLETON:
       # `instance_eval`/`instance_exec` always (self IS the receiver — `def` lands on
       # `#<Class:X>`); `class_eval` only inside an already-singleton body, where the receiver's
@@ -7106,7 +7099,7 @@ module Rigor
       EMPTY_NESTING = [].freeze
 
       # The empty qualified prefix. Distinct from {EMPTY_NESTING} only in what it MEANS: the two are handed
-      # to different parameters, and this cycle spent a blocker on a prefix and a nesting sharing a name.
+      # to different parameters.
       EMPTY_PREFIX = [].freeze
       private_constant :EMPTY_NESTING
 
@@ -7812,8 +7805,8 @@ module Rigor
 
       # ADR-48 — per qualified class name -> ordered `Data.define` member-name list, for both the named-subclass form
       # (`class Point < Data.define(:x, :y)`) and the constant-assigned form (`Point = Data.define(:x, :y)`). Only
-      # `Data.define` is recorded: `Struct.new` instances are mutable, so member-value folding would be unsound (the
-      # Struct follow-up is deferred — see ADR-48 § "Struct follow-up"). Consumed by
+      # `Data.define` is recorded: `Struct.new` instances are mutable, so member-value folding would be unsound
+      # (the Struct sibling table is {#build_struct_member_layouts}, ADR-48 § "Struct follow-up"). Consumed by
       # {Inference::MethodDispatcher::DataFolding} via {Scope#data_member_layout}.
       #
       # ADR-116 WD5 — built with its Struct sibling by {MemberLayoutsCollector}. Production builds both in
@@ -8275,15 +8268,12 @@ module Rigor
         true
       end
 
-      # Issue #728 — a block that REBINDS `self` owns the mixin calls written in it, and this walk used to
-      # hand them to the lexically enclosing declaration. `Thing = Class.new { include Taggable }` inside
-      # `class Outer` registered `Taggable` on `Outer`, so `Outer.new.tag` typed `:tagged` where MRI raises
-      # `NoMethodError` — a wrong answer, not a wider one. The classification is
+      # Issue #728 — a block that REBINDS `self` owns the mixin calls written in it, not the lexically enclosing
+      # declaration: `Thing = Class.new { include Taggable }` inside `class Outer` must not register `Taggable` on
+      # `Outer`, where `Outer.new.tag` raises `NoMethodError` in MRI. The classification is
       # {#rebound_block_self}, the same one #721 gave its own mixin scan.
       #
-      # `Recv.class_eval { include M }` resolves to `Recv` and now records there, which it never did before
-      # (the block's owner was the lexical enclosure, so at the top level the include was simply dropped).
-      # An OPAQUE rebinding — `Class.new` / `Module.new` / a non-constant `class_eval` receiver — records
+      # `Recv.class_eval { include M }` resolves to `Recv` and records there. An OPAQUE rebinding — `Class.new` / `Module.new` / a non-constant `class_eval` receiver — records
       # nothing: the class exists but this walk cannot name it, and naming the lexical enclosure instead is
       # the one answer Ruby is guaranteed not to have written.
       def walk_mixin_call_children(node, qualified_prefix, current_class, accumulator, singleton_self,
@@ -8648,8 +8638,8 @@ module Rigor
       end
 
       # `[[owner, side], …]` — the ancestry sides a mixin call reshapes. `self` and the implicit receiver
-      # are the enclosing class (`:include` for `include` / `prepend`, `:extend` for `extend`, and both
-      # flip to `:extend` inside `class << self`); `singleton_class` is the singleton side; a constant is
+      # are the enclosing class (`:include` for `include` / `prepend`, `:extend` for `extend`; inside
+      # `class << self` `include` / `prepend` flip to `:extend` and `extend` names no owner); `singleton_class` is the singleton side; a constant is
       # that class; any other receiver is unknown, so it may be the class that includes this one from a
       # hook (`base.include M`) and taints both sides of the enclosing class.
       def mixin_effects(node, kind, qualified_prefix, current_class, accumulator, in_singleton:)
@@ -9364,7 +9354,7 @@ module Rigor
       # class_eval { def x }`, `singleton_class.send(:define_method, :x)`, `Const.singleton_class.prepend(M)`,
       # `Const.singleton_class.send(:include, M)`) puts methods or modules on that singleton class that no edge
       # records, so its singleton side is unpositioned: the owner is the enclosing class for a bare or `self.`
-      # receiver, else the constant. True when it tainted.
+      # receiver, else the constant. True when the call was handled here (taint, or a recorded `include` / `prepend`).
       #
       # Issue #1906 — a naming call with literal names ({#singleton_class_named_call?}) marks only its names instead,
       # but only where it is a direct statement (a top-level statement, or one of a direct declaration body or of a
@@ -11240,9 +11230,10 @@ module Rigor
       end
 
       # Walks every file in `paths` (each path is parsed once with `Prism.parse_file`) and returns the unioned
-      # project-wide `discovered_classes` Hash: `{qualified_name => Singleton[…]}`. Used by `Analysis::Runner` to seed
-      # each file's `default_scope.discovered_classes` so that lexical constant lookup in one file resolves a `class
-      # Foo` declared in a sibling file. Per-file collisions are last-write-wins (matches the existing in-file merge
+      # project-wide `discovered_classes` Hash: `{qualified_name => Singleton[…]}`, which seeds each file's
+      # `default_scope.discovered_classes` so that lexical constant lookup in one file resolves a `class Foo` declared
+      # in a sibling file. The runner's pre-pass now gets it from {#discovered_project_index_for_paths}; this is the
+      # classes-only walk. Per-file collisions are last-write-wins (matches the existing in-file merge
       # semantics). Parse failures fail-soft to an empty contribution. The `buffer` argument, when present, redirects
       # reads for the bound logical path to the buffer's physical path so editor-mode pre-passes see the in-flight
       # bytes.
@@ -11609,8 +11600,7 @@ module Rigor
       # iteration, so no more than one AST is held alive at a time (peak RSS stays flat on large projects).
       #
       # Error degradation is identical to the two independent loops it replaces: a read / parse failure (the
-      # rescue's real target) contributes nothing to either table. The subset-scoped callers
-      # ({IncrementalSession}, `coverage --protection`) keep calling the individual methods unchanged.
+      # rescue's real target) contributes nothing to either table.
       #
       # @param uncertain — issue #2021: the paths whose every method contribution is `possible`
       #   ({Certainty.every_contribution}).
@@ -12255,7 +12245,6 @@ module Rigor
         # {#subtract_sibling_methods!} applies the same drop to `possible_discovered_methods`. The extends fold copies
         # an extended module's instance defs onto the extender's singleton, and follows the siblings the same way (a
         # copy is possible or contested when its edge is listed in `unpositioned_mixins` or its source was).
-        # Until a producer fills a sibling and an edge is listed, there is nothing for either pass to follow.
         fold_project_extends(acc)
         # Cross-file method suppression is for the project's OWN accessors (attr_* / define_method / alias) — NOT for
         # plain `def`s. A cross-file `def` on a class is exactly the ADR-17 monkey-patch case the undefined-method rule
@@ -12488,7 +12477,7 @@ module Rigor
       # and publishes a value the program does not have. That is why the operator / multi-assign / chained /
       # `self::` forms below are censused as unpublishable rather than skipped.
       #
-      # **Why the publishable set is only Symbol / Integer / Float.** Publishing turns `Dynamic[top]` into a
+      # **Why only Symbol / Integer / Float / `true` / `false` publish.** Publishing turns `Dynamic[top]` into a
       # real type at every reader in the project, which is precisely where a wrong answer becomes a diagnostic
       # on correct code (AGENTS.md § "Implementation Guidelines"), so the recognised set is the one whose
       # precision is worth that risk.
@@ -13558,7 +13547,6 @@ module Rigor
         [self_decl, child_prefix, unnameable_decl?(node, self_decl, singleton_cref)]
       end
 
-      # Whether a meta-new constant write's TARGET still names its class below an unnameable
       # The qualified prefix a `self::`-anchored declaration or write target names when
       # `self_base` names the REBOUND self — a `def_owner` override, a mixin `current_class`,
       # or a meta-new class prefix. nil `self_base` means `self` is the lexical class — the
@@ -13572,6 +13560,7 @@ module Rigor
         self_base + tail
       end
 
+      # Whether a meta-new constant write's TARGET still names its class below an unnameable
       # singleton cref — the path-write twin of {#decl_nameable_under_cref?}. `::K`, `C::K`,
       # `Foo::F` resolve their base lexically; a bare `K =` / `K ||=` lands on the singleton's
       # own constant table, and a `self::` or dynamic base names nothing reachable — unless

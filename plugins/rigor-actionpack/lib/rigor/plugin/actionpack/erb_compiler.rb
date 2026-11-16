@@ -162,8 +162,10 @@ module Rigor
           end
         end
 
-        # Rewrites every block-opening output tag into a statement tag; see {BLOCK_EXPR}. Line- and
-        # width-preserving by construction: only the tag's `=` characters are replaced, by spaces.
+        # The template pre-pass: blanks the trim markers ({TRIM_OPEN}), rewrites the `yield` keyword
+        # ({YIELD_METHOD}) and turns every block-opening output tag into a statement tag ({BLOCK_EXPR}).
+        # Line-preserving by construction; the trim and block rewrites are also width-preserving (only
+        # `-` / `=` characters are replaced, by spaces), the `yield` rewrite is not.
         def normalize(text)
           normalize_block_expressions(normalize_yields(text.gsub(TRIM_OPEN, "<% ").gsub(TRIM_CLOSE, " %>")))
         end

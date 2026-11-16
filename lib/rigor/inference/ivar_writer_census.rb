@@ -12,7 +12,7 @@ module Rigor
     # replace. The standard is parity with a literal write: `@x = 1` in `initialize` already reads `1` in every sibling
     # method whatever an unknown object's code does, so only the writers that literal writes would also have to answer
     # for are recorded, and an unknown-receiver writer records nothing (as `ReflectiveIvarWrite` leaves
-    # `o.instance_variable_set` alone). Three entry kinds go into the census `Set`:
+    # `o.instance_variable_set` alone). Four entry kinds go into the census `Set` (a fifth, `:binds_class`, is below):
     #
     # - `[:ivar_set, name]` — a literal `o.instance_variable_set(:@x, v)` (or the same through a `send` that spells
     #   it) on an explicit receiver other than `self`, and an `@x` write in the literal block of an

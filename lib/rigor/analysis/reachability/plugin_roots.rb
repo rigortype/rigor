@@ -91,8 +91,8 @@ module Rigor
         #   and write the same ADR-60 record-and-validate slots they use under `rigor check`, instead of
         #   recomputing from scratch — a routes parse or a factory discovery is a validated cache read on
         #   every invocation after the first. Nil keeps the historical recompute-always behaviour.
-        # @return sorted and de-duplicated. Empty whenever the project declares no plugins, no
-        #   plugin contributes anything, or anything at all goes wrong.
+        # @return a {Contribution}, roots and references sorted and de-duplicated. Empty whenever the project
+        #   declares no plugins, no plugin contributes anything, or anything at all goes wrong.
         def collect(configuration:, plugin_requirer: ->(name) { require name }, cache_store: nil)
           return Contribution.empty if configuration.plugins.empty?
 

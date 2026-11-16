@@ -29,8 +29,7 @@ module Rigor
         end
 
         # Unresolvable reasons. `:not_in_bundle` covers both the "RubyGems doesn't know this gem" case and the
-        # `LoadError`-style raise from `find_by_name`. Future reasons (`:c_extension_only`, `:no_lib_root`) are
-        # introduced as the walker discovers them in slice 2b.
+        # `LoadError`-style raise from `find_by_name`. It is the only reason {VALID_REASONS} admits today.
         Unresolvable = Data.define(:gem_name, :reason)
 
         VALID_REASONS = %i[not_in_bundle].freeze

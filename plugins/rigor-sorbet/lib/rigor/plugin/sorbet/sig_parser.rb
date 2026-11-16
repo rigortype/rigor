@@ -26,8 +26,8 @@ module Rigor
       # yet acted on; `type_parameters` is recognised and its payload discarded.
       #
       # The parser is intentionally tolerant — unknown chain nodes degrade to "the rest of the chain is
-      # opaque" rather than raising. The plugin emits a diagnostic (`plugin.sorbet.parse-error`) only when
-      # the entire chain fails to yield either a `returns` or a `void`.
+      # opaque" rather than raising. The plugin emits a diagnostic (`plugin.sorbet.parse-error`) when the
+      # chain yields neither a `returns` nor a `void`, or the `sig` has no block or an empty one.
       module SigParser
         # Modifiers we recognise at any position in the chain. Stored in `:modifiers` on the parse result.
         RECOGNISED_MODIFIERS = %i[abstract override overridable final].freeze

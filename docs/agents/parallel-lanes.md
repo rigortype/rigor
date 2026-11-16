@@ -41,6 +41,45 @@ coordinator keeps these in its own loop and spawns an agent only for implementat
 Keep what comes back short. Lanes and reviewers report in the shapes their skills give; the detail
 lives in the PR body and the issues, which the coordinator reads only when a decision needs it.
 
+## Claim the numbers before spending anything on them
+
+Several coordinator sessions run in sibling worktrees of one clone, and nothing in
+`ListAgents` or the session list tells one that another is already on a ticket: those answer which
+*subagents* this session spawned, not what a sibling session owns. On 2026-11-15 one session
+reviewed, fixed and landed PRs #3253, #3254 and #3256 while another ran a reviewer subagent on each
+of the same three PRs and filed overlapping issues. The whole review round was duplicate spend, and
+the heads the second session briefed were stale: the first rebases a branch before every push, so
+#3254's reviewer read a commit the branch no longer held.
+
+So a number is claimed before anything is spent on it:
+
+```sh
+bin/rigor-claim check 3253 3254 3256   # read-only: free, mine, or HELD by whom
+bin/rigor-claim take 3253 --note 'review round'
+bin/rigor-claim drop 3253              # at landing, or when the loop stops
+bin/rigor-claim drop --mine            # release everything this session holds
+```
+
+The claim is a `refs/rigor/claim/<number>` ref in the shared `.git`, taken by compare-and-swap, so
+two sessions racing for one number cannot both win. Issues and PRs share GitHub's number space and a
+PR's review is the same work as its issue, so one key covers both. `check` exits 10 when another
+session holds a number; the script's header has the rest, including why claims do not expire.
+
+- **Claim before the spend, not after the decision.** Take the batch's numbers before step 1's
+  premise checks, every number a reviewer brief will name before the brief goes out, and the PR
+  before a fix round. A refused `take` is the cheapest outcome this file can offer.
+- **`take` is all-or-nothing per run.** A refusal releases what that run took and leaves what the
+  session already held, so a partly-claimed batch never starts.
+- **Drop at landing.** Release the number when the merge lands, when the work moves to another
+  session, and when the user stops the loop. `drop --mine` is the one call that cleans up a loop.
+- **A `HELD` number is a conversation, not a wall.** `check` prints the holder's session id: look it
+  up in the session list, and either send that session what you found — a review report it has not
+  seen is worth more there than re-run here — or, if it is archived or dead, `steal` the claim with
+  the blob sha `check` printed. Only an agent can tell a dead session from a slow one; the script
+  deliberately will not guess.
+- **Re-read the head before briefing a reviewer**, claim or no claim. A claim stops a second session
+  from starting; it does not freeze a branch the holder is still rebasing.
+
 ## Coordinator steps
 
 1. **Check each premise before it enters the batch.** Reproduce the issue on current `origin/master`

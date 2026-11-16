@@ -168,6 +168,13 @@ silently".
 
 ## Landing a pull request
 
+Before a review round, a fix round or a landing run: `bin/rigor-claim check <number>` and, if it is
+free, `take` it. Several sessions share this clone, and a sibling session's work on a PR is invisible
+to `ListAgents` and the session list. A session that skipped this check spent a reviewer subagent on
+each of three PRs another session was landing at the time (2026-11-15). `drop` the number at the
+merge. [`parallel-lanes.md`](parallel-lanes.md) § "Claim the numbers before spending anything on
+them" has the rules, including what to do with a `HELD` number.
+
 Once the change is implemented and `make verify-changed` passes:
 
 1. **Push and open the Draft PR.** CI on a Draft PR is a light gate: change detection plus `lint` on

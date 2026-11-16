@@ -78,6 +78,12 @@ Before committing, pushing, opening/landing a PR, or preparing a release, read
 [`docs/agents/contribution-flow.md`](docs/agents/contribution-flow.md). It contains the conditional
 GitHub Markdown, branch, draft-PR, changelog-fragment, release, and reporter-credit rules.
 
+Several sessions share this clone. Before spending a review round, a fix round or a landing run on an
+issue or PR, claim its number: `bin/rigor-claim check <number>`, then `take` it, and `drop` it at the
+merge. A sibling session's work is invisible to `ListAgents` and the session list; the rules are in
+[`docs/agents/parallel-lanes.md`](docs/agents/parallel-lanes.md) § "Claim the numbers before spending
+anything on them".
+
 Unless the user asks otherwise or it is a small docs fix pushed straight to `master`, a change
 request ends at its landing, not at a local diff: push a Draft PR (its CI is a light gate; the full
 run comes at `gh pr ready`), run CI and an independent adversarial review in parallel, apply what

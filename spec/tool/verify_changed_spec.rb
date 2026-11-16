@@ -11,18 +11,44 @@
 # unmatched: every literal here is text the selection greps for. The real
 # fixture paths in the other examples do select this file, which is why their
 # size assertions leave room for it.
+require "fileutils"
 require "open3"
+require "tmpdir"
 require "spec_helper"
 
 RSpec.describe "bin/verify-changed spec selection" do
   let(:script) { File.expand_path("../../bin/verify-changed", __dir__) }
   let(:root) { File.expand_path("../..", __dir__) }
 
+  # A GIT_DIR-free environment, so a temporary repository cannot reach this one.
+  def clean_env
+    ENV.keys.grep(/\AGIT_/).to_h { |key| [key, nil] }.merge("VERIFY_BASE" => nil, "VERIFY_CHANGED_PATHS" => nil)
+  end
+
+  # Yields a committed temporary repository holding the script and `files`.
+  def with_temp_repo(files)
+    Dir.mktmpdir("verify-changed-spec") do |dir|
+      FileUtils.mkdir_p(File.join(dir, "bin"))
+      FileUtils.cp(script, File.join(dir, "bin/verify-changed"))
+      files.each do |path, text|
+        FileUtils.mkdir_p(File.dirname(File.join(dir, path)))
+        File.write(File.join(dir, path), text)
+      end
+      git = ["git", "-c", "user.name=t", "-c", "user.email=t@t.invalid", "-c", "commit.gpgsign=false"]
+      [["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "x"]].each do |cmd|
+        _, err, status = Open3.capture3(clean_env, *git, *cmd, chdir: dir)
+        raise err unless status.success?
+      end
+      yield dir
+    end
+  end
+
   # [selected spec paths, uncovered fixture paths] for the given changed paths.
-  def selection_for(*paths)
+  def selection_for(*paths, quick: false)
     env = { "VERIFY_CHANGED_PATHS" => paths.join("\n") }
+    args = ["HEAD", *("--quick" if quick), "--list-specs"]
     out, err, status = Bundler.with_unbundled_env do
-      Open3.capture3(env, script, "HEAD", "--list-specs", chdir: root)
+      Open3.capture3(env, script, *args, chdir: root)
     end
     expect(status.exitstatus).to eq(0), "#{out}\n#{err}"
     specs = out.lines.map(&:strip).reject(&:empty?)
@@ -214,5 +240,170 @@ RSpec.describe "bin/verify-changed spec selection" do
     specs, uncovered = selection_for(path)
     expect(specs).to be_empty
     expect(uncovered).to include(path)
+  end
+
+  # #3277: a module with a spec directory and no same-named spec. Before the
+  # directory rule, check_rules.rb selected none of spec/rigor/analysis/check_rules/.
+  describe "the directory mirror rule" do
+    it "selects every spec under the mirror directory when there is no same-named spec" do
+      expect(File.exist?(File.join(root, "spec/rigor/analysis/check_rules_spec.rb"))).to be(false)
+      expected = Dir.glob("spec/rigor/analysis/check_rules/**/*_spec.rb", base: root)
+      expect(expected.length).to be > 5
+      [false, true].each do |quick|
+        specs, = selection_for("lib/rigor/analysis/check_rules.rb", quick: quick)
+        expect(specs).to include(*expected), "quick=#{quick}"
+      end
+    end
+
+    it "does not pull in a sibling module's directory" do
+      specs, = selection_for("lib/rigor/analysis/check_rules.rb", quick: true)
+      expect(specs.grep(%r{\Aspec/rigor/analysis/(?!check_rules/)})).to be_empty
+    end
+
+    # The bound, on a temporary repository so the counts are exact: the real
+    # directories drift (cli 49, check_rules 21 at the time of writing).
+    describe "its bound" do
+      def spec_files(dir, count, nested: false)
+        count.times.to_h { |i| ["#{dir}#{'/deep/er' if nested && i.odd?}/s#{i}_spec.rb", "# spec\n"] }
+      end
+
+      def list_in_temp_repo(files, path, quick:)
+        with_temp_repo(files) do |dir|
+          env = { "VERIFY_CHANGED_PATHS" => path }
+          args = ["HEAD", *("--quick" if quick), "--list-specs"]
+          out, err, status = Open3.capture3(clean_env.merge(env), "bin/verify-changed", *args, chdir: dir)
+          expect(status.exitstatus).to eq(0), err
+          # The default tier also names the drift specs, which this repository lacks.
+          [out.lines.map(&:strip).reject(&:empty?).select { |spec| File.exist?(File.join(dir, spec)) }, err]
+        end
+      end
+
+      [false, true].each do |quick|
+        context "with quick=#{quick}" do
+          it "selects nothing for the unit-spec root" do
+            files = { "lib/rigor.rb" => "", "spec/rigor/a_spec.rb" => "# spec\n" }
+            specs, err = list_in_temp_repo(files, "lib/rigor.rb", quick: quick)
+            expect(specs).to be_empty
+            expect(err).not_to include("bound")
+          end
+
+          it "selects every spec of a directory at the bound, nested ones included" do
+            files = { "lib/rigor/mod.rb" => "" }.merge(spec_files("spec/rigor/mod", 30, nested: true))
+            specs, err = list_in_temp_repo(files, "lib/rigor/mod.rb", quick: quick)
+            expect(specs.length).to eq(30)
+            expect(specs.grep(%r{/deep/er/}).length).to eq(15)
+            expect(err).not_to include("bound")
+          end
+
+          it "selects none from a directory over the bound and says so, naming the directory and the count" do
+            files = { "lib/rigor/mod.rb" => "" }.merge(spec_files("spec/rigor/mod", 31, nested: true))
+            specs, err = list_in_temp_repo(files, "lib/rigor/mod.rb", quick: quick)
+            expect(specs).to be_empty
+            expect(err).to include("spec/rigor/mod/ (31 specs")
+            expect(err).to include("run the ones your change touches yourself")
+          end
+
+          it "applies to a tool/ file's mirror directory" do
+            files = { "tool/x.rb" => "" }.merge(spec_files("spec/tool/x", 2))
+            specs, = list_in_temp_repo(files, "tool/x.rb", quick: quick)
+            expect(specs).to eq(["spec/tool/x/s0_spec.rb", "spec/tool/x/s1_spec.rb"])
+          end
+
+          it "adds the directory to a same-named spec" do
+            files = { "lib/rigor/mod.rb" => "", "spec/rigor/mod_spec.rb" => "# spec\n" }
+                    .merge(spec_files("spec/rigor/mod", 2))
+            specs, = list_in_temp_repo(files, "lib/rigor/mod.rb", quick: quick)
+            expect(specs).to include("spec/rigor/mod_spec.rb", "spec/rigor/mod/s0_spec.rb", "spec/rigor/mod/s1_spec.rb")
+          end
+        end
+      end
+    end
+
+    it "selects nothing for a path with no spec and no spec directory" do
+      specs, = selection_for("lib/rigor/zz_no_such_module_3277.rb", quick: true)
+      expect(specs).to be_empty
+    end
+  end
+
+  # #3277: the quick tier is the edit-loop check; the default mode keeps every
+  # selection it had.
+  describe "--quick" do
+    let(:engine_path) { "lib/rigor/inference/statement_evaluator.rb" }
+    let(:drift) do
+      %w[spec/integration/precision_snapshot_spec.rb spec/rigor/public_api_drift_spec.rb
+         spec/rigor/sig_gen/provenance_spec.rb spec/rigor/scope/ancestry_walker_detection_spec.rb]
+    end
+
+    it "selects only the mirror spec for an engine path, where the default adds the drift set" do
+      quick, = selection_for(engine_path, quick: true)
+      expect(quick).to eq(["spec/rigor/inference/statement_evaluator_spec.rb"])
+      full, = selection_for(engine_path)
+      expect(full).to include("spec/rigor/inference/statement_evaluator_spec.rb", *drift)
+    end
+
+    it "omits the incremental not-re-checked specs that a dependency-recording edit adds by default" do
+      path = "lib/rigor/analysis/dependency_recorder.rb"
+      quick, = selection_for(path, quick: true)
+      full, = selection_for(path)
+      incremental = full.grep(/incremental/)
+      expect(incremental).not_to be_empty
+      expect(quick.grep(/incremental/)).to be_empty
+    end
+
+    it "still runs a changed spec file" do
+      spec = "spec/rigor/inference/statement_evaluator_spec.rb"
+      quick, = selection_for(spec, quick: true)
+      expect(quick).to eq([spec])
+    end
+
+    it "keeps the fixture selection, and drops only the two all-plugin conformance specs for a plugin" do
+      path = "spec/integration/fixtures/and_assign_narrowing.rb"
+      expect(selection_for(path, quick: true)).to eq(selection_for(path))
+      plugin = Dir.glob("plugins/rigor-*/lib/**/*.rb", base: root).first
+      quick, = selection_for(plugin, quick: true)
+      full, = selection_for(plugin)
+      conformance = %w[spec/integration/all_plugins_load_spec.rb spec/integration/plugin_contract_conformance_spec.rb]
+      expect(full).to include(*conformance)
+      expect(quick).not_to include(*conformance)
+      expect(quick).to eq(full - conformance)
+    end
+
+    # A real run in a throwaway repository: with nothing changed it executes only
+    # the whitespace checks, so no rspec or RuboCop starts.
+    it "runs, labels itself the edit-loop tier, lists what it adds none of, and fails when a check fails" do
+      with_temp_repo({}) do |dir|
+        run = lambda do
+          Open3.capture3(clean_env, "bin/verify-changed", "--quick", "HEAD", chdir: dir)
+        end
+        out, err, status = run.call
+        expect(status.exitstatus).to eq(0), "#{out}\n#{err}"
+        expect(out).to include("verify-changed --quick: the EDIT-LOOP tier, not the pre-push gate.")
+        expect(out).to include("adds none of these on its own")
+        %w[drift pinned incremental spec/docs/ self-check conformance].each { |word| expect(out).to include(word) }
+        expect(out).to include("run `make verify-changed` before pushing.")
+        expect(out).to include("the checks it ran passed. Not the pre-push gate.")
+        expect(out).not_to include("verify-changed: OK.")
+
+        File.write(File.join(dir, "bad.txt"), "trailing \n")
+        out, err, status = run.call
+        expect(status.exitstatus).to eq(1), "#{out}\n#{err}"
+        expect(out).to include("verify-changed: FAILED")
+        expect(out).to include("whitespace (untracked files)")
+        expect(out).to include("run `make verify-changed` before pushing.")
+        expect(out).not_to include("the checks it ran passed")
+      end
+    end
+
+    it "is not accepted or forwarded by bin/lane-push" do
+      expect(File.read(File.join(root, "bin/lane-push"))).not_to include("--quick")
+    end
+
+    it "still refuses the stand-in diff outside --list-specs" do
+      _, err, status = Bundler.with_unbundled_env do
+        Open3.capture3({ "VERIFY_CHANGED_PATHS" => "docs/nonexistent.md" }, script, "HEAD", "--quick", chdir: root)
+      end
+      expect(status.exitstatus).to eq(2)
+      expect(err).to include("--list-specs only")
+    end
   end
 end

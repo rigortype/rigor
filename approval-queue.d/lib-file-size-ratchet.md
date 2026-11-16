@@ -2,49 +2,56 @@
 
 - **PR:** [#3281](https://github.com/rigortype/rigor/pull/3281)
 - **Issue:** [#1192](https://github.com/rigortype/rigor/issues/1192)
-- **Class:** open-choice
-- **Precedent:** [ADR-97](../docs/adr/97-adr-index-budgets.md)
+- **Class:** scope
+- **Precedent:** none — sets one
 - **Decided:** 2026-11-17
 
 ## Background
 
-Issue #1192 asked for a line budget for every `lib/` file of 1,000+ lines, and its "Done when" said each
-budget equals the file's line count at the commit that lands the gate. ADR-116 WD0 makes that gate the
-control on file growth before the ADR-116 splits shrink the files. The gate is `spec/docs/lib_file_budgets_spec.rb`,
-in the shape of ADR-97's index budgets, with rows in `spec/docs/lib_file_budgets.yml`.
+Issue #1192 asked for a line budget for every `lib/` file of 1,000+ lines. Its "Done when" states that
+each budget equals the file's line count at the commit that lands the gate. This PR does not do that. It
+records each budget as a multiple of 100 and lets the gate accept any multiple from the file's count up to
+199 lines above it. The gate is `spec/docs/lib_file_budgets_spec.rb`, with rows in
+`spec/docs/lib_file_budgets.yml`. The gate's shape follows ADR-97's index budgets, but ADR-97 budgets an
+index count, not a line count, so nothing earlier sets the granularity.
 
-An exact count works on paper, but the files it budgets change daily. About 15 PRs a day merge to `master`,
-and 44% of `lib/`-touching PRs touch one of the three largest budgeted files. With exact counts, two
-in-flight PRs that each add a line to the same file edit the same row, and one of them conflicts with the
-other even when neither takes the file past anything. The issue's wording left the granularity open in
-practice, so the choice of granularity was a decision nobody had made.
+The reason is churn. About 15 PRs a day merge to `master`, and 44% of `lib/`-touching PRs touch one of the
+three largest budgeted files. With exact counts, two in-flight PRs that each add a line to the same file
+edit the same row and conflict there, even when neither takes the file past anything.
 
 ## Options and trade-offs
 
-- **Exact count (the issue's wording).** The budget is the file's `wc -l`. It is the most literal reading.
+- **Exact count (the issue's Done-when).** The budget is the file's `wc -l`. It is the most literal reading.
   It costs a conflict on the budget row for nearly every in-flight pair of PRs that touch one of the three
-  largest files, and it makes every edit to those files also an edit to the gate.
-- **Bucket of 100 with a 200-line slack (chosen).** The budget is the smallest multiple of 100 at or
-  above the count, and the gate fails when the budget is 200 or more above the file, so a split must lower
-  it. A row moves only when a file crosses a boundary, so most concurrent edits leave it alone. The cost is
-  that growth inside the bucket is not reviewed: a file can grow by up to 99 lines with no gate message.
-- **No upper-slack rule.** The gate checks only that a file stays under its budget and that a file over
-  1,000 lines has a row. A split would then lower its row only when someone remembers to, and a file could
-  sit 1,000 lines above its budget for years. This keeps the rows still but drops the split pressure that
-  the issue asked for ("a split lowers the budget of the file it came out of").
+  largest files, and every edit to those files also edits the gate.
+- **Bucket of 100, slack below 200 (chosen).** The row is a multiple of 100 that is at least the file's
+  count and less than 200 above it. A row moves only when a file crosses a boundary, so most concurrent edits
+  leave it alone. The cost: growth inside the current bucket is not gated. Right after a row is set to the
+  smallest bucket, a file can grow by up to 99 lines with no message. After a shrink, a row can sit up to 199
+  lines above its file until someone lowers it.
+- **Bucket of 100, slack below 100.** The gate would accept only the smallest bucket that holds the file. A
+  split then always moves its row into the bucket it lands in, so the whole gain of a split is held. The cost
+  is a row edit whenever a shrink crosses a bucket boundary, which brings back some of the conflicts the
+  bucket was meant to remove, and the growth inside a bucket stays ungated just the same.
+- **No upper-slack rule.** The gate checks only that a file stays under its budget and that a file of 1,000+
+  lines has a row. A split would then lower its row only when someone remembers to, and a file could sit far
+  above its budget for years. This keeps the rows still but drops the split pressure the issue asked for
+  ("a split lowers the budget of the file it came out of").
 
 ## Decision
 
-The bucket of 100 with a 200-line slack, with the upper-slack rule kept. The issue asked for growth to be
-a decision, and a bucket keeps that decision at the boundary without making every edit a conflict. The
-precedent is ADR-97's budget gate, which is also a checked-in number per file, a failure that names the
-fix, and examples that prove the failure. The precedent fits the gate's shape and not its granularity:
-ADR-97 budgets an index count, not a line count, so this entry sets the precedent for bucketed budgets.
+Bucket of 100 with slack below 200, as the chosen option above. A bucket keeps a row still until a file crosses
+a boundary, and the slack of 200 keeps a split from being forced to move its row on every shrink. A slack of 100 is the
+alternative above; it holds the whole gain of a split at the cost of row edits on shrinks, and it is recorded here
+for the maintainer to weigh at ratification. The class is `scope`. The
+README's `scope` class names splitting, deferring or closing part of an issue; this entry narrows one Done-when
+item instead of deferring it, so `scope` is the nearest fit rather than an exact one. No precedent fits the
+granularity, so this entry sets one for bucketed line budgets.
 
 ## To undo
 
-Change the gate to exact counts: each row's budget becomes the file's `wc -l`, the "not a multiple of 100"
-check and the 200-line slack check go, and the growth check stays. The rows in `spec/docs/lib_file_budgets.yml`
-are regenerated from `wc -l`, which is a one-line change per file, and the examples in
-`spec/docs/lib_file_budgets_spec.rb` that pin the bucket messages are rewritten to match. Nothing else depends
-on the bucket: the ADR-116 WD0 bullet describes it in one place, and it would need the same edit.
+Change the gate to exact counts: each row becomes the file's `wc -l`, the multiple-of-100 check and the slack
+check go, and the growth check stays. Regenerate the rows in `spec/docs/lib_file_budgets.yml` from `wc -l`, and
+rewrite the examples in `spec/docs/lib_file_budgets_spec.rb` that pin the bucket messages. The ADR-116 WD0 bullet
+describes the bucket and would need the same edit. To move to a slack of 100 instead, change `SLACK` in the gate
+and the rule text in its header and in the ADR-116 WD0 bullet; the rows stay valid.

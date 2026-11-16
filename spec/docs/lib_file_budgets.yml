@@ -1,7 +1,9 @@
 # Line budgets for every lib/ Ruby file of 1,000 or more lines (ADR-116 WD0, #1192).
 #
 # One row per file: `<path>: <budget>`. The gate is spec/docs/lib_file_budgets_spec.rb, and its
-# header states the rule (a budget is a multiple of 100 and at most 200 above the file's line count).
+# header states the rule: a budget is a multiple of 100, at least the file's line count and less than
+# 200 above it. The rows below are the smallest multiple of 100 that holds each file when they were set;
+# the gate accepts any multiple in that range.
 # A file that grows past its budget fails the gate; a split lowers its row; a new file of 1,000 lines
 # gets a row. Raising a budget is a reviewed diff in the PR that needs it, with the reason in its body.
 #

@@ -47,6 +47,10 @@ traps that fail silently (zsh, `grep -q` under `pipefail`) are in
 
 Local runs are targeted; the full gate is CI on the pull request.
 
+- Between edits: `make verify-quick` — whitespace, RuboCop, and only the specs the diff selects
+  directly (changed, mirror files and mirror directories, fixture readers), in seconds. It skips the
+  whole-engine drift specs, the "flip this when" pins, `spec/docs/` and the self-check, and says so;
+  it is not a pre-push check.
 - Before pushing: `make verify-changed` — whitespace, RuboCop, the affected specs, `spec/docs/`, and
   `rigor check` over what the branch changed, in under a minute. It lists what it cannot cover; CI
   decides those. Give it, and any rspec run, stdin from `/dev/null`: an agent shell's stdin never

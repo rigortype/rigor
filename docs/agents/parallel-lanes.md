@@ -43,40 +43,53 @@ lives in the PR body and the issues, which the coordinator reads only when a dec
 
 ## Claim the numbers before spending anything on them
 
-Several coordinator sessions run in sibling worktrees of one clone, and nothing in
-`ListAgents` or the session list tells one that another is already on a ticket: those answer which
-*subagents* this session spawned, not what a sibling session owns. On 2026-11-15 one session
-reviewed, fixed and landed PRs #3253, #3254 and #3256 while another ran a reviewer subagent on each
-of the same three PRs and filed overlapping issues. The whole review round was duplicate spend, and
-the heads the second session briefed were stale: the first rebases a branch before every push, so
-#3254's reviewer read a commit the branch no longer held.
+Several coordinator sessions run in sibling worktrees of one clone, and nothing showed one that
+another was already on a ticket. `ListAgents` answers which *subagents* this session spawned. The
+desktop session list records one bound PR per session and lags behind, so a sibling mid-batch looks
+idle. On 2026-11-15 one session reviewed, fixed and landed PRs #3253, #3254 and #3256 while another
+ran a reviewer subagent on each of the same three PRs and filed overlapping issues. The whole review
+round was duplicate spend, and one of those reviewers read a pre-rebase head of #3254 — the patches
+were identical, but its base was eight hours old.
 
 So a number is claimed before anything is spent on it:
 
 ```sh
-bin/rigor-claim check 3253 3254 3256   # read-only: free, mine, or HELD by whom
-bin/rigor-claim take 3253 --note 'review round'
-bin/rigor-claim drop 3253              # at landing, or when the loop stops
+bin/rigor-claim check --pr 3253        # the PR and the issues it closes
+bin/rigor-claim take --pr 3253 --note 'review round'
+bin/rigor-claim check 3219 3080        # read-only: free, mine, or HELD by whom
+bin/rigor-claim drop --pr 3253         # at the merge; bin/land-pr does this itself
 bin/rigor-claim drop --mine            # release everything this session holds
 ```
 
 The claim is a `refs/rigor/claim/<number>` ref in the shared `.git`, taken by compare-and-swap, so
-two sessions racing for one number cannot both win. Issues and PRs share GitHub's number space and a
-PR's review is the same work as its issue, so one key covers both. `check` exits 10 when another
-session holds a number; the script's header has the rest, including why claims do not expire.
+two sessions racing for one number cannot both win. `check` exits 10 when another session holds a
+number. The script's header has the design and its limits, including why claims do not expire.
 
+- **A PR and its issues are one claim set, not one key.** GitHub numbers them together, but the PR
+  number is born at `gh pr create`, so holding issue #3219 does not hold PR #3253 — and a session
+  that claimed only the PR does not hold the issue a sibling is reading. `--pr <n>` expands to both
+  through `gh`; pass it rather than typing numbers, and the lane that opens the PR claims its number
+  at `gh pr create`.
 - **Claim before the spend, not after the decision.** Take the batch's numbers before step 1's
   premise checks, every number a reviewer brief will name before the brief goes out, and the PR
   before a fix round. A refused `take` is the cheapest outcome this file can offer.
 - **`take` is all-or-nothing per run.** A refusal releases what that run took and leaves what the
-  session already held, so a partly-claimed batch never starts.
-- **Drop at landing.** Release the number when the merge lands, when the work moves to another
-  session, and when the user stops the loop. `drop --mine` is the one call that cleans up a loop.
-- **A `HELD` number is a conversation, not a wall.** `check` prints the holder's session id: look it
-  up in the session list, and either send that session what you found — a review report it has not
-  seen is worth more there than re-run here — or, if it is archived or dead, `steal` the claim with
-  the blob sha `check` printed. Only an agent can tell a dead session from a slow one; the script
-  deliberately will not guess.
+  session already held, so a partly claimed batch never starts.
+- **Confirm the claim is still `mine` before `gh pr ready` and `bin/land-pr`.** A `steal` tells the
+  thief, not the holder: a session that was merely slow would otherwise land over whoever took the
+  work over.
+- **Drop at the merge.** `bin/land-pr` drops the PR and its closing issues itself on a successful
+  merge, which is the one moment that needs no memory, since the claim outlives the turn that took
+  it. Drop by number when work moves to another session or the user stops the loop; `drop --mine`
+  only when nothing else is in flight, because in a batch it releases every lane at once.
+- **A `HELD` number is a conversation, not a wall.** `check` prints the holder's session id, its pid
+  and whether that pid is alive. Look the session up, and either send it what you found — a review
+  report it has not seen is worth more there than re-run here — or, if it is gone, `steal` the claim
+  with the blob sha `check` printed. A dead pid is evidence, not a licence: a resumed session holds
+  its claim legitimately under a new process.
+- **An unattended harness has no session id.** takt worktrees share this `.git`, but a lane on
+  another provider has no `CLAUDE_CODE_SESSION_ID`; it must pass `RIGOR_CLAIM_SESSION` with an id a
+  human can trace back to a run, or not claim at all. A claim nobody can look up is worse than none.
 - **Re-read the head before briefing a reviewer**, claim or no claim. A claim stops a second session
   from starting; it does not freeze a branch the holder is still rebasing.
 

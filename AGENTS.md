@@ -79,8 +79,9 @@ Before committing, pushing, opening/landing a PR, or preparing a release, read
 GitHub Markdown, branch, draft-PR, changelog-fragment, release, and reporter-credit rules.
 
 Several sessions share this clone. Before spending a review round, a fix round or a landing run on an
-issue or PR, claim its number: `bin/rigor-claim check <number>`, then `take` it, and `drop` it at the
-merge. A sibling session's work is invisible to `ListAgents` and the session list; the rules are in
+issue or PR, claim its number: `bin/rigor-claim check --pr <number>`, then `take --pr <number>`, which
+covers the PR and the issues it closes. `bin/land-pr` drops the claim at the merge. A sibling
+session's work is invisible to `ListAgents` and the session list; the rules are in
 [`docs/agents/parallel-lanes.md`](docs/agents/parallel-lanes.md) § "Claim the numbers before spending
 anything on them".
 

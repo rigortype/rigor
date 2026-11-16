@@ -86,6 +86,19 @@ json_field() {
   tr -d '\n' | sed -n 's/.*"'"$1"'" *: *"\([^"]*\)".*/\1/p'
 }
 
+# A claim outlives the turn that took it, so the merge is the one moment that can
+# release it without memory: this runs in the background and may outlive the
+# session's turn, and `rigor-claim drop --mine` would release the batch's other
+# lanes, still in flight. Only this PR and the issues it closes are dropped, and a
+# claim another session holds is left alone (drop exits 10, which is not an error
+# here — the work landed either way).
+release_claims() {
+  local claim
+  claim="$(dirname "$0")/rigor-claim"
+  [[ -x "$claim" ]] || return 0
+  "$claim" drop --pr "$number" 2>&1 | sed 's/^/land-pr: /' || true
+}
+
 # Print the PR's fields, tab-separated, in the order given.
 pr_fields() {
   gh api graphql -F n="$number" \
@@ -168,6 +181,7 @@ while :; do
     MERGED)
       [[ -n "$oid" ]] || continue
       echo "land-pr: #$number merged as $oid"
+      release_claims
       exit 0
       ;;
     OPEN)

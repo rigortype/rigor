@@ -1085,7 +1085,7 @@ RSpec.describe Rigor::Analysis::Runner do
       end
 
       # Regression: the dispatcher's `try_project_patched_method` tier resolved the call's TYPE through the registry,
-      # but `CheckRules#undefined_method_diagnostic` ran an independent "does this method exist?" probe that ignored the
+      # but `CheckRules::UndefinedMethod.diagnostic` ran an independent "does this method exist?" probe that ignored the
       # registry — so a patched method on a concretely-typed receiver (`Nominal[String]` / `Constant["hello"]`) would
       # type correctly yet still fire `call.undefined-method`. The fix consults the registry in CheckRules at the same
       # precedence the dispatcher does.

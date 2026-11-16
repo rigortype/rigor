@@ -2,7 +2,7 @@
 
 # Issue #1101, follow-up — the END-TO-END half of the composite tier's plugin-typed-record deferral.
 #
-# `Scope#plugin_typed_calls` (#653) is set-only, and `CheckRules#call_site_exempt?` reads it as an
+# `Scope#plugin_typed_calls` (#653) is set-only, and `CheckRules::UndefinedMethod.call_site_exempt?` reads it as an
 # exemption from `call.undefined-method` — ahead of the receiver-shape branch, so it covers
 # `union_undefined_method_diagnostic` too. The composite tier re-enters `MethodDispatcher#resolve` once
 # per projected member, so without the deferral a member a PLUGIN answers, beside a member that

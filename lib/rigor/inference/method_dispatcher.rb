@@ -150,7 +150,7 @@ module Rigor
           #
           # Under a composite-receiver projection the record is BUFFERED instead (#1101). It is the one
           # recording in this method that is set-only — `Scope#plugin_typed_calls` has no removal, and
-          # `CheckRules#call_site_exempt?` / `#source_arity_envelope` read it as an exemption — so a
+          # `CheckRules::UndefinedMethod.call_site_exempt?` / `#source_arity_envelope` read it as an exemption — so a
           # member a plugin answers beside a member that declines would exempt a call this dispatcher
           # never typed, silencing `call.undefined-method` and `call.wrong-arity` on a firing that stands.
           # `call_site_exempt?` runs ahead of the receiver-shape branch, so the union rule is covered by

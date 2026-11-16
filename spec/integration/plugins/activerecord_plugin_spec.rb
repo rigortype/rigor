@@ -937,7 +937,7 @@ RSpec.describe "plugins/rigor-activerecord" do
     # this is a class of wrong-signature errors, not a strict reading of a real one.
     #
     # `ActiveRecord::Relation` is already an ADR-26 `open_receivers:` class, which exempted it from
-    # `call.undefined-method`; `CheckRules#unauthoritative_inherited_signature?` now extends that to the two
+    # `call.undefined-method`; `ReceiverPredicates.unauthoritative_inherited_signature?` now extends that to the two
     # rules that read a resolved SIGNATURE — but only for a name the open class INHERITED. A method the
     # Relation itself declares keeps its arity check, which is the must-still-fire sibling below.
 

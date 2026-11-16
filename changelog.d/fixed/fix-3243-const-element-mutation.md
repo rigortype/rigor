@@ -1,0 +1,4 @@
+- **[engine]** A method that mutates an element read off a constant or class variable (`S[0] << "b"`, `NESTED[0] << 2`, `H[:a] << "x"`, `W[0][0] = 1`) no longer leaves that element's literal pinned, so `S[0] == "a"` and `NESTED[0].last == 1` stop reporting `flow.always-truthy-condition` on code that changes them. ([#3264](https://github.com/rigortype/rigor/pull/3264))
+  - Only the element the read reaches is widened: the container's size and its other elements keep their exact types, and an Integer element keeps its value (`INTS[0] << 3` is a shift).
+  - A mutated `Array` built by a method (`[[1]].shuffle`) also stops pinning the nested literals it holds.
+  - A whole-name mutation of such an `Array` (`NS << 1` where `NS = ["a"].shuffle`) now admits what it stores, so reading an element as the stored class (`NS[1].odd?`) stops reporting `call.undefined-method`.

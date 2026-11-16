@@ -4822,6 +4822,21 @@ end
       result = census("module Admin\n  def self.fill(k) = Table::ROWS[k] = 1\nend\n")
       expect(result[:constants]).to eq(Set["Admin::Table::ROWS", "Table::ROWS"])
     end
+
+    # #3243 — a mutation of an element read off a constant or class variable records the read's root under the same
+    # candidates, with its steps, and leaves the whole-name sets alone.
+    it "records an element mutation's root and steps apart from the whole-name sets" do
+      result = census("module Admin\n  def self.grow(i) = T.dig(0, :k).first[i] << 1\nend\n")
+      key = Rigor::Inference::ScopeIndexer::MutatedElementCensus::KeyStep.new(:k)
+      expect(result[:constant_elements]).to eq(Set[["Admin::T", [0, key, :first, :all]], ["T", [0, key, :first, :all]]])
+      expect(result[:constants]).to be_empty
+    end
+
+    it "records a class variable's element mutation under its class, and none at the top level" do
+      result = census("class A\n  def self.grow = @@n[0][-1] << 2\nend\n@@t[0] << 2\n")
+      expect(result[:cvar_elements]).to eq({ "A" => Set[[:@@n, [0, -1]]] })
+      expect(result[:cvars]).to be_empty
+    end
   end
 
   # The census names what a call mutated, not what it stored, so a widened entry stops claiming its contents are
@@ -4882,6 +4897,26 @@ end
 
       expect(described_class.send(:census_mutated_type, pinned).describe).to eq("Dynamic[Array[1 | Dynamic[top]]]")
       expect(described_class.send(:census_mutated_type, classed).describe).to eq("Dynamic[Array[Integer]]")
+    end
+  end
+
+  # #3243 — the containers a step passes through on the way to the element, asserted on the types because no read
+  # of a constant built in source spells these wrappers. The read-side face is
+  # `spec/rigor/inference/mutated_constant_census_spec.rb`.
+  describe "MutatedElementCensus.widen" do
+    let(:combinator) { Rigor::Type::Combinator }
+    let(:census) { Rigor::Inference::ScopeIndexer::MutatedElementCensus }
+    let(:nested) { combinator.tuple_of(combinator.tuple_of(combinator.constant_of(1)), combinator.constant_of(2)) }
+
+    it "widens through a Dynamic wrapper and a removal over a nominal, keeping both" do
+      expect(census.widen(combinator.dynamic(nested), [0]).describe)
+        .to eq("Dynamic[[Dynamic[Array[Dynamic[top]]], 2]]")
+      expect(census.widen(combinator.non_empty_array(nested), [:all, 0]).describe)
+        .to eq("non-empty-array[Array[Dynamic[top]]]")
+    end
+
+    it "leaves an immutable nominal element pinned" do
+      expect(census.widen(combinator.tuple_of(combinator.nominal_of("Integer")), [0])).to be_nil
     end
   end
 

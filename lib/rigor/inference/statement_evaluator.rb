@@ -4337,9 +4337,9 @@ module Rigor
       end
 
       # Extracts the per-iteration element type from a collection carrier. `Tuple[T1..Tn]` yields the union of its
-      # elements; `Nominal[Array, [T]]` (likewise `Range`, `Set`, `Enumerator`) yields `T`; `Nominal[Hash, [K, V]]` yields `Tuple[K,
-      # V]` (Hash#each yields `[key, value]` pairs); `IntegerRange` yields `Integer`; a `Range` constant reads the
-      # literal range's element class. Anything else falls back to `untyped`.
+      # elements; `Nominal[Array, [T]]` (likewise `Range`, `Set`, `Enumerator`) yields `T`; `Nominal[Hash, [K, V]]`
+      # yields `Tuple[K, V]` (Hash#each yields `[key, value]` pairs); `IntegerRange` yields `Integer`; a `Range`
+      # constant reads the literal range's element class. Anything else falls back to `untyped`.
       def collection_element_type(type)
         case type
         when Type::Tuple
@@ -6701,7 +6701,8 @@ module Rigor
       # applies when either mutates. Ruby calls only the singleton side, but the hand-offs that reach an instance def
       # from there (`new.call(acc)`, `instance.helper(acc)`) and the singleton defs the index does not record
       # (`module_function :poke`, `define_singleton_method`, `alias_method` in `class << self`) are not followed, and
-      # dropping the instance def floored too little on correct code (ratified in #2394). An instance-side body resolves to instance defs only.
+      # dropping the instance def floored too little on correct code (ratified in #2394). An instance-side body resolves
+      # to instance defs only.
       #
       # A `send(:name, ...)` / `public_send(:name, ...)` with a symbol literal resolves as the self-call `name(...)`,
       # offset 1, on each side that has no def of the `send` / `public_send` name itself; on a side that has one, it is
@@ -7727,8 +7728,8 @@ module Rigor
 
       # The instance variables, class variables and globals the block body writes that {#capturable_non_local?}
       # accepts; no instance variable for a block that runs on another object. No self-rebinding call classifies
-      # `:non_escaping` today, so neither content seam that calls this meets one; the guard keeps the answer right should
-      # the escape analysis learn to call one non-escaping.
+      # `:non_escaping` today, so neither content seam that calls this meets one; the guard keeps the answer right
+      # should the escape analysis learn to call one non-escaping.
       def rebound_capturable_non_locals(block, call_node)
         return NO_REWRITES if block.body.nil?
 

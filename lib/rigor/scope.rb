@@ -579,8 +579,8 @@ module Rigor
     end
 
     # The one body behind {#with_local} and {#with_mutated_local}, which differ only in whether the marks a
-    # write drops (construction facts, declaration-sourced, optimistic) survive. Passing the kept sets through unchanged, rather than dropping and re-adding them, keeps
-    # a mutation's rebind to the one `rebuild` a write costs.
+    # write drops (construction facts, declaration-sourced, optimistic) survive. Passing the kept sets through
+    # unchanged, rather than dropping and re-adding them, keeps a mutation's rebind to the one `rebuild` a write costs.
     def bind_local(name, type, keep_marks:)
       # `rigor trace` — the moment a local enters the scope.
       Inference::FlowTracer.bind(name, type) if Inference::FlowTracer.active?

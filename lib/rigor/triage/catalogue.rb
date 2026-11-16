@@ -6,9 +6,9 @@ module Rigor
   module Triage
     # ADR-23 § "Heuristic catalogue" — the recognisers: H1–H7, plus H2K (the engine-proven variant of H2).
     #
-    # {.recognise} runs them in {.recognisers} order over the diagnostic stream. Each recogniser sees only the diagnostics not yet
-    # claimed by an earlier one, so a `5.minutes` diagnostic counted by H1 (ActiveSupport) is not re-counted by H2
-    # (monkey-patch).
+    # {.recognise} runs them in {.recognisers} order over the diagnostic stream. Each recogniser sees only the
+    # diagnostics not yet claimed by an earlier one, so a `5.minutes` diagnostic counted by H1 (ActiveSupport) is not
+    # re-counted by H2 (monkey-patch).
     #
     # WD3 / slice 4: recognisers key on the structured `qualified_rule` first; where they additionally need the receiver
     # type or method name they read the structured `Diagnostic#receiver_type` / `#method_name` fields, falling back to

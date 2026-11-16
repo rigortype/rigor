@@ -133,10 +133,10 @@ module Rigor
 
       # The per-collector diagnostic builders {.diagnose} folds over, in the historical emission order
       # (value-use-void → always-truthy → unreachable-clause → shadowed-rescue → ivar-write →
-      # dead-assignment → duplicate-hash-key → return-in-ensure → plugin-api-surface). Keys match {.build_node_collectors}'
-      # roles; each value is a `(path, results)` module_function on this module. `void_value_use` leads
-      # because its standalone walk used to run before this fold, and the emission order is byte-identical
-      # output, not an implementation detail.
+      # dead-assignment → duplicate-hash-key → return-in-ensure → plugin-api-surface). Keys match
+      # {.build_node_collectors}' roles; each value is a `(path, results)` module_function on this module.
+      # `void_value_use` leads because its standalone walk used to run before this fold, and the emission order is
+      # byte-identical output, not an implementation detail.
       COLLECTOR_DIAGNOSTIC_BUILDERS = {
         void_value_use: :void_value_use_diagnostics,
         always_truthy: :always_truthy_condition_diagnostics,

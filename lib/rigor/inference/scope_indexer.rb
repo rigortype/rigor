@@ -6210,14 +6210,14 @@ module Rigor
                            tables.nil? || tables.certain)
       end
 
-      # Module-singleton call resolution (ADR-57 follow-up) — the SINGLETON-side mirror of the def-node table {#build_methods_and_def_nodes} builds.
-      # Records the `Prism::DefNode` for every singleton-side method (`def self.x`, `def Foo.x`, a `class << self` body,
-      # and a `module_function` method) keyed by qualified class/module name → method → node, so `ExpressionTyper` can
-      # re-type the body when a `Singleton[Foo]` receiver dispatches `Foo.x`. The instance-side table is kept
-      # singleton-free on purpose (its ancestor walk binds `self` as `Nominal`), so the two never overlap except for
-      # `module_function` defs, which are genuinely callable on both sides and so appear in both tables. Top-level
-      # singleton defs (`def self.x` outside any class — `self` is `main`) are not recorded; they have no constant
-      # receiver to dispatch through.
+      # Module-singleton call resolution (ADR-57 follow-up) — the SINGLETON-side mirror of the def-node table
+      # {#build_methods_and_def_nodes} builds. Records the `Prism::DefNode` for every singleton-side method
+      # (`def self.x`, `def Foo.x`, a `class << self` body, and a `module_function` method) keyed by qualified
+      # class/module name → method → node, so `ExpressionTyper` can re-type the body when a `Singleton[Foo]`
+      # receiver dispatches `Foo.x`. The instance-side table is kept singleton-free on purpose (its ancestor walk
+      # binds `self` as `Nominal`), so the two never overlap except for `module_function` defs, which are genuinely
+      # callable on both sides and so appear in both tables. Top-level singleton defs (`def self.x` outside any class
+      # — `self` is `main`) are not recorded; they have no constant receiver to dispatch through.
       def build_discovered_singleton_def_nodes(root)
         build_singleton_def_tables(root).first
       end
@@ -8274,9 +8274,9 @@ module Rigor
       # `Outer`, where `Outer.new.tag` raises `NoMethodError` in MRI. The classification is
       # {#rebound_block_self}, the same one #721 gave its own mixin scan.
       #
-      # `Recv.class_eval { include M }` resolves to `Recv` and records there. An OPAQUE rebinding — `Class.new` / `Module.new` / a non-constant `class_eval` receiver — records
-      # nothing: the class exists but this walk cannot name it, and naming the lexical enclosure instead is
-      # the one answer Ruby is guaranteed not to have written.
+      # `Recv.class_eval { include M }` resolves to `Recv` and records there. An OPAQUE rebinding — `Class.new` /
+      # `Module.new` / a non-constant `class_eval` receiver — records nothing: the class exists but this walk cannot
+      # name it, and naming the lexical enclosure instead is the one answer Ruby is guaranteed not to have written.
       def walk_mixin_call_children(node, qualified_prefix, current_class, accumulator, singleton_self,
                                    singleton_cref)
         # `self` is unnameable whenever the singleton marker is set OR the body is ownerless
@@ -8640,9 +8640,9 @@ module Rigor
 
       # `[[owner, side], …]` — the ancestry sides a mixin call reshapes. `self` and the implicit receiver
       # are the enclosing class (`:include` for `include` / `prepend`, `:extend` for `extend`; inside
-      # `class << self` `include` / `prepend` flip to `:extend` and `extend` names no owner); `singleton_class` is the singleton side; a constant is
-      # that class; any other receiver is unknown, so it may be the class that includes this one from a
-      # hook (`base.include M`) and taints both sides of the enclosing class.
+      # `class << self` `include` / `prepend` flip to `:extend` and `extend` names no owner); `singleton_class` is the
+      # singleton side; a constant is that class; any other receiver is unknown, so it may be the class that includes
+      # this one from a hook (`base.include M`) and taints both sides of the enclosing class.
       def mixin_effects(node, kind, qualified_prefix, current_class, accumulator, in_singleton:)
         receiver = node.receiver
         side = kind == :extend ? :extend : :include

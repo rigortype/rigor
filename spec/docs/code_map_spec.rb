@@ -71,7 +71,7 @@ module CodeMapSpecSupport
   end
 end
 
-RSpec.describe "docs/agents/code-map.md" do # rubocop:disable RSpec/DescribeClass
+RSpec.describe "docs/agents/code-map.md" do
   let(:text) { File.read(CODE_MAP_PATH) }
 
   it "has a row for every directory and top-level file of lib/rigor/" do
@@ -103,17 +103,14 @@ RSpec.describe "docs/agents/code-map.md" do # rubocop:disable RSpec/DescribeClas
   # The checks above read the real tree, where they pass. These run them against trees and texts
   # built to fail, so a check that stopped looking would not stay green.
   describe "the checks themselves" do
-    around do |example|
-      Dir.mktmpdir do |dir|
-        @root = dir
+    let(:root) do
+      Dir.mktmpdir.tap do |dir|
         FileUtils.mkdir_p(File.join(dir, "lib/rigor/type"))
         File.write(File.join(dir, "lib/rigor/type.rb"), "")
         File.write(File.join(dir, "lib/rigor/type/union.rb"), "")
         File.write(File.join(dir, "lib/rigor/notes.txt"), "")
-        example.run
       end
     end
-
     let(:complete) do
       <<~MAP
         | Path | Responsible for |
@@ -123,38 +120,40 @@ RSpec.describe "docs/agents/code-map.md" do # rubocop:disable RSpec/DescribeClas
       MAP
     end
 
+    after { FileUtils.remove_entry(root) }
+
     it "accepts a complete map and ignores non-Ruby files and non-path backticks" do
-      expect(CodeMapSpecSupport.unmapped(complete, @root)).to eq([])
-      expect(CodeMapSpecSupport.missing(complete, @root)).to eq([])
-      expect(CodeMapSpecSupport.misspelled_keys(complete, @root)).to eq([])
+      expect(CodeMapSpecSupport.unmapped(complete, root)).to eq([])
+      expect(CodeMapSpecSupport.missing(complete, root)).to eq([])
+      expect(CodeMapSpecSupport.misspelled_keys(complete, root)).to eq([])
     end
 
     it "reports a directory with no row" do
       text = complete.lines.reject { |line| line.start_with?("| `lib/rigor/type/`") }.join
-      expect(CodeMapSpecSupport.unmapped(text, @root)).to eq(["lib/rigor/type/"])
+      expect(CodeMapSpecSupport.unmapped(text, root)).to eq(["lib/rigor/type/"])
     end
 
     it "reports a top-level file with no row" do
       text = complete.lines.reject { |line| line.start_with?("| `lib/rigor/type.rb`") }.join
-      expect(CodeMapSpecSupport.unmapped(text, @root)).to eq(["lib/rigor/type.rb"])
+      expect(CodeMapSpecSupport.unmapped(text, root)).to eq(["lib/rigor/type.rb"])
     end
 
     it "does not take a mention in another row's prose for a row" do
       text = <<~MAP
         | `lib/rigor/type.rb` | Loads `lib/rigor/type/`. |
       MAP
-      expect(CodeMapSpecSupport.unmapped(text, @root)).to eq(["lib/rigor/type/"])
+      expect(CodeMapSpecSupport.unmapped(text, root)).to eq(["lib/rigor/type/"])
     end
 
     it "reports a named path that does not exist, in a row key or in prose" do
       text = "#{complete}| `lib/rigor/gone/` | See `spec/rigor/gone_spec.rb`. |\n"
-      expect(CodeMapSpecSupport.missing(text, @root)).to eq(["lib/rigor/gone/", "spec/rigor/gone_spec.rb"])
+      expect(CodeMapSpecSupport.missing(text, root)).to eq(["lib/rigor/gone/", "spec/rigor/gone_spec.rb"])
     end
 
     it "reports a directory row spelled without its slash" do
       text = complete.sub("`lib/rigor/type/` |", "`lib/rigor/type` |")
-      expect(CodeMapSpecSupport.misspelled_keys(text, @root)).to eq(["lib/rigor/type"])
-      expect(CodeMapSpecSupport.unmapped(text, @root)).to eq(["lib/rigor/type/"])
+      expect(CodeMapSpecSupport.misspelled_keys(text, root)).to eq(["lib/rigor/type"])
+      expect(CodeMapSpecSupport.unmapped(text, root)).to eq(["lib/rigor/type/"])
     end
   end
 end

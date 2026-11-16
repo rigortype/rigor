@@ -25,6 +25,7 @@ module Rigor
         def diagnostic(path, call_node, facts, lexical_sites = nil) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
           return nil if call_node.receiver.nil?
 
+
           scope = facts.scope
           return nil if scope.nil?
 
@@ -812,7 +813,7 @@ module Rigor
           class_name = ReceiverPredicates.concrete_class_name(member)
           return true if class_name.nil?
           return true if member.is_a?(Type::Singleton)
-          return true if ReceiverPredicates::METACLASS_ARMS.include?(class_name)
+          return true if ReceiverPredicates.metaclass_arm?(class_name)
           return true if ReceiverPredicates.unbounded_receiver_surface?(class_name, scope)
 
           ReceiverPredicates.module_mixin_receiver?(member, scope)

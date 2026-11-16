@@ -563,6 +563,13 @@ module Rigor
         # `Plugin` subclass with `.manifest`), an unbounded receiver (ADR-26 open class or a synthesized
         # stub), or a module mixin whose Object-inherited methods the per-arm lookup would miss.
         METACLASS_ARMS = %w[Class Module].to_set.freeze
+        private_constant :METACLASS_ARMS
+
+        # Whether `class_name` is the generic metaclass `Class` / `Module`; {UndefinedMethod} asks it rather than
+        # reading {METACLASS_ARMS}, which stays private.
+        def metaclass_arm?(class_name)
+          METACLASS_ARMS.include?(class_name)
+        end
       end
     end
   end

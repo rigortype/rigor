@@ -24,8 +24,33 @@ RSpec.describe Rigor::Analysis::CheckRules::UndefinedMethod do
     expect(diagnostic_for(%("x".upcase\n))).to be_nil
   end
 
-  it "is silent for a call with no explicit receiver" do
-    expect(diagnostic_for("no_such_method\n")).to be_nil
+  # No example pins `return nil if call_node.receiver.nil?`: removing it leaves a receiverless call silent anyway,
+  # because the receiver type is nil and the rule declines further down, so the guard is redundant by construction.
+
+  it "reports a method a Tuple receiver's class (Array) does not declare" do
+    expect(diagnostic_for("[1, 2].no_such_method\n")&.message).to include("undefined method `no_such_method'")
+  end
+
+  it "reports a method a HashShape receiver's class (Hash) does not declare" do
+    expect(diagnostic_for("{ a: 1 }.no_such_method\n")&.message).to include("undefined method `no_such_method'")
+  end
+
+  describe "a union arm typed as the generic metaclass" do
+    let(:scope) { Rigor::Scope.empty }
+
+    def blocks?(class_name)
+      member = Rigor::Type::Combinator.nominal_of(class_name)
+      described_class.send(:union_arm_blocks_undefined_fire?, member, scope)
+    end
+
+    it "blocks the union rule on Class and Module, whose singleton methods cannot be enumerated" do
+      expect(blocks?("Class")).to be(true)
+      expect(blocks?("Module")).to be(true)
+    end
+
+    it "does not block on an ordinary closed class" do
+      expect(blocks?("String")).to be(false)
+    end
   end
 
   it "is silent for a safe-navigation call on a receiver that is exactly nil" do

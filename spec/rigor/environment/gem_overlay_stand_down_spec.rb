@@ -225,7 +225,7 @@ RSpec.describe "ADR-72 gem-overlay stand-down" do
     end
   end
 
-  # The predicate both the stand-down and `CheckRules#gem_overlay_loaded?` ask. Its contract is "would the
+  # The predicate both the stand-down and `ReceiverPredicates.gem_overlay_loaded?` ask. Its contract is "would the
   # RBS loader read one of the twin's `.rbs` files from these entries", NOT "does one of these strings look
   # like the twin" — the four cases below are exactly where those two answers differ.
   #

@@ -5,8 +5,8 @@
 # ostruct defines each field as a per-instance singleton method and answers the rest through a private
 # `method_missing`, so no signature can enumerate its surface. The only declaration rbs 4.2 carries is json's
 # add-on reopening (`json_create` / `as_json` / `to_json`), and Rigor read that as the whole class.
-# `data/core_overlay/ostruct.rbs` declares the hook pair, and `CheckRules::CORE_OVERLAY_OPEN_RECEIVERS` names the
-# class as an open receiver.
+# `data/core_overlay/ostruct.rbs` declares the hook pair, and `CheckRules::ReceiverPredicates::CORE_OVERLAY_OPEN_RECEIVERS`
+# names the class as an open receiver.
 #
 # This file lives under `spec/rigor/environment` because that is what CI's "RBS compatibility (RBS 3.x)" job runs.
 require "spec_helper"

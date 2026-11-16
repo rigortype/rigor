@@ -25,7 +25,6 @@ module Rigor
         def diagnostic(path, call_node, facts, lexical_sites = nil) # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
           return nil if call_node.receiver.nil?
 
-
           scope = facts.scope
           return nil if scope.nil?
 

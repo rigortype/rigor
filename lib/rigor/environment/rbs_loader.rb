@@ -1716,7 +1716,7 @@ module Rigor
         # @return whether `path` sits under the bundled gem-overlay root — the prefix half of
         #   "this run loaded a `data/gem_overlay/` directory". Callers needing ONE gem's overlay ask
         #   {.gem_overlay_sig_paths} for that gem's directory instead: `signature_standdowns` uses this
-        #   to recognise overlay rows across every gem, while `CheckRules#gem_overlay_loaded?` keys on
+        #   to recognise overlay rows across every gem, while `ReceiverPredicates.gem_overlay_loaded?` keys on
         #   the activesupport overlay alone (#3041 — a project can load the addressable overlay without
         #   the activesupport one, and only the latter may open `ActiveSupport::Duration` /
         #   `ActiveSupport::Concern`). `GEM_OVERLAY_SIGS_ROOT` is defined inside this `class << self`
@@ -1734,7 +1734,7 @@ module Rigor
         #
         # - `Environment.gem_overlay_paths` asks per gem, so the overlay stands down instead of loading
         #   alongside the twin and collapsing every class they share;
-        # - `CheckRules#gem_overlay_loaded?` asks across all of them, because the twin's `sig/` carries no
+        # - `ReceiverPredicates.gem_overlay_loaded?` asks across all of them, because the twin's `sig/` carries no
         #   plugin manifest, so `open_receivers:` cannot protect the partial `ActiveSupport::Duration`
         #   declaration it nonetheless loads.
         #

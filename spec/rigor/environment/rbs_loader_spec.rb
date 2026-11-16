@@ -54,7 +54,7 @@ RSpec.describe Rigor::Environment::RbsLoader do
     end
   end
 
-  # Issue #632/#660 — `CheckRules#gem_overlay_loaded?` calls this instead of reaching for
+  # Issue #632/#660 — `ReceiverPredicates.gem_overlay_loaded?` calls this instead of reaching for
   # `GEM_OVERLAY_SIGS_ROOT` directly: that constant is defined inside this class's `class << self` block, so
   # it is reachable from methods in the SAME block but not as `RbsLoader::GEM_OVERLAY_SIGS_ROOT` from outside
   # (a `NameError` a plain constant reference doesn't catch — this method is the public seam instead).

@@ -28,7 +28,7 @@ module Rigor
     # `method_missing`). Declaring it now is safe because `ActiveSupport::Duration` is protected TWICE:
     # this manifest's own `open_receivers:` (ADR-26, below — the mechanism `rigor-activerecord` uses for
     # `ActiveRecord::Relation`) covers the plugin-loaded path, and
-    # `Rigor::Analysis::CheckRules::GEM_OVERLAY_OPEN_RECEIVERS` covers the auto-applied
+    # `Rigor::Analysis::CheckRules::ReceiverPredicates::GEM_OVERLAY_OPEN_RECEIVERS` covers the auto-applied
     # `data/gem_overlay/activesupport/core_ext.rbs` twin (issue #449's overlay-has-no-manifest gap — see that
     # constant's comment). Either alone would keep `call.undefined-method` from ever firing against a
     # Duration receiver; both exist because a plugin manifest cannot protect a receiver an unrelated,

@@ -1217,7 +1217,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Nix
-        uses: cachix/install-nix-action@v31.11.3
+        uses: cachix/install-nix-action@v31.11.5
 
       # Keyed on the derivation's inputs, so a hash or resolution change
       # misses and a stale `sha256` can never be served from the cache.

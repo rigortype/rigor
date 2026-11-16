@@ -123,8 +123,8 @@ are one feature each, called from those three.
 | --- | --- |
 | Rule engine | `lib/rigor/analysis/check_rules.rb` (call-site rules, suppression, message builders), `lib/rigor/analysis/check_rules/` (node collectors, rule ids, guards), `lib/rigor/analysis/rule_catalog.rb` |
 | Run orchestration | `lib/rigor/analysis/runner.rb`, `lib/rigor/analysis/runner/`, `lib/rigor/analysis/worker_session.rb` |
-| Incremental runs and the run cache | `lib/rigor/analysis/incremental_session.rb`, `lib/rigor/analysis/incremental.rb`, `lib/rigor/analysis/run_cache_key.rb` |
-| Dependency graph (ADR-46) | `lib/rigor/analysis/dependency_recorder.rb`, `lib/rigor/analysis/self_call_resolution_recorder.rb`. The engine records into these from `lib/rigor/inference/` and `lib/rigor/scope.rb`, so they are engine services that live here for historical reasons. |
+| Incremental runs and the run cache | `lib/rigor/analysis/incremental_session.rb`, `lib/rigor/analysis/run_cache_key.rb` |
+| Dependency graph (ADR-46) | `lib/rigor/analysis/dependency_recorder.rb`, `lib/rigor/analysis/incremental.rb`. The engine records into the recorder from `lib/rigor/inference/` and `lib/rigor/scope.rb`, so it is an engine service that lives here for historical reasons. |
 | Reachability (`rigor unused`) | `lib/rigor/analysis/reachability/` |
 | Template units (ERB and friends) | `lib/rigor/analysis/template_units.rb` and the other `template_unit_*.rb` files |
 | Diagnostic values | `lib/rigor/analysis/diagnostic.rb`, `lib/rigor/analysis/result.rb`, `lib/rigor/analysis/baseline.rb` |

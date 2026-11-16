@@ -122,6 +122,13 @@ module Rigor
       freeze
     end
 
+    # Issue #2883 — builds the RBS environment now, if it is not built yet, so typing never builds it. A no-op for an
+    # environment with no loader. Answers the environment.
+    def prepare_for_typing!
+      rbs_loader&.prepare_for_typing!
+      self
+    end
+
     # ADR-20 slices 2e + 6 — lazy HKT registry getter. Merge order on first call: builtins (base) ← plugin
     # manifest aggregation ← RBS env scan. Last-write-wins on URI collisions so user-authored `.rbs` overlays
     # beat plugin entries, which beat the bundled JSON_VALUE. Memoised; single-threaded use only (under the
@@ -132,13 +139,6 @@ module Rigor
     # stage that failed and the other stage still runs, so this getter never raises into its callers —
     # neither into a file's `analyze_body` rescue nor out of the run-owned demands, which have no rescue
     # above them at all.
-    # Issue #2883 — builds the RBS environment now, if it is not built yet, so typing never builds it. A no-op for an
-    # environment with no loader. Answers the environment.
-    def prepare_for_typing!
-      rbs_loader&.prepare_for_typing!
-      self
-    end
-
     def hkt_registry
       @hkt_registry_holder.fetch do
         pre_scan = pre_scan_hkt_registry

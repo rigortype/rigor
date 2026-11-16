@@ -102,6 +102,15 @@ module Rigor
 
       module_function
 
+      # The no-op re-anchoring table (#722 residue 2): shared so the overwhelmingly common
+      # nothing-to-re-anchor walk allocates none.
+      EMPTY_RENAMES = {}.freeze
+
+      # No path whose contributions are all `possible` (issue #2021), the cross-file walks' default.
+      EMPTY_PATH_SET = Set.new.freeze
+      # The {IvarWriterCensus} entry kinds the project pre-pass tags with the file that records them.
+      PATH_TAGGED_KINDS = %i[own_write own_write_type].to_set.freeze
+
       # Build the scope index for a Prism program subtree.
       #
       # @param root — usually a `Prism::ProgramNode`, but any
@@ -120,15 +129,7 @@ module Rigor
       #   and sig-gen observe the clause's plain entry.
       # @return identity-comparing
       #   table whose default value is the seeded `default_scope`.
-      # The no-op re-anchoring table (#722 residue 2): shared so the overwhelmingly common
-      # nothing-to-re-anchor walk allocates none.
-      EMPTY_RENAMES = {}.freeze
-
-      # No path whose contributions are all `possible` (issue #2021), the cross-file walks' default.
-      EMPTY_PATH_SET = Set.new.freeze
-      # The {IvarWriterCensus} entry kinds the project pre-pass tags with the file that records them.
-      PATH_TAGGED_KINDS = %i[own_write own_write_type].to_set.freeze
-
+      #
       # `declared_ivar_types:` — whether an RBS-declared ivar type replaces the census's join of the writes (#1406).
       # `rigor sig-gen` passes false: it proposes what the code says, and reading a declaration back would make a row
       # count as generated only because it is declared.
@@ -1689,22 +1690,6 @@ module Rigor
         end
       end
 
-      # C2 — returns a Set of `object_id`s for transient `@x = nil` writes that a later statement in the same method
-      # body *definitely* overwrites with a non-nil value on every completing path. Such a nil can never be the ivar's
-      # value at method exit, so it must not contribute a `nil` constituent to the (flow-insensitive) class-ivar union.
-      #
-      # Scope is deliberately narrow and post-domination-sound:
-      #   - only the top-level statement sequence of the body is
-      #     considered (no writes hidden inside loops / rescue / nested
-      #     conditionals count as the "definite" overwrite, except the
-      #     one structured `if/else` form below);
-      #   - the killing statement is either an unconditional
-      #     statement-level `@x = <non-nil>`, OR an `if/else` (with a
-      #     real `else`) where BOTH branches' final top-level write to
-      #     `@x` is non-nil. Both shapes overwrite `@x` on every path;
-      #   - only `@x = nil` literal writes are ever marked dead — a
-      #     non-nil transient is left untouched (it is already
-      #     precision-additive in the union).
       # WD3 — ADR-41-style hard cap on how deep the same-class-call definite-assignment crediting recurses (the ctor
       # calls `mask!`, which could itself call another same-class helper). Cycle-guarded independently; the cap bounds
       # even acyclic chains.
@@ -1941,6 +1926,22 @@ module Rigor
         end
       end
 
+      # C2 — returns a Set of `object_id`s for transient `@x = nil` writes that a later statement in the same method
+      # body *definitely* overwrites with a non-nil value on every completing path. Such a nil can never be the ivar's
+      # value at method exit, so it must not contribute a `nil` constituent to the (flow-insensitive) class-ivar union.
+      #
+      # Scope is deliberately narrow and post-domination-sound:
+      #   - only the top-level statement sequence of the body is
+      #     considered (no writes hidden inside loops / rescue / nested
+      #     conditionals count as the "definite" overwrite, except the
+      #     one structured `if/else` form below);
+      #   - the killing statement is either an unconditional
+      #     statement-level `@x = <non-nil>`, OR an `if/else` (with a
+      #     real `else`) where BOTH branches' final top-level write to
+      #     `@x` is non-nil. Both shapes overwrite `@x` on every path;
+      #   - only `@x = nil` literal writes are ever marked dead — a
+      #     non-nil transient is left untouched (it is already
+      #     precision-additive in the union).
       def dead_transient_nil_writes(body, class_name = nil, method_assign_effects = nil)
         statements = top_level_statements(body)
         return nil if statements.length < 2
@@ -3144,9 +3145,7 @@ module Rigor
         end
       end
 
-      # Issue #352 — folds the project-wide `pre_eval:` constant seed under this file's own table. Returns the
-      # per-file table unchanged (same frozen object) when nothing was seeded, so a run without `pre_eval:`
-      # constants allocates and compares exactly what it did before.
+      # Issue #352 — folds the project-wide `pre_eval:` constant seed under this file's own table.
       # Issue #644 — merges the per-file constant table OVER the project seed and records, alongside it,
       # which of those names THIS FILE declares (as last segments). The second table is the other half of
       # `Scope#published_constant?`: a project-published constant the analysed file also assigns is one its
@@ -3352,6 +3351,8 @@ module Rigor
         (table[class_name] ||= Set.new) << node.name
       end
 
+      # Returns the per-file table unchanged (same frozen object) when nothing was seeded, so a run without `pre_eval:`
+      # constants allocates and compares exactly what it did before.
       def merge_seeded_constants(seeded, per_file)
         return per_file if seeded.nil? || seeded.empty?
 
@@ -4979,7 +4980,7 @@ module Rigor
       # carries a block, the block body holds method overrides whose canonical class is `Const`. Survey item (e)
       # extended the recognition to `Const = Module.new do ... end` and `Const = Class.new(?super) do ... end` — the
       # ADR-16 Tier A "block-as-method" idiom at constant-write position. Returns the block body node (a
-      # `Prism::StatementsNode`) when the rvalue matches; nil otherwise. Used by `walk_methods` / `walk_def_nodes` to
+      # `Prism::StatementsNode`) when the rvalue matches; nil otherwise. Used by `walk_methods_and_def_nodes` to
       # push `Const` onto the qualified prefix before recursing.
       #
       # Issue [#703](https://github.com/rigortype/rigor/issues/703) — a PATH write is the same idiom.
@@ -5264,15 +5265,15 @@ module Rigor
         record_method(accumulator, class_name, def_node.name, kind, Source::ParameterEnvelope.of(def_node))
       end
 
+      # The side a `def`'s body evidence is filed on: a `def self.x`'s singleton side, unless the caller files it as an
+      # instance method elsewhere (`receiver_side: false`, #3005's `Owner::<included>`).
+      def evidence_side(def_node, side, receiver_side) = receiver_side && def_node.receiver ? :singleton : side
+
       # Issue #992 — the rewriting calls a METHOD BODY makes, which the declaration walk never descends into:
       # `def self.inherited(sub) = sub.class_eval { … }`, `def self.wrap_all = define_method(…)`,
       # `def decorate(obj) = obj.extend(Decorator)`. A class-body macro records the same evidence in
       # {#record_surface_evidence}; `send` is left out here because inside a body it is an ordinary call far
       # more often than a definition.
-      # The side a `def`'s body evidence is filed on: a `def self.x`'s singleton side, unless the caller files it as an
-      # instance method elsewhere (`receiver_side: false`, #3005's `Owner::<included>`).
-      def evidence_side(def_node, side, receiver_side) = receiver_side && def_node.receiver ? :singleton : side
-
       def record_def_body_evidence(def_node, qualified_prefix, tables, side, receiver_side: true)
         return if def_node.body.nil?
 
@@ -6275,16 +6276,6 @@ module Rigor
         end
       end
 
-      # Issue #1097 — `[[start_offset, end_offset, name, kind, owner], ...]` for every `def` / block /
-      # lambda body in the file. `Scope#*_def_shadows_call?` reads it to answer two execution-timing
-      # questions no `"path:line"` site can: whether a call sits INSIDE a deferred form (it runs at
-      # invocation time, after every class-body `def` installed) and, for an eager class-body call,
-      # where the earliest same-name def OF THE SAME OWNER starts. Def rows carry the method name,
-      # its `:instance` / `:singleton` / `:both` (`module_function`) kind, and the qualified owner —
-      # the owner filter keeps `class A; def self.sig` from ordering `class F`'s `sig` call, and the
-      # kind filter keeps `def sig` from ordering `def self.sig`'s shadow question. Block / lambda /
-      # `END` rows and defs nested inside another deferred range (they install at invocation time,
-      # not during the enclosing body's own eval) carry nil name / kind / owner — containment only.
       # The two position-keyed per-file indexes: the def / block / lambda body ranges issue #1097's
       # `*_def_shadows_call?` predicates order a same-name def against, and the class-declaration
       # sites `record_class_sources` accumulates.
@@ -6345,6 +6336,16 @@ module Rigor
         yield eval_constant_receiver_prefix(node, receiver, rendered, lexical_prefix).join("::") if rendered
       end
 
+      # Issue #1097 — `[[start_offset, end_offset, name, kind, owner], ...]` for every `def` / block /
+      # lambda body in the file. `Scope#*_def_shadows_call?` reads it to answer two execution-timing
+      # questions no `"path:line"` site can: whether a call sits INSIDE a deferred form (it runs at
+      # invocation time, after every class-body `def` installed) and, for an eager class-body call,
+      # where the earliest same-name def OF THE SAME OWNER starts. Def rows carry the method name,
+      # its `:instance` / `:singleton` / `:both` (`module_function`) kind, and the qualified owner —
+      # the owner filter keeps `class A; def self.sig` from ordering `class F`'s `sig` call, and the
+      # kind filter keeps `def sig` from ordering `def self.sig`'s shadow question. Block / lambda /
+      # `END` rows and defs nested inside another deferred range (they install at invocation time,
+      # not during the enclosing body's own eval) carry nil name / kind / owner — containment only.
       def build_deferred_ranges(root)
         ranges = []
         walk_deferred_ranges(root, [], false, false, [], ranges)
@@ -10378,10 +10379,6 @@ module Rigor
         singleton_class_of_receiver?(receiver) && (receiver.receiver.nil? || receiver.receiver.is_a?(Prism::SelfNode))
       end
 
-      # Issue #1911 — an `attr_reader` / `attr_writer` / `attr_accessor` call written on the body's self records
-      # each member it defines (`x`, `x=`) with `visibility`: the running default for a statement (`toggled`), the
-      # wrapping call's for `private attr_accessor :x`, which Ruby applies to the `[:x, :x=]` the macro returns.
-      # A non-literal name (`attr_reader(*FIELDS)`) records nothing; a call that is no such macro records nothing.
       # Issue #1989 — the names a `define_method(:x)` or an `alias_method :x, :y` call replaces. An `attr_*` call is
       # not among them: it writes its members' slots itself ({#record_attr_visibility}).
       def replaced_by_call(call_node)
@@ -10408,6 +10405,10 @@ module Rigor
         end
       end
 
+      # Issue #1911 — an `attr_reader` / `attr_writer` / `attr_accessor` call written on the body's self records
+      # each member it defines (`x`, `x=`) with `visibility`: the running default for a statement (`toggled`), the
+      # wrapping call's for `private attr_accessor :x`, which Ruby applies to the `[:x, :x=]` the macro returns.
+      # A non-literal name (`attr_reader(*FIELDS)`) records nothing; a call that is no such macro records nothing.
       def record_attr_visibility(call_node, qualified_prefix, visibility, accumulator, toggled:, side: :instance)
         macro = attr_macro(call_node)
         return if macro.nil? || qualified_prefix.empty?

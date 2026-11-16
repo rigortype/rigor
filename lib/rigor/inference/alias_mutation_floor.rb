@@ -279,11 +279,6 @@ module Rigor
                   memo: {}.compare_by_identity, named_memo: {}.compare_by_identity)
       end
 
-      # A site's key ({SiteCollector}) is the start of the outermost loop or block that holds it (it may run again after
-      # any later point inside that loop), else where it has handed its locals on: its end (the receiver of a call has
-      # handed its locals on before the call's message runs, while the call's own arguments are handed on by the call
-      # itself), or its block's start. A local's key is its least site's; a capture by a closure that may run later is
-      # {ALWAYS}.
       # Where a site has handed its locals on: a call's block may receive them as soon as it starts.
       def handed_by(node)
         block = node.block if node.is_a?(Prism::CallNode)

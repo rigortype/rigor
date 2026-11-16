@@ -126,6 +126,8 @@ module Rigor
       # not invalidate the receiver's facts.
       def pure_self_returner?(method_name) = PURE_SELF_RETURNERS.include?(method_name)
 
+      NO_ARG_TYPES = [].freeze
+
       # Returns a scope with the call's receiver widened, for every variable the receiver expression
       # can evaluate to ({ReceiverAlias.candidates}) whose current binding is a literal-shape carrier
       # (`Tuple` / `HashShape`) or an empty-witness refinement (`non-empty-array` /
@@ -136,8 +138,6 @@ module Rigor
       # scope the arguments are evaluated in. They are what the widened carrier JOINS its added
       # content evidence from (issue #560); an empty list means "no evidence", which reproduces the
       # pre-join behaviour exactly.
-      NO_ARG_TYPES = [].freeze
-
       # `rewritten_element` is the element a typed element rewriter stores ({RewriteMutation.typed}), or `nil`.
       def widen_after_call(call_node:, current_scope:, arg_types: NO_ARG_TYPES, rewritten_element: nil)
         return current_scope if pure_self_returner?(call_node.name)

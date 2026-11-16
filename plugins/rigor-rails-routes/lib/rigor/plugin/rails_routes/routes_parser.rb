@@ -801,13 +801,6 @@ module Rigor
           end
         end
 
-        # ADR-102 WD3 — the controller a `resources` / `resource` declaration dispatches to.
-        #
-        # `resources :users` serves `UsersController`; a SINGULAR `resource :profile` serves the PLURAL
-        # `ProfilesController` — Rails pluralises the controller even though the routes are singular, and
-        # that is the one point where the two shapes disagree. An explicit `controller:` wins outright,
-        # including its `controller: "admin/users"` module-path and `controller: "/users"` absolute forms.
-        #
         # Whether a `resources` / `resource` declaration actually routes anything to its own controller.
         #
         # `only: []` strips every default action, and the two shapes it appears in mean opposite things:
@@ -841,6 +834,13 @@ module Rigor
           end
         end
 
+        # ADR-102 WD3 — the controller a `resources` / `resource` declaration dispatches to.
+        #
+        # `resources :users` serves `UsersController`; a SINGULAR `resource :profile` serves the PLURAL
+        # `ProfilesController` — Rails pluralises the controller even though the routes are singular, and
+        # that is the one point where the two shapes disagree. An explicit `controller:` wins outright,
+        # including its `controller: "admin/users"` module-path and `controller: "/users"` absolute forms.
+        #
         # `only: []` (or an `except:` that removes every action) declares no routes at all and so names no
         # controller; the callers gate on {#routed?} rather than this method re-deriving it.
         def record_resource_controller(context, options, name, plural:)

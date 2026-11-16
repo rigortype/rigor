@@ -413,12 +413,6 @@ module Rigor
           )
         end
 
-        # Robustness uplift companion (ADR-5) — when the project's `signature_paths:` RBS declared
-        # qualified names without their enclosing namespace, `RbsLoader` synthesizes the missing `module`s
-        # so the otherwise-inert signatures resolve. Surface a single `:info` diagnostic naming them so the
-        # user knows their sig set is malformed (`rbs validate` rejects it) and can fix it at the source.
-        # Authored `:info`: the analysis already succeeded; this is advisory, never a gate. Empty for a
-        # well-formed sig set.
         # An unparseable or declaration-colliding `.rbs` under `signature_paths:` is QUARANTINED so the
         # rest of the env survives (PR #50; issue #777 extends this to class-vs-module / constant
         # collisions against bundled RBS), which means the types it declares are silently absent — calls
@@ -506,6 +500,12 @@ module Rigor
           [build_rbs_hkt_scan_failed_diagnostic(failure)]
         end
 
+        # Robustness uplift companion (ADR-5) — when the project's `signature_paths:` RBS declared
+        # qualified names without their enclosing namespace, `RbsLoader` synthesizes the missing `module`s
+        # so the otherwise-inert signatures resolve. Surface a single `:info` diagnostic naming them so the
+        # user knows their sig set is malformed (`rbs validate` rejects it) and can fix it at the source.
+        # Authored `:info`: the analysis already succeeded; this is advisory, never a gate. Empty for a
+        # well-formed sig set.
         def rbs_synthesized_namespace_diagnostics
           synthesized = @snapshots[:synthesized_namespaces]
           return [] if synthesized.nil? || synthesized.empty?

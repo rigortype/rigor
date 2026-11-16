@@ -137,21 +137,7 @@ module Rigor
         )
       end
 
-      # ADR-20 slice 3 — hardcoded `(class_name, method_name,
-      # kind) => HKT application` table consulted by the
-      # dispatcher's new HKT-builtin tier. Sits ABOVE
-      # `RbsDispatch.try_dispatch` so a known stdlib method
-      # (`JSON.parse`, `JSON.parse!`) gets the reduced HKT
-      # type instead of the upstream rbs gem's `untyped`
-      # return. The annotation-based `%a{rigor:v1:return:
-      # App[...]}` path (parsed by
-      # `RbsExtended.parse_return_type_override`) is the
-      # general extension surface for user-authored sigs;
-      # this table is the Rigor-bundled shortcut for the
-      # handful of stdlib methods whose RBS declarations
-      # cannot be cleanly overridden via RBS overlay merging.
-      #
-      # Each entry maps to a hash with `:uri`, `:args`
+      # A table entry maps to a hash with `:uri`, `:args`
       # (an array of Ruby class names), `:discriminator` and
       # `:post_reduce`. The dispatcher
       # builds `Type::App.new(uri, args.map { Nominal })`,
@@ -197,6 +183,19 @@ module Rigor
       }.freeze
       private_constant :CSV_ROW_SPEC
 
+      # ADR-20 slice 3 — hardcoded `(class_name, method_name,
+      # kind) => HKT application` table consulted by the
+      # dispatcher's new HKT-builtin tier. Sits ABOVE
+      # `RbsDispatch.try_dispatch` so a known stdlib method
+      # (`JSON.parse`, `JSON.parse!`) gets the reduced HKT
+      # type instead of the upstream rbs gem's `untyped`
+      # return. The annotation-based `%a{rigor:v1:return:
+      # App[...]}` path (parsed by
+      # `RbsExtended.parse_return_type_override`) is the
+      # general extension surface for user-authored sigs;
+      # this table is the Rigor-bundled shortcut for the
+      # handful of stdlib methods whose RBS declarations
+      # cannot be cleanly overridden via RBS overlay merging.
       METHOD_RETURN_OVERRIDES = {
         # JSON — stdlib's `json` library. Upstream rbs declares
         # `(string, ?options) -> untyped`; the HKT-builtin tier

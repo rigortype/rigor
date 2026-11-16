@@ -5303,12 +5303,13 @@ module Rigor
         end
       end
 
-      # ADR-37 slice 2 / ADR-52 WD3 — gathers each plugin's post-return narrowing from the method-gated
-      # `narrowing_facts` DSL, wrapped as a facts-only `FlowContribution`, swallowing per-plugin exceptions so a buggy
-      # plugin can't abort the assertion path.
       EMPTY_CONTRIBUTIONS = [].freeze
       private_constant :EMPTY_CONTRIBUTIONS
 
+      # ADR-37 slice 2 / ADR-52 WD3 — gathers each plugin's post-return narrowing from the method-gated
+      # `narrowing_facts` DSL, wrapped as a facts-only `FlowContribution`, swallowing per-plugin exceptions so a buggy
+      # plugin can't abort the assertion path.
+      #
       # Fast-exit guard: skip if no plugin declares a `narrowing_facts` rule, or if no registered method-name gate
       # matches the call. See `collect_gated_statement_contributions` for the full consultation.
       def collect_plugin_contributions(registry, call_node, current_scope)
@@ -7094,15 +7095,15 @@ module Rigor
         slots
       end
 
-      # True when at least one argument of `node` is a bare local-variable read (positional or keyword value) bound in
-      # the current scope — a cheap pre-filter so the def resolution / body scan only runs for calls that could actually
-      # floor something.
       # A local bound in the current scope, or (issue #2335) one whose object another local may share, which the
       # alias floor reads a callee's write through ({AliasMutationFloor.reaches_other_locals?}).
       def passed_local?(read, node)
         scope.locals.key?(read.name) || AliasMutationFloor.reaches_other_locals?(scope, read, node)
       end
 
+      # True when at least one argument of `node` is a bare local-variable read (positional or keyword value) bound in
+      # the current scope — a cheap pre-filter so the def resolution / body scan only runs for calls that could actually
+      # floor something.
       def call_passes_local_argument?(node)
         args = node.arguments
         return false unless args.respond_to?(:arguments)

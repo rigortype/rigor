@@ -28,14 +28,6 @@ module Rigor
       end
     end
 
-    # Generates type-visible mutations of a Ruby source string by walking the Prism AST and recording byte-range
-    # splices (no unparser needed — Prism hands us exact offsets, and the analyzer re-parses the spliced source).
-    #
-    # A mutation is "type-visible" when it should trip a diagnostic rule *if* Rigor holds a type at the site: a
-    # call-argument literal dropped to `nil` or type-swapped (→ `call.argument-type-mismatch`), or a call site
-    # renamed to a missing method (→ `call.undefined-method`). Only call sites and bodies are mutated, never
-    # `def` signatures, so a reused project scan stays valid.
-
     # Signature-arity guard for `arity_extra` (ADR-62): verifies through `ScopeIndexer` and
     # `Reflection` that a call site targets a known, fixed/bounded positional signature and that
     # adding 1 argument exceeds `max_arity`. Drops variadic or untyped calls to eliminate noise.
@@ -133,6 +125,13 @@ module Rigor
       end
     end
 
+    # Generates type-visible mutations of a Ruby source string by walking the Prism AST and recording byte-range
+    # splices (no unparser needed — Prism hands us exact offsets, and the analyzer re-parses the spliced source).
+    #
+    # A mutation is "type-visible" when it should trip a diagnostic rule *if* Rigor holds a type at the site: a
+    # call-argument literal dropped to `nil` or type-swapped (→ `call.argument-type-mismatch`), or a call site
+    # renamed to a missing method (→ `call.undefined-method`). Only call sites and bodies are mutated, never
+    # `def` signatures, so a reused project scan stays valid.
     class Mutator
       IDENT = /\A[a-z_][A-Za-z0-9_]*\z/
       QUOTES = ['"', "'"].freeze

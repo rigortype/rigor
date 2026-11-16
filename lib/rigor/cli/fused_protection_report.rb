@@ -4,13 +4,6 @@ require_relative "../protection/measurement_integrity"
 
 module Rigor
   class CLI
-    # ADR-70 — aggregates per-file {Protection::MutationScanner::FusedFileResult} into a project-level **fused**
-    # protection report: how many type-visible breakages were caught by the type checker, how many of the
-    # *type-survivors* were caught by the test suite, and which sites neither axis caught — the ranked "add a type OR a
-    # test here" list.
-    #
-    # Framing (ADR-63 / ADR-62 Criterion A, extended): the payload is the **attribution** — which protection axis is
-    # missing — never raw survival. An unprotected site is "add protection here", never "your code is broken".
     # `harness_errors` (#264) — see {Rigor::CLI::FileEffectiveness}; defaults to 0 for the same reason.
     # A `class ... < Data.define(...)` body, not the `Data.define(...) do ... end` shorthand: Steep
     # resolves a `def` inside the shorthand block against the *lexically enclosing* class (here,
@@ -32,6 +25,13 @@ module Rigor
     end
     UnprotectedBreakage = Data.define(:method_name, :count, :examples)
 
+    # ADR-70 — aggregates per-file {Protection::MutationScanner::FusedFileResult} into a project-level **fused**
+    # protection report: how many type-visible breakages were caught by the type checker, how many of the
+    # *type-survivors* were caught by the test suite, and which sites neither axis caught — the ranked "add a type OR a
+    # test here" list.
+    #
+    # Framing (ADR-63 / ADR-62 Criterion A, extended): the payload is the **attribution** — which protection axis is
+    # missing — never raw survival. An unprotected site is "add protection here", never "your code is broken".
     FusedProtectionReport = Data.define(:files, :unprotected, :parse_errors) do
       def total_type_killed = files.sum(&:type_killed)
       def total_test_killed = files.sum(&:test_killed)

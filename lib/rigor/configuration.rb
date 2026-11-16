@@ -237,6 +237,10 @@ module Rigor
     SCALAR_PATH_KEYS = %w[core_root].freeze
     private_constant :SCALAR_PATH_KEYS
 
+    # The isolation strategies a `.rigor.yml` may name (ADR-39 slice 5 / #911). `ruby_box` is
+    # deliberately absent: it is a boot-time decision the config file is read too late to make.
+    CONFIGURABLE_PLUGIN_ISOLATIONS = %w[none process].freeze
+
     # Top-level keys this implementation DECLARES but never reads — see `docs/internal-spec/config.md`
     # § "Reserved namespaces" and ADR-99.
     #
@@ -250,10 +254,6 @@ module Rigor
     # reservation FINDABLE by the next person adding config validation (#166 is exactly that), and to
     # give the schema-parity spec something to key on: a reserved namespace is by definition absent
     # from DEFAULTS, so the DEFAULTS-driven schema gate can never see it.
-    # The isolation strategies a `.rigor.yml` may name (ADR-39 slice 5 / #911). `ruby_box` is
-    # deliberately absent: it is a boot-time decision the config file is read too late to make.
-    CONFIGURABLE_PLUGIN_ISOLATIONS = %w[none process].freeze
-
     RESERVED_NAMESPACES = %w[rigor_rs].freeze
 
     # Every top-level key a conforming `.rigor.yml` may carry: the keys this implementation owns, plus

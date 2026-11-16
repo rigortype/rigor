@@ -3401,9 +3401,6 @@ module Rigor
           build_unreachable_branch_diagnostic(path, dead_branch, polarity)
         end
 
-        # Returns `:truthy` / `:falsey` for a syntactically-literal predicate, or nil for anything else.
-        # `TrueNode`, `FalseNode`, `NilNode` are the unambiguous cases. Numeric / string / symbol literals
-        # are always truthy in Ruby (any non-`false` / non-`nil` value is truthy, including `0` and `""`).
         TRUTHY_LITERAL_NODES = [
           Prism::TrueNode, Prism::IntegerNode, Prism::FloatNode,
           Prism::StringNode, Prism::SymbolNode, Prism::RegularExpressionNode
@@ -3413,6 +3410,9 @@ module Rigor
         FALSEY_LITERAL_NODES = [Prism::FalseNode, Prism::NilNode].freeze
         private_constant :FALSEY_LITERAL_NODES
 
+        # Returns `:truthy` / `:falsey` for a syntactically-literal predicate, or nil for anything else.
+        # `TrueNode`, `FalseNode`, `NilNode` are the unambiguous cases. Numeric / string / symbol literals
+        # are always truthy in Ruby (any non-`false` / non-`nil` value is truthy, including `0` and `""`).
         def literal_predicate_polarity(predicate)
           return :truthy if TRUTHY_LITERAL_NODES.any? { |klass| predicate.is_a?(klass) }
           return :falsey if FALSEY_LITERAL_NODES.any? { |klass| predicate.is_a?(klass) }

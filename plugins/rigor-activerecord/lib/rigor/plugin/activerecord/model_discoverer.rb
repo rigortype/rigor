@@ -77,13 +77,13 @@ module Rigor
       #   `ApplicationRecord`) setting `self.table_name_prefix` for every model under it — both already
       #   guess wrong identically on unpatched code.
       class ModelDiscoverer
-        # @param search_paths — absolute or project-relative paths.
-        # @param base_classes — superclass names that identify a class as an AR model.
         # Declaration macros whose column's runtime value is a rich object, not the SQL scalar. Their column
         # must NOT be narrowed to the schema type (see {ModelIndex.build}'s type-override remap).
         TYPE_OVERRIDE_METHODS = %i[serialize mount_uploader mount_uploaders].freeze
         OUTSIDE_SEARCH_DIRECTORIES = %w[lib config engines].freeze
 
+        # @param search_paths — absolute or project-relative paths.
+        # @param base_classes — superclass names that identify a class as an AR model.
         def initialize(io_boundary:, search_paths:, base_classes:, project_root: ".")
           @io_boundary = io_boundary
           @search_paths = search_paths

@@ -31,6 +31,10 @@ module Rigor
         hint: 4
       }.freeze
 
+      # The single Debouncer key every save round shares (#246). Per-URI keys would let two saves start two
+      # concurrent rounds; one key means a burst collapses into the last one.
+      PROJECT_ROUND_KEY = :__rigor_project_round__
+
       # @param debouncer —
       #   when present, `publish_for` schedules its work through
       #   the debouncer (cancels prior pending task for the same
@@ -41,10 +45,6 @@ module Rigor
       #   debounced publish fires. 0 with a debouncer means
       #   "schedule on next-tick" (still async); without a
       #   debouncer the value is unused.
-      # The single Debouncer key every save round shares (#246). Per-URI keys would let two saves start two
-      # concurrent rounds; one key means a burst collapses into the last one.
-      PROJECT_ROUND_KEY = :__rigor_project_round__
-
       def initialize(writer:, buffer_table:, project_context:,
                      debouncer: nil, debounce_seconds: 0.2)
         @writer = writer

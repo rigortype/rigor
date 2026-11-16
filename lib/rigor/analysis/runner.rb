@@ -1851,17 +1851,6 @@ module Rigor
         end
       end
 
-      # Issue #352 — a `pre_eval:` file is a real input to the run's diagnostics: its `def`s populate the
-      # ADR-17 patched-method registry and (since #352) its constants populate the project seed. ADR-17 WD5
-      # permits listing a file under `pre_eval:` and NOT under `paths:`, and such a file never appears in the
-      # expansion — so without this entry, editing one would leave the run-result cache serving diagnostics
-      # computed against the previous version. The common case (a `lib/core_ext/` file that is also under
-      # `paths:`) contributes a duplicate entry, which the descriptor's per-path validation absorbs.
-      # #392 — the TEMPLATE files behind the run's units. The key slot carries the compiled Ruby's digest
-      # (`template_units_digest`), which is what decides whether a cached answer describes this source; these
-      # entries are the validation half, so a template edited between two runs re-globs and re-digests here
-      # exactly as an analysed `.rb` file does. Both are needed: a transform that compiles two different
-      # templates to the same Ruby must still not resurrect the wrong PATH in a diagnostic.
       # #392 — one `:names` row per claimed `template_globs:` pattern, whether or not it matched. The file
       # rows below cover edits to templates that EXIST; only a glob row notices one appearing or vanishing,
       # which is what let a project's first template stay invisible to every warm run.
@@ -1872,6 +1861,12 @@ module Rigor
       # Every template the run READ, successes and failures alike: a `plugin_loader` row produced by a
       # template that would not compile must not outlive the edit that fixes it, and a buffer-bound path is
       # digested at the bytes the run actually read.
+      #
+      # #392 — the TEMPLATE files behind the run's units. The key slot carries the compiled Ruby's digest
+      # (`template_units_digest`), which is what decides whether a cached answer describes this source; these
+      # entries are the validation half, so a template edited between two runs re-globs and re-digests here
+      # exactly as an analysed `.rb` file does. Both are needed: a transform that compiles two different
+      # templates to the same Ruby must still not resurrect the wrong PATH in a diagnostic.
       def template_unit_file_entries
         template_units.source_paths.filter_map do |path|
           physical = template_units.physical_path(path, @buffer)
@@ -1881,6 +1876,12 @@ module Rigor
         end
       end
 
+      # Issue #352 — a `pre_eval:` file is a real input to the run's diagnostics: its `def`s populate the
+      # ADR-17 patched-method registry and (since #352) its constants populate the project seed. ADR-17 WD5
+      # permits listing a file under `pre_eval:` and NOT under `paths:`, and such a file never appears in the
+      # expansion — so without this entry, editing one would leave the run-result cache serving diagnostics
+      # computed against the previous version. The common case (a `lib/core_ext/` file that is also under
+      # `paths:`) contributes a duplicate entry, which the descriptor's per-path validation absorbs.
       def pre_eval_file_entries
         @configuration.pre_eval.filter_map do |path|
           physical = @buffer ? @buffer.resolve(path) : path
@@ -2222,14 +2223,6 @@ module Rigor
         @served_effect_collections.merge(effect_collections_by_path).sort_by { |path, _| path.to_s }.map(&:last)
       end
 
-      # Editor mode § "Scope choice — option A". Under `buffer:` non-nil the per-file analysis emits
-      # diagnostics ONLY for the buffer's logical path; the rest of `paths:` is consumed by the
-      # project-wide pre-passes (synthetic methods, project-patched methods, plugin facts) but contributes
-      # no per-file diagnostics. Option B (#146) narrows to the closure instead; see {#target_files}.
-      #
-      # The buffer's logical path is added to the file list even if it's not under `paths:` — per design §
-      # "Failure envelope": "--instead-of=Y with Y not under any paths: directory → treated as a valid
-      # logical identity for the buffer".
       # #392 — the run's template units. Built once per run, on the parent, AFTER the plugin pre-pass has
       # loaded the registry; a run whose plugins declare no `template_globs:` never globs and never calls a
       # plugin.
@@ -2249,6 +2242,14 @@ module Rigor
                             end
       end
 
+      # Editor mode § "Scope choice — option A". Under `buffer:` non-nil the per-file analysis emits
+      # diagnostics ONLY for the buffer's logical path; the rest of `paths:` is consumed by the
+      # project-wide pre-passes (synthetic methods, project-patched methods, plugin facts) but contributes
+      # no per-file diagnostics. Option B (#146) narrows to the closure instead; see {#target_files}.
+      #
+      # The buffer's logical path is added to the file list even if it's not under `paths:` — per design §
+      # "Failure envelope": "--instead-of=Y with Y not under any paths: directory → treated as a valid
+      # logical identity for the buffer".
       def target_files(expansion)
         files = expansion.fetch(:files)
         # ADR-46 slice 2 — restrict the analyzed set to the affected closure while the pre-pass (run

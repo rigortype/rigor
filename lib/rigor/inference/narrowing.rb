@@ -1305,13 +1305,13 @@ module Rigor
           [truthy, falsey]
         end
 
+        NAMED_CAPTURE_BODY_RE = /\(\?<([A-Za-z_][A-Za-z0-9_]*)>([^()|]*)\)/
+        private_constant :NAMED_CAPTURE_BODY_RE
+
         # Extracts `{ capture_name => Refinement }` for every named capture group in the
         # `MatchWriteNode`'s wrapped `=~` call whose body the recogniser table accepts. Bodies
         # that contain nested groups, anchors, alternation, or anything else outside the curated
         # forms drop out and the caller falls back to plain `String`.
-        NAMED_CAPTURE_BODY_RE = /\(\?<([A-Za-z_][A-Za-z0-9_]*)>([^()|]*)\)/
-        private_constant :NAMED_CAPTURE_BODY_RE
-
         def match_write_capture_refinements(node)
           regex = node.call.is_a?(Prism::CallNode) ? node.call.receiver : nil
           return {} unless regex.is_a?(Prism::RegularExpressionNode)

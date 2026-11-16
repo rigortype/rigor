@@ -198,8 +198,6 @@ module Rigor
           itself: :shape_self
         }.freeze
 
-        # @return the precise element/value type, or `nil` to defer to the next
-        #   dispatcher tier.
         # Per-carrier dispatch table. Adding a new carrier here is a one-row change; the helper methods
         # stay private. Anonymous Type subclasses are not expected.
         RECEIVER_HANDLERS = {
@@ -215,6 +213,8 @@ module Rigor
         }.freeze
         private_constant :RECEIVER_HANDLERS
 
+        # @return the precise element/value type, or `nil` to defer to the next
+        #   dispatcher tier.
         def try_dispatch(context)
           receiver = context.receiver
           method_name = context.method_name

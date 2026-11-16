@@ -1300,9 +1300,6 @@ module Rigor
           lin
         end
 
-        # A memoised linearisation rebuilt for the audit by a Builder over a fresh bucket. A memoised one met no
-        # cycle and stayed inside the depth budget, so its depth does not change it; a retro world that fit
-        # {LIMIT} once fits it again.
         # A memoised chain's forks are the asker's too.
         def absorb_cached(cached)
           @frames.last&.absorb(cached[3], cached[4], cached[5])
@@ -1316,6 +1313,9 @@ module Rigor
         SINGLETON_LIN_TABLES = %i[lin_singleton lin_singleton_retro].freeze
         private_constant :SINGLETON_LIN_TABLES
 
+        # A memoised linearisation rebuilt for the audit by a Builder over a fresh bucket. A memoised one met no
+        # cycle and stayed inside the depth budget, so its depth does not change it; a retro world that fit
+        # {LIMIT} once fits it again.
         def fresh_lin(table, name)
           side = SINGLETON_LIN_TABLES.include?(table) ? :singleton : :instance
           builder = Builder.new(@scope, @flavor, ResolutionChain.send(:flavor_bucket, @discovery, @flavor),

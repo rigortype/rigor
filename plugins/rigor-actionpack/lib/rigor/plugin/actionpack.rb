@@ -268,11 +268,11 @@ module Rigor
         ]
       end
 
-      # The compile the {RenderLocals} cache could not answer — an editor's in-flight bytes, or a template
-      # the index never globbed. Same four values the cache carries.
       # The one handler this plugin compiles; every other claimed template is declined for its name.
       ERB_SUFFIX = ".erb"
 
+      # The compile the {RenderLocals} cache could not answer — an editor's in-flight bytes, or a template
+      # the index never globbed. Same four values the cache carries.
       def compile_now(text)
         compiled, line_map, transform = ErbCompiler.compile(text)
         [compiled, line_map, transform, Prism.parse(compiled).errors.empty?]

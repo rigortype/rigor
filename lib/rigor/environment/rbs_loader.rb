@@ -2065,13 +2065,6 @@ module Rigor
         @state[:ruby_library_roots] ||= RubyLibraryRoots.shared
       end
 
-      # Issue #2174 — the subset of `signature_paths:` the user configured (every entry is also in
-      # `@signature_paths`), and the features the project's source requires: read only by
-      # {#ruby_library_reopen?}.
-      # Issue #610 — the subset of `signature_paths:` a bundled PLUGIN contributed. Loaded last and allowed to stand
-      # down against a colliding generic arity ({.add_deferred_signatures}). Issue #2978 — and the subset that stands
-      # down member by member to the rest. Every entry of either is also in `@signature_paths`, so the env cache
-      # descriptor already digests these files.
       # Issue #3030 — every `.rbs` file this loader reads from its `signature_paths:`, the `_`-prefixed directories of
       # its `rbs collection` gem directories left out ({.project_sig_files}).
       def signature_files
@@ -2079,11 +2072,18 @@ module Rigor
       end
       private :signature_files
 
+      # Issue #610 — the subset of `signature_paths:` a bundled PLUGIN contributed. Loaded last and allowed to stand
+      # down against a colliding generic arity ({.add_deferred_signatures}). Issue #2978 — and the subset that stands
+      # down member by member to the rest. Every entry of either is also in `@signature_paths`, so the env cache
+      # descriptor already digests these files.
       def assign_partition(deferred_signature_paths, subordinate_signature_paths)
         @deferred_signature_paths = deferred_signature_paths.map { |p| Pathname(p) }.freeze
         @subordinate_signature_paths = subordinate_signature_paths.map { |p| Pathname(p) }.freeze
       end
 
+      # Issue #2174 — the subset of `signature_paths:` the user configured (every entry is also in
+      # `@signature_paths`), and the features the project's source requires: read only by
+      # {#ruby_library_reopen?}.
       def assign_reopen_inputs(project_signature_paths, required_features)
         @project_signature_paths = project_signature_paths.map { |p| Pathname(p) }.freeze
         @required_features = required_features.map { |feature| feature.to_s.dup.freeze }.freeze

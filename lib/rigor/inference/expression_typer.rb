@@ -2766,13 +2766,6 @@ module Rigor
           scope.discovered_method?(class_name, method_name, :singleton)
       end
 
-      # v0.0.2 #5 — re-types the body of a user-defined instance method with the call site's argument types
-      # bound to the method's parameters. Used as a last-resort tier after `MethodDispatcher.dispatch` has
-      # exhausted its catalogue (RBS, shape, constant folding, user-class fallback). Returns nil when:
-      #
-      # - the receiver is not `Nominal[T]` for some T;
-      # - no def_node is recorded for that class/method (the receiver is foreign or has only an RBS sig);
-      # - the def has no body, or has a parameter shape we cannot bind from the call's positional args.
       # v0.0.3 A — re-types a top-level (or DSL-block-nested) `def` discovered by `ScopeIndexer` under the
       # `TOP_LEVEL_DEF_KEY` sentinel. Mirrors the `infer_user_method_return` shape but uses the current
       # `scope.self_type` (or implicit `Object`) as the receiver carrier so the body's own self is
@@ -2935,6 +2928,13 @@ module Rigor
         try_user_method_inference(receiver, node, args.map { |a| type_of(a) })
       end
 
+      # v0.0.2 #5 — re-types the body of a user-defined instance method with the call site's argument types
+      # bound to the method's parameters. Used as a last-resort tier after `MethodDispatcher.dispatch` has
+      # exhausted its catalogue (RBS, shape, constant folding, user-class fallback). Returns nil when:
+      #
+      # - the receiver is not `Nominal[T]` for some T;
+      # - no def_node is recorded for that class/method (the receiver is foreign or has only an RBS sig);
+      # - the def has no body, or has a parameter shape we cannot bind from the call's positional args.
       def try_user_method_inference(receiver, call_node, arg_types, method_name: call_node.name, block_type: nil)
         return nil unless user_inference_receiver?(receiver)
 
@@ -3316,13 +3316,6 @@ module Rigor
         nil
       end
 
-      # ADR-24 slice 2 — resolves `method_name` against the project definers on `class_name`'s
-      # {Scope::ResolutionChain}, in Ruby's order: prepended modules, the class, its included modules, then the
-      # superclass's chain likewise. RBS-known ancestors are NOT answered here — the `MethodDispatcher` RBS
-      # tier runs before `try_user_method_inference` and already covers them; they sit on the chain as
-      # external entries this lookup passes over. Cross-file: the chain is built from the tables the runner
-      # seeds from the project-wide pre-pass, cycle-guarded and capped at `Scope::ANCESTOR_WALK_LIMIT`.
-
       CLASS_GRAPH_CACHE = TypingState.memo(
         :class_graph_cache,
         run_scoped: true,
@@ -3498,6 +3491,12 @@ module Rigor
         true
       end
 
+      # ADR-24 slice 2 — resolves `method_name` against the project definers on `class_name`'s
+      # {Scope::ResolutionChain}, in Ruby's order: prepended modules, the class, its included modules, then the
+      # superclass's chain likewise. RBS-known ancestors are NOT answered here — the `MethodDispatcher` RBS
+      # tier runs before `try_user_method_inference` and already covers them; they sit on the chain as
+      # external entries this lookup passes over. Cross-file: the chain is built from the tables the runner
+      # seeds from the project-wide pre-pass, cycle-guarded and capped at `Scope::ANCESTOR_WALK_LIMIT`.
       def resolve_user_def_through_ancestors(class_name, method_name)
         resolve_user_def_with_owner(class_name, method_name).first
       end
@@ -3844,10 +3843,6 @@ module Rigor
       # when it ends ({RunScopedSlots}; `Runner#run` keeps its bucket for `#return_summaries`).
       # `ExpressionTyper` is rebuilt per `Scope#type_of`, so the store lives in the thread's {TypingState}; fork-pool
       # workers are separate processes, so it never crosses a project boundary (ADR-84 WD5).
-      #
-      # ADR-129 WD1 — a Table, not a Memo: its WD3 serves a standalone result where a fresh compute inside a cycle
-      # would be tainted, and its WD6 serves a stored `untyped`, so it is not extensional. Its reads and stores are
-      # journaled ({#log_return_memo}).
       # ADR-129 WD3 — the return memo's entry protocol. The slot holds `[generation, bucket]` ({#return_memo_bucket}),
       # and a journal record keys an entry on `[def_node, memo_key]`. A replay writes into the bucket the slot holds: a
       # `type_of` memo entry lives no longer than its file's analysis, inside one run generation, so a slot with no
@@ -3874,6 +3869,9 @@ module Rigor
         end
       end
 
+      # ADR-129 WD1 — a Table, not a Memo: its WD3 serves a standalone result where a fresh compute inside a cycle
+      # would be tainted, and its WD6 serves a stored `untyped`, so it is not extensional. Its reads and stores are
+      # journaled ({#log_return_memo}).
       RETURN_MEMO = TypingState.table(
         :user_method_return_memo,
         run_scoped: true, computed: "return memo", entries: ReturnMemoEntries,
@@ -6199,14 +6197,6 @@ module Rigor
         Type::Combinator.nominal_of("Array", type_args: [element])
       end
 
-      # Evaluates the call's block once per receiver element. Two block shapes are supported:
-      #
-      # - `Prism::BlockNode` — a full `do … end` / `{ … }` block; the body is re-typed per position with the
-      #   element bound to the block parameter.
-      # - `Prism::BlockArgumentNode` wrapping a `SymbolNode` — the `&:predicate` shorthand; the symbol is
-      #   dispatched as a zero-arg method on each element type.
-      #
-      # Any other shape (`&proc_local`, `&method(:foo)`, no block) returns `nil` so the fold declines.
       # Arity cap on the scope-threading fold under this per-element walk. The `Constant<Range>` receivers are
       # already capped at {PER_ELEMENT_RANGE_LIMIT} positions, but a Tuple's elements come through
       # {#per_element_elements_of} uncapped — a 40-element array literal is 40 positions, and each one that
@@ -6219,6 +6209,14 @@ module Rigor
       PER_ELEMENT_THREADING_LIMIT = PER_ELEMENT_RANGE_LIMIT
       private_constant :PER_ELEMENT_THREADING_LIMIT
 
+      # Evaluates the call's block once per receiver element. Two block shapes are supported:
+      #
+      # - `Prism::BlockNode` — a full `do … end` / `{ … }` block; the body is re-typed per position with the
+      #   element bound to the block parameter.
+      # - `Prism::BlockArgumentNode` wrapping a `SymbolNode` — the `&:predicate` shorthand; the symbol is
+      #   dispatched as a zero-arg method on each element type.
+      #
+      # Any other shape (`&proc_local`, `&method(:foo)`, no block) returns `nil` so the fold declines.
       def per_element_block_results(block, element_types)
         case block
         when Prism::BlockNode

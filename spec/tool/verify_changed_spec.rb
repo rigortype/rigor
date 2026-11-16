@@ -303,6 +303,12 @@ RSpec.describe "bin/verify-changed spec selection" do
             expect(err).to include("run the ones your change touches yourself")
           end
 
+          it "applies to a tool/ file's mirror directory" do
+            files = { "tool/x.rb" => "" }.merge(spec_files("spec/tool/x", 2))
+            specs, = list_in_temp_repo(files, "tool/x.rb", quick: quick)
+            expect(specs).to eq(["spec/tool/x/s0_spec.rb", "spec/tool/x/s1_spec.rb"])
+          end
+
           it "adds the directory to a same-named spec" do
             files = { "lib/rigor/mod.rb" => "", "spec/rigor/mod_spec.rb" => "# spec\n" }
                     .merge(spec_files("spec/rigor/mod", 2))

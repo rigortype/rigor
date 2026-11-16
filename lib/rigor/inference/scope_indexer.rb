@@ -3102,8 +3102,15 @@ module Rigor
         when Type::Tuple then Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.untyped])
         when Type::Constant then StringMutation.constant?(member) ? Type::Combinator.nominal_of("String") : member
         when Type::Nominal
+          # The pin is tested BEFORE the content is unpinned, and on the original member: unpinning floors a
+          # literal type argument to its class (`Array["a"]` to `Array[String]`), which is a class-level argument
+          # and so not value-pinned, and the `Dynamic[top]` arm never arrived. `NS = ["a"].shuffle` with a method
+          # running `NS << 1` then kept claiming every element is a `String`, so `NS[1].odd?` — correct Ruby on the
+          # Integer that method stores — drew `call.undefined-method`. Whether the carrier held anything
+          # value-pinned at any depth is the question, and only the un-floored member can answer it.
+          pinned = UnknownStoreWidening.value_pinned_collection?(member)
           member = census_unpinned_content(member)
-          UnknownStoreWidening.value_pinned_collection?(member) ? UnknownStoreWidening.gradual_content(member) : member
+          pinned ? UnknownStoreWidening.gradual_content(member) : member
         when Type::Difference, Type::Refined then census_unpinned_carrier(member.base)
         else member
         end

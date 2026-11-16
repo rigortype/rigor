@@ -565,6 +565,66 @@ RSpec.describe "Mutated constant census widening", type: :runner do
       RUBY
     end
 
+    # The twin of the example above, and the one the arm exists for. An element mutation rewrites the String the
+    # element holds, so `Array[String]` stays true and needs no `Dynamic[top]` arm. A WHOLE-NAME mutation stores
+    # something else into the carrier, so the element claim has to admit it — and the pin that licenses the arm is
+    # only visible before the literal is floored to its class, which is why the order in `census_unpinned_carrier`
+    # is load-bearing.
+    it "keeps a Dynamic arm when a whole-name mutation stores into a nominal whose element literal is floored" do
+      expect(dumped_types(<<~RUBY)).to eq(["Dynamic[Array[Dynamic[top] | String]]", 'Array["a"]'])
+        NW = ["a"].shuffle
+        NK = ["a"].shuffle
+        def grow
+          NW << 1
+        end
+        dump_type(NW); dump_type(NK)
+      RUBY
+    end
+
+    # Reading the element as the Integer that method stores is correct Ruby, so the arm is what keeps a false
+    # positive off it. Without it the census answered `Array[String]` and reported `odd?` undefined for `String`.
+    it "does not report a read of an element a whole-name mutation stored, and still reports the unmutated twin" do
+      expect(rules(<<~RUBY)).to eq([[7, "call.undefined-method"]])
+        NW = ["a"].shuffle
+        NK = ["a"].shuffle
+        def grow
+          NW << 1
+        end
+        NW[1].odd?
+        NK[0].odd?
+      RUBY
+    end
+
+    # `READERS` pairs each reader with the argument counts that make it read ONE element. Past them the call answers
+    # a new container — `C[0, 2]` and `C.first(1)` are copies — so the mutation reaches nothing the constant holds,
+    # and reading the step as an index would drop a pin that is still true.
+    it "records nothing for a reader whose argument count makes it answer a copy" do
+      expect(dumped_types(<<~RUBY)).to eq(["[[1], [2]]", "[[1], [2]]"])
+        C = [[1], [2]].freeze
+        D = [[1], [2]].freeze
+        def grow
+          C[0, 2] << 3
+          D.first(1) << 3
+        end
+        dump_type(C); dump_type(D)
+      RUBY
+    end
+
+    # The chain is unwrapped at every rung, not only at its end: `path` strips the parentheses it is handed, and the
+    # loop strips each receiver's. Without the inner strip the walk stopped at the `ParenthesesNode`, the root was
+    # not the constant, and nothing was recorded — a stale pin, which is the false positive this census removes.
+    it "reads a parenthesised rung in the middle of a read chain" do
+      expect(rules(<<~RUBY)).to eq([[7, "flow.always-truthy-condition"]])
+        C = [[[1]]].freeze
+        K = [[[1]]].freeze
+        def grow
+          (C[0])[0] << 9
+        end
+        puts "p" if C[0][0].last == 1
+        puts "p" if K[0][0].last == 1
+      RUBY
+    end
+
     it "reaches the same table whichever order a whole-name and an element mutation, or two depths, appear in" do
       expect(dumped_types(<<~RUBY)).to eq([wide, wide, "[#{wide}]", "[#{wide}]"])
         C1 = [[1]].freeze

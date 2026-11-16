@@ -25,7 +25,7 @@ CODE_MAP_NAMED_PATH = %r{`((?:lib|spec|sig|docs|data|schemas|bin)/[^`\s]*)`}
 # The first cell of a table row, when it is one backticked path.
 CODE_MAP_ROW_KEY = /^\| `([^`]+)` \|/
 
-# The map is a lookup table, not a description of the engine. Today it is 166 lines; a map that needs
+# The map is a lookup table, not a description of the engine. Today it is 169 lines; a map that needs
 # far more than this is restating docs/internal-spec/.
 CODE_MAP_LINE_MAX = 220
 

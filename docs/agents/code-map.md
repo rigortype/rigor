@@ -35,7 +35,7 @@ A `rigor check` run goes through these stages. A change usually belongs to one o
 | `lib/rigor/ast/` | The marker for synthetic (virtual) nodes. | `lib/rigor/ast.rb` | `spec/rigor/ast/` |
 | `lib/rigor/builtins/` | Imported refinement carriers and static return refinements for core and stdlib. The generated catalogues are in `data/builtins/`. | `lib/rigor/builtins/imported_refinements.rb` | `spec/rigor/builtins/` |
 | `lib/rigor/cache/` | The on-disk cache store, cache descriptors and digests, the cached RBS environment, and the incremental snapshot. | `lib/rigor/cache/store.rb` | `spec/rigor/cache/` |
-| `lib/rigor/cli/` | One class per command, plus each command's report and renderer. `rigor init` is the exception: it is inside `lib/rigor/cli.rb`. | `lib/rigor/cli.rb` | `spec/rigor/cli/` |
+| `lib/rigor/cli/` | One class per command, plus each command's report and renderer. `init`, `describe` and `playground` are the exceptions: they are inside `lib/rigor/cli.rb`. | `lib/rigor/cli.rb` | `spec/rigor/cli/` |
 | `lib/rigor/configuration/` | Severity profiles and the dependency settings. The loader, defaults and validators are in `lib/rigor/configuration.rb`. | `lib/rigor/configuration.rb` | `spec/rigor/configuration/` |
 | `lib/rigor/effects/` | Effect labels and summaries: scanning units, propagation, envelopes, snapshots. The CLI side is `lib/rigor/cli/effects_command.rb`; the run-time passes are in `lib/rigor/analysis/runner/`. | `lib/rigor/effects.rb` | `spec/rigor/effects/` |
 | `lib/rigor/environment/` | RBS loading and queries, signature discovery (bundle, `rbs collection`, vendored), and the class registry. | `lib/rigor/environment.rb` | `spec/rigor/environment/` |
@@ -43,7 +43,7 @@ A `rigor check` run goes through these stages. A change usually belongs to one o
 | `lib/rigor/hashing/` | The XXH3 implementation the cache digests use. | `lib/rigor/hashing/xxh3.rb` | `spec/rigor/hashing/` |
 | `lib/rigor/inference/` | The typing engine and declaration discovery. See [Inside `inference/`](#inside-inference). | `lib/rigor/inference/statement_evaluator.rb` | `spec/rigor/inference/` |
 | `lib/rigor/language_server/` | The LSP server: one provider per request kind, buffer tables, publishing. | `lib/rigor/language_server/server.rb` | `spec/rigor/language_server/` |
-| `lib/rigor/lens/` | The `lens/v0` document: per-site contract claims read from source. | `lib/rigor/lens.rb` | `spec/rigor/lens/` |
+| `lib/rigor/lens/` | `rigor lens`: the `lens/v0` declaration map of the requested files, with type provenance and contract claims. | `lib/rigor/lens.rb` | `spec/rigor/lens/` |
 | `lib/rigor/mcp/` | The MCP server loop. | `lib/rigor/mcp/server.rb` | `spec/rigor/mcp/` |
 | `lib/rigor/plugin/` | The plugin API: the base class, manifest, loader, registry, trust and isolation, and the macro substrate. | `lib/rigor/plugin/base.rb` | `spec/rigor/plugin/` |
 | `lib/rigor/protection/` | Type-protection coverage by mutation: the mutator, the oracles and the mutation cache. Its scanner is `lib/rigor/inference/protection_scanner.rb`, and its commands are the `coverage*`, `mutation*` and `protection*` files of `lib/rigor/cli/`. | `lib/rigor/protection/mutation_scanner.rb` | `spec/rigor/protection/` |
@@ -65,7 +65,7 @@ A `rigor check` run goes through these stages. A change usually belongs to one o
 | `lib/rigor/ast.rb` | Loads `lib/rigor/ast/`. |
 | `lib/rigor/bleeding_edge.rb` | The queue of changes that ship behind `bleeding_edge`. |
 | `lib/rigor/ci_detector.rb` | Detects the CI provider from the environment. |
-| `lib/rigor/cli.rb` | Command dispatch (`HANDLERS`), exit codes, and `rigor init`. |
+| `lib/rigor/cli.rb` | Command dispatch (`HANDLERS`), exit codes, and the commands with no class of their own (`init`, `describe`, `playground`). |
 | `lib/rigor/config_audit.rb` | Findings about the configuration itself (unknown keys, dead paths). |
 | `lib/rigor/config_path.rb` | Resolves a configured path against its base directory. |
 | `lib/rigor/configuration.rb` | Configuration loading, `DEFAULTS` and the `coerce_*` validators. |
@@ -80,7 +80,7 @@ A `rigor check` run goes through these stages. A change usually belongs to one o
 | `lib/rigor/memo_audit.rb` | The ADR-129 audit that compares a memo hit with a fresh computation. |
 | `lib/rigor/plugin.rb` | Plugin registration by gem name. |
 | `lib/rigor/plugin_gap_advisory.rb` | Advises enabling a bundled plugin for a gem the project depends on. |
-| `lib/rigor/project_environment.rb` | Builds the environment for commands other than `check`. |
+| `lib/rigor/project_environment.rb` | Builds the plugin-aware environment for commands other than `check`; the `check` runner and its workers call its helpers too. |
 | `lib/rigor/rbs_extended.rb` | Reads `%a{rigor:…}` directives off RBS declarations. |
 | `lib/rigor/reflection.rb` | The reflection facade and the constant-lookup ladder. |
 | `lib/rigor/rooted_glob.rb` | A `Dir.glob` that takes its root literally. |
@@ -124,10 +124,11 @@ are one feature each, called from those three.
 | Rule engine | `lib/rigor/analysis/check_rules.rb` (call-site rules, suppression, message builders), `lib/rigor/analysis/check_rules/` (node collectors, rule ids, guards), `lib/rigor/analysis/rule_catalog.rb` |
 | Run orchestration | `lib/rigor/analysis/runner.rb`, `lib/rigor/analysis/runner/`, `lib/rigor/analysis/worker_session.rb` |
 | Incremental runs and the run cache | `lib/rigor/analysis/incremental_session.rb`, `lib/rigor/analysis/incremental.rb`, `lib/rigor/analysis/run_cache_key.rb` |
-| Dependency graph (ADR-46) | `lib/rigor/analysis/dependency_recorder.rb`, `lib/rigor/analysis/fact_store.rb`. The engine records into these from `lib/rigor/inference/` and `lib/rigor/scope.rb`, so they are engine services that live here for historical reasons. |
+| Dependency graph (ADR-46) | `lib/rigor/analysis/dependency_recorder.rb`, `lib/rigor/analysis/self_call_resolution_recorder.rb`. The engine records into these from `lib/rigor/inference/` and `lib/rigor/scope.rb`, so they are engine services that live here for historical reasons. |
 | Reachability (`rigor unused`) | `lib/rigor/analysis/reachability/` |
 | Template units (ERB and friends) | `lib/rigor/analysis/template_units.rb` and the other `template_unit_*.rb` files |
 | Diagnostic values | `lib/rigor/analysis/diagnostic.rb`, `lib/rigor/analysis/result.rb`, `lib/rigor/analysis/baseline.rb` |
+| Flow facts | `lib/rigor/analysis/fact_store.rb`: the facts a `Scope` carries. Also an engine service. |
 
 Two names occur twice. `Analysis::FactStore` holds flow facts; `Plugin::FactStore`
 (`lib/rigor/plugin/fact_store.rb`) holds plugin-published facts. `lib/rigor/source/constant_path.rb` renders a
@@ -142,25 +143,27 @@ this is its list.
 
 | To add | Edit |
 | --- | --- |
-| A check rule | `lib/rigor/analysis/check_rules/rule_ids.rb`, the rule itself in `lib/rigor/analysis/check_rules.rb` or a collector under `lib/rigor/analysis/check_rules/`, `lib/rigor/analysis/rule_catalog.rb`, `lib/rigor/configuration/severity_profile.rb`, `docs/manual/04-diagnostics.md`, `docs/type-specification/diagnostic-policy.md`. A collector rule is also wired in `check_rules.rb` (`build_node_collectors` and its message builder). |
+| A check rule | `lib/rigor/analysis/check_rules/rule_ids.rb`, `lib/rigor/analysis/rule_catalog.rb`, `lib/rigor/configuration/severity_profile.rb`, `docs/manual/04-diagnostics.md`, and the rule itself where its facts are: a call-site rule in `lib/rigor/analysis/check_rules.rb`, a node collector under `lib/rigor/analysis/check_rules/` (wired in `build_node_collectors`, with its message builder), a run-level rule in a pass under `lib/rigor/analysis/runner/` (the `effect.*` rules), an RBS-consistency rule in `lib/rigor/environment/member_consistency.rb`. `docs/type-specification/diagnostic-policy.md` when the rule's policy is specified there; about half the rule ids are. |
 | A CLI command | `lib/rigor/cli.rb` (`HANDLERS` and its `run_*` method), a command class under `lib/rigor/cli/`, `lib/rigor/cli/catalogue.rb`, `docs/manual/02-cli-reference.md` |
-| A configuration key | `lib/rigor/configuration.rb` (`DEFAULTS`, its `coerce_*` validator, the reader), `schemas/rigor-config.schema.json`, `docs/manual/03-configuration.md` |
-| A plugin hook | `lib/rigor/plugin/base.rb`, `lib/rigor/plugin/registry.rb`, `lib/rigor/analysis/plugin_fact_fingerprint.rb`, the RBS under `sig/rigor/`, `docs/internal-spec/plugin.md`, `docs/internal-spec/public-api.md` |
+| A configuration key | `lib/rigor/configuration.rb` (`DEFAULTS`, its `coerce_*` validator, the reader, and `to_h`), `schemas/rigor-config.schema.json`, `docs/manual/03-configuration.md`. `to_h` is hand-written and is the run-cache key's input: a key that changes a diagnostic and is missing there serves stale cached results, and no gate checks it. A key that changes the RBS environment also goes into `lib/rigor/cache/rbs_descriptor.rb`. |
+| A plugin hook | The method on `lib/rigor/plugin/base.rb` and its RBS under `sig/rigor/`; the place the engine calls it (grep an existing hook of the same kind: `narrowing_facts_for` is called from `lib/rigor/inference/statement_evaluator.rb`, `declared_members` from `lib/rigor/sig_gen/generator.rb`); `lib/rigor/plugin/registry.rb` when the engine reaches it through the registry; `lib/rigor/plugin/manifest.rb` when a plugin declares it in its manifest; `lib/rigor/analysis/plugin_fact_fingerprint.rb` when it contributes a type; `docs/internal-spec/plugin.md`, `docs/internal-spec/public-api.md` |
 | A discovery table | its collector, `lib/rigor/scope/discovery_index.rb`, the merge, fold and seed-bundle code in `lib/rigor/inference/scope_indexer.rb`, `lib/rigor/inference/project_seed_tables.rb`, the reader on `lib/rigor/scope.rb`, `lib/rigor/analysis/runner.rb`, `lib/rigor/analysis/runner/project_pre_passes.rb`, `sig/rigor/scope.rbs`, and a cache schema bump (ADR-116 WD2) |
-| A dispatch tier | a module under `lib/rigor/inference/method_dispatcher/` with `try_dispatch`, its `require_relative` and its position in the tier arrays of `lib/rigor/inference/method_dispatcher.rb`, `docs/internal-spec/inference-engine.md` § "Dispatch tier contract" |
-| A thread-local or memo | one declaration in `lib/rigor/typing_state.rb`. No other file under `lib/rigor/` calls `Thread.current[]` |
+| A dispatch tier | A module under `lib/rigor/inference/method_dispatcher/` with `try_dispatch`, its `require_relative` and its position in the tier arrays of `lib/rigor/inference/method_dispatcher.rb`, `docs/internal-spec/inference-engine.md` § "Dispatch tier contract". A tier that must win before any RBS-backed answer, or run only on a miss, belongs with the `try_*` calls of `ExpressionTyper#call_result_type_for` in `lib/rigor/inference/expression_typer.rb` instead. |
+| A thread-local or memo | One declaration in `lib/rigor/typing_state.rb`. No other file under `lib/rigor/` calls `Thread.current[]`. Two files keep attribution state with `thread_variable_get`/`set` (`lib/rigor/analysis/run_disclosure_credit.rb`, `lib/rigor/plugin/io_boundary.rb`); do not copy that for engine state. |
 
 ## Which spec style to write
 
-Per-example cost differs by two orders of magnitude (measured 2026-11-17), so choose the cheapest
-style that can see the behaviour.
+Per-example cost differs by two orders of magnitude, so choose the cheapest style that can see the
+behaviour. Measured 2026-11-17, one run each: `spec/rigor/type/combinator_spec.rb` 0.03 s for 161
+examples, `spec/rigor/inference/mutation_widening_spec.rb` 0.11 s for 87, and
+`spec/rigor/analysis/check_rules/special_global_write_spec.rb` 17.5 s for 45.
 
 | Style | Cost per example | Use for |
 | --- | --- | --- |
-| Plain data: build types with `Type::Combinator`, or a `CallContext` with `cc(...)` from `spec/support/call_context_helpers.rb` | 1–2 ms | Type algebra, acceptance, one dispatch tier, narrowing primitives, anything under `lib/rigor/source/` |
-| Parse a snippet and type it against `Scope.empty` | about 3 ms | One engine feature: a narrowing rule, a widening, a census |
-| A full run through `analyze(...)` from `spec/support/runner_helpers.rb` | 200–400 ms | Behaviour that needs the runner: cross-file discovery, rule output and suppression, the pool, caches, incremental runs |
+| Plain data: build types with `Type::Combinator`, or a `CallContext` with `cc(...)` from `spec/support/call_context_helpers.rb` | under 1 ms | Type algebra, acceptance, one dispatch tier, narrowing primitives, anything under `lib/rigor/source/` |
+| Parse a snippet and type it against `Scope.empty` | 1–3 ms | One engine feature: a narrowing rule, a widening, a census |
+| A full run through `analyze(...)` from `spec/support/runner_helpers.rb`, which a spec gets with `type: :runner` metadata | 200–400 ms | Behaviour that needs the runner: cross-file discovery, rule output and suppression, the pool, caches, incremental runs |
 
-A spec file named for its `lib/` file is what `make verify-changed` selects when that file changes
-(#3277 adds the directory named for it). A spec named for an issue is selected by
-nothing, so put a regression example in the spec of the module that owns the fix.
+A spec file named for its `lib/` file is what `make verify-changed` selects by name when that file
+changes. A spec named for an issue is selected only when it is itself edited or names a changed
+fixture, so put a regression example in the spec of the module that owns the fix.

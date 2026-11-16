@@ -261,7 +261,8 @@ never chooses the cut.
 
 ## Amendment, 2026-11-17 — what the re-measurement added
 
-Eight weeks after acceptance the files this ADR targets had grown, not shrunk. Only WD3 had landed.
+Eight weeks after acceptance the files this ADR targets had grown, not shrunk. Only WD3 had closed;
+WD5 was partly ported, as the status paragraph records.
 
 | File | 2026-09-23 | 2026-11-17 |
 | --- | --- | --- |
@@ -273,7 +274,7 @@ Eight weeks after acceptance the files this ADR targets had grown, not shrunk. O
 
 Of the 665 first-parent merges that touched `lib/` in the 60 days to 2026-11-17, 293 (44%) touched
 one of the first three files. The method is the churn audit's; the numbers were taken at `master`
-`0a843c261`, and the per-example costs and reference counts by the commands in #3278's pull request. The line numbers in the working decisions above are from September and are stale: find
+`0a843c261`. A reference count below is a `grep` for the name over the files named, outside comments. The line numbers in the working decisions above are from September and are stale: find
 a cluster by its method names.
 
 The direction, C1–C3 and the guardrails stand. The re-measurement found four things they do not
@@ -297,8 +298,8 @@ cover.
    `MethodDispatcher#resolve`, in two tier shapes.
 4. **The specs do not follow the modules.** 310 of 686 `lib/` files have no same-named spec, and 345
    of 721 spec files under `spec/rigor/` name no `lib/` file. An example that runs the whole runner
-   costs 200–400 ms, one that types a snippet against `Scope.empty` about 3 ms, and one on plain
-   data 1–2 ms; about 90 of the 126 spec files under `spec/rigor/analysis/` use the runner, including all
+   costs 200–400 ms, one that types a snippet against `Scope.empty` 1–3 ms, and one on plain data
+   under 1 ms (the runs are in the code map); about 90 of the 126 spec files under `spec/rigor/analysis/` use the runner, including all
    282 examples of `runner_check_rules_spec.rb`, although `CheckRules` is a stateless module.
 
 ### C4 — A module that leaves takes its specs with it
@@ -308,10 +309,12 @@ cheapest style that can see its behaviour (the three styles are in
 [`docs/agents/code-map.md`](../agents/code-map.md)). The examples that pinned the cluster through
 the runner move there when they can be rewritten against the module's interface without losing
 what they check, and stay where they are otherwise. *Test:* after the slice, editing the module
-selects its spec in `make verify-quick`, and that spec fails when the module's behaviour is broken.
+selects its spec in `make verify-changed` by the mirror rule, and that spec fails when the module's
+behaviour is broken.
 
 C4 is why splitting alone does not shorten the edit loop: the cost is in the example style and in
-which specs an edit selects, not in file size.
+which specs an edit selects, not in file size. #3277 adds the tier that runs only the selected
+specs.
 
 ### Added slices
 
@@ -347,23 +350,25 @@ amendment rule requires.
   They move to the walk's side. This is WD5's "extract the context model first", finished, and it
   is what lets the per-table clusters leave.
 - **WD10 — `ScopeIndexer` splits by responsibility.** The per-node scope index keeps the name. The
-  declaration collectors, the cross-file fold and the seed-bundle codec become a discovery namespace
-  whose interface is the methods other files call today. It follows WD2 and WD9. Path-keyed gates
+  declaration collectors, the cross-file fold and the seed-bundle codec become a discovery namespace.
+  The methods other files call today are the starting inventory for its interface, not the
+  interface. It follows WD2 and WD9. Path-keyed gates
   move in the same PR: the `scope_indexer.rb` entry of
   `spec/rigor/declaration_facts/producers.yml` is 326 lines.
 - **WD11 — The engine's services leave `analysis/`.** `DependencyRecorder`, the flow `FactStore` and
   the rule guards that `inference/` calls move below the engine, so that `inference/` and `scope/`
   no longer reference `Analysis`. A rename with no behaviour change, but it touches about 190 sites,
   so it lands alone.
-- **WD12 — One dispatch ladder (C1).** Every tier takes a `CallContext` and is listed once, in
-  order, including the user-method tiers that run from `ExpressionTyper` today.
-- **WD13 — C1 for the remaining hand-listed kinds:** a rule id (six files today), a CLI command, a
+- **WD12 — One dispatch ladder (C1).** The tier order is declared in one place, including the tiers
+  that run from `ExpressionTyper#call_result_type_for` today. Most tiers already share
+  `try_dispatch(CallContext)`; whether the rest can take that shape is the design question.
+- **WD13 — C1 for the remaining hand-listed kinds:** a rule id, a CLI command, a
   configuration key and a plugin hook. The lists are in the code map. Each kind is its own slice,
   taken when its files next become a co-change hotspot, as WD7 is.
 
 ### Order and procedure
 
-1. WD0, the `make verify-quick` tier (#3277) and the code map (#3278), which move no code.
+1. WD0, the quick tier of `verify-changed` (#3277) and the code map (#3278), which move no code.
 2. The pure moves, WD1 first. Up to three run at a time on different files. Each is small-model lane
    work: the contract is byte-identical output, and the review checks that nothing but the location
    changed.

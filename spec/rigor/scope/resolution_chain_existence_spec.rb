@@ -73,7 +73,7 @@ RSpec.describe "existence probes over a contested resolution chain" do
   end
 
   it "keeps CheckRules' undefined-method suppression answering defined" do
-    rules = Rigor::Analysis::CheckRules
+    rules = Rigor::Analysis::CheckRules::ReceiverPredicates
     expect(rules.send(:project_defines_method?, scope, "C", :foo, :instance)).to be(true)
     expect(rules.send(:ancestry_declares_method?, scope, "C", :foo, :instance)).to be(true)
   end
@@ -108,7 +108,7 @@ RSpec.describe "existence probes over a contested resolution chain" do
   it "keeps the ancestor-walk probe finding a hand-written `with` on a contested chain" do
     node, owner = scope.user_def_through_ancestors("C", :with)
     expect([owner, node.nil?]).to eq(["M", false])
-    rules = Rigor::Analysis::CheckRules
+    rules = Rigor::Analysis::CheckRules::ReceiverPredicates
     expect(rules.send(:project_defines_method?, scope, "C", :with, :instance)).to be(true)
   end
 

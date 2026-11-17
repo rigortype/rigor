@@ -3,6 +3,8 @@
 require "prism"
 
 require_relative "../../source/node_children"
+require_relative "../diagnostic"
+require_relative "rule_ids"
 
 module Rigor
   module Analysis
@@ -59,6 +61,35 @@ module Rigor
         def results
           @results.freeze
         end
+
+        # ADR-116 WD1 — the message builder for this collector's results, moved here from `CheckRules`.
+        # {.diagnostics} is called by `CheckRules.diagnose` through its collector table; the rest is private to it.
+
+        # v0.3.0 — `flow.return-in-ensure`. One diagnostic per explicit
+        # `return` lexically inside an `ensure` clause body: it silently
+        # discards the method's in-flight return value and swallows any
+        # in-flight exception. Purely syntactic; the
+        # `Analysis::CheckRules::ReturnInEnsureCollector` describes the
+        # frame-aware envelope (nested def / lambda / `define_method`
+        # blocks are excluded, plain blocks are not).
+        def self.diagnostics(path, results)
+          results.map do |result|
+            build_return_in_ensure_diagnostic(path, result[:return_node])
+          end
+        end
+
+        def self.build_return_in_ensure_diagnostic(path, return_node)
+          Diagnostic.from_location(
+            return_node.keyword_loc,
+            rule: RULE_RETURN_IN_ENSURE,
+            path: path,
+            message: "`return' inside `ensure' discards the method's in-flight return value " \
+                     "and swallows any in-flight exception",
+            severity: :warning
+          )
+        end
+
+        private_class_method :build_return_in_ensure_diagnostic
 
         private
 

@@ -34,8 +34,8 @@ members:
     copies: []
   discovered_classes:
     reads:
-    - lib/rigor/analysis/check_rules.rb
     - lib/rigor/analysis/check_rules/ivar_write_collector.rb
+    - lib/rigor/analysis/check_rules/nil_receiver.rb
     - lib/rigor/analysis/check_rules/override_support.rb
     - lib/rigor/analysis/check_rules/rbs_receiver_surface.rb
     - lib/rigor/analysis/check_rules/shadowed_rescue_collector.rb
@@ -238,8 +238,8 @@ members:
       - consults_contested
   discovered_parameter_envelopes:
     reads:
-    - lib/rigor/analysis/check_rules.rb
     - lib/rigor/analysis/check_rules/source_arity.rb
+    - lib/rigor/analysis/check_rules/wrong_arity.rb
     - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/definer_resolution.rb
@@ -253,7 +253,7 @@ members:
     justified:
       lib/rigor/inference/project_seed_tables.rb:
       - paired_copy
-      lib/rigor/analysis/check_rules.rb:
+      lib/rigor/analysis/check_rules/wrong_arity.rb:
       - existence
       lib/rigor/analysis/check_rules/source_arity.rb:
       - existence

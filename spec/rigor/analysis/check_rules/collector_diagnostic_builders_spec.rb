@@ -4,7 +4,8 @@ require "spec_helper"
 require "tmpdir"
 require "fileutils"
 
-# First observation spec for the collector-diagnostic-builder block of `check_rules.rb` (~L1887-2077):
+# First observation spec for the collector-diagnostic builders (once `check_rules.rb` ~L1887-2077, now each
+# collector's own `.diagnostics` under `check_rules/`, ADR-116 WD1):
 # `build_always_truthy_condition_diagnostic`, `build_unreachable_clause_diagnostic` (+
 # `unreachable_clause_message`), `build_void_value_use_diagnostic`, `build_shadowed_rescue_diagnostic` (+
 # `shadowed_rescue_message`), `build_dead_assignment_diagnostic`, `build_duplicate_hash_key_diagnostic`,

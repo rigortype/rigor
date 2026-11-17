@@ -5,6 +5,8 @@ require "prism"
 require_relative "../../reflection"
 require_relative "../../source/constant_path"
 require_relative "../../source/node_children"
+require_relative "../diagnostic"
+require_relative "rule_ids"
 
 module Rigor
   module Analysis
@@ -74,6 +76,38 @@ module Rigor
         def results
           @results.freeze
         end
+
+        # ADR-116 WD1 — the message builder for this collector's results, moved here from `CheckRules`.
+        # {.diagnostics} is called by `CheckRules.diagnose` through its collector table; the rest is private to it.
+
+        # `flow.shadowed-rescue-clause` — one diagnostic per rescue clause every earlier-comparable class of
+        # which is already caught by an earlier clause of the same chain (see {ShadowedRescueCollector} for
+        # the ancestry-certainty envelope).
+        def self.diagnostics(path, results)
+          results.map do |result|
+            build_shadowed_rescue_diagnostic(path, result)
+          end
+        end
+
+        def self.build_shadowed_rescue_diagnostic(path, result)
+          Diagnostic.from_node(
+            result.clause,
+            rule: RULE_SHADOWED_RESCUE_CLAUSE,
+            path: path,
+            message: shadowed_rescue_message(result),
+            severity: :warning
+          )
+        end
+
+        def self.shadowed_rescue_message(result)
+          earlier = result.earlier_sources.each_with_index.map do |source, index|
+            "`#{source}' (line #{result.earlier_lines[index]})"
+          end
+          "shadowed `#{result.clause_source}': every exception class it names is already caught " \
+            "by the earlier #{earlier.join(' and ')} clause#{'s' if earlier.size > 1}, so this clause can never run"
+        end
+
+        private_class_method :build_shadowed_rescue_diagnostic, :shadowed_rescue_message
 
         private
 

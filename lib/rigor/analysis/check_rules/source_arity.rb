@@ -32,7 +32,7 @@ module Rigor
       #
       # Deliberately NOT in scope: a constructor reached through `Class#new` (nothing records `initialize` as
       # `[:singleton, :new]`, so `.new` finds no owner unless the class writes `def self.new` itself); keyword
-      # arity (the envelope's required-keyword flag declines, as `compute_arity_envelope` declines an RBS
+      # arity (the envelope's required-keyword flag declines, as `WrongArity.compute_arity_envelope` declines an RBS
       # function with required keywords); and a `class_eval` whose receiver is not a constant, which the
       # discovery walk cannot name.
       class SourceArity # rubocop:disable Metrics/ClassLength

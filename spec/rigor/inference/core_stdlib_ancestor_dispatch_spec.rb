@@ -321,7 +321,7 @@ RSpec.describe "a source subclass of a core/stdlib class resolves inherited call
 
   # The reframed false-positive boundary (ADR-114). ADR-43 declined blanket inherited resolution
   # because firing `call.undefined-method` against a partial RBS "would frighten working code". That
-  # wall is not reachable through dispatch: `undefined_method_diagnostic` and `arity_envelope_for` gate
+  # wall is not reachable through dispatch: `undefined_method_diagnostic` and `WrongArity.arity_envelope_for` gate
   # on `Reflection.rbs_class_known?` of the RECEIVER, which a Ruby-source subclass never is. What this
   # slice can do instead is propagate a WRONG PRECISE TYPE one hop, and fire there.
   describe "the negative rules" do

@@ -2,7 +2,7 @@
 
 require "spec_helper"
 
-# `call.wrong-arity` family — check_rules.rb ~L1084-1232 (`wrong_arity_diagnostic`,
+# `call.wrong-arity` family — `CheckRules::WrongArity` (once check_rules.rb ~L1084-1232: `wrong_arity_diagnostic`,
 # `anonymous_struct_new_call?`, `plain_positional_call?`, `simple_positional?`,
 # `compute_arity_envelope`, `arity_eligible?`) plus the `build_arity_diagnostic` builder (~L2510). Fires
 # when an explicit-receiver call's positional argument count falls outside the RBS-declared arity
@@ -13,7 +13,7 @@ require "spec_helper"
 # were entirely unobserved: no existing example anywhere in the suite drove an arity check through a
 # chained `Struct.new(...).new` call. The 5th, `build_arity_diagnostic`'s `from_message_loc` (L2514), was
 # unobserved too.
-RSpec.describe "wrong arity" do
+RSpec.describe Rigor::Analysis::CheckRules::WrongArity do
   def diagnostics_for(source)
     runner = Rigor::Analysis::Runner.new(configuration: Rigor::Configuration.new("paths" => []), cache_store: nil)
     guarded_run_source(runner, source: source, path: "mem.rb").diagnostics
@@ -147,6 +147,168 @@ RSpec.describe "wrong arity" do
       # `inner.parent.nil? && inner.name == :Struct` on a Prism::ConstantPathNode, instead of the
       # ConstantReadNode branch the two examples above exercise.
       expect(arity_diagnostics("::Struct.new(:a, :b).new()\n")).to be_empty
+    end
+  end
+
+  describe "without the runner (ADR-116 WD1 / C4)" do
+    # ADR-116 WD1 / C4 — {CheckRules::WrongArity} on a parsed snippet and its scope index, with no runner: the
+    # examples above pin the rule through the whole run at 200-400 ms an example, these at a millisecond or two. The
+    # snippet is indexed against an empty scope with the core RBS, so a call is judged against core signatures and what
+    # the snippet itself records.
+    #
+    # Mutation-proved: each guard line (a `return` / `next` modifier) of `diagnostic` and of the helpers it calls was
+    # blanked in turn and an example in this file failed, except these, which no input here distinguishes (one line on
+    # what was tried each; the first two groups survive in the runner examples above as well):
+    #
+    # - `return nil if call_node.receiver.nil?` and `return nil if class_name.nil?`: an implicit-self call and an
+    #   untyped receiver reach the same nil class name, which the later guards decline; each is backed by the other.
+    # - `return nil if scope.nil?`: every call of an indexed snippet has a scope.
+    # - `ReceiverPredicates.inferred_param_receiver?`: true only for a parameter whose type the whole-project run infers
+    #   from its call sites; a one-file snippet leaves the parameter untyped.
+    # - `ReceiverPredicates.unenumerable_receiver_shape?` and `definition_available?`: no core-class receiver tried
+    #   (`Array`, `String`, `Object`, `Math`) reaches either; they decline an includer of a module the receiver's RBS
+    #   declares (#879), which needs a receiver of that shape.
+    # - the chained `Struct.new(...).new` guards (`return nil if anonymous_struct_new_call?` and the four conditions
+    #   inside it): blanking any one leaves the zero-argument chained example above green, here and in the runner
+    #   describe, because the `Struct.new(:a, :b).new()` call is declined before it reaches the test.
+    # - `return false if arg.is_a?(Prism::BlockArgumentNode)` in `simple_positional?`: Prism keeps a block-pass on
+    #   `call.block`, never in `arguments`, so the test cannot be true.
+    # - `return nil if mins.empty?` and `return false unless function.respond_to?(:required_keywords)`: a method with no
+    #   overload, and a method with an untyped `(?)` signature, were not found among the core methods tried.
+    # - `return false unless kind == :singleton && call_node.name == :new` and `return false unless
+    #   method_def.respond_to?(:defined_in)` in `undeclared_constructor?`: the line after them answers the same for
+    #   every instance method of a core class, and every resolved method answers `defined_in`.
+    # - the whole project-`def` lane (`arity_report_withheld?`'s `source_arity` test, `source_lane_open?` and its
+    #   guard in `arity_envelope_for`, and every guard of `source_arity_envelope`, `project_module?` and
+    #   `project_module_class_receiver?`): it needs `discovered_parameter_envelopes` keyed project-wide, which only a
+    #   whole-project pre-pass records; a snippet's own `def` (`A.new.f` with `def f(a)`, with optionals, on a module,
+    #   on a `self.` method, a constructor) gives no row either way. `spec/integration/source_arity_resolution_spec.rb`
+    #   and `arity_declared_source_method_spec.rb` pin it through the runner.
+    def calls_in(node, found = [])
+      found << node if node.is_a?(Prism::CallNode)
+      node.compact_child_nodes.each { |child| calls_in(child, found) }
+      found
+    end
+
+    def scope_index_of(program)
+      Rigor::Inference::ScopeIndexer.index(program, default_scope: Rigor::Scope.empty)
+    end
+
+    # `[line, message]` for each call of `source` the rule reports.
+    def fired(source)
+      program = Prism.parse(source).value
+      scope_index = scope_index_of(program)
+      sites = Rigor::Analysis::CheckRules::LexicalMethodSites.new(program)
+      calls_in(program).filter_map do |call|
+        row = described_class.diagnostic("mem.rb", call, Rigor::Analysis::CheckRules::CallFacts.new(call, scope_index),
+                                         sites)
+        [call.location.start_line, row.message] if row
+      end
+    end
+
+    describe "an instance receiver" do
+      it "reports too many arguments, with the declared range" do
+        expect(fired("[1].rotate(1, 2)\n")).to eq(
+          [[1, "wrong number of arguments to `rotate' on Array (given 2, expected 0..1)"]]
+        )
+      end
+
+      it "reports too few arguments, with the bare count when the arity is exact" do
+        expect(fired(%("a".+()\n))).to eq([[1, "wrong number of arguments to `+' on String (given 0, expected 1)"]])
+      end
+
+      it "carries the rule id, the error severity, the receiver class and the method name" do
+        program = Prism.parse("[1].rotate(1, 2)\n").value
+        call = calls_in(program).find { |c| c.name == :rotate }
+        row = described_class.diagnostic("mem.rb", call,
+                                         Rigor::Analysis::CheckRules::CallFacts.new(call, scope_index_of(program)))
+
+        expect([row.rule, row.severity, row.receiver_type, row.method_name, row.path, row.line, row.column]).to eq(
+          [Rigor::Analysis::CheckRules::RULE_WRONG_ARITY, :error, "Array", "rotate", "mem.rb", 1, 5]
+        )
+      end
+
+      it "is silent inside the envelope, at both ends" do
+        expect([fired("[1].rotate\n"), fired("[1].rotate(1)\n")]).to eq([[], []])
+      end
+
+      it "is silent for an implicit-self call" do
+        expect(fired("def t = rotate(1, 2)\n")).to eq([])
+      end
+
+      it "is silent under a refinement of the receiver's class that redefines the method" do
+        source = "module R\n  refine Array do\n    def rotate(a, b) = self\n  end\nend\nusing R\n[1].rotate(1, 2)\n"
+
+        expect(fired(source)).to eq([])
+      end
+
+      it "reports under a refinement of the class that does not touch the method" do
+        source = "module R\n  refine Array do\n    def other = 1\n  end\nend\nusing R\n[1].rotate(1, 2)\n"
+
+        expect(fired(source).map(&:first)).to eq([7])
+      end
+
+      it "is silent for a call with a splat argument" do
+        expect(fired("a = [1]\n[1].rotate(*a, 2)\n")).to eq([])
+      end
+
+      it "is silent for a call passing keywords" do
+        expect(fired("[1].rotate(1, k: 2)\n")).to eq([])
+      end
+
+      it "is silent for a call forwarding `...`" do
+        expect(fired("def t(...) = [1].rotate(...)\n")).to eq([])
+      end
+
+      it "ignores a block argument when it counts the positionals" do
+        expect(fired("[1].rotate(1, 2, &:x)\n").map(&:first)).to eq([1])
+      end
+
+      it "is silent when the receiver has no single class" do
+        expect(fired("def t(x) = x.rotate(1, 2)\n")).to eq([])
+      end
+    end
+
+    describe "a class-object receiver" do
+      it "reports a module function called with too many arguments" do
+        message = "wrong number of arguments to `sqrt' on Math (given 2, expected 1)"
+
+        expect(fired("Math.sqrt(1, 2)\n")).to eq([[1, message]])
+      end
+
+      it "is silent for a chained `Struct.new(...).new`, whose anonymous subclass takes any count" do
+        expect(fired("Struct.new(:a, :b).new(1, 2, 3)\n")).to eq([])
+      end
+
+      it "is silent for a class whose constructor no loaded RBS declares" do
+        expect(fired("Gem::Specification.new(1, 2, 3)\n")).to eq([])
+      end
+    end
+
+    describe ".plain_positional_call?" do
+      def call_of(source)
+        calls_in(Prism.parse(source).value).first
+      end
+
+      it "is true for no arguments, for plain positionals and for a block-pass (which Prism keeps off the arguments)" do
+        sources = ["x.f", "x.f(1)", "x.f(1, 'a')", "x.f(&b)"]
+
+        expect(sources.map { |s| described_class.plain_positional_call?(call_of(s)) }).to eq([true] * 4)
+      end
+
+      it "is false for a splat, keywords or forwarded arguments" do
+        sources = ["x.f(*a)", "x.f(k: 1)", "x.f(1, k: 1)", "def t(...) = x.f(...)"]
+
+        expect(sources.map { |s| described_class.plain_positional_call?(call_of(s)) }).to eq([false] * 4)
+      end
+    end
+
+    it "keeps its helpers private" do
+      names = %i[arity_report_withheld? arity_envelope_for source_lane_open? source_arity_envelope
+                 project_module_class_receiver? project_module? undeclared_constructor? anonymous_struct_new_call?
+                 simple_positional? compute_arity_envelope arity_eligible? build_arity_diagnostic]
+
+      expect(names.map { |m| described_class.respond_to?(m) }).to eq([false] * 12)
     end
   end
 end

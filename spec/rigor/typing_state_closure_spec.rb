@@ -40,25 +40,10 @@ require "prism"
 #
 # Stage 1 converts files a PR at a time; each conversion adds its files to {#covered_files}.
 RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
-  def covered_files = analysis_files + inference_files + other_files
+  def covered_files = analysis_files + check_rules_files + inference_files + other_files
 
   def analysis_files
     %w[
-      lib/rigor/analysis/check_rules.rb
-      lib/rigor/analysis/check_rules/always_raises.rb
-      lib/rigor/analysis/check_rules/override_param_narrowed.rb
-      lib/rigor/analysis/check_rules/override_return_widened.rb
-      lib/rigor/analysis/check_rules/override_support.rb
-      lib/rigor/analysis/check_rules/override_visibility.rb
-      lib/rigor/analysis/check_rules/raise_non_exception.rb
-      lib/rigor/analysis/check_rules/receiver_predicates.rb
-      lib/rigor/analysis/check_rules/rigor_testing.rb
-      lib/rigor/analysis/check_rules/self_undefined_method.rb
-      lib/rigor/analysis/check_rules/special_global_write.rb
-      lib/rigor/analysis/check_rules/suppression.rb
-      lib/rigor/analysis/check_rules/undefined_method.rb
-      lib/rigor/analysis/check_rules/unresolved_toplevel.rb
-      lib/rigor/analysis/check_rules/visibility_mismatch.rb
       lib/rigor/analysis/dependency_recorder.rb
       lib/rigor/analysis/run_disclosure_credit.rb
       lib/rigor/analysis/runner/pool_coordinator.rb
@@ -66,6 +51,36 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       lib/rigor/cache/file_digest.rb
       lib/rigor/effects/collector.rb
       lib/rigor/environment/rbs_loader.rb
+    ]
+  end
+
+  def check_rules_files
+    %w[
+      lib/rigor/analysis/check_rules.rb
+      lib/rigor/analysis/check_rules/always_raises.rb
+      lib/rigor/analysis/check_rules/always_truthy_condition_collector.rb
+      lib/rigor/analysis/check_rules/dead_assignment_collector.rb
+      lib/rigor/analysis/check_rules/duplicate_hash_key_collector.rb
+      lib/rigor/analysis/check_rules/ivar_write_collector.rb
+      lib/rigor/analysis/check_rules/nil_receiver.rb
+      lib/rigor/analysis/check_rules/override_param_narrowed.rb
+      lib/rigor/analysis/check_rules/override_return_widened.rb
+      lib/rigor/analysis/check_rules/override_support.rb
+      lib/rigor/analysis/check_rules/override_visibility.rb
+      lib/rigor/analysis/check_rules/raise_non_exception.rb
+      lib/rigor/analysis/check_rules/receiver_predicates.rb
+      lib/rigor/analysis/check_rules/return_in_ensure_collector.rb
+      lib/rigor/analysis/check_rules/rigor_testing.rb
+      lib/rigor/analysis/check_rules/self_undefined_method.rb
+      lib/rigor/analysis/check_rules/shadowed_rescue_collector.rb
+      lib/rigor/analysis/check_rules/special_global_write.rb
+      lib/rigor/analysis/check_rules/suppression.rb
+      lib/rigor/analysis/check_rules/undefined_method.rb
+      lib/rigor/analysis/check_rules/unreachable_clause_collector.rb
+      lib/rigor/analysis/check_rules/unresolved_toplevel.rb
+      lib/rigor/analysis/check_rules/visibility_mismatch.rb
+      lib/rigor/analysis/check_rules/void_value_use_collector.rb
+      lib/rigor/analysis/check_rules/wrong_arity.rb
     ]
   end
 

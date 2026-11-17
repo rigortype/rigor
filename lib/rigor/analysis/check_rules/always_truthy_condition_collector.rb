@@ -6,6 +6,8 @@ require_relative "../../source/node_children"
 require_relative "../../inference/optimistic_origin"
 require_relative "inferred_param_guard"
 require_relative "published_constant_guard"
+require_relative "../diagnostic"
+require_relative "rule_ids"
 
 module Rigor
   module Analysis
@@ -76,6 +78,34 @@ module Rigor
         def results
           @results.freeze
         end
+
+        # ADR-116 WD1 — the message builder for this collector's results, moved here from `CheckRules`.
+        # {.diagnostics} is called by `CheckRules.diagnose` through its collector table; the rest is private to it.
+
+        # v0.1.2 — `flow.always-truthy-condition`. Fires on
+        # `if` / `unless` / ternary predicates whose inferred
+        # type is a `Type::Constant` AND that don't fall in
+        # the literal-only / inside-loop-or-block / defensive-
+        # predicate skip envelope (see
+        # `Analysis::CheckRules::AlwaysTruthyConditionCollector`
+        # for the full triage rationale).
+        def self.diagnostics(path, results)
+          results.map do |result|
+            build_always_truthy_condition_diagnostic(path, result.node, result.polarity)
+          end
+        end
+
+        def self.build_always_truthy_condition_diagnostic(path, predicate_node, polarity)
+          Diagnostic.from_node(
+            predicate_node,
+            rule: RULE_ALWAYS_TRUTHY_CONDITION,
+            path: path,
+            message: "condition is always #{polarity} (the surrounding flow proves it folds to a constant)",
+            severity: :warning
+          )
+        end
+
+        private_class_method :build_always_truthy_condition_diagnostic
 
         private
 

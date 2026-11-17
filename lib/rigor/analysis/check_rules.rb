@@ -59,30 +59,15 @@ require_relative "../typing_state"
 
 module Rigor
   module Analysis
-    # Catalogue of `rigor check` diagnostic rules.
+    # Catalogue of `rigor check` diagnostic rules, reduced by ADR-116 WD1 to the orchestration: {.diagnose} folds the
+    # node collectors, the per-node main pass and the suppression filter into one diagnostic list, and
+    # {.call_node_diagnostics} / {.main_pass_node_diagnostics} run each rule's entry in emission order. Each rule lives
+    # in its own module under `check_rules/`.
     #
-    # Rules fire ONLY when the engine is confident enough to make a
-    # useful claim and MUST NOT raise on unrecognised AST shapes,
-    # RBS gaps, or missing scope information. Each rule consumes
-    # the per-node scope index produced by
-    # `Rigor::Inference::ScopeIndexer.index` and yields zero or
-    # more `Rigor::Analysis::Diagnostic` values.
-    #
-    # The primary rule (`call.undefined-method`) flags an
-    # explicit-receiver `Prism::CallNode` whose receiver statically
-    # resolves to a class known to the RBS environment and whose
-    # method name does not appear on that class's method table.
-    # It does NOT fire for:
-    #
-    # - implicit-self calls (no `node.receiver`) — too noisy
-    #   without per-method RBS for every helper in the class.
-    # - dynamic / unknown receivers (`Dynamic[T]`, `Top`)
-    #   — by definition we cannot enumerate the method set.
-    # - shape carriers: `Tuple` → "Array", `HashShape` → "Hash",
-    #   `Constant` → the constant's class — `concrete_class_name`
-    #   resolves these to their runtime class for dispatch.
-    # - receivers whose class name is NOT registered in the
-    #   loader (RBS-blind environments, unknown stdlib).
+    # Rules fire ONLY when the engine is confident enough to make a useful claim and MUST NOT raise on unrecognised
+    # AST shapes, RBS gaps, or missing scope information. Each rule consumes the per-node scope index produced by
+    # `Rigor::Inference::ScopeIndexer.index(root, default_scope:)` and yields zero or more
+    # `Rigor::Analysis::Diagnostic` values.
     module CheckRules
       # ADR-87 WD4 — the canonical rule-id table lives in the light `check_rules/rule_ids.rb` (required at the
       # top of this file) so {Analysis::RuleCatalog} can read it without loading the engine.

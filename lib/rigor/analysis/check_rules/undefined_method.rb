@@ -18,6 +18,22 @@ module Rigor
       #
       # The one entry point is {.diagnostic}, called by `CheckRules.call_node_diagnostics`. It reads the shared
       # predicates through {ReceiverPredicates} and calls nothing else in `CheckRules`.
+      #
+      # The primary rule (`call.undefined-method`) flags an
+      # explicit-receiver `Prism::CallNode` whose receiver statically
+      # resolves to a class known to the RBS environment and whose
+      # method name does not appear on that class's method table.
+      # It does NOT fire for:
+      #
+      # - implicit-self calls (no `node.receiver`) — too noisy
+      #   without per-method RBS for every helper in the class.
+      # - dynamic / unknown receivers (`Dynamic[T]`, `Top`)
+      #   — by definition we cannot enumerate the method set.
+      # - shape carriers: `Tuple` → "Array", `HashShape` → "Hash",
+      #   `Constant` → the constant's class — `concrete_class_name`
+      #   resolves these to their runtime class for dispatch.
+      # - receivers whose class name is NOT registered in the
+      #   loader (RBS-blind environments, unknown stdlib).
       # rubocop:disable-next Metrics/ModuleLength
       module UndefinedMethod
         module_function

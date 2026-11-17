@@ -24,7 +24,8 @@ require "yaml"
 # writes outside `scope_indexer.rb` and `scope_indexer/node_propagation.rb`, through a local alias of a parameter,
 # through `...` forwarding, or from a method reached only through `send`, a block handed to another file, or an
 # entry point neither in `DeclarationWriterScan::ROOTS` nor called as `ScopeIndexer.x` (or `NodePropagation.x`) from
-# another covered file. Plugin specs and demo apps are not scanned. The list freezes the set and certifies nothing about how an entry computes its context.
+# another covered file. Plugin specs and demo apps are not scanned. The list freezes the set and certifies nothing
+# about how an entry computes its context.
 RSpec.describe "Declaration producers" do
   let(:snapshot) { File.join(__dir__, "producers.yml") }
   # The closed grandfathered list. Lower it when an entry goes; never raise it for a new producer.

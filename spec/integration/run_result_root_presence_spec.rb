@@ -210,6 +210,24 @@ RSpec.describe "the run-result slot and the presence of its roots (#1962, #1555)
     end
   end
 
+  # The `pre_eval:` file is outside `paths:`, so it is no analysed file and only the descriptor's
+  # `pre_eval_file_entries` rows notice an edit to it: the cached answer was computed against a `triple` that is gone.
+  context "with a `pre_eval:` file outside `paths:` that is edited" do
+    let(:overrides) { { "pre_eval" => %w[core_ext/boot.rb] } }
+
+    before do
+      FileUtils.mkdir_p("core_ext")
+      File.write("core_ext/boot.rb", "class Integer\n  def triple = self * 3\nend\n")
+      File.write("lib/a.rb", "3.triple\n")
+    end
+
+    it "re-answers as a cold run when the method the file defined is deleted" do
+      before, after = expect_matches_cold_after(%w[lib]) { File.write("core_ext/boot.rb", "") }
+      expect(before).to eq([])
+      expect(after).not_to be_empty
+    end
+  end
+
   describe "an unchanged root set" do
     before do
       FileUtils.mkdir("x")

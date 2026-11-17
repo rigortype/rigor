@@ -4,7 +4,7 @@ require "spec_helper"
 
 # ADR-116 WD1 / C4 — {CheckRules::RaiseNonException.diagnostic} on a parsed snippet and its scope index, with no
 # runner. `raise_non_exception_spec.rb` pins the rule's envelope through the whole run.
-RSpec.describe Rigor::Analysis::CheckRules::RaiseNonException do
+RSpec.describe Rigor::Analysis::CheckRules::RaiseNonException do # rubocop:disable RSpec/SpecFilePathFormat
   def diagnostic_for(source)
     program = Prism.parse(source).value
     scope_index = Rigor::Inference::ScopeIndexer.index(program, default_scope: Rigor::Scope.empty)

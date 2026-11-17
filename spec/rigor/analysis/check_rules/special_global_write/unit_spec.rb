@@ -6,7 +6,7 @@ require "spec_helper"
 # runner. `special_global_write_spec.rb` pins the setter table against the running interpreter, and the
 # `alias $x $stdout` and escape-hatch arms (`global_aliased?`, `literal_may_answer?`), which need a project census a
 # single parsed snippet does not carry; they are guards here, not pinned by an example in this file.
-RSpec.describe Rigor::Analysis::CheckRules::SpecialGlobalWrite do
+RSpec.describe Rigor::Analysis::CheckRules::SpecialGlobalWrite do # rubocop:disable RSpec/SpecFilePathFormat
   def rules_for(source)
     program = Prism.parse(source).value
     scope_index = Rigor::Inference::ScopeIndexer.index(program, default_scope: Rigor::Scope.empty)

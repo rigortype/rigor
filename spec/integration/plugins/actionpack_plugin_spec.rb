@@ -710,7 +710,7 @@ RSpec.describe "plugins/rigor-actionpack" do
     it "draws no possible-nil-receiver on an assigned `params[:key]` — the `[] -> Parameters?` hazard (#534)" do
       # `#[] -> Parameters | nil` fixes every fold above and still carries the chain, but
       # `call.possible-nil-receiver` fires on `Prism::LocalVariableReadNode` receivers
-      # (`CheckRules#nil_receiver_diagnostic`'s local-read restriction) — i.e. exactly the
+      # (`CheckRules::NilReceiver.diagnostic`'s local-read restriction) — i.e. exactly the
       # `q = params[:q]; q.strip` shape Rails controllers use constantly — at error severity, once
       # per unguarded use.
       source = <<~RUBY

@@ -6,6 +6,8 @@ require_relative "../../source/node_children"
 require_relative "../../inference/narrowing"
 require_relative "inferred_param_guard"
 require_relative "clause_coverage"
+require_relative "../diagnostic"
+require_relative "rule_ids"
 
 module Rigor
   module Analysis
@@ -109,6 +111,46 @@ module Rigor
         def results
           @results.freeze
         end
+
+        # ADR-116 WD1 — the message builder for this collector's results, moved here from `CheckRules`.
+        # {.diagnostics} is called by `CheckRules.diagnose` through its collector table; the rest is private to it.
+
+        # ADR-47 — `flow.unreachable-clause`. One diagnostic per `when` / `in` clause
+        # the flow engine's narrowing proves can never match (its narrowed
+        # subject is `bot`), and per `else` it proves never runs. The squiggle lands
+        # on the dead clause's body, mirroring `flow.unreachable-branch`.
+        def self.diagnostics(path, results)
+          results.map do |result|
+            build_unreachable_clause_diagnostic(path, result)
+          end
+        end
+
+        def self.build_unreachable_clause_diagnostic(path, result)
+          Diagnostic.from_node(
+            result.body,
+            rule: RULE_UNREACHABLE_CLAUSE,
+            path: path,
+            message: unreachable_clause_message(result),
+            severity: :warning
+          )
+        end
+
+        def self.unreachable_clause_message(result)
+          subject = result.subject_name
+          kw = result.keyword
+          case result.kind
+          when :prior_exhaustion
+            "unreachable `#{kw} #{result.condition_source}': `#{subject}' is already covered " \
+            "by an earlier `#{kw}' clause"
+          when :exhausted_else
+            "unreachable `else': the `#{kw}' clauses already cover every value `#{subject}' can take here"
+          else # :disjoint
+            "unreachable `#{kw} #{result.condition_source}': `#{subject}' can never be " \
+            "#{result.condition_source} here (the flow proves the subject disjoint)"
+          end
+        end
+
+        private_class_method :build_unreachable_clause_diagnostic, :unreachable_clause_message
 
         private
 

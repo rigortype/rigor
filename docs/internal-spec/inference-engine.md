@@ -626,7 +626,7 @@ The following carry no mark and MUST keep firing:
 
 | Rule | Gate | Criterion |
 | --- | --- | --- |
-| `call.possible-nil-receiver` | `nil_receiver_diagnostic`, via `withholds_nil?` | Declines on a marked receiver. The rule restricts itself to a `Prism::LocalVariableReadNode` receiver beforehand, so only the `:local` kind is reachable here. For a local copied from a global's seed, it declines only when the file's writes to that global carry no `nil`. |
+| `call.possible-nil-receiver` | `CheckRules::NilReceiver.diagnostic`, via `withholds_nil?` | Declines on a marked receiver. The rule restricts itself to a `Prism::LocalVariableReadNode` receiver beforehand, so only the `:local` kind is reachable here. For a local copied from a global's seed, it declines only when the file's writes to that global carry no `nil`. |
 | `call.argument-type-mismatch` | `single_argument_mismatch` (nil channel) | Declines on a marked argument whose type is exactly nil, before the parameter is consulted. |
 | `call.argument-type-mismatch` | `nil_arg_overload_mismatch` (multi-overload nil channel) | The same criterion on the per-overload path. |
 | `call.argument-type-mismatch` | `declaration_sourced_nil_only_mismatch?`, via `argument_genuinely_mismatches?` | Declines only when the argument is marked **and** the rejection is caused solely by the nil constituent — the type with nil removed is accepted when gradual mode does not reject it (a `yes`, or an unresolved `maybe`, which covers unrelated unloaded project classes too, such as an unloaded project class's `singleton(Circle)` against `singleton(Shape)`, [#2863](https://github.com/rigortype/rigor/issues/2863)). The argument's type is unchanged; only the firing decision is gated. |

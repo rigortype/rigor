@@ -21,7 +21,7 @@
 # `rigor:v1:inferred-return`: an author who writes `# @rbs num: Float` and nothing else has made an
 # assertion about the parameter list, even though the return — nothing about it was written — still
 # defaults, and defaulting the return is the ONLY provenance `inferred-return?` can see. Gating
-# `wrong_arity_diagnostic` on that directive silenced this exact case, indistinguishable from a fully
+# `WrongArity.diagnostic` on that directive silenced this exact case, indistinguishable from a fully
 # bare `def`. `rigor:v1:inferred-signature` (present only when EVERY type slot on the member defaulted,
 # not only the return) is what the rule reads instead — see the "param annotated, return left to the
 # synthesizer" arm below, which is the issue's own repro.
@@ -218,7 +218,7 @@ RSpec.describe "call.wrong-arity on a source-defined method with a trustworthy s
 
   # A mixin reached through an annotated file: `Helper#helper` carries no annotation of its own, only
   # `Foo#f` (elsewhere in the same file) does, which is what pulls the plugin's file-wide skeleton in.
-  # `C` never defines `helper` itself, so the only signature `wrong_arity_diagnostic` can resolve for
+  # `C` never defines `helper` itself, so the only signature `WrongArity.diagnostic` can resolve for
   # `C.new.helper` is the fully-defaulted one synthesized for `Helper#helper` — which is checked the same
   # way an unannotated method with no member at all is (#992): through `C`'s mixin to `Helper`'s `def`.
   def mixin_project

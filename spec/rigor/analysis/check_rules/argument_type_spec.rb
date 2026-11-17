@@ -465,7 +465,7 @@ RSpec.describe "argument-type mismatch (provenance gate, param overrides, accept
   # the positional arguments of every keyword-bearing signature in the bundle went unchecked:
   # `time.beginning_of_week("monday")` fired while `time.next_week("monday")` — `(?Symbol, ?same_time:
   # bool)`, the same runtime error — did not. Keywords cannot shift a positional argument's index, and a
-  # call that PASSES keywords never reaches the signature at all (`plain_positional_call?` rejects a
+  # call that PASSES keywords never reaches the signature at all (`WrongArity.plain_positional_call?` rejects a
   # `KeywordHashNode` first), so the class-refutation half is now checked. The nullability half stays
   # behind the old envelope: see `keyword_bearing?`'s note in check_rules.rb for the two corpus witnesses.
   describe "argument_check_eligible? (#673)" do

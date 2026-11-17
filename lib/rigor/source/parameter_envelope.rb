@@ -16,7 +16,7 @@ module Rigor
     # bundle through `Marshal`: `max` is nil when a rest or `...` parameter leaves it unbounded, and
     # `required_keywords` is true when the def takes a required keyword — a call that passes positionals
     # only then fails on the missing keyword whatever its count, which is a different diagnostic than the
-    # one this envelope backs, so the rule declines on it the way `compute_arity_envelope` declines an RBS
+    # one this envelope backs, so the rule declines on it the way `WrongArity.compute_arity_envelope` declines an RBS
     # function with required keywords.
     #
     # {OPAQUE} is the value every other contribution to a name records — `define_method`, `attr_*`, an alias,

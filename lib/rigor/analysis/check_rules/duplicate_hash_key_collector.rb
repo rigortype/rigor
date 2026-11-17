@@ -3,6 +3,8 @@
 require "prism"
 
 require_relative "../../source/node_children"
+require_relative "../diagnostic"
+require_relative "rule_ids"
 
 module Rigor
   module Analysis
@@ -63,6 +65,38 @@ module Rigor
         def results
           @results.freeze
         end
+
+        # ADR-116 WD1 — the message builder for this collector's results, moved here from `CheckRules`.
+        # {.diagnostics} is called by `CheckRules.diagnose` through its collector table; the rest is private to it.
+
+        # v0.3.0 — `flow.duplicate-hash-key`. Emits a diagnostic for each LATER occurrence of a repeated
+        # LITERAL key within one Hash literal (braced or bare-kwargs) — Ruby keeps the last entry silently
+        # at runtime, so the earlier value is dead. The
+        # `Analysis::CheckRules::DuplicateHashKeyCollector` describes the value-pinned-literal-only
+        # envelope (symbols / plain strings / integers / floats / true / false / nil; never
+        # cross-kind, never interpolation / constants / calls / splats).
+        def self.diagnostics(path, duplicate_keys)
+          duplicate_keys.map do |result|
+            build_duplicate_hash_key_diagnostic(path, result)
+          end
+        end
+
+        # The diagnostic points at the LATER occurrence (the entry that wins at runtime) and names the
+        # first occurrence's line, so the fix — delete or rename one of the two — is visible from the
+        # message alone.
+        def self.build_duplicate_hash_key_diagnostic(path, result)
+          first_line = result[:first_key_node].location.start_line
+          Diagnostic.from_node(
+            result[:key_node],
+            rule: RULE_DUPLICATE_HASH_KEY,
+            path: path,
+            message: "duplicate hash key `#{result[:key_label]}' in the same literal; this entry " \
+                     "overwrites the value first set at line #{first_line}",
+            severity: :warning
+          )
+        end
+
+        private_class_method :build_duplicate_hash_key_diagnostic
 
         private
 

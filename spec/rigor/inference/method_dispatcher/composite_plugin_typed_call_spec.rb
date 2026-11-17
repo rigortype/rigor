@@ -3,7 +3,7 @@
 require "spec_helper"
 
 # Issue #1101 — `Scope#plugin_typed_calls` is the one recording in `MethodDispatcher#resolve` that is
-# SET-ONLY: the table has no removal, and `UndefinedMethod.call_site_exempt?` / `#source_arity_envelope` read
+# SET-ONLY: the table has no removal, and `UndefinedMethod.call_site_exempt?` / `WrongArity.source_arity_envelope` read
 # it as an exemption from `call.undefined-method` and `call.wrong-arity`. The composite-receiver tier
 # re-enters `resolve` once per projected member, so a member a plugin answers beside a member that
 # declines would leave the node marked plugin-typed for a call this dispatcher never typed.

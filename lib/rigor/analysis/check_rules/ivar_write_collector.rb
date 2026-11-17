@@ -8,6 +8,10 @@ require_relative "../../scope/resolution_chain"
 require_relative "../../source/constant_path"
 require_relative "../../source/node_children"
 require_relative "../../inference/census_foreign_block"
+require_relative "../../inference/acceptance"
+require_relative "../diagnostic"
+require_relative "receiver_predicates"
+require_relative "rule_ids"
 
 module Rigor
   module Analysis
@@ -93,6 +97,128 @@ module Rigor
             [class_name, writes_by_ivar.transform_values { |writes| with_actions(class_name, writes) }.freeze]
           end.freeze
         end
+
+        # ADR-116 WD1 — the message builder for this collector's results, moved here from `CheckRules`.
+        # {.diagnostics} is called by `CheckRules.diagnose` through its collector table; the rest is private to it.
+
+        # v0.1.2 — `def.ivar-write-mismatch`. Walks every
+        # ClassNode / ModuleNode body, gathers per-class ivar
+        # writes with their rvalue types, and emits a diagnostic
+        # when a later write's concrete class disagrees with the
+        # first write's. The first write per (class, ivar) is
+        # treated as the "declared" type; subsequent writes that
+        # land on a different concrete class trigger.
+        #
+        # Conservative envelope:
+        # - Only fires when both the first and the offending
+        #   write resolve to a `concrete_class_name` (Nominal /
+        #   Singleton / Constant / Tuple → "Array" / HashShape →
+        #   "Hash"). Unions / Dynamic / IntegerRange / shape-
+        #   varied carriers fall through.
+        # - `NilClass` is an intentional widening idiom (`@x =
+        #   "value"` then later `@x = nil` to "clear") — skipped.
+        # - Singleton-method (`def self.foo`) bodies are skipped.
+        #   Class-level ivars (`@x = 1` outside any def, in the
+        #   class body) are also skipped — they're a separate
+        #   surface (`Module#@var`) the engine doesn't yet model.
+        # - A divergence the class's RBS declaration admits is withheld: when the ivar is declared (`@x: T`,
+        #   or the slot an `attr_*` member implies) and that type accepts both the first write and the
+        #   later one, the union is the author's intent. The declaration only silences here; checking
+        #   writes against it is #1406.
+        def self.diagnostics(path, ivar_writes)
+          ivar_writes.flat_map do |class_name, writes_by_ivar|
+            writes_by_ivar.flat_map do |ivar_name, writes|
+              ivar_mismatch_diagnostics_for(path, class_name, ivar_name, writes)
+            end
+          end
+        end
+
+        def self.ivar_mismatch_diagnostics_for(path, class_name, ivar_name, writes)
+          return [] if writes.size < 2
+
+          # Skip past leading `NilClass` writes when establishing
+          # the canonical type. The common nullable-slot idiom
+          # (`@x = nil` placeholder in `initialize` / a default
+          # state slot, then `@x = :foo` on first concrete state)
+          # would otherwise fire a false positive on every
+          # concrete write because `first_class` was `NilClass`
+          # and every subsequent `Symbol` / `String` / `Hash`
+          # write triggered the divergence rule. The first
+          # concrete (non-nil) write is the canonical type;
+          # additional `NilClass` writes are still tolerated
+          # downstream by the existing `other_class == "NilClass"`
+          # check (the nullable-slot resets to nil between work).
+          canonical = writes.find { |w| ivar_class_for(w[:type]) != "NilClass" }
+          return [] if canonical.nil?
+
+          first_class = ivar_class_for(canonical[:type])
+          return [] if first_class.nil?
+
+          canonical_index = writes.index(canonical)
+          writes[(canonical_index + 1)..].filter_map do |write|
+            other_class = ivar_class_for(write[:type])
+            next nil if other_class.nil? || other_class == "NilClass" || other_class == first_class
+            next nil if declaration_admits?(write[:declared], canonical[:type], write[:type])
+            next nil if separate_invocations?(write, other_class, writes)
+
+            build_ivar_write_mismatch_diagnostic(path, write[:node], class_name, ivar_name, first_class, other_class)
+          end
+        end
+
+        # ADR-125 — a divergent write is never live together with the writes it conflicts with when the class
+        # serves one entry point per instance (a plugin-declared per-invocation class, e.g. a Rails controller:
+        # one action per request) and every conflicting write — non-nil, of a concrete class other than this
+        # write's — sits in a DIFFERENT action of the same class. An action is a public method no declared
+        # non-action macro names (`before_action :x`, `helper_method :y`); {IvarWriteCollector} decides it. A
+        # conflicting write in a private or protected helper, a callback target, a `helper_method`,
+        # `initialize`, or the same method keeps the finding. Which helper each action reaches is not proved
+        # here.
+        def self.separate_invocations?(write, write_class, writes)
+          return false unless write[:action]
+
+          writes.all? do |other|
+            other_class = ivar_class_for(other[:type])
+            next true if other_class.nil? || other_class == "NilClass" || other_class == write_class
+
+            other[:action] && other[:method_name] != write[:method_name]
+          end
+        end
+
+        def self.declaration_admits?(declared, *write_types)
+          return false if declared.nil?
+
+          write_types.none? { |type| Inference::Acceptance.accepts(declared, type, mode: :gradual).no? }
+        end
+
+        # Pulls a single concrete class name from an ivar write's rvalue type. Returns nil when the type is
+        # too unstable to compare (Union / Dynamic / IntegerRange / etc.). `concrete_class_name` already
+        # covers Nominal / Singleton / Constant / Tuple / HashShape; the wrapper exists so the ivar rule can
+        # extend the envelope (or apply different filters) without disturbing the call rules.
+        #
+        # `TrueClass` / `FalseClass` are both normalised to `"bool"` here so the common boolean-flag idiom
+        # (`@loaded = false` in `initialize` then `@loaded = true` on first work) doesn't fire the mismatch
+        # rule. A real `bool → String` drift still trips because the second write's `ivar_class_for` returns
+        # `"String"`.
+        def self.ivar_class_for(type)
+          name = ReceiverPredicates.concrete_class_name(type)
+          return "bool" if %w[TrueClass FalseClass].include?(name)
+
+          name
+        end
+
+        def self.build_ivar_write_mismatch_diagnostic(path, node, class_name, ivar_name, first_class, other_class)
+          Diagnostic.from_name_loc(
+            node,
+            rule: RULE_IVAR_WRITE_MISMATCH,
+            path: path,
+            message: "instance variable `#{ivar_name}' on #{class_name} was previously assigned " \
+                     "#{first_class}; this write assigns #{other_class}",
+            severity: :error
+          )
+        end
+
+        private_class_method :ivar_mismatch_diagnostics_for, :separate_invocations?, :declaration_admits?,
+                             :ivar_class_for, :build_ivar_write_mismatch_diagnostic
 
         private
 

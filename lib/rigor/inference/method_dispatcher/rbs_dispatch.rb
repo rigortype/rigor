@@ -768,7 +768,7 @@ module Rigor
           # working code". Two things narrow it here. The ancestry is core / stdlib, whose RBS is the
           # method set every negative rule already trusts for a direct receiver of it. And the negative
           # rules do not reach these receivers anyway: `undefined_method_diagnostic` and
-          # `arity_envelope_for` gate on `Reflection.rbs_class_known?` of the RECEIVER, which a
+          # `WrongArity.arity_envelope_for` gate on `Reflection.rbs_class_known?` of the RECEIVER, which a
           # Ruby-source subclass never is. So the risk this arm carries is not a new firing but a
           # WRONG PRECISE TYPE propagating one hop — which is what the declines below are about.
           #

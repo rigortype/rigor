@@ -3,6 +3,8 @@
 require "prism"
 
 require_relative "../../source/node_children"
+require_relative "../diagnostic"
+require_relative "rule_ids"
 
 module Rigor
   module Analysis
@@ -60,6 +62,33 @@ module Rigor
         def results
           @results.freeze
         end
+
+        # ADR-116 WD1 — the message builder for this collector's results, moved here from `CheckRules`.
+        # {.diagnostics} is called by `CheckRules.diagnose` through its collector table; the rest is private to it.
+
+        # v0.1.2 — `flow.dead-assignment`. Walks every `DefNode`
+        # body and emits a diagnostic for each plain
+        # `LocalVariableWriteNode` whose target name is never
+        # read in the same body. The
+        # `Analysis::CheckRules::DeadAssignmentCollector` describes
+        # the conservative envelope.
+        def self.diagnostics(path, dead_assignments)
+          dead_assignments.map do |result|
+            build_dead_assignment_diagnostic(path, result[:write_node], result[:def_node])
+          end
+        end
+
+        def self.build_dead_assignment_diagnostic(path, write_node, def_node)
+          Diagnostic.from_name_loc(
+            write_node,
+            rule: RULE_DEAD_ASSIGNMENT,
+            path: path,
+            message: "local `#{write_node.name}' assigned in `#{def_node.name}' but never read",
+            severity: :warning
+          )
+        end
+
+        private_class_method :build_dead_assignment_diagnostic
 
         private
 

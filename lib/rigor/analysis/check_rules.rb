@@ -39,6 +39,8 @@ require_relative "check_rules/plugin_api_surface"
 require_relative "check_rules/receiver_predicates"
 require_relative "check_rules/suppression"
 require_relative "check_rules/undefined_method"
+require_relative "check_rules/nil_receiver"
+require_relative "check_rules/wrong_arity"
 require_relative "check_rules/override_param_narrowed"
 require_relative "check_rules/override_return_widened"
 require_relative "check_rules/override_support"
@@ -112,7 +114,7 @@ module Rigor
         diagnostics.concat(SelfUndefinedMethod.diagnostics(path, self_call_misses, root, scope_index))
         COLLECTOR_DIAGNOSTIC_BUILDERS.each do |role, builder|
           collector = OPTIONAL_COLLECTOR_ROLES.include?(role) ? collectors[role] : collectors.fetch(role)
-          diagnostics.concat(send(builder, path, collector.results)) if collector
+          diagnostics.concat(builder.diagnostics(path, collector.results)) if collector
         end
         # ADR-47 WD5 — the dead arm of a decidable version guard (#627) reports nothing: it cannot run on
         # the Ruby being checked with, so a diagnostic there is a false positive. Applied before
@@ -132,19 +134,20 @@ module Rigor
       # The per-collector diagnostic builders {.diagnose} folds over, in the historical emission order
       # (value-use-void → always-truthy → unreachable-clause → shadowed-rescue → ivar-write →
       # dead-assignment → duplicate-hash-key → return-in-ensure → plugin-api-surface). Keys match
-      # {.build_node_collectors}' roles; each value is a `(path, results)` module_function on this module.
+      # {.build_node_collectors}' roles; each value is the collector class (or module) whose
+      # `diagnostics(path, results)` builds the rows.
       # `void_value_use` leads because its standalone walk used to run before this fold, and the emission order is
       # byte-identical output, not an implementation detail.
       COLLECTOR_DIAGNOSTIC_BUILDERS = {
-        void_value_use: :void_value_use_diagnostics,
-        always_truthy: :always_truthy_condition_diagnostics,
-        unreachable_clauses: :unreachable_clause_diagnostics,
-        shadowed_rescues: :shadowed_rescue_diagnostics,
-        ivar_writes: :ivar_write_mismatch_diagnostics,
-        dead_assignments: :dead_assignment_diagnostics,
-        duplicate_hash_keys: :duplicate_hash_key_diagnostics,
-        return_in_ensure: :return_in_ensure_diagnostics,
-        plugin_api_surface: :plugin_api_surface_diagnostics
+        void_value_use: VoidValueUseCollector,
+        always_truthy: AlwaysTruthyConditionCollector,
+        unreachable_clauses: UnreachableClauseCollector,
+        shadowed_rescues: ShadowedRescueCollector,
+        ivar_writes: IvarWriteCollector,
+        dead_assignments: DeadAssignmentCollector,
+        duplicate_hash_keys: DuplicateHashKeyCollector,
+        return_in_ensure: ReturnInEnsureCollector,
+        plugin_api_surface: PluginApiSurface
       }.freeze
       private_constant :COLLECTOR_DIAGNOSTIC_BUILDERS
 
@@ -329,187 +332,15 @@ module Rigor
         [
           UndefinedMethod.diagnostic(path, node, facts, lexical_sites),
           UnresolvedToplevel.diagnostic(path, node, scope_index, eval_ranges, lexical_sites),
-          wrong_arity_diagnostic(path, node, facts, lexical_sites),
+          WrongArity.diagnostic(path, node, facts, lexical_sites),
           argument_type_diagnostic(path, node, facts, lexical_sites),
-          nil_receiver_diagnostic(path, node, facts, lexical_sites),
+          NilReceiver.diagnostic(path, node, facts, lexical_sites),
           RigorTesting.dump_diagnostic(path, node, scope_index),
           RigorTesting.assert_diagnostic(path, node, scope_index),
           AlwaysRaises.diagnostic(path, node, facts, lexical_sites, raise_shield),
           RaiseNonException.diagnostic(path, node, scope_index),
           VisibilityMismatch.diagnostic(path, node, facts, lexical_sites)
         ].compact
-      end
-
-      # v0.1.2 — `def.ivar-write-mismatch`. Walks every
-      # ClassNode / ModuleNode body, gathers per-class ivar
-      # writes with their rvalue types, and emits a diagnostic
-      # when a later write's concrete class disagrees with the
-      # first write's. The first write per (class, ivar) is
-      # treated as the "declared" type; subsequent writes that
-      # land on a different concrete class trigger.
-      #
-      # Conservative envelope:
-      # - Only fires when both the first and the offending
-      #   write resolve to a `concrete_class_name` (Nominal /
-      #   Singleton / Constant / Tuple → "Array" / HashShape →
-      #   "Hash"). Unions / Dynamic / IntegerRange / shape-
-      #   varied carriers fall through.
-      # - `NilClass` is an intentional widening idiom (`@x =
-      #   "value"` then later `@x = nil` to "clear") — skipped.
-      # - Singleton-method (`def self.foo`) bodies are skipped.
-      #   Class-level ivars (`@x = 1` outside any def, in the
-      #   class body) are also skipped — they're a separate
-      #   surface (`Module#@var`) the engine doesn't yet model.
-      # - A divergence the class's RBS declaration admits is withheld: when the ivar is declared (`@x: T`,
-      #   or the slot an `attr_*` member implies) and that type accepts both the first write and the
-      #   later one, the union is the author's intent. The declaration only silences here; checking
-      #   writes against it is #1406.
-      def ivar_write_mismatch_diagnostics(path, ivar_writes)
-        ivar_writes.flat_map do |class_name, writes_by_ivar|
-          writes_by_ivar.flat_map do |ivar_name, writes|
-            ivar_mismatch_diagnostics_for(path, class_name, ivar_name, writes)
-          end
-        end
-      end
-
-      # v0.1.2 — `flow.dead-assignment`. Walks every `DefNode`
-      # body and emits a diagnostic for each plain
-      # `LocalVariableWriteNode` whose target name is never
-      # read in the same body. The
-      # `Analysis::CheckRules::DeadAssignmentCollector` describes
-      # the conservative envelope.
-      def dead_assignment_diagnostics(path, dead_assignments)
-        dead_assignments.map do |result|
-          build_dead_assignment_diagnostic(path, result[:write_node], result[:def_node])
-        end
-      end
-
-      # v0.3.0 — `flow.duplicate-hash-key`. Emits a diagnostic for each LATER occurrence of a repeated
-      # LITERAL key within one Hash literal (braced or bare-kwargs) — Ruby keeps the last entry silently
-      # at runtime, so the earlier value is dead. The
-      # `Analysis::CheckRules::DuplicateHashKeyCollector` describes the value-pinned-literal-only
-      # envelope (symbols / plain strings / integers / floats / true / false / nil; never
-      # cross-kind, never interpolation / constants / calls / splats).
-      def duplicate_hash_key_diagnostics(path, duplicate_keys)
-        duplicate_keys.map do |result|
-          build_duplicate_hash_key_diagnostic(path, result)
-        end
-      end
-
-      # v0.3.0 — `flow.return-in-ensure`. One diagnostic per explicit
-      # `return` lexically inside an `ensure` clause body: it silently
-      # discards the method's in-flight return value and swallows any
-      # in-flight exception. Purely syntactic; the
-      # `Analysis::CheckRules::ReturnInEnsureCollector` describes the
-      # frame-aware envelope (nested def / lambda / `define_method`
-      # blocks are excluded, plain blocks are not).
-      def return_in_ensure_diagnostics(path, results)
-        results.map do |result|
-          build_return_in_ensure_diagnostic(path, result[:return_node])
-        end
-      end
-
-      # v0.1.2 — `flow.always-truthy-condition`. Fires on
-      # `if` / `unless` / ternary predicates whose inferred
-      # type is a `Type::Constant` AND that don't fall in
-      # the literal-only / inside-loop-or-block / defensive-
-      # predicate skip envelope (see
-      # `Analysis::CheckRules::AlwaysTruthyConditionCollector`
-      # for the full triage rationale).
-      def always_truthy_condition_diagnostics(path, results)
-        results.map do |result|
-          build_always_truthy_condition_diagnostic(path, result.node, result.polarity)
-        end
-      end
-
-      # ADR-47 — `flow.unreachable-clause`. One diagnostic per `when` / `in` clause
-      # the flow engine's narrowing proves can never match (its narrowed
-      # subject is `bot`), and per `else` it proves never runs. The squiggle lands
-      # on the dead clause's body, mirroring `flow.unreachable-branch`.
-      def unreachable_clause_diagnostics(path, results)
-        results.map do |result|
-          build_unreachable_clause_diagnostic(path, result)
-        end
-      end
-
-      # ADR-128 WD6 / ADR-130 slice 2 — `plugin.api-surface`, from its collector's results.
-      def plugin_api_surface_diagnostics(path, results)
-        PluginApiSurface.diagnostics(path, results)
-      end
-
-      # ADR-100 WD2 — `static.value-use.void`. Its value-context slot inspection rides the shared per-node
-      # {RuleWalk} like the other collectors, so the file is not re-traversed for it. Each result is a
-      # value-context use of a call whose author-declared `-> void` return the engine recovered to `top`.
-      def void_value_use_diagnostics(path, results)
-        results.map do |result|
-          build_void_value_use_diagnostic(path, result)
-        end
-      end
-
-      # `flow.shadowed-rescue-clause` — one diagnostic per rescue clause every earlier-comparable class of
-      # which is already caught by an earlier clause of the same chain (see {ShadowedRescueCollector} for
-      # the ancestry-certainty envelope).
-      def shadowed_rescue_diagnostics(path, results)
-        results.map do |result|
-          build_shadowed_rescue_diagnostic(path, result)
-        end
-      end
-
-      def ivar_mismatch_diagnostics_for(path, class_name, ivar_name, writes)
-        return [] if writes.size < 2
-
-        # Skip past leading `NilClass` writes when establishing
-        # the canonical type. The common nullable-slot idiom
-        # (`@x = nil` placeholder in `initialize` / a default
-        # state slot, then `@x = :foo` on first concrete state)
-        # would otherwise fire a false positive on every
-        # concrete write because `first_class` was `NilClass`
-        # and every subsequent `Symbol` / `String` / `Hash`
-        # write triggered the divergence rule. The first
-        # concrete (non-nil) write is the canonical type;
-        # additional `NilClass` writes are still tolerated
-        # downstream by the existing `other_class == "NilClass"`
-        # check (the nullable-slot resets to nil between work).
-        canonical = writes.find { |w| ivar_class_for(w[:type]) != "NilClass" }
-        return [] if canonical.nil?
-
-        first_class = ivar_class_for(canonical[:type])
-        return [] if first_class.nil?
-
-        canonical_index = writes.index(canonical)
-        writes[(canonical_index + 1)..].filter_map do |write|
-          other_class = ivar_class_for(write[:type])
-          next nil if other_class.nil? || other_class == "NilClass" || other_class == first_class
-          next nil if declaration_admits?(write[:declared], canonical[:type], write[:type])
-          next nil if separate_invocations?(write, other_class, writes)
-
-          build_ivar_write_mismatch_diagnostic(path, write[:node], class_name, ivar_name, first_class, other_class)
-        end
-      end
-
-      # ADR-125 — a divergent write is never live together with the writes it conflicts with when the class
-      # serves one entry point per instance (a plugin-declared per-invocation class, e.g. a Rails controller:
-      # one action per request) and every conflicting write — non-nil, of a concrete class other than this
-      # write's — sits in a DIFFERENT action of the same class. An action is a public method no declared
-      # non-action macro names (`before_action :x`, `helper_method :y`); {IvarWriteCollector} decides it. A
-      # conflicting write in a private or protected helper, a callback target, a `helper_method`,
-      # `initialize`, or the same method keeps the finding. Which helper each action reaches is not proved
-      # here.
-      def separate_invocations?(write, write_class, writes)
-        return false unless write[:action]
-
-        writes.all? do |other|
-          other_class = ivar_class_for(other[:type])
-          next true if other_class.nil? || other_class == "NilClass" || other_class == write_class
-
-          other[:action] && other[:method_name] != write[:method_name]
-        end
-      end
-
-      def declaration_admits?(declared, *write_types)
-        return false if declared.nil?
-
-        write_types.none? { |type| Inference::Acceptance.accepts(declared, type, mode: :gradual).no? }
       end
 
       # ADR-116 WD1 — the suppression filters live in {Suppression}; these keep `CheckRules.filter_suppressed` and
@@ -551,424 +382,6 @@ module Rigor
             ranges << [loc.start_offset, loc.end_offset]
           end
           ranges
-        end
-
-        # Slice 7 phase 11 — wrong-arity diagnostic. Fires when
-        # an explicit-receiver `Prism::CallNode` resolves to a
-        # method whose declared overloads do not admit the
-        # supplied positional argument count (across all
-        # overloads, see {#compute_arity_envelope}). One overload
-        # with required keyword arguments or trailing positionals
-        # leaves the whole method unchecked; calls with `*splat`, keyword, or
-        # block-pass arguments are silently skipped to avoid
-        # false positives. The check piggybacks on the same
-        # scope-index lookup used by `undefined_method_diagnostic`;
-        # it returns nil when the call's receiver / RBS coverage /
-        # call shape disqualifies the rule.
-        # rubocop:disable-next Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
-        def wrong_arity_diagnostic(path, call_node, facts, lexical_sites = nil)
-          return nil if call_node.receiver.nil?
-          return nil unless plain_positional_call?(call_node)
-
-          scope = facts.scope
-          return nil if scope.nil?
-
-          # ADR-67 WD6b — an inferred-parameter receiver's type is an open-call-site lower bound; a wrong-arity
-          # firing against it is an FP by construction. Decline.
-          return nil if ReceiverPredicates.inferred_param_receiver?(call_node, scope)
-
-          receiver_type = facts.receiver_type
-          class_name = ReceiverPredicates.concrete_class_name(receiver_type)
-          return nil if class_name.nil?
-
-          # Issue #879 — the receiver whose surface `call.undefined-method` already refuses to enumerate.
-          # Deciding an arity against a declaration this rule cannot prove the receiver actually runs is the
-          # same unsoundness in signature form: the includer may declare the name with a wider arity, and
-          # then the call is correct code.
-          return nil if ReceiverPredicates.unenumerable_receiver_shape?(receiver_type, class_name, scope)
-
-          kind = receiver_type.is_a?(Type::Singleton) ? :singleton : :instance
-          # `Struct.new(:a, :b).new(...)` chained: the inner
-          # `Struct.new(...)` is an anonymous Struct *subclass* whose
-          # `.new` accepts any positional arity (one slot per member,
-          # all defaulting to nil) — including zero. The receiver types
-          # as `Singleton[Struct]` (so the call-site `.new` dispatches,
-          # per the dispatcher's `struct_new_lift`), but validating that
-          # `.new` against the real `Struct.new(*Symbol)` signature is a
-          # false positive. Skip arity-checking the chained position.
-          return nil if anonymous_struct_new_call?(call_node, class_name, kind)
-
-          arity_envelope = arity_envelope_for(facts, class_name, kind)
-          return nil if arity_envelope.nil?
-
-          actual = (call_node.arguments&.arguments || []).size
-          min, max, source_arity = arity_envelope
-          if actual.between?(min, max)
-            source_arity&.settle_by_definitions
-            return nil
-          end
-          return nil if arity_report_withheld?(source_arity, class_name, call_node, scope, kind, lexical_sites)
-
-          build_arity_diagnostic(path, call_node, class_name, min, max, actual)
-        end
-
-        # The declines `call.wrong-arity` asks only once the arity is out of the envelope.
-        def arity_report_withheld?(source_arity, class_name, call_node, scope, kind, lexical_sites)
-          # Issue #992 — a source envelope's remaining declines can only withhold, so they run only now.
-          source_arity&.settle_by_walk
-          return true if source_arity && !source_arity.authoritative?(class_name)
-
-          ReceiverPredicates.refined_redefinition_in_effect?(class_name, call_node, scope, kind, lexical_sites)
-        end
-
-        # The `[min, max]` the call is checked against — a declared signature's, or (issue #992) the project
-        # `def`'s own when no signature declares the method, with the {SourceArity} that found it as a third
-        # element — or nil when neither may be trusted.
-        #
-        # Issue #991 — `discovered_method?` used to exempt the call outright before ever asking for a
-        # declaration. `trustworthy_signature` is the same lookup `argument_type_diagnostic` treats as
-        # authoritative over a source `def` (see its own comment beside that call), and the two rules must agree
-        # on whose contract binds, so a declared method is checked against its declaration.
-        def arity_envelope_for(facts, class_name, kind)
-          receiver_type = facts.receiver_type
-          call_node = facts.call_node
-          scope = facts.scope
-          if Rigor::Reflection.rbs_class_known?(class_name, scope: scope)
-            return nil unless ReceiverPredicates.definition_available?(receiver_type, class_name, scope)
-
-            method_def = ReceiverPredicates.receiver_signature(facts)
-            if method_def && !Rigor::RbsExtended.inferred_signature?(method_def)
-              return nil if undeclared_constructor?(class_name, call_node, kind, method_def)
-
-              return compute_arity_envelope(method_def)
-            end
-            return nil unless source_lane_open?(method_def, receiver_type, class_name, call_node, scope)
-          end
-
-          source_arity_envelope(class_name, call_node, scope, kind)
-        end
-
-        # Issue #992 — whether a class RBS knows may still be checked against its project `def`. Two lanes:
-        #
-        # - the member resolved and carries `%a{rigor:v1:inferred-signature}`: under ADR-93 the bundled
-        #   `rigor-rbs-inline` plugin emits a full skeleton for EVERY `def` in a file carrying at least one
-        #   annotation (#823), with every type slot defaulted, so nobody asserted anything about it. Its arity
-        #   is NOT read here — the `def`'s envelope is, through the same {SourceArity} walk as a method with no
-        #   member at all, so one `def` is never judged by two readings of its parameter list;
-        # - no member resolved, and the class's declaration is the project's own `sig/`
-        #   (`project_declared_class?`): a partial sidecar of a project class whose `def` lives in source.
-        #
-        # Everything else declines. A bundled declaration (core / stdlib / gem) describes a class the project
-        # does not own, so a project `def` on it is an ADR-17 monkey-patch that another library may patch too;
-        # a lookup that raised, or a name an open receiver only inherited (`trustworthy_signature` answered
-        # nil for those while a raw lookup does not), is not "no member".
-        def source_lane_open?(method_def, receiver_type, class_name, call_node, scope)
-          return true if method_def
-
-          ReceiverPredicates.lookup_method(receiver_type, class_name, call_node.name, scope).nil? &&
-            Rigor::Reflection.project_declared_class?(class_name, scope: scope)
-        end
-
-        # Issue #992 — stage 1 of {SourceArity}: the nearest project definition's envelope, after the
-        # receiver-level declines that need no walk. Stage 2 (`SourceArity#authoritative?`) runs only once the
-        # count is known to fall outside it.
-        def source_arity_envelope(class_name, call_node, scope, kind)
-          return nil unless scope.discovered_parameter_envelopes.key?(Scope::DiscoveryIndex::ENVELOPE_PROJECT_WIDE)
-          return nil if ReceiverPredicates.unbounded_receiver_surface?(class_name, scope)
-          return nil if ReceiverPredicates.plugin_typed_call?(call_node, scope)
-          # An instance of a project module is an instance of whatever includes it (#739's reasoning, which
-          # `module_mixin_receiver?` can only apply to a module RBS declares).
-          return nil if kind == :instance && project_module?(class_name, scope)
-          return nil if project_module_class_receiver?(call_node, scope)
-
-          arity = SourceArity.new(scope, call_node.name, kind)
-          envelope = arity.owner_envelope(class_name)
-          if envelope.nil? || envelope[2]
-            envelope.nil? && arity.ambiguous? ? arity.settle_by_walk : arity.settle_by_definitions
-            return nil
-          end
-
-          [envelope[0], envelope[1] || Float::INFINITY, arity]
-        end
-
-        # `self.class.f(1)` inside a project module's instance method: the engine types `self.class` as the
-        # module's singleton, but at runtime it is the includer's class, whose class methods are its own. The
-        # source-lane twin of {#mixin_self_class_receiver?}, which can only see a module RBS declares.
-        def project_module_class_receiver?(call_node, scope)
-          receiver = call_node.receiver
-          return false unless receiver.is_a?(Prism::CallNode) && receiver.name == :class && receiver.arguments.nil?
-          return false if receiver.receiver.nil?
-
-          inner = ReceiverPredicates.concrete_class_name(scope.type_of(receiver.receiver))
-          !inner.nil? && project_module?(inner, scope)
-        end
-
-        # Read off the table directly rather than through `Scope#parameter_envelopes_of`: a class does not turn
-        # into a module without its declaration (and so the receiver's own typing) changing, so this answer
-        # needs no ADR-46 class edge of its own.
-        def project_module?(class_name, scope)
-          bucket = scope.discovered_parameter_envelopes[class_name.to_s]
-          !bucket.nil? && bucket.key?(Scope::DiscoveryIndex::ENVELOPE_MODULE_MARK)
-        end
-
-        # Issue #917 — no loaded RBS declares a constructor for this class. The definition builder
-        # synthesizes `.new` from the nearest `initialize` in the ancestry, and when nothing declares
-        # one that is `BasicObject#initialize: () -> void`, so `.new` derives a nullary envelope that
-        # is an artifact of the fallback rather than a statement about the class. `Gem::Specification`
-        # is declared in full by the vendored rubygems sigs except for its constructor, and every
-        # argument at the real one was reported. The rule needs "this class declares a nullary
-        # constructor", and only a `defined_in` naming a class other than `BasicObject` is that
-        # evidence — except on `BasicObject` and `Object` themselves, where the declaration is their
-        # own and `.new` really does take no arguments.
-        def undeclared_constructor?(class_name, call_node, kind, method_def)
-          return false unless kind == :singleton && call_node.name == :new
-          return false unless method_def.respond_to?(:defined_in)
-
-          defined_in = method_def.defined_in
-          return false unless defined_in.nil? || ReceiverPredicates.strip_root(defined_in.to_s) == "BasicObject"
-
-          !%w[BasicObject Object].include?(ReceiverPredicates.strip_root(class_name))
-        end
-
-        # True for the outer `.new` of a chained `Struct.new(...).new`:
-        # `class_name`/`kind` already pin the receiver to
-        # `Singleton[Struct]`, and the receiver node is itself a
-        # `Struct.new` (or `::Struct.new`) call — the anonymous subclass.
-        def anonymous_struct_new_call?(call_node, class_name, kind)
-          return false unless class_name == "Struct" && kind == :singleton
-          return false unless call_node.name == :new
-
-          receiver = call_node.receiver
-          return false unless receiver.is_a?(Prism::CallNode) && receiver.name == :new
-
-          inner = receiver.receiver
-          return true if inner.is_a?(Prism::ConstantReadNode) && inner.name == :Struct
-
-          # `::Struct.new(...).new` — a top-level constant path.
-          inner.is_a?(Prism::ConstantPathNode) && inner.parent.nil? && inner.name == :Struct
-        end
-
-        def plain_positional_call?(call_node)
-          arguments = call_node.arguments
-          return true if arguments.nil?
-
-          arguments.arguments.all? { |arg| simple_positional?(arg) }
-        end
-
-        def simple_positional?(arg)
-          return false if arg.is_a?(Prism::SplatNode)
-          return false if arg.is_a?(Prism::KeywordHashNode)
-          return false if arg.is_a?(Prism::BlockArgumentNode)
-          return false if arg.is_a?(Prism::ForwardingArgumentsNode)
-
-          true
-        end
-
-        # Returns `[min, max]` positional-argument arity for the
-        # method (across all overloads), or nil when the rule
-        # does not apply. We disqualify only when the method
-        # uses required keyword arguments (which the caller MUST
-        # pass at the call site, and our plain-positional check
-        # would not have caught) or trailing positionals (rare,
-        # complex). `optional_keywords` and `rest_keywords` do
-        # NOT affect positional arity. `rest_positionals` raises
-        # `max` to `Float::INFINITY`.
-        def compute_arity_envelope(method_def)
-          mins = []
-          maxes = []
-          method_def.method_types.each do |mt|
-            function = mt.type
-            return nil unless arity_eligible?(function)
-
-            min_arity = function.required_positionals.size
-            max_arity =
-              if function.rest_positionals
-                Float::INFINITY
-              else
-                min_arity + function.optional_positionals.size
-              end
-            mins << min_arity
-            maxes << max_arity
-          end
-          return nil if mins.empty?
-
-          [mins.min, maxes.max]
-        end
-
-        def arity_eligible?(function)
-          # `RBS::Types::UntypedFunction` (used for `(?) ->`
-          # untyped sigs) does not expose the per-arity
-          # accessors. Treating it as ineligible is the
-          # correct conservative move: an untyped function
-          # has no static arity to enforce.
-          return false unless function.respond_to?(:required_keywords)
-
-          function.required_keywords.empty? && function.trailing_positionals.empty?
-        end
-
-        # Slice 7 phase 14 — nil-receiver diagnostic. Fires when
-        # the receiver type is a `Type::Union` containing a
-        # nil-bearing member (`Constant[nil]` or
-        # `Nominal[NilClass]`) AND the called method does not
-        # exist on `NilClass`. This is the canonical "you forgot
-        # to nil-check before calling X" signal: the engine has
-        # proved that on at least one execution path the receiver
-        # is nil, and the call would raise NoMethodError.
-        #
-        # The rule deliberately ignores receivers that are
-        # exactly `Constant[nil]` / `Nominal[NilClass]` (those
-        # are already covered by `undefined_method_diagnostic`)
-        # and union receivers where every member already
-        # disqualifies the call (avoid duplicating the
-        # undefined-method diagnostic).
-        def nil_receiver_diagnostic(path, call_node, facts, lexical_sites = nil)
-          return nil if call_node.receiver.nil?
-          # Safe-navigation calls (`recv&.method`) already
-          # short-circuit on nil at runtime, so a nil-bearing
-          # receiver is not a bug for them.
-          return nil if call_node.safe_navigation?
-          # Restrict to direct local-variable reads. Local
-          # narrowing (Slice 6 phase 1) is the only narrowing
-          # surface that can prove a guard like
-          # `return if x.nil?` removed nil from the union, so
-          # firing on chained / method-call receivers would
-          # produce false positives we cannot suppress.
-          return nil unless call_node.receiver.is_a?(Prism::LocalVariableReadNode)
-
-          scope = facts.scope
-          return nil if scope.nil?
-
-          # ADR-58 WD1 — a receiver whose `nil` constituent is purely
-          # declaration-sourced (the class-ivar index seed of a ctor
-          # `@x = nil` written in another method, possibly copied into a
-          # local via `r = @right`) does not fire by default: the working
-          # program's cross-method invariant is assumed per the robustness
-          # principle. The nil stays in the displayed type; only its use as
-          # diagnostic fuel is withheld. Any flow-live touch (method-local
-          # nil write, failed-guard narrowing) drops the mark upstream, so
-          # flow-observed nil keeps firing exactly as before. The receiver
-          # is already narrowed to a local read above, so this asks
-          # {DeclarationSourcedGuard} exactly what it asked before — but it
-          # now asks it through the predicate the argument-type gates share
-          # (issue #324), which is what keeps the two rules from drifting.
-          #
-          # Issue #1362 — a local copied from a global still on its declared seed (`sep = $/`) is asked against the
-          # file's writes to that global instead: its declared `nil` is withheld, and one the file writes still fires.
-          return nil if DeclarationSourcedGuard.withholds_nil?(call_node.receiver, scope)
-
-          # ADR-67 WD6b — an inferred-parameter receiver's type (incl. any nil constituent unioned in from a
-          # nil call site) is an open-call-site lower bound; a possible-nil firing against it is an FP by
-          # construction. Decline.
-          return nil if scope.inferred_param?(call_node.receiver.name)
-
-          receiver_type = facts.receiver_type
-          return nil unless receiver_type.is_a?(Type::Union)
-
-          # The rule only fires when the analyzer has access to
-          # an RBS loader; without it, the per-member method-
-          # presence checks below cannot rule out a sound call.
-          return nil unless Rigor::Reflection.rbs_class_known?("NilClass", scope: scope)
-
-          return nil unless nil_bearing_union_witnesses?(receiver_type, call_node.name, scope)
-          return nil if nil_receiver_withheld?(call_node, receiver_type, scope, facts.scope_index, lexical_sites)
-
-          build_nil_receiver_diagnostic(path, call_node)
-        end
-
-        # The declines `call.possible-nil-receiver` asks only once a report would fire.
-        def nil_receiver_withheld?(call_node, receiver_type, scope, scope_index, lexical_sites)
-          # Issue #1703 — a `nil` that only a `key?` guard on the same receiver and key rules out. It re-walks the file
-          # once with guards on, and only to withhold this report.
-          return true if Inference::KeyPresenceGuard.withholds_nil?(call_node, receiver_type, lexical_sites&.root,
-                                                                    scope_index)
-
-          # ADR-121 WD7 — a refinement of `NilClass` (or one Rigor cannot read) in effect may define the name.
-          ReceiverPredicates.refined_method_in_effect?("NilClass", call_node, scope, :instance, lexical_sites)
-        end
-
-        # The receiver-type half of the rule, factored out of the node-shape
-        # guards above: the union must carry nil, must carry a non-nil arm the
-        # presence question can be asked of, must support the method on every
-        # non-nil arm (so the call is only wrong on the nil path), and the
-        # method must be absent from `NilClass` (so the nil path really raises).
-        def nil_bearing_union_witnesses?(receiver_type, method_name, scope)
-          union_contains_nil?(receiver_type) &&
-            union_has_nameable_non_nil_arm?(receiver_type, scope) &&
-            union_method_present_on_non_nil?(receiver_type, method_name, scope) &&
-            !nil_class_has_method?(method_name, scope)
-        end
-
-        def union_contains_nil?(union)
-          union.members.any? { |member| ReceiverPredicates.nil_member?(member) }
-        end
-
-        # Possible-nil may witness only where the presence question below is
-        # ANSWERABLE. `method_present_anywhere?` reports "present" for a
-        # nameless arm (Dynamic / Top / Bot) — the permissive polarity the
-        # union-undefined-method rule's FP safety rests on — so a union whose
-        # non-nil arms are ALL nameless satisfied that gate vacuously and fired
-        # on every method name, including names defined on no class anywhere.
-        # That inverted the intent: the gate suppressed exactly where knowledge
-        # exists (`String | nil` calling a nonexistent method stays silent) and
-        # permitted exactly where none does. Requiring one nameable concrete
-        # arm restores the polarity without touching the shared helper:
-        # `String | nil` keeps firing, and so does `Dynamic | String | nil` —
-        # the nameless arm stays permissive inside the all-arms check, which is
-        # only about the arms' method surface. That union no longer arises from
-        # a merge re-joining the narrowed edges of one untyped local, which
-        # binds it back to `Dynamic[top]` (issue #1840,
-        # `Inference::UntypedRejoin`); it still does when the program writes
-        # the `nil` (`x = nil if c`) and no `nil?` edge strips it before the
-        # re-joining merge, or when the arms are not a narrowing of one
-        # untyped value.
-        def union_has_nameable_non_nil_arm?(union, scope)
-          union.members.any? do |m|
-            next false if ReceiverPredicates.nil_member?(m)
-
-            class_name = ReceiverPredicates.concrete_class_name(m)
-            next false if class_name.nil?
-
-            # Issue #574 — nameable is not the same as ANSWERABLE. `method_present_anywhere?` reports
-            # "present" for a named arm nothing knows the surface of, purely because nothing is known —
-            # which is the same vacuity this gate's docstring says it exists to prevent, one level in. A
-            # plugin-minted nominal like `ActionController::Parameters` ships no RBS and has no project
-            # source, so it counted as a full witness and `q = params[:q]; q.strip` fired at ERROR severity
-            # on correct Rails code.
-            Rigor::Reflection.rbs_class_known?(class_name, scope: scope) ||
-              scope.discovered_classes.key?(class_name)
-          end
-        end
-
-        # The non-nil members must collectively support the
-        # method (i.e. for every non-nil member, the method
-        # exists on its class via RBS or in-source discovery).
-        # Without this guard, the rule would also fire on calls
-        # that are unsound on the non-nil branch — that is the
-        # `undefined_method_diagnostic` rule's job, and we want
-        # exactly one diagnostic per offending call site.
-        def union_method_present_on_non_nil?(union, method_name, scope)
-          non_nil_members = union.members.reject { |m| ReceiverPredicates.nil_member?(m) }
-          return false if non_nil_members.empty?
-
-          non_nil_members.all? { |m| ReceiverPredicates.method_present_anywhere?(m, method_name, scope) }
-        end
-
-        def nil_class_has_method?(method_name, scope)
-          definition = Rigor::Reflection.instance_definition("NilClass", scope: scope)
-          return false if definition.nil?
-
-          !definition.methods[method_name.to_sym].nil?
-        end
-
-        def build_nil_receiver_diagnostic(path, call_node)
-          Diagnostic.from_message_loc(
-            call_node,
-            rule: RULE_NIL_RECEIVER,
-            path: path,
-            message: "possible nil receiver: `#{call_node.name}' is undefined on NilClass",
-            severity: :error,
-            method_name: call_node.name.to_s
-          )
         end
 
         # v0.1.2 — `flow.unreachable-branch`. Fires when an `IfNode` / `UnlessNode` whose predicate is a
@@ -1021,133 +434,6 @@ module Rigor
           return :falsey if FALSEY_LITERAL_NODES.any? { |klass| predicate.is_a?(klass) }
 
           nil
-        end
-
-        # Pulls a single concrete class name from an ivar write's rvalue type. Returns nil when the type is
-        # too unstable to compare (Union / Dynamic / IntegerRange / etc.). `concrete_class_name` already
-        # covers Nominal / Singleton / Constant / Tuple / HashShape; the wrapper exists so the ivar rule can
-        # extend the envelope (or apply different filters) without disturbing the call rules.
-        #
-        # `TrueClass` / `FalseClass` are both normalised to `"bool"` here so the common boolean-flag idiom
-        # (`@loaded = false` in `initialize` then `@loaded = true` on first work) doesn't fire the mismatch
-        # rule. A real `bool → String` drift still trips because the second write's `ivar_class_for` returns
-        # `"String"`.
-        def ivar_class_for(type)
-          name = ReceiverPredicates.concrete_class_name(type)
-          return "bool" if %w[TrueClass FalseClass].include?(name)
-
-          name
-        end
-
-        def build_always_truthy_condition_diagnostic(path, predicate_node, polarity)
-          Diagnostic.from_node(
-            predicate_node,
-            rule: RULE_ALWAYS_TRUTHY_CONDITION,
-            path: path,
-            message: "condition is always #{polarity} (the surrounding flow proves it folds to a constant)",
-            severity: :warning
-          )
-        end
-
-        def build_unreachable_clause_diagnostic(path, result)
-          Diagnostic.from_node(
-            result.body,
-            rule: RULE_UNREACHABLE_CLAUSE,
-            path: path,
-            message: unreachable_clause_message(result),
-            severity: :warning
-          )
-        end
-
-        def build_void_value_use_diagnostic(path, result)
-          Diagnostic.from_node(
-            result.void_node,
-            rule: RULE_VALUE_USE_VOID,
-            path: path,
-            message: "value use of `void': `#{result.origin.label}' declares `-> void', so its return " \
-                     "recovers to `top' and should not be used as a value",
-            severity: :warning
-          )
-        end
-
-        def unreachable_clause_message(result)
-          subject = result.subject_name
-          kw = result.keyword
-          case result.kind
-          when :prior_exhaustion
-            "unreachable `#{kw} #{result.condition_source}': `#{subject}' is already covered " \
-            "by an earlier `#{kw}' clause"
-          when :exhausted_else
-            "unreachable `else': the `#{kw}' clauses already cover every value `#{subject}' can take here"
-          else # :disjoint
-            "unreachable `#{kw} #{result.condition_source}': `#{subject}' can never be " \
-            "#{result.condition_source} here (the flow proves the subject disjoint)"
-          end
-        end
-
-        def build_shadowed_rescue_diagnostic(path, result)
-          Diagnostic.from_node(
-            result.clause,
-            rule: RULE_SHADOWED_RESCUE_CLAUSE,
-            path: path,
-            message: shadowed_rescue_message(result),
-            severity: :warning
-          )
-        end
-
-        def shadowed_rescue_message(result)
-          earlier = result.earlier_sources.each_with_index.map do |source, index|
-            "`#{source}' (line #{result.earlier_lines[index]})"
-          end
-          "shadowed `#{result.clause_source}': every exception class it names is already caught " \
-            "by the earlier #{earlier.join(' and ')} clause#{'s' if earlier.size > 1}, so this clause can never run"
-        end
-
-        def build_dead_assignment_diagnostic(path, write_node, def_node)
-          Diagnostic.from_name_loc(
-            write_node,
-            rule: RULE_DEAD_ASSIGNMENT,
-            path: path,
-            message: "local `#{write_node.name}' assigned in `#{def_node.name}' but never read",
-            severity: :warning
-          )
-        end
-
-        # The diagnostic points at the LATER occurrence (the entry that wins at runtime) and names the
-        # first occurrence's line, so the fix — delete or rename one of the two — is visible from the
-        # message alone.
-        def build_duplicate_hash_key_diagnostic(path, result)
-          first_line = result[:first_key_node].location.start_line
-          Diagnostic.from_node(
-            result[:key_node],
-            rule: RULE_DUPLICATE_HASH_KEY,
-            path: path,
-            message: "duplicate hash key `#{result[:key_label]}' in the same literal; this entry " \
-                     "overwrites the value first set at line #{first_line}",
-            severity: :warning
-          )
-        end
-
-        def build_return_in_ensure_diagnostic(path, return_node)
-          Diagnostic.from_location(
-            return_node.keyword_loc,
-            rule: RULE_RETURN_IN_ENSURE,
-            path: path,
-            message: "`return' inside `ensure' discards the method's in-flight return value " \
-                     "and swallows any in-flight exception",
-            severity: :warning
-          )
-        end
-
-        def build_ivar_write_mismatch_diagnostic(path, node, class_name, ivar_name, first_class, other_class)
-          Diagnostic.from_name_loc(
-            node,
-            rule: RULE_IVAR_WRITE_MISMATCH,
-            path: path,
-            message: "instance variable `#{ivar_name}' on #{class_name} was previously assigned " \
-                     "#{first_class}; this write assigns #{other_class}",
-            severity: :error
-          )
         end
 
         # Returns the dead-branch node for a literal-predicate if/unless, or nil when no observable branch
@@ -1232,7 +518,7 @@ module Rigor
         def argument_type_diagnostic(path, call_node, facts, lexical_sites = nil)
           return nil if call_node.receiver.nil?
           return nil if UNIVERSAL_EQUALITY_METHODS.include?(call_node.name)
-          return nil unless plain_positional_call?(call_node)
+          return nil unless WrongArity.plain_positional_call?(call_node)
 
           scope = facts.scope
           return nil if scope.nil?
@@ -1330,7 +616,8 @@ module Rigor
         end
 
         def nil_tainted?(actual)
-          ReceiverPredicates.nil_member?(actual) || (actual.is_a?(Type::Union) && union_contains_nil?(actual))
+          ReceiverPredicates.nil_member?(actual) ||
+            (actual.is_a?(Type::Union) && NilReceiver.union_contains_nil?(actual))
         end
 
         # Multi-overload argument-type-mismatch. The dispatcher's per-overload
@@ -1531,7 +818,7 @@ module Rigor
         def rigor_type_admits_nil?(type)
           return true if type.is_a?(Type::Dynamic) || type.is_a?(Type::Top)
           return true if ReceiverPredicates.nil_member?(type)
-          return union_contains_nil?(type) if type.is_a?(Type::Union)
+          return NilReceiver.union_contains_nil?(type) if type.is_a?(Type::Union)
 
           false
         end
@@ -1568,7 +855,7 @@ module Rigor
           methods = loader.interface_method_names(rbs_type.name.to_s)
           return true if methods.nil? || methods.empty?
 
-          methods.all? { |method_name| nil_class_has_method?(method_name, scope) }
+          methods.all? { |method_name| NilReceiver.nil_class_has_method?(method_name, scope) }
         end
 
         # ADR-64 WD3 — the non-nil channel fires only on an argument that types
@@ -1656,7 +943,7 @@ module Rigor
           methods.all? { |method_name| arg_class_has_method?(class_name, method_name, scope) }
         end
 
-        # The non-nil mirror of {#nil_class_has_method?}, but conservative on
+        # The non-nil mirror of {NilReceiver.nil_class_has_method?}, but conservative on
         # the unknown side: an unresolvable definition returns true (the class
         # *might* implement the method — e.g. a metaprogrammed conversion), so
         # the channel never fires on uncertainty.
@@ -1857,7 +1144,7 @@ module Rigor
         def declaration_sourced_nil_only_mismatch?(arg, arg_type, param_type, scope)
           return false unless DeclarationSourcedGuard.marked?(arg, scope)
           return false unless arg_type.is_a?(Type::Union)
-          return false unless union_contains_nil?(arg_type)
+          return false unless NilReceiver.union_contains_nil?(arg_type)
 
           non_nil = Type::Combinator.union(*arg_type.members.reject { |m| ReceiverPredicates.nil_member?(m) })
           return false if non_nil.is_a?(Type::Bot)
@@ -1883,11 +1170,11 @@ module Rigor
         # `time.next_week("monday")`, `(?Symbol, ?same_time: bool)`, did not,
         # though both raise the same way at runtime. Keywords cannot shift a
         # positional argument's index, and a call that PASSES keywords never
-        # reaches here at all — `plain_positional_call?` rejects a
+        # reaches here at all — `WrongArity.plain_positional_call?` rejects a
         # `KeywordHashNode` argument (`**opts` included) before the signature
         # is consulted.
         def argument_check_eligible?(function)
-          # See `arity_eligible?`: `UntypedFunction` lacks
+          # See `WrongArity.arity_eligible?`: `UntypedFunction` lacks
           # the per-arity accessors. Treat it as ineligible
           # for argument-type-mismatch diagnostics.
           return false unless function.respond_to?(:required_keywords)
@@ -1912,21 +1199,6 @@ module Rigor
           Diagnostic.from_node(
             mismatch[:node],
             rule: RULE_ARGUMENT_TYPE,
-            path: path,
-            message: message,
-            severity: :error,
-            receiver_type: class_name,
-            method_name: call_node.name.to_s
-          )
-        end
-
-        def build_arity_diagnostic(path, call_node, class_name, min, max, actual)
-          range = min == max ? min.to_s : "#{min}..#{max}"
-          method_label = "`#{call_node.name}' on #{class_name}"
-          message = "wrong number of arguments to #{method_label} (given #{actual}, expected #{range})"
-          Diagnostic.from_message_loc(
-            call_node,
-            rule: RULE_WRONG_ARITY,
             path: path,
             message: message,
             severity: :error,

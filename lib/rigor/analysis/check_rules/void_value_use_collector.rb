@@ -3,6 +3,8 @@
 require "prism"
 
 require_relative "../../source/node_children"
+require_relative "../diagnostic"
+require_relative "rule_ids"
 
 module Rigor
   module Analysis
@@ -68,6 +70,31 @@ module Rigor
         def results
           @results.freeze
         end
+
+        # ADR-116 WD1 — the message builder for this collector's results, moved here from `CheckRules`.
+        # {.diagnostics} is called by `CheckRules.diagnose` through its collector table; the rest is private to it.
+
+        # ADR-100 WD2 — `static.value-use.void`. Its value-context slot inspection rides the shared per-node
+        # {RuleWalk} like the other collectors, so the file is not re-traversed for it. Each result is a
+        # value-context use of a call whose author-declared `-> void` return the engine recovered to `top`.
+        def self.diagnostics(path, results)
+          results.map do |result|
+            build_void_value_use_diagnostic(path, result)
+          end
+        end
+
+        def self.build_void_value_use_diagnostic(path, result)
+          Diagnostic.from_node(
+            result.void_node,
+            rule: RULE_VALUE_USE_VOID,
+            path: path,
+            message: "value use of `void': `#{result.origin.label}' declares `-> void', so its return " \
+                     "recovers to `top' and should not be used as a value",
+            severity: :warning
+          )
+        end
+
+        private_class_method :build_void_value_use_diagnostic
 
         private
 

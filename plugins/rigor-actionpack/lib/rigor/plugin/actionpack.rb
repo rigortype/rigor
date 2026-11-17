@@ -540,7 +540,7 @@ module Rigor
       #   and still carries the chain — `params[:user][:name]` types `Parameters?` and
       #   `params[:user].permit(:name)` types `Parameters`, because the dispatcher strips the nil arm
       #   for the receiver gate. Idiomatic *chained* reads stay silent too: `call.possible-nil-receiver`
-      #   restricts itself to `Prism::LocalVariableReadNode` receivers (`CheckRules#nil_receiver_diagnostic`), so
+      #   restricts itself to `Prism::LocalVariableReadNode` receivers (`CheckRules::NilReceiver.diagnostic`), so
       #   `params[:q].strip` cannot fire. What it does fire on is the assigned form — `q = params[:q];
       #   q.strip` — at **error** severity, once per unguarded use. Guarded forms (`return if q.nil?`,
       #   `if q`, `q&.strip`, `|| ""`) all narrow correctly and stay silent, so this is not a broken

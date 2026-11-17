@@ -93,6 +93,22 @@ RSpec.describe Rigor::Inference::ScopeIndexer::NodePropagation do
       expect(table[node.else_clause.statements.body.first].local(:x)).to eq(combinator.nominal_of("String"))
     end
 
+    it "reads a `case` without a subject's clauses from a scope where a local a condition writes is Dynamic[top]" do
+      program, table = walk("x = 1\ncase; when show(x = 2) then x; else x; end", start)
+
+      node = last_statement(program)
+      expect(table[node.conditions.first.statements.body.first].local(:x)).to eq(combinator.untyped)
+      expect(table[node.else_clause.statements.body.first].local(:x)).to eq(combinator.untyped)
+    end
+
+    it "reads a `case`'s clauses from a scope where a local its subject writes is Dynamic[top]" do
+      program, table = walk("x = 1\ncase show(x = 2) when nil then x else x end", start)
+
+      node = last_statement(program)
+      expect(table[node.conditions.first.statements.body.first].local(:x)).to eq(combinator.untyped)
+      expect(table[node.else_clause.statements.body.first].local(:x)).to eq(combinator.untyped)
+    end
+
     it "narrows the clauses of a `case` with a subject by the clause's edges" do
       program, table = walk("x = 1\ncase x when nil then x else x end", start)
 
@@ -133,6 +149,12 @@ RSpec.describe Rigor::Inference::ScopeIndexer::NodePropagation do
       expect(table[sum.arguments.arguments.first].local(:k)).to eq(const(2))
     end
 
+    it "leaves a closure local the enclosing scope does not bind unbound" do
+      program, table = walk("->(a) { a }", start)
+
+      expect(table[last_statement(program).body.body.first].local(:a)).to be_nil
+    end
+
     it "rebinds an implicit `it` the enclosing scope also binds" do
       program, table = walk("->{ it + 1 }", scope.with_local(:it, const(5)))
 
@@ -153,6 +175,13 @@ RSpec.describe Rigor::Inference::ScopeIndexer::NodePropagation do
       definition = last_statement(program)
       expect(table[definition.receiver].local(:o)).to eq(const(1))
       expect(table[definition.body.body.first].local(:o)).to eq(combinator.untyped)
+    end
+
+    it "reads a def's parameter defaults under its own locals" do
+      program, table = walk("o = 1\ndef m(o, b = o) = 1", start)
+
+      default = last_statement(program).parameters.optionals.first.value
+      expect(table[default].local(:o)).to eq(combinator.untyped)
     end
 
     it "stops the unknown `self` of an unentered block at a def body" do
@@ -185,6 +214,40 @@ RSpec.describe Rigor::Inference::ScopeIndexer::NodePropagation do
       expect(table[singleton_def].self_type).to eq(combinator.singleton_of(name))
     end
 
+    it "leaves a block's def the walk reaches on its own, and a def inside a nested block, unrecorded by the class" do
+      program, table = walk("show(Class.new { def o.m = 1; [1].each { def n = 2 } })")
+
+      call = last_statement(program).arguments.arguments.first
+      name = Rigor::Inference::AnonymousMetaClass.name_for(call, nil)
+      receiver_def, each_call = call.block.body.body
+      nested_def = each_call.block.body.body.first
+      expect(table[receiver_def].self_type).to eq(combinator.singleton_of(name))
+      expect(table[nested_def].self_type).not_to eq(combinator.nominal_of(name))
+    end
+
+    it "walks a class-body block with no statements" do
+      program, table = walk("show(Class.new {})\nrefine Foo do\nend")
+
+      expect(table.size).to be > 4
+      expect(table).to have_key(program.statements.body.last.block)
+    end
+
+    it "gives a `Class.new` block a scope outside any `class << self` body" do
+      program, table = walk("show(Class.new { z })", scope.with_singleton_class_body(true))
+
+      expect(table[last_statement(program).arguments.arguments.first.block.body.body.first].singleton_class_body?)
+        .to be(false)
+    end
+
+    it "files the defs of a `refine` block in a class body under the class, not the refined class" do
+      source = "class W\n  show(refine(String) { def label = 1 })\nend"
+      program = Prism.parse(source).value
+      table = Rigor::Inference::ScopeIndexer.index(program, default_scope: scope)
+
+      definition = program.statements.body.first.body.body.first.arguments.arguments.first.block.body.body.first
+      expect(table[definition].self_type).to eq(combinator.singleton_of("W"))
+    end
+
     it "keeps the scope of a def of a class-body block the evaluator already recorded" do
       source = "refine Foo do\n  def m = 1\nend"
       own = scope.with_local(:o, const(9))
@@ -207,6 +270,17 @@ RSpec.describe Rigor::Inference::ScopeIndexer::NodePropagation do
       program, table = walk("y = 1\ny&.foo((y = nil), y)", scope.with_local(:y, string_or_nil))
 
       expect(table[last_statement(program).arguments.arguments.last].local(:y)).to eq(string_or_nil)
+    end
+  end
+
+  describe "an `END` body" do
+    it "does not read a guard's narrowing of a global, since it runs after code that may rebind it" do
+      string = combinator.nominal_of("String")
+      start = scope.with_guarded_global(:$g, string, combinator.untyped)
+      program, table = walk("END { $g }", start)
+
+      expect(start.global(:$g)).to eq(string)
+      expect(table[last_statement(program).statements.body.first].global(:$g)).not_to eq(string)
     end
   end
 
@@ -285,6 +359,20 @@ RSpec.describe Rigor::Inference::ScopeIndexer::NodePropagation do
       expect(calls).to be_empty
     end
 
+    it "hands an unrecorded subjectless `case` to the evaluation by its first `when` test" do
+      program, calls = evaluating("[case; when a then 1 end]")
+
+      expect(calls.map { |arguments, _| arguments.first }).to eq([last_statement(program).elements.first])
+    end
+
+    it "leaves the block of a class-creating or `refine` call to the walk" do
+      _program, class_calls = evaluating("show(Class.new { def m = 1 })")
+      _refine, refine_calls = evaluating("refine Foo do\n  def m = 1\nend")
+
+      expect(class_calls).to be_empty
+      expect(refine_calls).to be_empty
+    end
+
     it "installs the evaluation for the block only" do
       evaluate = -> {}
       seen = []
@@ -297,6 +385,9 @@ RSpec.describe Rigor::Inference::ScopeIndexer::NodePropagation do
   end
 
   describe ".refined_class_name" do
+    # The `delete_prefix("::")` in the method is a labelled guard: `Source::ConstantPath.qualified_name` renders a
+    # rooted path without its `::` and a `Singleton`'s class name carries none, so no input reaches it. Tried a rooted
+    # constant, a nested rooted path and a class the environment knows.
     it "names a constant the scope does not type as a class as written, without a leading `::`" do
       target = Prism.parse("::Foo::Bar").value.statements.body.first
 

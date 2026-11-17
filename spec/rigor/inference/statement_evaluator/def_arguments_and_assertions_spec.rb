@@ -106,30 +106,34 @@ RSpec.describe Rigor::Inference::StatementEvaluator::DefArgumentsAndAssertions d
   end
 
   describe ".apply_plugin_assertions" do
-let(:fact_class) { Rigor::FlowContribution::Fact }
-let(:plugin_class) do
-  Struct.new(:facts, :seen) do
-    def narrowing_facts_for(call_node:, scope:)
-      seen << [call_node, scope]
-      facts
+    def fact_class = Rigor::FlowContribution::Fact
+
+    def plugin_class
+      Struct.new(:facts, :seen) do
+        def narrowing_facts_for(call_node:, scope:)
+          seen << [call_node, scope]
+          facts
+        end
+      end
     end
-  end
-end
-let(:registry_class) do
-  Struct.new(:contribution_index) do
-    def empty? = false
-  end
-end
-let(:index_class) do
-  Struct.new(:plugins) do
-    def for_statement = plugins
 
-    def statement_candidate?(name) = name == :narrow_x
+    def registry_class
+      Struct.new(:contribution_index) do
+        def empty? = false
+      end
+    end
 
-    def narrowing_facts_candidate_for?(_plugin, name) = name == :narrow_x
-  end
-end
-let(:environment_class) { Struct.new(:plugin_registry) }
+    def index_class
+      Struct.new(:plugins) do
+        def for_statement = plugins
+
+        def statement_candidate?(name) = name == :narrow_x
+
+        def narrowing_facts_candidate_for?(_plugin, name) = name == :narrow_x
+      end
+    end
+
+    def environment_class = Struct.new(:plugin_registry)
 
     def scope_with(plugins)
       registry = registry_class.new(index_class.new(plugins))

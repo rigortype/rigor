@@ -3,17 +3,18 @@
 require "spec_helper"
 require "prism"
 
-# ADR-116 C4 — `ExpressionTyper::ControlFlow` types the control-flow nodes in value position: `if` / `unless` and
-# `and` / `or` (delegated to the statement evaluator), `case` with its three-valued `when` certainty, and `begin` /
-# `rescue` / `expr rescue fallback`. The examples parse a snippet and call the entry with a scope that binds the
-# locals the snippet reads and a real typer over it, the module's callbacks being `type_of`, `statements_or_nil`,
-# `typer_under` and `block_level_jump?`.
+# ADR-116 C4 — `ExpressionTyper::ControlFlow` types the control-flow nodes in value position: `if` / `unless` and `and`
+# / `or` (delegated to the statement evaluator), `case` with its three-valued `when` certainty, and `begin` / `rescue` /
+# `expr rescue fallback`. The examples parse a snippet and call the entry with a scope that binds the locals the snippet
+# reads and a real typer over it, the module's callbacks being `type_of`, `statements_or_nil`, `typer_under` and
+# `block_level_jump?`.
 #
-# Three guards no example distinguishes: `case_when_branch_certainty`'s `return :maybe if results.empty?` (a `when` clause
-# always has a condition, so `results` is never empty); `type_of_case`'s `return type_of_case_simple_union(node, typer) if
-# node.is_a?(CaseMatchNode)` (a `case ... in` through the predicate path types the same arms and the same `nil`, tried with
-# class, literal and binding patterns); and `type_of_loop`'s `return constant_of(nil) if break_free_condition_loop?` (a
-# loop nothing breaks out of evaluates to `nil` either way; the guard only skips evaluating the body).
+# Three guards no example distinguishes: `case_when_branch_certainty`'s `return :maybe if results.empty?` (a `when`
+# clause always has a condition, so `results` is never empty); `type_of_case`'s `return type_of_case_simple_union(node,
+# typer) if node.is_a?(CaseMatchNode)` (a `case ... in` through the predicate path types the same arms and the same
+# `nil`, tried with class, literal and binding patterns); and `type_of_loop`'s `return constant_of(nil) if
+# break_free_condition_loop?` (a loop nothing breaks out of evaluates to `nil` either way; the guard only skips
+# evaluating the body).
 RSpec.describe Rigor::Inference::ExpressionTyper::ControlFlow do
   let(:combinator) { Rigor::Type::Combinator }
   let(:integer) { combinator.nominal_of("Integer") }
@@ -119,7 +120,7 @@ RSpec.describe Rigor::Inference::ExpressionTyper::ControlFlow do
     end
 
     it "forgets the `$!` an enclosing clause bound and reads a written local as Dynamic[top] in a rescue arm" do
-      entered = scope.with_global(:"$!", string)
+      entered = scope.with_global(:$!, string)
 
       expect(described_class.type_of_begin(node_of("begin; 1; rescue; $!; end"), entered, typer_over(entered)).describe)
         .to eq("1 | Dynamic[top]")

@@ -8,10 +8,10 @@ require "prism"
 # fallback recorded. The examples call the entries with a real typer whose tracer collects the fallback events, which
 # are the module's three callbacks' visible effect (`fallback_for`, `record_fallback`, `dynamic_top`).
 #
-# One guard no example distinguishes: `type_of_constant_path`'s `rooted: Source::ConstantPath.rooted?(node)`. `rooted` only
-# stops the lexical ladder, so it separates `::Foo` from `Foo` only where an enclosing namespace defines its own `Foo`;
-# that needs the discovery tables, which `Scope.empty` lacks, and `reflection_spec.rb` pins the ladder. Tried `::Integer`,
-# `::Comparable` and `::Nope` over `Scope.empty`.
+# One guard no example distinguishes: `type_of_constant_path`'s `rooted: Source::ConstantPath.rooted?(node)`. `rooted`
+# only stops the lexical ladder, so it separates `::Foo` from `Foo` only where an enclosing namespace defines its own
+# `Foo`; that needs the discovery tables, which `Scope.empty` lacks, and `reflection_spec.rb` pins the ladder. Tried
+# `::Integer`, `::Comparable` and `::Nope` over `Scope.empty`.
 RSpec.describe Rigor::Inference::ExpressionTyper::Constants do
   let(:combinator) { Rigor::Type::Combinator }
   let(:scope) { Rigor::Scope.empty }

@@ -4,13 +4,14 @@ require "spec_helper"
 require "prism"
 
 # ADR-116 C4 — `ExpressionTyper::Composites` types the nodes whose answer is built from their children's types: hash,
-# array, range and interpolation literals, and the pass-through nodes (parentheses, statements, `else`, `ensure`,
-# `when` / `in`, a `class` body). The examples parse a snippet and call the entry with a real typer over a scope that
-# binds the locals the snippet reads, which is the module's one callback (`typer.type_of`).
+# array, range and interpolation literals, and the pass-through nodes (parentheses, statements, `else`, `ensure`, `when`
+# / `in`, a `class` body). The examples parse a snippet and call the entry with a real typer over a scope that binds the
+# locals the snippet reads, which is the module's one callback (`typer.type_of`).
 #
-# Two guards no example distinguishes: `array_type_for`'s `return tuple_of if elements.empty?` (`tuple_of(*[])` builds the
-# same empty Tuple) and `statements_or_nil`'s `return constant_of(nil) if statements_node.nil?` (`statements_type_for`
-# answers `nil` for a nil node itself); tried `[]`, `[*[]]`, `begin; end`, `()`, an empty `else` and an empty `ensure`.
+# Two guards no example distinguishes: `array_type_for`'s `return tuple_of if elements.empty?` (`tuple_of(*[])` builds
+# the same empty Tuple) and `statements_or_nil`'s `return constant_of(nil) if statements_node.nil?`
+# (`statements_type_for` answers `nil` for a nil node itself); tried `[]`, `[*[]]`, `begin; end`, `()`, an empty `else`
+# and an empty `ensure`.
 RSpec.describe Rigor::Inference::ExpressionTyper::Composites do
   let(:combinator) { Rigor::Type::Combinator }
   let(:integer) { combinator.nominal_of("Integer") }

@@ -12885,7 +12885,7 @@ module Rigor
       #
       # The wildcard key survives into the attribution so a producer with no censused name of its own — a
       # `pre_eval:` publication for a file outside `paths:` — can still see the conflict
-      # ({Analysis::Runner#publishable_pre_eval_constants}).
+      # ({Analysis::Runner::ScopeSeed.merged_seed_constants}).
       def apply_dynamic_target_writes(values, sources, dynamic)
         return if dynamic.empty?
 

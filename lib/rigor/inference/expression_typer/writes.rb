@@ -8,7 +8,6 @@ require_relative "../../source/constant_path"
 require_relative "../../type"
 require_relative "../method_dispatcher"
 require_relative "../narrowing"
-require_relative "../statement_evaluator"
 
 module Rigor
   module Inference
@@ -20,7 +19,9 @@ module Rigor
       # `type_of_index_compound_write`; every other method is private to the module (ADR-116 C3). State is passed, not
       # shared: each entry takes the values it reads from the typer as trailing positional parameters (`scope`,
       # `tracer`) and the typer itself (`typer`) when it calls back. `ScopeIndexer` (for `DYNAMIC_TARGET_PREFIX`) is not
-      # required here: it requires this class, and a direct require makes a cycle (`ruby -w`).
+      # required here: it requires this class, and a direct require makes a cycle (`ruby -w`). `StatementEvaluator` is
+      # not required either: requiring it from here changes the load order of the TypingState slot declarations. Both
+      # are loaded by `expression_typer.rb`'s own requires before any call.
       module Writes
         module_function
 

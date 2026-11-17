@@ -108,4 +108,37 @@ RSpec.describe Rigor::Inference::ExpressionTyper::Writes do
       expect(tracer.events.map(&:node_class)).to include(Prism::ConstantReadNode)
     end
   end
+
+  # The constant binding's callback, `typer.resolve_constant_name(full_name, rooted: rooted, caller_derived: false)`,
+  # needs the discovery tables and a lexical nesting, which `Scope.empty` lacks, so these go through the runner.
+  describe "the constant binding a compound write reads", type: :runner do
+    def dumped_type(source)
+      result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
+      result.diagnostics.filter_map do |diagnostic|
+        diagnostic.message.delete_prefix("dump_type: ") if diagnostic.message.start_with?("dump_type")
+      end.first
+    end
+
+    it "passes `rooted:`, so `::X ||=` reads the top-level constant past a lexically nearer one" do
+      expect(dumped_type(<<~RUBY)).to eq("5 | 9")
+        ::TOPW = 5
+        module Outer
+          TOPW = :inner
+          Rigor.dump_type(::TOPW ||= 9)
+        end
+      RUBY
+    end
+
+    it "passes `caller_derived: false`, so a top-level memo is not bound to the calling namespace's constant" do
+      expect(dumped_type(<<~RUBY)).to eq("{}")
+        def registry = (REGISTRY ||= {})
+
+        class Plugin
+          REGISTRY = "plugins"
+
+          def entries = Rigor.dump_type(registry)
+        end
+      RUBY
+    end
+  end
 end

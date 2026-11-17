@@ -11,7 +11,8 @@ module Rigor
       # modulo family by a literal zero.
       #
       # The one entry point is {.diagnostic}, called by `CheckRules.call_node_diagnostics`. It reads
-      # {ReceiverPredicates} and {AlwaysRaisesShield} and calls nothing else in `CheckRules`.
+      # {ReceiverPredicates}; the `raise_shield` ({AlwaysRaisesShield}) it consults is handed in. It calls nothing
+      # else in `CheckRules`.
       module AlwaysRaises
         module_function
 

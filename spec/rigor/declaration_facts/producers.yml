@@ -660,7 +660,6 @@ lib/rigor/inference/scope_indexer/mixin_accumulator.rb:
 lib/rigor/inference/scope_indexer/node_propagation.rb:
   computes: the per-node scope table's entries for the nodes the evaluator did not visit; it records no declaration
   producers:
-    Rigor::Inference::ScopeIndexer::NodePropagation: the node-class lists the per-node scope walk scopes or stops at (SELF_OPENING_BODIES, CLASS_BODY_DEF_BARRIERS), moved here from the ScopeIndexer body with the walk; they name a class or module body to scope it, and compute no declaration context
     Rigor::Inference::ScopeIndexer::NodePropagation#code_body_nodes: collects the nodes inside the code bodies of a construct the per-node scope walk evaluates unentered, which its recording leaves to the walk (#2196); it decides which nodes a recording skips, not what a declaration is
     Rigor::Inference::ScopeIndexer::NodePropagation#each_class_body_def: yields the defs of a value-position class-body block so the per-node scope walk records the self each body runs on (#1696); it registers no method, the def index having keyed them already
     Rigor::Inference::ScopeIndexer::NodePropagation#propagate: grandfathered

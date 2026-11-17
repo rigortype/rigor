@@ -55,7 +55,6 @@ require_relative "scope_indexer/constant_ivar_value"
 require_relative "scope_indexer/ivar_contributions"
 require_relative "scope_indexer/empty_seed"
 require_relative "scope_indexer/mutated_element_census"
-require_relative "scope_indexer/node_propagation"
 
 module Rigor
   module Inference
@@ -233,8 +232,8 @@ module Rigor
       end
 
       # The `(node, scope, excluded = nil) ->` evaluation that records every node it visits into `table`, except the
-      # nodes in `excluded`: the file's own pass, and each construct {#evaluate_unentered_flow} evaluates in the walk
-      # after it.
+      # nodes in `excluded`: the file's own pass, and each construct {NodePropagation#evaluate_unentered_flow}
+      # evaluates in the walk after it.
       def recording_evaluator(table, converged_loop_recording, widen_clauses)
         lambda do |node, scope, excluded = nil, block_only: false|
           on_enter =
@@ -13685,9 +13684,21 @@ module Rigor
 
       def refined_class_name(target, scope) = NodePropagation.refined_class_name(target, scope)
 
-      # Also read by {NodePropagation}, lexically: it stayed because {#each_singleton_body_prepend} uses it too.
+      # Read by {NodePropagation}, lexically. This one stayed because {#each_singleton_body_prepend} uses it too; the
+      # next two stayed so that the node-class lists do not make the moved module a declaration producer.
       CODE_BODY_NODES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
       private_constant :CODE_BODY_NODES
+
+      SELF_OPENING_BODIES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
+      private_constant :SELF_OPENING_BODIES
+
+      CLASS_BODY_DEF_BARRIERS = [
+        Prism::BlockNode, Prism::LambdaNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode
+      ].freeze
+      private_constant :CLASS_BODY_DEF_BARRIERS
     end
   end
 end
+
+# Last, so that the typing-state slot it declares keeps its place after the ones the module body above declares.
+require_relative "scope_indexer/node_propagation"

@@ -176,9 +176,6 @@ module Rigor
           TypingState.current.with(UNENTERED_EVALUATOR, evaluate.freeze, &)
         end
 
-        SELF_OPENING_BODIES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
-        private_constant :SELF_OPENING_BODIES
-
         # Issue #1717 — a `def` / `class` / `module` body opens its own `self`, so an enclosing unentered block's
         # unknown-`self` mark ({Scope#block_self_unknown?}) stops at it, as the evaluator's fresh body scope does.
         # Issue #1246 — it opens its own local table too, so a name in it (a `def`'s parameter, a body local) is a new
@@ -351,11 +348,6 @@ module Rigor
 
           node.rigor_each_child { |child| each_class_body_def(child, &) }
         end
-
-        CLASS_BODY_DEF_BARRIERS = [
-          Prism::BlockNode, Prism::LambdaNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode
-        ].freeze
-        private_constant :CLASS_BODY_DEF_BARRIERS
 
         # The narrowing ({MacroBlockSelfType::Match}) an unentered block's body runs with — its `self` and, for a
         # `block_as_methods:` entry, the declared refinements (issue #1667) — when the call is one whose block the

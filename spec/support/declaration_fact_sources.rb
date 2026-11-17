@@ -374,8 +374,9 @@ module DeclarationProducerScan
   end
 end
 
-# ADR-119 WD6's rule (v): the methods of `scope_indexer.rb` that are reachable, through same-file calls (a default
-# argument's included), from `ROOTS` or from a method another covered file calls as `ScopeIndexer.x`, and write into
+# ADR-119 WD6's rule (v): the methods of `RULE_V_FILES` that are reachable, through same-file calls (a default
+# argument's included), from `ROOTS` or from a method another covered file calls as `ScopeIndexer.x` (or
+# `NodePropagation.x`), and write into
 # one of their parameters: an indexed assignment or a `<<` / `merge!`-style call into it, or passing it to a
 # same-file method that does.
 module DeclarationWriterScan
@@ -406,7 +407,7 @@ module DeclarationWriterScan
     end.uniq
   end
 
-  # Rule (v): yields the keys of `scope_indexer.rb`'s methods that are reachable from its entry points and write
+  # Rule (v): yields the keys of a rule (v) file's methods that are reachable from its entry points and write
   # into a parameter.
   def rule_v(root, extra_roots = [])
     return unless root

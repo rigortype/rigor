@@ -104,7 +104,7 @@ never chooses the cut.
   Suppression parsing (~L447–660) becomes one more module, and the shared receiver predicates
   (`lookup_method`, `concrete_class_name`, `project_defines_method?`, …) one shared module. This is
   a pure move; the largest pieces are undefined-method (~L664–1507) and argument-type (~L2621–3230).
-  Landed 2026-11-17 in five slices (#3290, #3294, #3301, #3306 and #PRNUM): `check_rules.rb` now holds only
+  Landed 2026-11-17 in five slices (#3290, #3294, #3301, #3306 and #3308): `check_rules.rb` now holds only
   the orchestration (`diagnose`, the node-collector construction and driving, the per-node dispatch
   and the suppression delegators); every rule is its own module under `check_rules/`.
 - **WD2 — Discovery-table declarations (C1; #1194).** Each `DiscoveryIndex` table declares:

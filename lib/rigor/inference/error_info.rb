@@ -40,8 +40,8 @@ module Rigor
       # The exception instance type a `RescueNode` binds its reference to: `StandardError` for a bare `rescue`, else
       # the union over the named exceptions, each the instance of the class the block types it as (`yield`ed the
       # exception node) or `Dynamic[top]` when that is not a `Singleton` (a splat list, an unresolved constant).
-      # Shared by `StatementEvaluator#rescue_exception_type` and the class-ivar census (issue #1217), so the two
-      # agree.
+      # Shared by `StatementEvaluator::PatternBindings.rescue_exception_type` and the class-ivar census (issue #1217),
+      # so the two agree.
       def rescue_exception_type(rescue_node)
         exceptions = rescue_node.exceptions
         return Type::Combinator.nominal_of("StandardError") if exceptions.empty?
@@ -55,12 +55,12 @@ module Rigor
 
       # The scope a `rescue` clause, or a rescue modifier's fallback, runs from: `$!` bound to the exception it rescued
       # and `$@` to that exception's backtrace, with `$?` unbound. `exception_type` is what `rescue … => e` binds `e` to
-      # (`StatementEvaluator#rescue_exception_type`): the union of the named classes' instances, `StandardError` for a
-      # bare `rescue`. A member that is not a class RBS or the program places below `Exception` reads `Dynamic[top]`
-      # instead: a rescue list may name a module with its own `===` (`rescue NetworkErrors`), which matches exceptions
-      # that are not instances of it, and a class the analyzer cannot place may be such an object too. So does a class
-      # that it or a project ancestor gives its own singleton `===` (`class Matchy < StandardError; def self.===(o) =
-      # true`).
+      # (`StatementEvaluator::PatternBindings.rescue_exception_type`): the union of the named classes' instances,
+      # `StandardError` for a bare `rescue`. A member that is not a class RBS or the program places below `Exception`
+      # reads `Dynamic[top]` instead: a rescue list may name a module with its own `===` (`rescue NetworkErrors`), which
+      # matches exceptions that are not instances of it, and a class the analyzer cannot place may be such an object
+      # too. So does a class that it or a project ancestor gives its own singleton `===` (`class Matchy < StandardError;
+      # def self.===(o) = true`).
       #
       # `body` is the clause's statements or the fallback, and `reference` the name of the local a `rescue … => e`
       # clause binds. When the body guards `$!`, or that local, which is the same object, by its class ({.guarded?}),

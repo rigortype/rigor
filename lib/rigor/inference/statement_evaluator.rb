@@ -27,6 +27,8 @@ require_relative "../analysis/check_rules/declaration_sourced_guard"
 require_relative "../analysis/check_rules/inferred_param_guard"
 require_relative "../analysis/check_rules/published_constant_guard"
 require_relative "struct_fold_safety"
+require_relative "statement_evaluator/def_arguments_and_assertions"
+require_relative "statement_evaluator/pattern_bindings"
 require_relative "closure_escape_analyzer"
 require_relative "self_preserving_block"
 require_relative "content_join"
@@ -2223,6 +2225,8 @@ module Rigor
         [scope.type_of(node, tracer: tracer), forget_rebound_specials(widened, node)]
       end
 
+      # @api private — public only so {PatternBindings.bind_rescue_reference} can call it on the evaluator it is given.
+      #
       # The scope effect of calling the writer `writer` on `receiver` outside a `CallNode`: the receiver widening, the
       # drop of every method-chain narrowing rooted at the receiver that `eval_call` makes after any call on it (issue
       # #2693: `x.r ||= v`, `x.r, y = …` and `for x.r in …` call `r=`), and the receiver-wide drop of recorded
@@ -2235,6 +2239,7 @@ module Rigor
         widened = widened.without_method_chain_narrowings_for(*stable)
         IndexedNarrowing.mutator?(writer) ? widened.without_indexed_narrowings_for(*stable) : widened
       end
+      public :widen_attribute_write
 
       # The attribute targets of a multi-write (`h.default, x = 0, 1`), nested ones included, each widening its
       # receiver as the plain writer call would.
@@ -2258,6 +2263,8 @@ module Rigor
         end
       end
 
+      # @api private — public only so {PatternBindings.bind_rescue_reference} can call it on the evaluator it is given.
+      #
       # An index target (`Prism::IndexTargetNode`) stores `stored` through `[]=` on its receiver wherever it
       # appears — a multi-assign slot, a `for` index, a rescue reference — so its receiver widens exactly as the
       # plain store `h[:a] = v` widens it, joining `stored` as content evidence (issue #560), and drops the
@@ -2270,6 +2277,7 @@ module Rigor
                                            arg_types: index_write_arg_types(target, stored, type_scope: type_scope))
         IndexedNarrowing.invalidate_indexed_write(target, widened)
       end
+      public :widen_index_target
 
       # `if pred; t; (elsif/else)?` runs the predicate first (its post-scope is shared by both branches), then asks
       # `Rigor::Inference::Narrowing` for the truthy and falsey edge scopes derived from the predicate. Slice 6 phase 1
@@ -2700,7 +2708,8 @@ module Rigor
       # shape.
       def in_branch_body_and_falsey_scopes(subject_type, subject, branch, falsey_scope)
         truthy_scope, narrowed_falsey = Narrowing.case_clause_scopes(subject, branch, falsey_scope)
-        [apply_in_pattern_bindings(subject_type, subject, branch.pattern, truthy_scope), narrowed_falsey]
+        [PatternBindings.apply_in_pattern_bindings(subject_type, subject, branch.pattern, truthy_scope, self),
+         narrowed_falsey]
       end
 
       def eval_case_else(else_clause, falsey_scope)
@@ -2717,9 +2726,9 @@ module Rigor
 
       # Issue #1360 — a `begin` with a rescue chain runs through {#eval_begin} with `$!` and `$@` restored as it
       # leaves ({#restoring_error_info}): Ruby restores them once the `begin` exits, however it exits, so the binding
-      # its rescue clauses made ({#bind_rescue_reference}) never reaches the code after it. The retry edge carries
-      # locals and instance variables only, so a retried body reads them as the `begin` found them already. A `begin`
-      # without a rescue chain binds neither.
+      # its rescue clauses made ({PatternBindings.bind_rescue_reference}) never reaches the code after it. The retry
+      # edge carries locals and instance variables only, so a retried body reads them as the `begin` found them
+      # already. A `begin` without a rescue chain binds neither.
       #
       # A body a `retry` re-enters runs again after the exception it raised, which may have come while a subprocess
       # waited and so left `$?` nil, and the retry edge does not carry `$?`: such a `begin` is evaluated with `$?`
@@ -3434,10 +3443,10 @@ module Rigor
         while current
           widened = widen_clause_entry(entry_scope, writes, current.statements)
           record_operand_clause(current.statements, widened)
-          rescue_scope = bind_rescue_reference(current, entry_scope)
+          rescue_scope = PatternBindings.bind_rescue_reference(current, entry_scope, self)
           arm = if widened
-                  eval_widened_clause(current.statements, rescue_scope, bind_rescue_reference(current, widened),
-                                      on_enter: on_enter)
+                  eval_widened_clause(current.statements, rescue_scope,
+                                      PatternBindings.bind_rescue_reference(current, widened, self), on_enter: on_enter)
                 else
                   eval_branch_or_nil(current.statements, rescue_scope, on_enter: on_enter)
                 end
@@ -4656,6 +4665,8 @@ module Rigor
         [body_type, scope]
       end
 
+      # @api private — public only so {DefArgumentsAndAssertions} can call it on the evaluator it is given.
+      #
       # `def name(params); body; end`. Builds the method-entry scope by binding the parameter list (RBS-driven where
       # available, or `Dynamic[Top]` for the slice 3 phase 2 fallback) into a fresh scope, then evaluates the body under
       # that scope. The outer scope is left unchanged: a `def` does not introduce a binding in its enclosing scope. Ruby
@@ -4677,6 +4688,7 @@ module Rigor
         end
         [Type::Combinator.constant_of(node.name), scope]
       end
+      public :eval_def
 
       # `recv.foo(args) { |params| body }` and friends. The call type comes from `Scope#type_of` (which routes through
       # `ExpressionTyper#call_type_for` and is itself block-aware since Slice 6 phase C sub-phase 2: it builds the
@@ -4841,7 +4853,7 @@ module Rigor
         # `self.helper` inside reports `undefined method 'helper' for singleton(C)`. Walking each argument-position def
         # under the current evaluator (not a sub_eval — the def's effects do not bind into the surrounding scope)
         # populates the scope index with the correct instance / singleton `self_type` for the def's body.
-        evaluate_def_arguments(node)
+        DefArgumentsAndAssertions.evaluate_def_arguments(node, self)
         post_scope = record_closure_escape_if_any(node)
         # ADR-56 slice A — non-escaping block captured-local write-back. A `:non_escaping` block (each / times / upto /
         # map …) that rebinds an outer local must not leave that local's pre-call binding unmodified in the continuation
@@ -5050,9 +5062,9 @@ module Rigor
       end
 
       def apply_post_return_narrowing(node, post_scope)
-        post_scope = apply_rbs_extended_assertions(node, post_scope)
-        post_scope = apply_plugin_assertions(node, post_scope)
-        apply_rspec_matcher_narrowing(node, post_scope)
+        post_scope = DefArgumentsAndAssertions.apply_rbs_extended_assertions(node, post_scope, tracer)
+        post_scope = DefArgumentsAndAssertions.apply_plugin_assertions(node, post_scope, tracer)
+        DefArgumentsAndAssertions.apply_rspec_matcher_narrowing(node, post_scope)
       end
 
       # True when `node` could rebind the regex match-data globals by itself
@@ -5119,343 +5131,6 @@ module Rigor
         case self_type
         when Type::Nominal, Type::Singleton then self_type.class_name
         end
-      end
-
-      def evaluate_def_arguments(call_node)
-        args = call_node.arguments
-        return unless args.respond_to?(:arguments)
-
-        args.arguments.each do |arg|
-          eval_def(arg) if arg.is_a?(Prism::DefNode)
-        end
-      end
-
-      # Recognises a small catalogue of RSpec matcher patterns as assert-shaped narrows on the local passed to
-      # `expect(...)`. The pattern is matched purely on AST shape; no RBS for RSpec is required (and none is shipped
-      # today).
-      #
-      # Recognised today:
-      #
-      #   expect(x).not_to(be_nil)
-      #   expect(x).to_not(be_nil)
-      #     → narrow `x` AWAY from `NilClass`.
-      #
-      #   expect(x).to(be_a(C))
-      #   expect(x).to(be_kind_of(C))
-      #   expect(x).to(be_an_instance_of(C))
-      #   expect(x).to(be_instance_of(C))
-      #     → narrow `x` to `C` (exact for the two
-      #       `*instance_of` matchers, subtype-permitting
-      #       otherwise).
-      #
-      # Anything else is silently passed through. Symmetric negative class assertions (`not_to be_a(C)`) and narrowing
-      # TO `NilClass` are intentionally NOT modelled: they are rarely useful in practice and risk masking bugs if the
-      # assertion later fails.
-      def apply_rspec_matcher_narrowing(call_node, current_scope)
-        narrow = rspec_matcher_narrowing_request(call_node)
-        return current_scope if narrow.nil?
-
-        local_name = narrow.fetch(:local)
-        current_type = current_scope.local(local_name)
-        return current_scope if current_type.nil?
-
-        narrowed = apply_rspec_narrow(current_type, narrow, current_scope.environment)
-        current_scope.with_local(local_name, narrowed)
-      end
-
-      # Decodes an `expect(x).<chain>` outer call into a narrowing request hash, or `nil` when the shape is not
-      # recognised. The hash carries `:local` (the local name being narrowed) plus the narrowing parameters.
-      def rspec_matcher_narrowing_request(call_node)
-        local_name = rspec_expectation_target(call_node)
-        return nil if local_name.nil?
-
-        case call_node.name
-        when :not_to, :to_not
-          rspec_negative_narrow(call_node, local_name)
-        when :to
-          rspec_positive_narrow(call_node, local_name)
-        end
-      end
-
-      def rspec_negative_narrow(call_node, local_name)
-        return nil unless rspec_matcher_argument?(call_node, :be_nil)
-
-        { local: local_name, kind: :not_class, class_name: "NilClass", exact: false }
-      end
-
-      def rspec_positive_narrow(call_node, local_name)
-        matcher = rspec_matcher_node(call_node)
-        return nil if matcher.nil?
-
-        case matcher.name
-        when :be_a, :be_kind_of
-          rspec_be_a_narrow(matcher, local_name, exact: false)
-        when :be_an_instance_of, :be_instance_of
-          rspec_be_a_narrow(matcher, local_name, exact: true)
-        end
-      end
-
-      # `be_a` / `be_kind_of` / `be_an_instance_of` accept a single class argument — either a `ConstantReadNode`
-      # (`Integer`) or a `ConstantPathNode` (`Rigor::Type::Nominal`).
-      def rspec_be_a_narrow(matcher, local_name, exact:)
-        args = matcher.arguments&.arguments || []
-        return nil unless args.size == 1
-
-        class_name = Source::ConstantPath.qualified_name_or_nil(args.first)
-        return nil if class_name.nil?
-
-        { local: local_name, kind: :class, class_name: class_name, exact: exact }
-      end
-
-      def apply_rspec_narrow(current_type, narrow, environment)
-        case narrow.fetch(:kind)
-        when :not_class
-          Narrowing.narrow_not_class(current_type, narrow.fetch(:class_name),
-                                     exact: narrow.fetch(:exact), environment: environment)
-        when :class
-          Narrowing.narrow_class(current_type, narrow.fetch(:class_name),
-                                 exact: narrow.fetch(:exact), environment: environment)
-        end
-      end
-
-      # Returns the local name passed to `expect(...)` when the receiver chain matches `expect(<local>)` exactly, or nil
-      # otherwise. Centralised so each per-matcher decoder can short-circuit on a non-matching outer call.
-      def rspec_expectation_target(call_node)
-        receiver = call_node.receiver
-        return nil unless receiver.is_a?(Prism::CallNode) && receiver.name == :expect
-        return nil unless receiver.receiver.nil?
-
-        args = receiver.arguments&.arguments || []
-        return nil unless args.size == 1
-
-        target = args.first
-        target.is_a?(Prism::LocalVariableReadNode) ? target.name : nil
-      end
-
-      def rspec_matcher_node(call_node)
-        args = call_node.arguments&.arguments || []
-        return nil unless args.size == 1
-
-        matcher = args.first
-        return nil unless matcher.is_a?(Prism::CallNode) && matcher.receiver.nil? && matcher.block.nil?
-
-        matcher
-      end
-
-      # True when `call_node`'s sole argument is an implicit-self matcher call with the given name and no positional
-      # arguments — used by the no-arg matchers (`be_nil`).
-      def rspec_matcher_argument?(call_node, matcher_name)
-        matcher = rspec_matcher_node(call_node)
-        return false if matcher.nil?
-        return false unless matcher.name == matcher_name
-
-        matcher.arguments.nil? || matcher.arguments.arguments.empty?
-      end
-
-      # Slice 4b-2 (ADR-7 § "Slice 4-A/4-B") — applies the post-return facts the merger produces for an
-      # `RBS::Extended`-annotated call. Reads through `RbsExtended.read_flow_contribution` so the bundle carries the
-      # canonical `Rigor::FlowContribution::Fact` rows for `:always` assert directives (the slice-4a routing places
-      # conditional asserts on `truthy_facts` / `falsey_facts`, which `Narrowing.predicate_scopes` consumes). Plugin
-      # `:always` assertions are handled by the sibling `apply_plugin_assertions`, not this path.
-      def apply_rbs_extended_assertions(call_node, current_scope)
-        method_def = resolve_call_method(call_node, current_scope)
-        return current_scope if method_def.nil?
-
-        contribution = RbsExtended.read_flow_contribution(method_def, environment: current_scope.environment)
-        return current_scope if contribution.nil?
-
-        result = Rigor::FlowContribution::Merger.merge([contribution])
-        post_return = result.post_return_facts
-        return current_scope if post_return.empty?
-
-        post_return.reduce(current_scope) do |scope_acc, fact|
-          apply_post_return_fact(fact, call_node, scope_acc, method_def)
-        end
-      end
-
-      # ADR-7 § "Slice 4-A" / T.bind priority slice 2 — applies the post-return facts plugin contributions produce. This
-      # is the sibling of {apply_rbs_extended_assertions}: the carrier (`Rigor::FlowContribution::Fact`) and the
-      # downstream narrowing path (`apply_post_return_fact` → `apply_self_post_return_fact`) are the same; only the
-      # *source* of the bundle changes (RBS::Extended vs the registered plugins' `flow_contribution_for`).
-      #
-      # `:self`-targeted facts narrow `scope.self_type` for the surrounding scope. In a block body, the surrounding
-      # scope is the block's own scope, so the narrowing applies to the rest of the block — exactly the contract
-      # Sorbet's `T.bind(self, T)` commits to.
-      #
-      # `:parameter`-targeted facts only land when the called method has an authoritative RBS sig (via
-      # `resolve_call_method`); plugins recognising their own synthetic call shapes (e.g. `T.assert_type!`) have no
-      # method_def and the parameter facts silently skip — the plugin's own diagnostics_for_file path covers those
-      # cases. The full plugin-side parameter-targeting story (PHPStan-style Type-Specifying Extensions on
-      # plugin-recognised calls) lives behind a follow-up slice that introduces an `:argument_at` target kind.
-      def apply_plugin_assertions(call_node, current_scope)
-        registry = current_scope.environment&.plugin_registry
-        return current_scope if registry.nil? || registry.empty?
-
-        contributions = collect_plugin_contributions(registry, call_node, current_scope)
-        return current_scope if contributions.empty?
-
-        result = Rigor::FlowContribution::Merger.merge(contributions)
-        post_return = result.post_return_facts
-        return current_scope if post_return.empty?
-
-        method_def = resolve_call_method(call_node, current_scope)
-        post_return.reduce(current_scope) do |scope_acc, fact|
-          apply_post_return_fact(fact, call_node, scope_acc, method_def)
-        end
-      end
-
-      EMPTY_CONTRIBUTIONS = [].freeze
-      private_constant :EMPTY_CONTRIBUTIONS
-
-      # ADR-37 slice 2 / ADR-52 WD3 — gathers each plugin's post-return narrowing from the method-gated
-      # `narrowing_facts` DSL, wrapped as a facts-only `FlowContribution`, swallowing per-plugin exceptions so a buggy
-      # plugin can't abort the assertion path.
-      #
-      # Fast-exit guard: skip if no plugin declares a `narrowing_facts` rule, or if no registered method-name gate
-      # matches the call. See `collect_gated_statement_contributions` for the full consultation.
-      def collect_plugin_contributions(registry, call_node, current_scope)
-        index = registry.contribution_index
-        relevant = index.for_statement
-        return EMPTY_CONTRIBUTIONS if relevant.empty?
-
-        name = call_node.respond_to?(:name) ? call_node.name : nil
-        return EMPTY_CONTRIBUTIONS unless index.statement_candidate?(name)
-
-        collect_gated_statement_contributions(index, relevant, name, call_node, current_scope)
-      end
-
-      # ADR-37 slice 2 / ADR-52 WD1 — post-gate walk in registry order. Visits only plugins in `for_statement` (declare
-      # a `narrowing_facts` rule), further gated by the method-name Set probe so the common no-candidate case is a
-      # single lookup. Accumulates lazily; caller is read-only.
-      def collect_gated_statement_contributions(index, relevant, name, call_node, current_scope)
-        result = nil
-        relevant.each do |plugin|
-          next unless index.narrowing_facts_candidate_for?(plugin, name)
-
-          facts = plugin.narrowing_facts_for(call_node: call_node, scope: current_scope)
-          (result ||= []) << Rigor::FlowContribution.new(post_return_facts: facts) if facts && !facts.empty?
-        rescue StandardError
-          next
-        end
-        result || EMPTY_CONTRIBUTIONS
-      end
-
-      def resolve_call_method(call_node, current_scope)
-        receiver_node = call_node.receiver
-        receiver_type =
-          if receiver_node
-            current_scope.type_of(receiver_node, tracer: tracer)
-          else
-            current_scope.self_type
-          end
-        return nil if receiver_type.nil?
-
-        class_name = assertion_class_name(receiver_type)
-        return nil if class_name.nil?
-        return nil unless Rigor::Reflection.rbs_class_known?(class_name, scope: current_scope)
-
-        if receiver_type.is_a?(Type::Singleton)
-          Rigor::Reflection.singleton_method_definition(class_name, call_node.name, scope: current_scope)
-        else
-          Rigor::Reflection.instance_method_definition(class_name, call_node.name, scope: current_scope)
-        end
-      rescue StandardError
-        nil
-      end
-
-      def assertion_class_name(receiver_type)
-        case receiver_type
-        when Type::Nominal, Type::Singleton then receiver_type.class_name
-        end
-      end
-
-      # Slice 4b-2 — applies a single post-return Fact to the scope. Mirrors `Narrowing#apply_fact_to_scope`;
-      # shares the narrowing logic via `Narrowing.narrow_for_fact` so the
-      # predicate / assert / plugin paths all converge on the same hierarchy-aware narrowing rules.
-      #
-      # v0.1.8 Pillar 2 Slice 1 added the `:local` target_kind branch so plugins recognising bespoke call shapes
-      # (`expect(x).to be_a(T)`) can directly narrow a named local in the surrounding scope, bypassing the
-      # parameter-name lookup that requires an authoritative RBS sig on the called method (which RSpec matchers lack).
-      def apply_post_return_fact(fact, call_node, current_scope, method_def)
-        return apply_local_post_return_fact(fact, current_scope) if fact.target_kind == :local
-
-        target_node = fact_target_node(fact, call_node, method_def)
-        return apply_self_post_return_fact(fact, target_node, current_scope) if fact.target_kind == :self
-        return current_scope unless target_node.is_a?(Prism::LocalVariableReadNode)
-
-        local_name = target_node.name
-        current_type = current_scope.local(local_name)
-        return current_scope if current_type.nil?
-
-        narrowed = Narrowing.narrow_for_fact(current_type, fact, current_scope.environment)
-        current_scope.with_local(local_name, narrowed)
-      end
-
-      # v0.1.8 Pillar 2 Slice 1 — narrows the named local directly without consulting the call node's argument list. The
-      # fact's `target_name` is the local-variable name as written in source. Silently no-ops when the local is unbound
-      # in the current scope (the plugin's named local may have already gone out of scope when the contribution fires).
-      def apply_local_post_return_fact(fact, current_scope)
-        local_name = fact.target_name
-        current_type = current_scope.local(local_name)
-        return current_scope if current_type.nil?
-
-        narrowed = Narrowing.narrow_for_fact(current_type, fact, current_scope.environment)
-        current_scope.with_local(local_name, narrowed)
-      end
-
-      # v0.1.1 Track 1 slice 3 — `assert self is T` post-return narrowing for the four supported receiver shapes
-      # (mirrors `Narrowing#apply_self_fact`).
-      def apply_self_post_return_fact(fact, receiver_node, current_scope)
-        case receiver_node
-        when nil, Prism::SelfNode
-          current = current_scope.self_type
-          return current_scope if current.nil?
-
-          narrowed = Narrowing.narrow_for_fact(current, fact, current_scope.environment)
-          current_scope.with_self_type(narrowed)
-        when Prism::LocalVariableReadNode
-          current = current_scope.local(receiver_node.name)
-          return current_scope if current.nil?
-
-          narrowed = Narrowing.narrow_for_fact(current, fact, current_scope.environment)
-          current_scope.with_local(receiver_node.name, narrowed)
-        when Prism::InstanceVariableReadNode
-          current = current_scope.ivar(receiver_node.name)
-          return current_scope if current.nil?
-
-          narrowed = Narrowing.narrow_for_fact(current, fact, current_scope.environment)
-          current_scope.with_ivar(receiver_node.name, narrowed)
-        else
-          current_scope
-        end
-      end
-
-      # `:self` routes to the call receiver; otherwise we look up the matching positional argument by parameter name.
-      def fact_target_node(fact, call_node, method_def)
-        if fact.target_kind == :self
-          call_node.receiver
-        else
-          lookup_post_return_arg(call_node, method_def, fact.target_name)
-        end
-      end
-
-      def lookup_post_return_arg(call_node, method_def, target_name)
-        # Plugin-source contributions arrive without an authoritative method_def (the plugin recognised the call shape
-        # directly). Parameter-targeting falls back to "no narrow" in that case — the wider plugin-side parameter
-        # mapping (`:argument_at`) is a follow-up slice.
-        return nil if method_def.nil?
-
-        arguments = call_node.arguments&.arguments || []
-        # A `(?)` overload (`RBS::Types::UntypedFunction`, #1430) names no parameter and accepts any argument list,
-        # so a call may reach it with the target's position holding anything: no overload proves the target.
-        return nil unless method_def.method_types.all? { |mt| mt.type.respond_to?(:required_positionals) }
-
-        method_def.method_types.each do |mt|
-          params = mt.type.required_positionals + mt.type.optional_positionals
-          index = params.find_index { |param| param.name == target_name }
-          return arguments[index] if index && arguments[index]
-        end
-        nil
       end
 
       # Issue #1468 — the block of `recv&.m { … }` runs only once `recv` is non-nil, so it is entered from the scope
@@ -9638,6 +9313,8 @@ module Rigor
         Type::Combinator.tuple_of(*args.map { |arg| sub_eval(arg, scope).first })
       end
 
+      # @api private — public only so {PatternBindings} can call it on the evaluator it is given.
+      #
       # `on_enter: nil` evaluates without recording into the per-node scope index — for a pass whose scopes are not
       # the ones the index should keep. `next_scope_sink:` is replaced only by {#evaluate_invocation} and
       # {#loop_iteration}.
@@ -9650,6 +9327,7 @@ module Rigor
                                  next_scope_sink: next_scope_sink, operand_recorder: operand_recorder,
                                  opaque_class: opaque_class).evaluate(node)
       end
+      public :sub_eval
 
       # An evaluator over `with_scope` that inherits everything else from this one. `operand_scope:` and
       # `operand_types:` are set only by {#invoke_from}, for the evaluator that runs a call from the scope its
@@ -9788,548 +9466,11 @@ module Rigor
         scopes.reduce { |a, b| join_with_nil_injection(a, b) }
       end
 
-      # --------------------------------------------------------------- rescue variable binding helpers
-      # ---------------------------------------------------------------
-
-      # Returns `scope` extended with the rescue reference variable bound to the exception instance type. Leaves scope
-      # unchanged when the node carries no reference (bare `rescue` without `=> var`). An index-target reference
-      # (`rescue => h[:e]`) stores the exception through `[]=` instead, so its receiver widens with the exception
-      # instance type as the stored value, exactly as `rescue => e; h[:e] = e` widens it.
-      #
-      # Issue #1360 — with or without a reference, the clause runs with `$!` bound to the exception it rescued, `$@` to
-      # its backtrace and `$?` unbound ({ErrorInfo.rescue_entry}); {#eval_begin_node} restores `$!` and `$@` once the
-      # `begin` exits.
-      def bind_rescue_reference(rescue_node, scope)
-        exception_type = rescue_exception_type(rescue_node, scope)
-        ref = rescue_node.reference
-        reference = ref.name if ref.is_a?(Prism::LocalVariableTargetNode)
-        scope = ErrorInfo.rescue_entry(scope, exception_type, rescue_node.statements, reference)
-        case ref
-        when Prism::LocalVariableTargetNode
-          scope.with_local(ref.name, exception_type)
-        when Prism::InstanceVariableTargetNode
-          # Issue #1446 — `rescue => @io` writes the ivar, which ends a class guard's narrowing of it, and `rescue =>
-          # $out` the global, which ends any guard's narrowing of it.
-          scope.with_ivar(ref.name, exception_type).without_ivar_guard(ref.name)
-        when Prism::GlobalVariableTargetNode
-          scope.with_global(ref.name, exception_type)
-        when Prism::ClassVariableTargetNode
-          scope.with_cvar(ref.name, exception_type)
-        when Prism::IndexTargetNode
-          widen_index_target(ref, exception_type, scope, type_scope: scope)
-        when Prism::CallTargetNode
-          # Issue #3205 — `rescue => x.r` calls `r=` on `x`, as `for x.r in` does (issue #2693).
-          widen_attribute_write(ref.receiver, ref.name, scope)
-        else
-          scope
-        end
-      end
-
-      # Derives the exception instance type for a `RescueNode` ({ErrorInfo.rescue_exception_type}): `StandardError` for
-      # a bare `rescue`, else the union of the named classes' instances, with `Dynamic[top]` for one that does not
-      # resolve to a `Singleton`.
-      def rescue_exception_type(rescue_node, scope)
-        ErrorInfo.rescue_exception_type(rescue_node) { |exception_node| sub_eval(exception_node, scope).first }
-      end
-
-      # --------------------------------------------------------------- `case/in` pattern variable binding helpers
-      # ---------------------------------------------------------------
-
-      # Builds the entry scope for an `in` branch by injecting every variable captured by the pattern as a local
-      # binding. `subject_type` is the type of the `case` subject — nil when the `case` carries no predicate, which
-      # leaves every binding at the `Dynamic[top]` floor — and `subject_node` the subject expression, which the
-      # `deconstruct` / `deconstruct_keys` dispatch reads for its freshness gate.
-      def apply_in_pattern_bindings(subject_type, subject_node, pattern, scope)
-        bindings = collect_in_pattern_bindings(subject_type, pattern, scope, subject_node: subject_node)
-        bound = bindings.reduce(scope) { |s, (name, type)| s.with_local(name, type) }
-        marked = subject_node.is_a?(Prism::LocalVariableReadNode) && scope.gradual_narrowing?(subject_node.name)
-        mark_gradual_class_capture(subject_type, pattern, bound, marked: marked)
-      end
-
-      # Issue #2656 — `in C => y` over a `Dynamic` subject binds `y` to `C`'s `Nominal`, as a class guard's edge binds
-      # the subject, and marks it as that edge marks a local ({Narrowing.mark_gradual_local}). Only a capture of
-      # the whole subject by a class or an alternation of classes is marked.
-      def mark_gradual_class_capture(subject_type, pattern, scope, marked: false)
-        return scope unless pattern.is_a?(Prism::CapturePatternNode) && class_capture_value?(pattern.value)
-
-        name = pattern.target.name
-        Narrowing.mark_gradual_local(scope, name, subject_type, scope.local(name), marked: marked)
-      end
-
-      def class_capture_value?(value)
-        case value
-        when Prism::ConstantReadNode, Prism::ConstantPathNode then true
-        when Prism::AlternationPatternNode then class_capture_value?(value.left) && class_capture_value?(value.right)
-        else false
-        end
-      end
-
-      # Returns an array of `[Symbol, Rigor::Type]` pairs for every variable captured by `pattern`, typed against the
-      # subject. Unrecognised pattern nodes contribute no bindings (fail-soft).
-      #
-      # A union subject distributes first (see {#collect_union_pattern_bindings}); every other subject walks the
-      # pattern once, and each node kind decides how much of the subject it can name:
-      #
-      # - a bare target (`in [i, s]`, `in x`) binds the slot the enclosing pattern hands it,
-      # - a capture (`Integer => i`, `[a, b] => whole`) binds its own constraint, and recurses into the captured
-      #   pattern,
-      # - an array / find / hash pattern decomposes the subject (see the three collectors below).
-      def collect_in_pattern_bindings(subject_type, pattern, scope, subject_node: nil)
-        if subject_type.is_a?(Type::Union)
-          return collect_union_pattern_bindings(subject_type.members, pattern, scope, subject_node: subject_node)
-        end
-
-        case pattern
-        when Prism::CapturePatternNode
-          collect_capture_pattern_bindings(subject_type, pattern, scope)
-        when Prism::LocalVariableTargetNode
-          [[pattern.name, subject_type || Type::Combinator.untyped]]
-        when Prism::ImplicitNode
-          collect_in_pattern_bindings(subject_type, pattern.value, scope)
-        when Prism::ArrayPatternNode
-          collect_array_pattern_bindings(subject_type, pattern, scope, subject_node: subject_node)
-        when Prism::FindPatternNode
-          collect_find_pattern_bindings(subject_type, pattern, scope, subject_node: subject_node)
-        when Prism::HashPatternNode
-          collect_hash_pattern_bindings(subject_type, pattern, scope, subject_node: subject_node)
-        when Prism::AlternationPatternNode
-          collect_alternation_pattern_bindings(subject_type, pattern, scope)
-        else
-          []
-        end
-      end
-
-      # `pattern => target` binds `target` to what the pattern matched AND every name the pattern itself binds:
-      # `in [a, b] => whole` binds `a`, `b` and `whole`. The target's own type is the pattern's constraint when it
-      # names a class (`Integer => i`), and the subject otherwise — a capture over any other pattern IS the subject
-      # the pattern matched.
-      def collect_capture_pattern_bindings(subject_type, pattern, scope)
-        target = pattern.target
-        inner = collect_in_pattern_bindings(subject_type, pattern.value, scope)
-        return inner unless target.is_a?(Prism::LocalVariableTargetNode)
-
-        [[target.name, capture_pattern_type(subject_type, pattern.value, scope)]] + inner
-      end
-
-      # `in [i, s]` / `in [a, *rest, z]` / `in Foo[a, b]`.
-      def collect_array_pattern_bindings(subject_type, pattern, scope, subject_node:)
-        subject_type = pattern_class_constraint(subject_type, pattern.constant, scope)
-        fronts, rest_type, backs = pattern_slot_types(subject_type, pattern, scope, subject_node)
-        bindings = pattern.requireds.each_with_index.flat_map do |elem, i|
-          collect_in_pattern_bindings(fronts[i], elem, scope)
-        end
-        bindings += pattern.posts.each_with_index.flat_map do |elem, i|
-          collect_in_pattern_bindings(backs[i], elem, scope)
-        end
-        append_array_splat_binding(bindings, pattern.rest, rest_type)
-        bindings
-      end
-
-      # The per-slot types a positional pattern reads: the subject's own decomposition when it is a carrier
-      # {MultiTargetBinder.decompose_slots} accepts (`Tuple`, `Array[T]`), else the `deconstruct` projection of a
-      # subject that defines one (`Struct#deconstruct`, a `Data` instance, a class whose `deconstruct` names the
-      # parts), else the `Dynamic[top]` floor per slot.
-      def pattern_slot_types(subject_type, pattern, scope, subject_node)
-        view = positional_pattern_view(subject_type, scope, subject_node)
-        return floor_pattern_slots(pattern.requireds.size, pattern.posts.size, !pattern.rest.nil?) if view.nil?
-
-        MultiTargetBinder.decompose_slots(
-          view, front_count: pattern.requireds.size, back_count: pattern.posts.size,
-                rest_present: !pattern.rest.nil?, scope: scope
-        )
-      end
-
-      # The carrier a positional pattern decomposes: the subject itself when {MultiTargetBinder} already accepts it,
-      # else what the subject's `deconstruct` answers with (a `Tuple` / `Array[T]` carrier), else nil.
-      #
-      # `subject_node` rides along as the dispatch's call node so the `Struct` fold's freshness gate can see the
-      # receiver: `case Point.new(1, 2); in [x, y]` is a freshly materialised instance and folds, while a stored
-      # binding that may have been mutated since does not (ADR-48).
-      def positional_pattern_view(subject_type, scope, subject_node)
-        return subject_type if subject_type.is_a?(Type::Tuple)
-        return subject_type if MultiTargetBinder.array_element_type(subject_type)
-
-        deconstruct_projection(subject_type, scope, subject_node)
-      end
-
-      # What `subject.deconstruct` answers with, when that is a carrier this binder decomposes; nil otherwise —
-      # an absent method, or `Struct#deconstruct`'s RBS `Array[untyped]` for a class whose members are not known.
-      def deconstruct_projection(subject_type, scope, subject_node)
-        result = struct_instance_projection(subject_type, :deconstruct, scope, subject_node) ||
-                 pattern_decomposition_dispatch(subject_type, :deconstruct, [], scope) ||
-                 source_decomposition_projection(subject_type, :deconstruct, [], scope)
-        return nil if result.nil?
-        return result if result.is_a?(Type::Tuple) || MultiTargetBinder.array_element_type(result)
-
-        nil
-      end
-
-      # The inferred return type of a project-defined `deconstruct` / `deconstruct_keys` (issue #1122). The
-      # dispatcher answers nil for a class no RBS describes: the body-inference tier that would type
-      # `subject.deconstruct` lives on `ExpressionTyper` and needs the call NODE a pattern does not have, so
-      # this asks the scope's own entry point for the same answer a resolved call site gets (ADR-84 memo
-      # included). nil when the project defines no such method, or when the body's answer is the gradual floor.
-      def source_decomposition_projection(subject_type, method_name, arg_types, scope)
-        return nil unless subject_type.is_a?(Type::Nominal)
-
-        def_node = own_definer_node(scope, subject_type.class_name, method_name)
-        return nil if def_node.nil?
-
-        result = scope.user_method_return(def_node, subject_type, arg_types)
-        return nil if result.nil? || result.is_a?(Type::Dynamic) || result.is_a?(Type::Top)
-
-        result
-      end
-
-      # The `def` node the receiver's OWN class defines `method_name` with, or nil. ADR-119 C2-e (#1615): asked of
-      # `DefinerResolution`, so a slot rebuilt from an ADR-85 seed bundle is resolved to a node and the read files
-      # its ADR-46 edge. UNKNOWN answers nil: an unsettled or forked chain, or a contested slot once ADR-119 C1d
-      # fills the siblings. Conditional or reopened defs are not contested until C1d. A definer further up the
-      # chain (a prepended or included module, a superclass) is not the own class's, so the owner check declines it.
-      def own_definer_node(scope, class_name, method_name)
-        case DefinerResolution.resolve(scope, class_name, method_name, :instance, question: :definer)
-        in DefinerResolution::Known(answer: [node, owner])
-          owner == class_name ? node : nil
-        in DefinerResolution::UNKNOWN # the case/in contract needs one arm per answer
-          nil
-        in DefinerResolution::ABSENT # rubocop:disable Lint/DuplicateBranch -- see above
-          nil
-        end
-      end
-
-      # A `StructInstance`'s own projection — `Tuple` of its member values for `deconstruct`, `HashShape` of
-      # its members for `deconstruct_keys` — or nil when the subject is another carrier or the projection would
-      # be unsound.
-      #
-      # The `Struct` fold's freshness gate cannot answer for a pattern through the dispatcher: it asks whether
-      # the CALL's receiver was freshly materialised (`Point.new(1, 2).x`), while a pattern's subject node IS
-      # that materialisation (`case Point.new(1, 2); in [x, y]`). The gate still applies — a `Struct` is
-      # mutable, so a stored binding's member map may be stale (ADR-48) — so this asks it the pattern's own
-      # question, with the subject expression as the materialisation. A `Data` instance needs none of this:
-      # it is frozen, and the dispatcher already projects it (see `DataFolding`).
-      def struct_instance_projection(subject_type, method_name, scope, subject_node)
-        return nil unless subject_type.is_a?(Type::StructInstance)
-        return nil unless MethodDispatcher::StructMaterialization.materialization_call?(subject_node, scope)
-
-        case method_name
-        when :deconstruct then Type::Combinator.tuple_of(*subject_type.members.values)
-        when :deconstruct_keys then Type::Combinator.hash_shape_of(subject_type.members.dup)
-        end
-      end
-
-      # `deconstruct` / `deconstruct_keys` on a subject carrier. A `Dynamic` / `Top` answer is the gradual floor
-      # rather than a method's result, so it reads as "cannot ask" to every caller here.
-      #
-      # The subject node is deliberately NOT passed as the dispatch's `call_node`: the tiers read a call node's
-      # receiver and arguments, and a pattern's subject is any expression at all — `StructFolding`'s freshness
-      # gate dereferences `call_node.receiver`, which a local read or a literal does not answer. The one
-      # freshness question a pattern needs (`case Point.new(1, 2)`) is asked by
-      # {#struct_instance_projection} instead.
-      def pattern_decomposition_dispatch(subject_type, method_name, args, scope)
-        return nil if subject_type.nil?
-
-        result = MethodDispatcher.dispatch(
-          receiver_type: subject_type, method_name: method_name, arg_types: args,
-          environment: scope.environment, scope: scope
-        )
-        return nil if result.is_a?(Type::Dynamic) || result.is_a?(Type::Top)
-
-        result
-      end
-
-      # `in [*pre, m, *post]`. Ruby matches a find pattern's required elements at the EARLIEST position the
-      # surrounding splats allow (the pre-splat is non-greedy: `[1, 2, 3] in [*pre, x, *post]` binds `pre = []`, `x =
-      # 1`), but a required that does not match there slides right, so each required binds the union of every
-      # position it could occupy and the surrounding splats bind an `Array` of the subject's element type.
-      def collect_find_pattern_bindings(subject_type, pattern, scope, subject_node:)
-        subject_type = pattern_class_constraint(subject_type, pattern.constant, scope)
-        view = positional_pattern_view(subject_type, scope, subject_node)
-        slots = find_pattern_slots(view, pattern.requireds.size)
-        bindings = pattern.requireds.each_with_index.flat_map do |elem, i|
-          collect_in_pattern_bindings(slots ? slots[i] : Type::Combinator.untyped, elem, scope)
-        end
-        surround = find_pattern_surround_type(view)
-        [pattern.left, pattern.right].each { |splat| append_array_splat_binding(bindings, splat, surround) }
-        bindings
-      end
-
-      # The type each of a find pattern's `count` requireds can see, or nil when the subject cannot supply that many
-      # elements (the pattern cannot match).
-      def find_pattern_slots(view, count)
-        if view.is_a?(Type::Tuple)
-          elements = view.elements
-          return nil if elements.size < count
-
-          return Array.new(count) { |i| Type::Combinator.union(*elements[i..(elements.size - count + i)]) }
-        end
-
-        element = view && MultiTargetBinder.array_element_type(view)
-        element && Array.new(count) { element }
-      end
-
-      # `*pre` / `*post` capture the elements the requireds did not: `Array[T]` for an `Array[T]` subject, an `Array`
-      # of the element union for a `Tuple`, `Array[untyped]` when the subject could not be decomposed.
-      def find_pattern_surround_type(view)
-        element = case view
-                  when Type::Tuple then union_of_types(view.elements)
-                  else view && MultiTargetBinder.array_element_type(view)
-                  end
-        Type::Combinator.nominal_of("Array", type_args: [element || Type::Combinator.untyped])
-      end
-
-      # `in {name: String => n}` / `in {name:, **rest}`. Each element reads the subject's value at its key through
-      # the subject's `deconstruct_keys` projection; `**rest` binds the remaining entries.
-      def collect_hash_pattern_bindings(subject_type, pattern, scope, subject_node:)
-        subject_type = pattern_class_constraint(subject_type, pattern.constant, scope)
-        view = hash_pattern_view(subject_type, scope, subject_node)
-        bindings = pattern.elements.flat_map do |assoc|
-          next [] unless assoc.is_a?(Prism::AssocNode) && assoc.value
-
-          collect_in_pattern_bindings(hash_pattern_value_type(view, assoc.key), assoc.value, scope)
-        end
-        rest = pattern.rest
-        if rest.is_a?(Prism::AssocSplatNode) && rest.value.is_a?(Prism::LocalVariableTargetNode)
-          bindings << [rest.value.name, hash_pattern_rest_type(view)]
-        end
-        bindings
-      end
-
-      # The `Hash`-shaped view a hash pattern reads: the subject's `deconstruct_keys` answer, which is a `HashShape`
-      # for a shape carrier or a `deconstruct_keys` body and `Hash[K, V]` for the RBS answer of a plain `Hash` — or
-      # nil when the subject cannot be asked.
-      def hash_pattern_view(subject_type, scope, subject_node)
-        args = [Type::Combinator.constant_of(nil)]
-        struct_instance_projection(subject_type, :deconstruct_keys, scope, subject_node) ||
-          pattern_decomposition_dispatch(subject_type, :deconstruct_keys, args, scope) ||
-          source_decomposition_projection(subject_type, :deconstruct_keys, args, scope)
-      end
-
-      # The value type the pattern's key reads out of the view: a `HashShape` answers per key, a `Hash[K, V]`
-      # answers `V` for every key, and anything else — a key the AST does not pin (`in {"#{k}": v}`), a shape that
-      # does not carry the key — answers the floor.
-      def hash_pattern_value_type(view, key_node)
-        key = hash_pattern_key(key_node)
-        return Type::Combinator.untyped if key.nil?
-        return view.pairs[key] || Type::Combinator.untyped if view.is_a?(Type::HashShape)
-
-        hash_value_type(view) || Type::Combinator.untyped
-      end
-
-      # The key a hash pattern element names, or nil when the AST does not pin one (an interpolated or computed key).
-      def hash_pattern_key(key_node)
-        case key_node
-        when Prism::SymbolNode then key_node.unescaped.to_sym
-        when Prism::StringNode then key_node.unescaped
-        end
-      end
-
-      # `{ key:, **rest }` binds `rest` to a Hash whose keys are Symbols (the only legal key shape for a hash pattern)
-      # and whose values are the view's own value type — the entries the pattern named are a subset of it.
-      def hash_pattern_rest_type(view)
-        value = view.is_a?(Type::HashShape) ? union_of_types(view.pairs.values) : hash_value_type(view)
-        Type::Combinator.nominal_of(
-          "Hash",
-          type_args: [Type::Combinator.nominal_of("Symbol"), value || Type::Combinator.untyped]
-        )
-      end
-
-      # The `V` of a `Hash[K, V]`, or nil for a raw `Hash`, a non-`Hash` nominal, or a `Dynamic` / `Top` value.
-      def hash_value_type(type)
-        return nil unless type.is_a?(Type::Nominal) && type.class_name == "Hash" && type.type_args.size == 2
-
-        value = type.type_args.last
-        return nil if value.is_a?(Type::Dynamic) || value.is_a?(Type::Top)
-
-        value
-      end
-
-      # The union of a list of types, ignoring the gradual floor (`Dynamic[top]` / `Top` carries nothing to union)
-      # and answering nil when nothing is left.
-      def union_of_types(types)
-        known = types.reject { |type| type.is_a?(Type::Dynamic) || type.is_a?(Type::Top) }
-        known.empty? ? nil : Type::Combinator.union(*known)
-      end
-
-      # `[..., *rest, ...]` / `[*pre, x, *post]` capture an Array of the unmatched elements. `rest_type` is the
-      # enclosing decomposition's own rest (a `Tuple` of the middle elements for a tuple subject, `Array[T]` for an
-      # `Array[T]`); without one — a subject that did not decompose — the rest is `Array[untyped]`.
-      def append_array_splat_binding(bindings, splat, rest_type)
-        return unless splat.is_a?(Prism::SplatNode)
-
-        target = splat.expression
-        return unless target.is_a?(Prism::LocalVariableTargetNode)
-
-        bindings << [target.name, rest_type || Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.untyped])]
-      end
-
-      # The `Dynamic[top]` floor per slot, for a subject no rule decomposes.
-      def floor_pattern_slots(front_count, back_count, rest_present)
-        [
-          Array.new(front_count) { Type::Combinator.untyped },
-          rest_present ? Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.untyped]) : nil,
-          Array.new(back_count) { Type::Combinator.untyped }
-        ]
-      end
-
-      # The class a pattern's own constant asserts (`in Point[x, y]`, `in Foo{...}`), applied to the subject. An
-      # opaque subject — `Dynamic` / `Top`, which no `is_a?`-style narrowing can refine — becomes `Nominal[C]`: the
-      # pattern's `C === subject` test has just established the class, which is what lets a constrained pattern bind
-      # off a subject whose own type named nothing. A subject whose class is already known keeps it.
-      def pattern_class_constraint(subject_type, constant_node, scope)
-        return subject_type if constant_node.nil?
-
-        nominal = singleton_to_nominal(sub_eval(constant_node, scope).first)
-        return subject_type unless opaque_pattern_subject?(subject_type)
-        return subject_type if nominal.is_a?(Type::Dynamic) || nominal.is_a?(Type::Top)
-
-        nominal
-      end
-
-      def opaque_pattern_subject?(subject_type)
-        subject_type.nil? || subject_type.is_a?(Type::Dynamic) || subject_type.is_a?(Type::Top)
-      end
-
-      # Distributes a union subject over the pattern, the rule {MultiTargetBinder} applies to `a, b = union`: every
-      # member walks the same pattern and each name binds the join of its per-member types, while a member that binds
-      # `Dynamic[top]` floors the name for the whole union — a precise member must not stand for one nothing is known
-      # about. A member that PROVABLY cannot match the pattern contributes nothing at all instead of flooring:
-      # `case maybe; in [a, b]` over `Tuple[1, "a"] | nil` binds `1` / `"a"`, because a `nil` subject raises
-      # `NoMatchingPatternError` rather than reaching the body.
-      def collect_union_pattern_bindings(members, pattern, scope, subject_node: nil)
-        reachable = members.reject { |member| pattern_match_impossible?(member, pattern, scope) }
-        walks = (reachable.empty? ? [Type::Combinator.untyped] : reachable).map do |member|
-          collect_in_pattern_bindings(member, pattern, scope, subject_node: subject_node)
-        end
-        merge_pattern_bindings(walks)
-      end
-
-      # Whether `type` provably cannot match `pattern`, so its arm contributes no binding. Only the two
-      # decompositions a pattern asks for are checked — `deconstruct` (array / find patterns) and `deconstruct_keys`
-      # (hash patterns) — and both only for a class the RBS environment knows, whose method set is closed, the same
-      # rule `array_conversion_free?` applies to the multi-assign `to_ary` question (issue #1094). A carrier the
-      # check cannot prove negative about (Dynamic, a source class, an unresolved constant) answers false, which
-      # keeps the union at the conservative floor.
-      def pattern_match_impossible?(type, pattern, scope)
-        case pattern
-        when Prism::ArrayPatternNode, Prism::FindPatternNode then !decomposable_as_array?(type, scope)
-        when Prism::HashPatternNode then !decomposable_as_hash?(type, scope)
-        when Prism::CapturePatternNode then pattern_match_impossible?(type, pattern.value, scope)
-        else false
-        end
-      end
-
-      def decomposable_as_array?(type, scope)
-        return true unless pattern_decomposition_dispatch(type, :deconstruct, [], scope).nil?
-
-        class_name = MultiTargetBinder.conversion_class_name(type)
-        class_name.nil? || !MethodDispatcher::RbsDispatch.array_conversion_free?(class_name, scope)
-      end
-
-      def decomposable_as_hash?(type, scope)
-        args = [Type::Combinator.constant_of(nil)]
-        return true unless pattern_decomposition_dispatch(type, :deconstruct_keys, args, scope).nil?
-
-        class_name = MultiTargetBinder.conversion_class_name(type)
-        return true if class_name.nil? || scope.environment.nil?
-
-        !Reflection.rbs_class_known?(class_name, environment: scope.environment)
-      end
-
-      # Joins per-member binding lists by name: `Dynamic[top]` from any walk — or a name a walk does not bind —
-      # floors the name, otherwise the members union. The first walk's order is the declaration order.
-      def merge_pattern_bindings(walks)
-        floor = Type::Combinator.untyped
-        walks.first.map do |name, _type|
-          types = walks.map { |walk| walk.assoc(name)&.last }
-          floored = types.any? { |type| type.nil? || Type::Combinator.untyped?(type) }
-          [name, floored ? floor : Type::Combinator.union(*types)]
-        end
-      end
-
-      # `expr in pattern` (a `MatchPredicateNode`, evaluating to a boolean) and `expr => pattern` (a
-      # `MatchRequiredNode`, evaluating to `nil` and raising `NoMatchingPatternError` on a mismatch) — the one-line
-      # pattern matches. Both bind every name the pattern captures into the post-scope, decomposed exactly as an `in`
-      # branch of a `case` is, and WITHOUT the nil-injection a surrounding join would add: a name is read on the
-      # truthy side only after the pattern matched it, which is the shape `if config in {timeout: Integer => t}`
-      # depends on.
-      def eval_match_pattern(node)
-        subject_type, post_value = sub_eval(node.value, scope)
-        bound = apply_in_pattern_bindings(subject_type, node.value, node.pattern, post_value)
-        [scope.type_of(node, tracer: tracer), bound]
-      end
-
-      # --------------------------------------------------------------- named-capture regex binding (`MatchWriteNode`)
-      # ---------------------------------------------------------------
-
-      # `/(?<year>\d+)/ =~ str` — Prism emits a `MatchWriteNode` that wraps the `=~` call and lists the named-capture
-      # targets. Each target is bound to `String | nil` (the capture is absent as nil when the pattern doesn't match or
-      # the group didn't participate).
-      def eval_match_write(node)
-        match_type, post_scope = sub_eval(node.call, scope)
-        string_or_nil = Type::Combinator.union(
-          Type::Combinator.nominal_of("String"),
-          Type::Combinator.constant_of(nil)
-        )
-        bound_scope = node.targets.reduce(post_scope) do |s, target|
-          next s unless target.is_a?(Prism::LocalVariableTargetNode)
-
-          s.with_local(target.name, string_or_nil)
-        end
-        [match_type, bound_scope]
-      end
-
-      # --------------------------------------------------------------- shared type conversion helper
-      # ---------------------------------------------------------------
-
-      # Converts a `Singleton[ClassName]` (the class object) to the corresponding `Nominal[ClassName]` (an instance).
-      # Falls back to `untyped` for carriers that are not Singleton (e.g. Dynamic[Top] when the class could not be
-      # resolved).
-      def singleton_to_nominal(type)
-        type.is_a?(Type::Singleton) ? Type::Combinator.nominal_of(type.class_name) : Type::Combinator.untyped
-      end
-
-      # Returns the type to bind for a `CapturePatternNode`'s target. A class reference (`Integer => x`, and every
-      # alternate of `Integer | String => x`) answers the constraint's `Nominal[T]` — the pattern's own `T ===
-      # subject` test is what licenses the binding even when the subject's type is opaque. A value pattern (`1 => x`)
-      # answers the literal's own type. A capture over any other pattern (`[a, b] => whole`, `^(x) => y`) answers the
-      # subject, which is what that pattern matched.
-      def capture_pattern_type(subject_type, value_node, scope)
-        case value_node
-        when Prism::ConstantReadNode, Prism::ConstantPathNode
-          singleton_to_nominal(sub_eval(value_node, scope).first)
-        when Prism::AlternationPatternNode
-          Type::Combinator.union(
-            capture_pattern_type(subject_type, value_node.left, scope),
-            capture_pattern_type(subject_type, value_node.right, scope)
-          )
-        when Prism::ArrayPatternNode, Prism::FindPatternNode, Prism::HashPatternNode,
-             Prism::PinnedVariableNode, Prism::PinnedExpressionNode, Prism::ImplicitNode
-          subject_type || Type::Combinator.untyped
-        else
-          literal_pattern_type(value_node, scope)
-        end
-      end
-
-      # The type a non-class pattern node evaluates to: `Constant[1]` for `1 => x`, the nominal for `/re/ => x`,
-      # the range for `1..5 => x`. A class reference is the one carrier that must convert (`Singleton[C]` is the
-      # class object; the binding holds an instance), which the caller's constant arm does.
-      def literal_pattern_type(value_node, scope)
-        type = sub_eval(value_node, scope).first
-        type.is_a?(Type::Singleton) ? singleton_to_nominal(type) : type
-      end
-
-      # `in PatternA | PatternB` — Ruby rejects a named capture inside an alternative pattern (only `_`-prefixed names
-      # compile), so the binder, which runs against the AST, simply collects bindings from each side and merges by
-      # name, unioning types when both alternates contribute. A name only one alternate contributes still surfaces.
-      def collect_alternation_pattern_bindings(subject_type, pattern, scope)
-        left = collect_in_pattern_bindings(subject_type, pattern.left, scope)
-        right = collect_in_pattern_bindings(subject_type, pattern.right, scope)
-        merged = {}
-        (left + right).each do |name, type|
-          merged[name] = merged.key?(name) ? Type::Combinator.union(merged[name], type) : type
-        end
-        merged.to_a
-      end
+      # The two `HANDLERS` entries whose bodies live in {PatternBindings}. They read this evaluator's scope and
+      # tracer, so those are passed in; {PatternBindings} calls back {#sub_eval} on the evaluator it is given.
+      def eval_match_pattern(node) = PatternBindings.eval_match_pattern(node, scope, tracer, self)
+
+      def eval_match_write(node) = PatternBindings.eval_match_write(node, scope, self)
     end
   end
 end

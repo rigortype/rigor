@@ -68,7 +68,7 @@ class Sites
     Rigor.dump_type(v)
   end
 
-  # `statement_evaluator.rb`, `merge_pattern_bindings`: an untyped binding from any member floors the name.
+  # `statement_evaluator/pattern_bindings.rb`, `merge_pattern_bindings`: an untyped binding from any member floors the name.
   def pattern_join(x, f)
     t = f ? [x] : [1]
     case t

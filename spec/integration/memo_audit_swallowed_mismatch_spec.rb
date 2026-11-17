@@ -4,8 +4,9 @@ require "spec_helper"
 require "tmpdir"
 
 # ADR-129 WD5 / issue #2785 — a `MemoAudit` mismatch raised under one of the typing path's `rescue StandardError`
-# sites is still reported. `StatementEvaluator#resolve_call_method` types a receiver under `rescue StandardError → nil`;
-# a mismatch raised there used to become an ordinary fallback answer and leave the audited run green.
+# sites is still reported. `StatementEvaluator::DefArgumentsAndAssertions.resolve_call_method` types a receiver
+# under `rescue StandardError → nil`; a mismatch raised there used to become an ordinary fallback answer and leave the
+# audited run green.
 RSpec.describe "a MemoAudit mismatch swallowed by a rescue on the typing path (#2785)", type: :runner do
   around do |example|
     Rigor::Inference::MemoAudit.enable!

@@ -130,11 +130,11 @@ RSpec.describe "bin/rigor-worktree reference-clone verification" do
   end
 
   it "accepts a sparse checkout, whose working tree holds less than its own HEAD lists" do
-    # `references/phpstan` and `references/TypeScript-Website` are sparse, so a verification that
-    # probed a name out of `git ls-tree HEAD` failed on both. The source and the copy agree; HEAD
+    # A sparse reference checkout holds less than its own HEAD lists, so a verification that
+    # probed a name out of `git ls-tree HEAD` failed on it. The source and the copy agree; HEAD
     # is not the reference point.
     FileUtils.rm_rf(File.join(source, "include"))
-    dst = RigorWorktreeReferenceClone.copy_faithfully(source, File.join(tmp, "sparse", "references", "phpstan"))
+    dst = RigorWorktreeReferenceClone.copy_faithfully(source, File.join(tmp, "sparse", "references", "sparse_ref"))
 
     expect(RigorWorktreeReferenceClone.verifies?(source, dst)).to be(true)
   end

@@ -16,7 +16,7 @@
   {"query": "I use git worktrees for my personal blog repo to preview two branches side by side in different terminal tabs. can you show me the git commands for adding and removing one", "should_trigger": false},
   {"query": "sweep rigor's `check` output across every tagged release of redmine from v4.0.0 onward and tabulate how the surfaced-diagnostic count changes over the release line", "should_trigger": false},
   {"query": "bump the development Ruby to 4.0.6 across flake.nix, .ruby-version, .tool-versions and the AGENTS.md target-Ruby line", "should_trigger": false},
-  {"query": "references/phpstan is showing as modified in git status and `git reset --hard` keeps aborting on the submodule. how do I get it back to a clean state", "should_trigger": false},
+  {"query": "references/ruby is showing as modified in git status and `git reset --hard` keeps aborting on the submodule. how do I get it back to a clean state", "should_trigger": false},
   {"query": "the parallel spec run keeps OOM-killing my laptop when I have several make verify runs going at once. how many full-suite jobs can this machine actually handle in parallel", "should_trigger": false},
   {"query": "delete all the local branches that have already been merged into master and prune the stale remote-tracking refs", "should_trigger": false}
 ]

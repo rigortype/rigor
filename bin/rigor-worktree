@@ -118,9 +118,8 @@ rm_wt_path() { # rm_wt_path ABS
 # submodule where the source has its whole checkout, and
 # `references/ruby/object.c` (the file spec/docs/c_effects_raises_gate_spec.rb
 # opens) is absent. Comparing entries rather than probing a name out of
-# `git ls-tree HEAD` is also what holds for the SPARSE checkouts
-# (references/phpstan, references/TypeScript-Website), whose working trees
-# deliberately materialize only part of HEAD.
+# `git ls-tree HEAD` is also what holds for a SPARSE checkout, whose working
+# tree deliberately materializes only part of HEAD.
 reference_entries() { # reference_entries DIR -> top-level names, `.git` excluded
   local dir=$1 f out=""
   for f in "$dir"/* "$dir"/.[!.]*; do

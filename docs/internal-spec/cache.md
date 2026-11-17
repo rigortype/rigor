@@ -1158,7 +1158,7 @@ answer block may answer from RBS without reading the slot). The
 singleton rule's other reads of the table record it too: its wildcard-slot contest check records
 `visibility:<entry>#*` for each project entry of the chain, and its
 project-wide "is the name private anywhere" gate
-(`CheckRules#private_singleton_candidate?`) records `visibility:*#<method
+(`CheckRules::VisibilityMismatch.private_singleton_candidate?`) records `visibility:*#<method
 name>`. A `private :foo` can be written from a reopening or from a
 `Parent.class_eval` block in a file the reader has no other edge to, so
 before this a verdict that read it was not re-checked when that file

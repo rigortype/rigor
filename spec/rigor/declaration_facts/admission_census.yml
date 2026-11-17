@@ -36,6 +36,7 @@ members:
     reads:
     - lib/rigor/analysis/check_rules.rb
     - lib/rigor/analysis/check_rules/ivar_write_collector.rb
+    - lib/rigor/analysis/check_rules/override_support.rb
     - lib/rigor/analysis/check_rules/rbs_receiver_surface.rb
     - lib/rigor/analysis/check_rules/shadowed_rescue_collector.rb
     - lib/rigor/analysis/check_rules/source_arity.rb
@@ -212,8 +213,9 @@ members:
     - lib/rigor/inference/project_seed_tables.rb
   discovered_method_visibilities:
     reads:
-    - lib/rigor/analysis/check_rules.rb
     - lib/rigor/analysis/check_rules/ivar_write_collector.rb
+    - lib/rigor/analysis/check_rules/override_visibility.rb
+    - lib/rigor/analysis/check_rules/visibility_mismatch.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/definer_resolution.rb
     - lib/rigor/inference/expression_typer.rb
@@ -222,7 +224,9 @@ members:
     justified:
       lib/rigor/inference/project_seed_tables.rb:
       - paired_copy
-      lib/rigor/analysis/check_rules.rb:
+      lib/rigor/analysis/check_rules/override_visibility.rb:
+      - existence
+      lib/rigor/analysis/check_rules/visibility_mismatch.rb:
       - existence
       lib/rigor/analysis/check_rules/ivar_write_collector.rb:
       - consults_contested
@@ -292,8 +296,8 @@ members:
     - lib/rigor/inference/project_seed_tables.rb
   discovered_deferred_ranges:
     reads:
-    - lib/rigor/analysis/check_rules.rb
     - lib/rigor/analysis/check_rules/rebinding_block_callees.rb
+    - lib/rigor/analysis/check_rules/visibility_mismatch.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/definer_resolution.rb
     - lib/rigor/inference/self_call_ivar_writes.rb

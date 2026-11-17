@@ -6,13 +6,6 @@
 # why; `RIGOR_REGENERATE_GATES=1` adds new entries as TODO, which the spec fails on.
 # A reason containing a space and a hash must be quoted, or folded with `>-`, or YAML reads the rest as a comment.
 
-lib/rigor/analysis/check_rules.rb:
-  computes: the visibility of a method and its override, for the def.method-visibility-mismatch and override rules
-  producers:
-    Rigor::Analysis::CheckRules.instance_visibility_mismatch: 'the instance-side half of the grandfathered visibility_mismatch_diagnostic, split out by issue #1984; its visibility comparisons are the grandfathered method''s, and it adds the method_missing / respond_to_missing? decline; it reads the recorded visibility through Scope and DefinerResolution and derives no declaration context'
-    Rigor::Analysis::CheckRules.private_recorded_names: 'issue #1984, the set of names some class records :private (either side), the table-only gate the singleton visibility rule asks before reading a chain; it derives no declaration context'
-    Rigor::Analysis::CheckRules.singleton_visibility_mismatch: 'issue #1984, the singleton-side half of visibility_mismatch_diagnostic; it compares DefinerResolution''s singleton-side :visibility answer with :private and derives no declaration context'
-    Rigor::Analysis::CheckRules.visibility_reduced?: grandfathered
 lib/rigor/analysis/check_rules/ivar_write_collector.rb:
   computes: the instance-variable writes in each class's instance-method bodies, keyed by qualified name
   producers:
@@ -28,6 +21,10 @@ lib/rigor/analysis/check_rules/lexical_method_sites.rb:
     Rigor::Analysis::CheckRules::LexicalMethodSites#defines_on_self?: 'issue #1722, finds the calls that give one local''s object singleton methods (o.extend, o.define_singleton_method, an instance_eval block that writes a def) for call.undefined-method''s per-file local-scope decline; it derives no declaration context'
     Rigor::Analysis::CheckRules::LexicalMethodSites#opened_method_name: 'issue #1722, finds the calls that give one local''s object singleton methods (o.extend, o.define_singleton_method, an instance_eval block that writes a def) for call.undefined-method''s per-file local-scope decline; it derives no declaration context'
     Rigor::Analysis::CheckRules::LexicalMethodSites#walk: grandfathered
+lib/rigor/analysis/check_rules/override_visibility.rb:
+  computes: the visibility of an override against the one it inherits, for the def.override-visibility-reduced rule
+  producers:
+    Rigor::Analysis::CheckRules::OverrideVisibility#visibility_reduced?: grandfathered
 lib/rigor/analysis/check_rules/replaced_singleton_defs.rb:
   computes: the singleton defs a later certain def of the same class body replaces
   producers:
@@ -52,6 +49,12 @@ lib/rigor/analysis/check_rules/source_arity.rb:
   producers:
     Rigor::Analysis::CheckRules::SourceArity#public_at?: grandfathered
     Rigor::Analysis::CheckRules::SourceArity#singleton_private?: 'issue #2059, compares DefinerResolution''s singleton-side :visibility answer with :private so the arity check leaves a private call to the visibility rule; it derives no declaration context'
+lib/rigor/analysis/check_rules/visibility_mismatch.rb:
+  computes: the visibility of a method, for the def.method-visibility-mismatch rule
+  producers:
+    Rigor::Analysis::CheckRules::VisibilityMismatch#instance_visibility_mismatch: 'the instance-side half of the grandfathered VisibilityMismatch.diagnostic, split out by issue #1984; its visibility comparisons are the grandfathered method''s, and it adds the method_missing / respond_to_missing? decline; it reads the recorded visibility through Scope and DefinerResolution and derives no declaration context'
+    Rigor::Analysis::CheckRules::VisibilityMismatch#private_recorded_names: 'issue #1984, the set of names some class records :private (either side), the table-only gate the singleton visibility rule asks before reading a chain; it derives no declaration context'
+    Rigor::Analysis::CheckRules::VisibilityMismatch#singleton_visibility_mismatch: 'issue #1984, the singleton-side half of VisibilityMismatch.diagnostic; it compares DefinerResolution''s singleton-side :visibility answer with :private and derives no declaration context'
 lib/rigor/analysis/dependency_source_inference/walker.rb:
   computes: the method catalog of an opt-in gem's source roots, per class and side, its refine bodies' refinements, and the constants its files bind
   producers:

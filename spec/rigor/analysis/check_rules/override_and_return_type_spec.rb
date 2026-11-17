@@ -6,7 +6,8 @@ require "spec_helper"
 # (ADR-8) and the three ADR-35 override rules (`def.override-visibility-reduced`,
 # `def.override-return-widened`, `def.override-param-narrowed`), together with the ancestry and
 # RBS-signature helpers they share (`body_last_expression`, `declared_return_union`,
-# `nearest_ancestor_visibility` / `nearest_ancestor_method_def` (over `Inference::DefinerResolution`), `defined_on?`,
+# `OverrideVisibility.nearest_ancestor_visibility` / `OverrideSupport.nearest_ancestor_method_def` (over
+# `Inference::DefinerResolution`), `OverrideSupport.defined_on?`,
 # `ancestor_instantiation_type_vars`).
 #
 # Authored from a mutation-recon pass over `check_rules.rb`, which found this the densest surviving

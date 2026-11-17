@@ -46,6 +46,10 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
     %w[
       lib/rigor/analysis/check_rules.rb
       lib/rigor/analysis/check_rules/always_raises.rb
+      lib/rigor/analysis/check_rules/override_param_narrowed.rb
+      lib/rigor/analysis/check_rules/override_return_widened.rb
+      lib/rigor/analysis/check_rules/override_support.rb
+      lib/rigor/analysis/check_rules/override_visibility.rb
       lib/rigor/analysis/check_rules/raise_non_exception.rb
       lib/rigor/analysis/check_rules/receiver_predicates.rb
       lib/rigor/analysis/check_rules/rigor_testing.rb
@@ -54,6 +58,7 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       lib/rigor/analysis/check_rules/suppression.rb
       lib/rigor/analysis/check_rules/undefined_method.rb
       lib/rigor/analysis/check_rules/unresolved_toplevel.rb
+      lib/rigor/analysis/check_rules/visibility_mismatch.rb
       lib/rigor/analysis/dependency_recorder.rb
       lib/rigor/analysis/run_disclosure_credit.rb
       lib/rigor/analysis/runner/pool_coordinator.rb

@@ -31,7 +31,7 @@ RSpec.describe "Declaration producers" do
   # Moves so far: 367 → 366 (#3014), when `concern_module_body?` stopped deriving a declaration context and
   # became a consumer. Name the entry and the reason here, since the pin itself carries no history.
   let(:grandfathered_pin) do
-    { count: 366, digest: "882cefc43358f4206d76a9f01b4d38fb2203b9923af9a9ac7f41a95ead0f39ab" }
+    { count: 366, digest: "5c96733b2bc7b4b865e5fa6971fe912b54aa972836e39a55052c17456b9920ea" }
   end
 
   define_method(:found) do |parsed = DeclarationFactSources.parsed_under|

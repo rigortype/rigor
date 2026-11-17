@@ -19,7 +19,8 @@ require "spec_helper"
 #   directory but only exercises the OTHER half (`raise` operand legality); this adds the Integer-division half.
 # - dump_type / assert_type (L1440 `dump_type_diagnostic`, L1512 `build_assert_type_diagnostic`) — the
 #   `Rigor::Testing` debug helpers; previously exercised only from `runner_spec.rb`, not from this directory.
-# - visibility_mismatch (L1860 `build_visibility_mismatch_diagnostic`) — unobserved anywhere in the suite.
+# - visibility_mismatch (L1860 `build_visibility_mismatch_diagnostic`, now in `VisibilityMismatch`) — unobserved
+#   anywhere in the suite.
 # - pipeline/orchestration — of 5 raw survivors clustered under `run_node_collectors`, one (L193, the
 #   `collectors.values` call feeding `RuleWalk.run`) is a real, reachable gap: `Runner#run_source` always threads
 #   `node_collectors:` (ADR-53 B4's converged walk), so the standalone branch only runs from a direct
@@ -228,7 +229,8 @@ RSpec.describe "remaining check_rules.rb rule families (#135 wave 2)" do
   end
 
   describe "visibility_mismatch" do
-    # undefined_method mutation on `Diagnostic.from_message_loc` (L1860) inside `build_visibility_mismatch_diagnostic`
+    # undefined_method mutation on `Diagnostic.from_message_loc` (L1860) inside
+    # `VisibilityMismatch.build_visibility_mismatch_diagnostic`
     # raises; unobserved by any other spec in the suite before this one.
     it "fires def.method-visibility-mismatch, pinning the Diagnostic.from_message_loc construction" do
       source = <<~RUBY

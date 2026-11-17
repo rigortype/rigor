@@ -7,6 +7,11 @@ reports what `check` reads) can give a project `attr_reader` / `attr_accessor` r
 engine is `master` at `4f4e8d9ad`. The design was drafted with a design partner and then critiqued adversarially;
 both measured the same yield independently.
 
+Landed 2026-11-17, unrevised: the measurements below are the tree at `4f4e8d9ad` and are not re-derived here.
+One fact has moved since, and it is the note's own first recommendation — **#1931 is fixed and closed**, so
+"fix #1931 first" is discharged. Everything else, including the yield and the four defects, is as it was
+written; the decisions at the end are still open (#1907).
+
 ## Why it came up
 
 ZARD, the documentation consumer of `rigor lens` (#1907), renders Rigor's own `lib/` API. There, every

@@ -165,19 +165,16 @@ RSpec.describe Rigor::Analysis::CheckRules::WrongArity do
     # - `return nil if scope.nil?`: every call of an indexed snippet has a scope.
     # - `ReceiverPredicates.inferred_param_receiver?`: true only for a parameter whose type the whole-project run infers
     #   from its call sites; a one-file snippet leaves the parameter untyped.
-    # - `ReceiverPredicates.unenumerable_receiver_shape?` and `definition_available?`: no core-class receiver tried
-    #   (`Array`, `String`, `Object`, `Math`) reaches either; they decline an includer of a module the receiver's RBS
-    #   declares (#879), which needs a receiver of that shape.
+    # - `ReceiverPredicates.definition_available?`: tried `Array`, `String`, `Object`, `Math`, `Module.new` and a
+    #   singleton class as receivers; each has a definition, so the guard never answers false.
     # - the chained `Struct.new(...).new` guards (`return nil if anonymous_struct_new_call?` and the four conditions
     #   inside it): blanking any one leaves the zero-argument chained example above green, here and in the runner
     #   describe, because the `Struct.new(:a, :b).new()` call is declined before it reaches the test.
     # - `return false if arg.is_a?(Prism::BlockArgumentNode)` in `simple_positional?`: Prism keeps a block-pass on
     #   `call.block`, never in `arguments`, so the test cannot be true.
-    # - `return nil if mins.empty?` and `return false unless function.respond_to?(:required_keywords)`: a method with no
-    #   overload, and a method with an untyped `(?)` signature, were not found among the core methods tried.
-    # - `return false unless kind == :singleton && call_node.name == :new` and `return false unless
-    #   method_def.respond_to?(:defined_in)` in `undeclared_constructor?`: the line after them answers the same for
-    #   every instance method of a core class, and every resolved method answers `defined_in`.
+    # - `return nil if mins.empty?`: a method with no overload; none was found among the core methods tried.
+    # - `return false unless method_def.respond_to?(:defined_in)` in `undeclared_constructor?`: every resolved method
+    #   tried answers `defined_in`.
     # - the whole project-`def` lane (`arity_report_withheld?`'s `source_arity` test, `source_lane_open?` and its
     #   guard in `arity_envelope_for`, and every guard of `source_arity_envelope`, `project_module?` and
     #   `project_module_class_receiver?`): it needs `discovered_parameter_envelopes` keyed project-wide, which only a
@@ -262,6 +259,24 @@ RSpec.describe Rigor::Analysis::CheckRules::WrongArity do
 
       it "ignores a block argument when it counts the positionals" do
         expect(fired("[1].rotate(1, 2, &:x)\n").map(&:first)).to eq([1])
+      end
+
+      it "is silent for a method whose core signature is the untyped `(?) -> untyped` (`Proc#call`)" do
+        source = "pr = proc { |x| x }\npr.call(1, 2)\nl = ->(a) { a }\nl.call(1, 2)\n"
+
+        expect(fired(source)).to eq([])
+      end
+
+      it "checks a method declared on BasicObject against its own signature" do
+        source = %("s".equal?(1, 2)\n"s".__id__(1)\n[1].instance_eval("1", "f", 1, 2)\n)
+
+        expect(fired(source).map(&:first)).to eq([1, 2, 3])
+      end
+
+      it "is silent for a module or singleton-class receiver, whose surface is not enumerable" do
+        source = "m = Module.new\nm.name(1)\ns = \"\".singleton_class\ns.name(1)\n"
+
+        expect(fired(source)).to eq([])
       end
 
       it "is silent when the receiver has no single class" do

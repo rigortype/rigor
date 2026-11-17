@@ -18,10 +18,8 @@ require "spec_helper"
 # - `return nil if scope.inferred_param?(...)`: true only for a parameter whose type the whole-project run infers from
 #   its call sites; `def t(x) = x.upcase` with `t(nil)` and `t("s")` callers in the one file leaves `x` untyped.
 # - `return nil unless Rigor::Reflection.rbs_class_known?("NilClass", ...)`: the empty scope has the core RBS.
-# - `Inference::KeyPresenceGuard.withholds_nil?`: `MAP.key?(k)` then `v = MAP[k]; v.upcase` was tried, on a closed hash
-#   constant; the local copy of the read keeps its `nil`, so the report fires either way.
 # - `next false if class_name.nil?` in `union_has_nameable_non_nil_arm?`: the `rbs_class_known?` / `discovered_classes`
-#   test after it answers false for a nil class name too.
+#   test after it answers false for a nil class name too (tried an untyped arm with nil; both orders agree).
 # - `return false if non_nil_members.empty?` in `union_method_present_on_non_nil?`: a union with no non-nil arm fails
 #   the earlier `union_has_nameable_non_nil_arm?` first.
 # - `return false if definition.nil?` in `nil_class_has_method?`: the core RBS always has a `NilClass` definition.
@@ -122,6 +120,14 @@ RSpec.describe Rigor::Analysis::CheckRules::NilReceiver do
 
     it "is silent when the other arm names no class (an untyped value)" do
       expect(fired("def t(c, d)\n  x = c ? d : nil\n  x.upcase\nend\n")).to eq([])
+    end
+
+    it "is silent for a read a `key?` guard on the same computed key rules out" do
+      source = "MAP = { integer: { type: :integer }, string: { type: :string } }.freeze\n" \
+               "def by_local(prop)\n  k = prop.column_type\n  if MAP.key?(k)\n    r = MAP[k].dup\n    " \
+               "r[:a] = 1\n  end\nend\n"
+
+      expect(fired(source)).to eq([])
     end
 
     it "is silent for a local copied from an ivar a constructor seeds with nil" do

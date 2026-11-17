@@ -25,6 +25,21 @@ RSpec.describe "collector diagnostic builders" do
     diagnostics_for(source).select { |d| d.rule == rule }
   end
 
+  describe "the emission order of the collector table" do
+    # `CheckRules::COLLECTOR_DIAGNOSTIC_BUILDERS` fixes the order rows come out in (dead-assignment before
+    # duplicate-hash-key), not source position: the duplicate key sits at column 10, the dead write at column 23, on
+    # the same line. `diagnose` is called directly so no later stage can re-sort the rows.
+    it "emits two rules that fire on one line in table order, whatever their columns" do
+      program = Prism.parse("def t\n  {a: 1, a: 2}.each { y = 1 }\n  0\nend\n").value
+      scope_index = Rigor::Inference::ScopeIndexer.index(program, default_scope: Rigor::Scope.empty)
+      rows = Rigor::Analysis::CheckRules.diagnose(path: "mem.rb", root: program, scope_index: scope_index)
+
+      expect(rows.map { |r| [r.rule, r.line, r.column] }).to eq(
+        [["flow.dead-assignment", 2, 23], ["flow.duplicate-hash-key", 2, 10]]
+      )
+    end
+  end
+
   describe "build_always_truthy_condition_diagnostic" do
     # `Diagnostic.from_node(predicate_node, ...)` — the squiggle lands on the PREDICATE expression itself
     # (`x`, column 4), not the enclosing `if` keyword (column 1) or the whole `if x` node. Pins the exact

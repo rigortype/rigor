@@ -20,8 +20,10 @@ require "prism"
 #   refinement is dropped either way (`apply_whole_receiver_refinement` finds no bound subject), and
 #   `analyse_whole_regex_match_predicate` declines an unbound local on its own guard. Tried: an operand the parser
 #   reads as a local with no type in the scope, a string-literal operand, and no operand.
-# - `regex_operand_from_constant`'s `return nil if name.nil?`: `Reflection.resolve_constant_type(nil, …)` answers nil,
-#   which the `Constant` test below it declines. Tried: `s =~ foo::RE` with `foo` a local (the example runs the guard).
+#
+# `regex_operand_from_constant`'s `return nil if name.nil?` is pinned by the recorder example: without the guard,
+# `Reflection.resolve_constant_type(nil, ...)` files the read with an active ADR-46 `DependencyRecorder`, whose
+# `plain_constant_path?` raises on nil. Outside a recorder the call answers nil, which the `Constant` test declines.
 RSpec.describe Rigor::Inference::Narrowing::RegexMatch do
   let(:combinator) { Rigor::Type::Combinator }
 
@@ -301,6 +303,15 @@ RSpec.describe Rigor::Inference::Narrowing::RegexMatch do
 
       it "declines a twice-assigned constant beside a regex literal, which is ambiguous, not absent" do
         expect(match("RE = /(a)/\nRE = /(b)(c)/\nRE =~ /(d)/")).to be_nil
+      end
+
+      it "declines a constant path whose parent is not a constant while a dependency recorder is active (ADR-46)" do
+        # `Reflection.resolve_constant_type(nil, ...)` files a read of the name with the recorder, which raises on nil.
+        result = Rigor::Analysis::DependencyRecorder.record_for("lib/x.rb") do
+          match("s =~ foo::RE", { s: string, foo: string })
+        end
+
+        expect(result).to be_a(Rigor::Analysis::DependencyRecorder::Record)
       end
 
       it "declines a constant path whose parent is not a constant" do

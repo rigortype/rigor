@@ -16,15 +16,17 @@ require "spec_helper"
 # cannot order, which is the `:unknown` ordering of #657.
 #
 # Mutation-proved: each guard line (a `return` modifier) of `class_dispatch.rb` was blanked in turn and an example here
-# failed, except four that no input distinguishes:
+# failed, except three that no input distinguishes:
 #
 # - `singleton_extend_declines_bot?`'s `return false if extended.empty?`: `[].any?` is false on the next line, so the
 #   guard only saves the block.
 # - `singleton_ancestor_modules`'s `return from_source if from_rbs.empty?` and `return from_rbs if from_source.empty?`:
 #   `from_source | from_rbs` answers the same modules (only their order differs, and `any?` does not read it). Tried:
 #   a scope record alone, a signature record alone, both, and neither.
-# - `class_ordering`'s `return :equal if lhs == rhs`: `Environment#class_ordering` answers `:equal` for equal names
-#   itself, and so does the table here. Tried: each carrier under its own class, positive, negative and `instance_of?`.
+#
+# `class_ordering`'s `return :equal if lhs == rhs` is pinned by the nil-environment example: a `Constant` under its own
+# class asks `subclass_of?`, which reaches `class_ordering`, and only the shortcut answers without the environment (a
+# `Nominal` is answered earlier, by its own `class_name ==` guard, which is why the `Nominal` examples do not show it).
 #
 # `singleton_ancestor_modules`'s `context.environment&.` nil arm is unreachable through the entry:
 # `narrow_singleton_to_class` asks `subclass_of?` and `declines_bot?` of the environment first, and a nil one raises
@@ -104,6 +106,17 @@ RSpec.describe Rigor::Inference::Narrowing::ClassDispatch do
       expect(negative(const(1), "Comparable")).to eq(bot)
       expect(negative(const(1), "String")).to eq(const(1))
       expect(negative(const(1), "Missing")).to eq(const(1))
+    end
+  end
+
+  describe "an environment that answers nothing" do
+    it "keeps a Constant under its own class and removes it on the negative edge without asking the environment" do
+      # Equal class names are answered by `class_ordering`'s shortcut; a nil environment raises on any other ask.
+      nowhere = context_class.new(false, :positive, nil, nil)
+      negative_nowhere = context_class.new(false, :negative, nil, nil)
+
+      expect(described_class.narrow_class_dispatch(const(1), "Integer", nowhere)).to eq(const(1))
+      expect(described_class.narrow_class_dispatch(const(1), "Integer", negative_nowhere)).to eq(bot)
     end
   end
 

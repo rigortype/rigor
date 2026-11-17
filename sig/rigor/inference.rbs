@@ -118,6 +118,17 @@ module Rigor
       def self?.case_when_scopes: (untyped subject, Array[untyped] conditions, Scope scope) -> [Scope, Scope]
       def self?.analyse: (untyped node, Scope scope) -> [Scope, Scope]?
 
+      module ClassDispatch
+        def self?.subclass_of?: (String rigor_class_name, String target_class_name, untyped context) -> bool
+        def self?.class_ordering: (String lhs, String rhs, untyped context) -> Symbol
+      end
+
+      module Complements
+        def self?.trusted_equality_literal?: (untyped literal) -> bool
+        def self?.falsey_value?: (untyped value) -> bool
+        def self?.falsey_nominal?: (Type::Nominal nominal) -> bool
+      end
+
       VALUE_EQUALITY_CLASSES: Array[Class]
     end
 

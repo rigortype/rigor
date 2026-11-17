@@ -416,26 +416,30 @@ for path in ${changed[@]+"${changed[@]}"}; do
       add_mirror_spec "${mirror%.rb}_spec.rb"
       add_mirror_dir_specs "${mirror%.rb}"
       ;;
-    # Issue #3298 — a script under bin/. Its spec is spec/tool/<name>_spec.rb with
-    # the hyphens of the script's name as underscores, which is why the identifier
-    # rules never found one: they match a basename WITH its extension, and a script
-    # has none, so `land-pr` could not reach `land_pr_spec.rb`. A change to any of
-    # these ran no spec locally and no uncovered line said so, the selection's own
-    # script included: `bin/verify-changed` did not select
-    # spec/tool/verify_changed_spec.rb. The gem arm below already spells the same
-    # hyphen-to-underscore mapping for a plugin directory.
+    # Issue #3298 — a script under bin/. The identifier rules match a changed
+    # file's basename WITH its extension, and a script has none, so `land-pr` could
+    # not reach spec/tool/land_pr_spec.rb: a change to any of these ran no spec
+    # locally and no uncovered line said so, the selection's own script included.
+    #
+    # The rule is the specs that NAME the script, as the gem arm below selects the
+    # specs that name a gem, and not a mirror of the script's name with its hyphens
+    # as underscores. A mirror reads as the obvious rule and is the wrong one twice
+    # over: it misses `bin/ci-required`, which has no spec of its own and is run for
+    # real by land_pr_spec and land_when_green_spec (`bin/land-pr` shells out to it),
+    # and it misses the second spec of a script that has one (`bin/land-pr` is run by
+    # land_when_green_spec too). Reporting either as uncovered would say CI is the
+    # only check where two specs would catch a break, which is the wrong direction
+    # for a gate to be wrong in. Measured on this tree, the search also finds every
+    # spec a mirror would, so the mirror is not kept beside it.
+    #
+    # The boundary keeps `bin/land-pr` from matching a future `bin/land-pr-batch`,
+    # as the gem arm's does. A spec that only mentions the script in a comment is
+    # selected too: a handful of tool specs is the cheap side of this trade.
     bin/*)
       script="${path#bin/}"
-      stem="spec/tool/${script//-/_}"
       before="$specs"
-      # A prefix glob, as the gem arm below uses: the spec is not always the exact
-      # mirror name (`bin/rigor-worktree` is pinned by
-      # spec/tool/rigor_worktree_reference_clone_spec.rb), and a script may grow a
-      # second spec file beside the first.
-      for spec in "$stem"_spec.rb "$stem"_*_spec.rb; do
-        [[ -f "$spec" ]] && add_spec "$spec"
-      done
-      [[ "$specs" == "$before" ]] && uncovered+="$path (no spec under ${stem}_*)"$'\n'
+      add_specs_matching "bin/${script}([^a-z0-9_-]|\$)"
+      [[ "$specs" == "$before" ]] && uncovered+="$path (no spec names it)"$'\n'
       ;;
     sig/*.rbs)
       mirror="lib/${path#sig/}"

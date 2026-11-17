@@ -1,4 +1,4 @@
-- **[engine]** A read that passes a project module with no method of its own now infers its type instead of answering `Dynamic`. ([#3282](https://github.com/rigortype/rigor/pull/3283))
+- **[engine]** A read that passes a project module with no method of its own now infers its type instead of answering `Dynamic`. ([#3282](https://github.com/rigortype/rigor/pull/3293))
   - The shapes this covers are a concern whose whole body is an `included do` block, which records nothing of its own once the block's `def self.x` stays off the concern, and an empty `module M; end`.
   - On a Mastodon checkout this types 291 more `(class, method)` pairs with none lost, and adds no diagnostic row.
   - A module that can still define on its includer keeps declining: one that rewrites its own method table, one whose side holds names no table spells, one whose hook block defines the name, and one that defines a mixin hook with a `def` of its own.

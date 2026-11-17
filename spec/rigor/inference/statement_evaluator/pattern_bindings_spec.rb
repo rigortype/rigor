@@ -8,6 +8,11 @@ require "prism"
 # evaluator (the module calls back `sub_eval`, `widen_index_target` and `widen_attribute_write` on it) over a scope
 # from `Scope.empty`, and read the bound names off the returned scope. `statement_evaluator_spec.rb` pins the same
 # behaviour through the whole walk.
+#
+# One guard no example distinguishes: `eval_match_write`'s `next s unless target.is_a?(LocalVariableTargetNode)`. Every
+# `MatchWriteNode` target is a local-variable target; tried an underscore name, a name that is already a local, a
+# method's name (`puts`), an interpolated or `o`-flag regexp, and a modifier or `if` position, and Prism answers
+# `LocalVariableTargetNode` for each.
 RSpec.describe Rigor::Inference::StatementEvaluator::PatternBindings do
   let(:combinator) { Rigor::Type::Combinator }
   let(:scope) { Rigor::Scope.empty }

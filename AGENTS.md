@@ -139,7 +139,12 @@ body happens to return — here or in upstream RBS — unless the library docume
 - `references/` contains read-only upstream submodules, never Rigor code. Read behavior there and
   implement the smallest Rigor-side equivalent. Use `make init-submodules` / `make pull-submodules`;
   the [`rigor-add-reference`](.claude/skills/rigor-add-reference/SKILL.md) workflow owns lifecycle and
-  recovery.
+  recovery. It holds only `ruby` and `rbs`, which the catalog extraction and its gates read at a pinned
+  revision.
+- The other upstream trees earlier docs cite as `references/<name>` (PHPStan docs, the TypeScript
+  handbook, Python typing, Sorbet, Steep, TypeProf, Tapioca, …) live outside this repository in the
+  separate `rigor-references` repository, laid out as `<language>/<name>` and synced unpinned to each
+  upstream's tip by its `bin/sync`. Treat them as read-only too; nothing in Rigor's gates reads them.
 - `docs/handbook/`, `docs/manual/`, and `docs/types.md` are informational. The type and internal specs
   are binding.
 - Before planning a change under `lib/rigor/`, read [`docs/agents/code-map.md`](docs/agents/code-map.md):

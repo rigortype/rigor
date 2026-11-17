@@ -19,9 +19,9 @@ The standing rule is in `AGENTS.md`: these submodules are **read-only reference 
 | Submodule | Upstream | Use |
 | --- | --- | --- |
 | `references/rbs` | `https://github.com/ruby/rbs.git` | RBS syntax, stdlib signatures, test cases, implementation behaviour. The compatibility target for the RBS ecosystem. |
-| `references/python-typing` | `https://github.com/python/typing.git` | Written-down Python typing concepts (gradual typing, generics, protocols, variance), borrowed **by idea only**. Not a syntax compatibility target. |
 | `references/ruby` | `https://github.com/ruby/ruby.git` (branch `ruby_4_0`) | Ruby interpreter source. Parsed offline to derive the PHPStan-functionMap-style catalog of built-in methods: argument / return types plus per-method effect facets (pure, self-mutating, block-dependent). Never link Rigor runtime code against it. |
-| `references/typeprof` | `https://github.com/ruby/typeprof.git` | TypeProf source — the reference implementation of Ruby type inference. Read for ideas and behaviour comparisons; never import or require it. |
+
+Unpinned reference material (docs sites, other type checkers) does **not** go here: it belongs in the separate `rigor-references` repository (`references.conf` + `bin/sync`, latest of each upstream, sparse where only a subdirectory matters). Add a submodule only when a Rigor gate must read the tree at a fixed revision, as `ruby` and `rbs` are.
 
 The trees are large, so the root `.ignore` lists `/references/` to keep `rg` out by default (git is unaffected). Search one intentionally, and **scope the path** so you do not pull in `vendor/`:
 
@@ -34,7 +34,7 @@ rg PATTERN --no-ignore references/rbs
 Before running any command, ask (or infer from context) whether a **sparse checkout** is needed:
 
 - **Full checkout** (default): the whole repo is useful — use `git submodule update --init --filter=blob:none`.
-- **Sparse checkout**: the repo is large but only a subdirectory matters (e.g. `references/phpstan` needs only `website/`, `references/TypeScript-Website` needs only `packages/documentation/copy/en`). Use the `sparse-checkout` pattern from `init-submodules` in the Makefile.
+- **Sparse checkout**: the repo is large but only a subdirectory matters (e.g. a docs site where only `website/` matters). Use the `sparse-checkout` block in Step 2b; `init-submodules` has none today, since both remaining submodules are checked out in full.
 
 When in doubt, full checkout is fine. Sparse is an optimisation, not a correctness requirement.
 
@@ -44,7 +44,7 @@ When in doubt, full checkout is fine. Sparse is an optimisation, not a correctne
 git submodule add <upstream-url> references/<name>
 ```
 
-Use `https://` URLs for read-only public repos (like sorbet). Use `git@github.com:` SSH URLs for repos where write access is possible or expected (like the existing `ruby/typeprof`). Match the convention of whichever group the new submodule belongs to.
+Use `https://` URLs for read-only public repos (like the existing `ruby/rbs` and `ruby/ruby`). Use `git@github.com:` SSH URLs only for repos where write access is possible or expected.
 
 This writes the `.gitmodules` entry and stages `references/<name>` automatically.
 
@@ -59,20 +59,19 @@ Append the new entry at the end of the list, continuing the `\`-continuation sty
 ```makefile
 REFERENCE_SUBMODULES := \
 	references/rbs \
-	... \
-	references/typeprof \
+	references/ruby \
 	references/<name>      # ← add here
 ```
 
 ### 2b. `init-submodules` target body
 
-**Full checkout** — add one line after the last simple `git submodule update` line (before the `@if` sparse-checkout blocks):
+**Full checkout** — add one line after the last `git submodule update` line:
 
 ```makefile
 	git submodule update --init --filter=blob:none references/<name>
 ```
 
-**Sparse checkout** — add an `@if` block modelled on the existing `phpstan` or `TypeScript-Website` blocks. The structure is:
+**Sparse checkout** — add an `@if` block using this structure:
 
 ```makefile
 	@if [ ! -e references/<name>/.git ]; then \
@@ -132,7 +131,7 @@ automatically.
 
 ## Submodule hygiene
 
-Drive the lifecycle through the Make targets: `make init-submodules`, `make pull-submodules`. Avoid raw `git submodule update --recursive` against the whole tree — it bypasses the sparse-checkout setup `init-submodules` bakes in for `references/phpstan` and `references/TypeScript-Website`. If a submodule is empty after cloning, run `nix develop --command make init-submodules`.
+Drive the lifecycle through the Make targets: `make init-submodules`, `make pull-submodules`. Avoid raw `git submodule update --recursive` against the whole tree — it bypasses any sparse-checkout setup `init-submodules` bakes in for a submodule. If a submodule is empty after cloning, run `nix develop --command make init-submodules`.
 
 **Never hand-edit `.gitmodules` or `.git/config` for a rename.** Use `git mv old/path new/path`, then `git submodule sync` so `.git/config` follows `.gitmodules`. Hand edits leave stale `submodule.<name>.*` sections and orphan `.git/modules/<old>/` directories, which can crash later parent operations with a `submodule.c` BUG assertion.
 

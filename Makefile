@@ -2,17 +2,7 @@
 
 REFERENCE_SUBMODULES := \
 	references/rbs \
-	references/rbs-inline-wiki \
-	references/phpstan \
-	references/python-typing \
-	references/ruby \
-	references/TypeScript-Website \
-	references/typeprof \
-	references/sorbet \
-	references/tapioca \
-	references/hanakai-rb \
-	references/ex_doc \
-	references/elixir-lang.github.com
+	references/ruby
 
 setup: install init-git-config init-submodules
 
@@ -33,41 +23,7 @@ init-git-config:
 
 init-submodules:
 	git submodule update --init --filter=blob:none references/rbs
-	git submodule update --init --filter=blob:none references/rbs-inline-wiki
-	@if [ ! -e references/phpstan/.git ]; then \
-		url="$$(git config -f .gitmodules submodule.references/phpstan.url)"; \
-		sha="$$(git rev-parse HEAD:references/phpstan)"; \
-		echo "Initializing references/phpstan sparsely (website)"; \
-		git clone --no-checkout --filter=blob:none "$$url" references/phpstan; \
-		git -C references/phpstan fetch origin "$$sha"; \
-		git -C references/phpstan sparse-checkout init --cone; \
-		git -C references/phpstan sparse-checkout set website; \
-		git -C references/phpstan checkout --detach "$$sha"; \
-		git submodule absorbgitdirs references/phpstan; \
-	else \
-		git submodule update --init --filter=blob:none references/phpstan; \
-	fi
-	git submodule update --init --filter=blob:none references/python-typing
 	git submodule update --init --filter=blob:none references/ruby
-	git submodule update --init --filter=blob:none references/typeprof
-	git submodule update --init --filter=blob:none references/sorbet
-	git submodule update --init --filter=blob:none references/tapioca
-	git submodule update --init --filter=blob:none references/hanakai-rb
-	git submodule update --init --filter=blob:none references/ex_doc
-	git submodule update --init --filter=blob:none references/elixir-lang.github.com
-	@if [ ! -e references/TypeScript-Website/.git ]; then \
-		url="$$(git config -f .gitmodules submodule.references/TypeScript-Website.url)"; \
-		sha="$$(git rev-parse HEAD:references/TypeScript-Website)"; \
-		echo "Initializing references/TypeScript-Website sparsely (packages/documentation/copy/en)"; \
-		git clone --no-checkout --filter=blob:none "$$url" references/TypeScript-Website; \
-		git -C references/TypeScript-Website fetch origin "$$sha"; \
-		git -C references/TypeScript-Website sparse-checkout init --cone; \
-		git -C references/TypeScript-Website sparse-checkout set packages/documentation/copy/en; \
-		git -C references/TypeScript-Website checkout --detach "$$sha"; \
-		git submodule absorbgitdirs references/TypeScript-Website; \
-	else \
-		git submodule update --init --filter=blob:none references/TypeScript-Website; \
-	fi
 
 pull-submodules: init-submodules
 	git submodule update --remote --merge $(REFERENCE_SUBMODULES)

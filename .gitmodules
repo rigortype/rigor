@@ -1,42 +1,7 @@
 [submodule "references/rbs"]
 	path = references/rbs
 	url = https://github.com/ruby/rbs.git
-[submodule "references/python-typing"]
-	path = references/python-typing
-	url = git@github.com:python/typing.git
-[submodule "references/TypeScript-Website"]
-	path = references/TypeScript-Website
-	url = https://github.com/microsoft/TypeScript-Website.git
-	branch = v2
-[submodule "references/phpstan"]
-	path = references/phpstan
-	url = https://github.com/phpstan/phpstan.git
-	branch = 2.2.x
-[submodule "references/rbs-inline-wiki"]
-	path = references/rbs-inline-wiki
-	url = https://github.com/soutaro/rbs-inline.wiki.git
-[submodule "references/steep"]
-	path = references/steep
-	url = git@github.com:soutaro/steep.git
 [submodule "references/ruby"]
 	path = references/ruby
 	url = https://github.com/ruby/ruby.git
 	branch = ruby_4_0
-[submodule "references/typeprof"]
-	path = references/typeprof
-	url = git@github.com:ruby/typeprof.git
-[submodule "references/sorbet"]
-	path = references/sorbet
-	url = https://github.com/sorbet/sorbet.git
-[submodule "references/tapioca"]
-	path = references/tapioca
-	url = https://github.com/Shopify/tapioca.git
-[submodule "references/hanakai-rb"]
-	path = references/hanakai-rb
-	url = https://github.com/hanakai-rb/site.git
-[submodule "references/ex_doc"]
-	path = references/ex_doc
-	url = https://github.com/elixir-lang/ex_doc.git
-[submodule "references/elixir-lang.github.com"]
-	path = references/elixir-lang.github.com
-	url = https://github.com/elixir-lang/elixir-lang.github.com.git

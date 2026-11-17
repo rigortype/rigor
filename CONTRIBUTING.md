@@ -53,9 +53,9 @@ make init-submodules
 If `nix` is not on `PATH`, substitute
 `/nix/var/nix/profiles/default/bin/nix`.
 
-`make init-submodules` clones the read-only specifications
-under `references/` (RBS, ruby/ruby on the `ruby_4_0` branch,
-PHPStan website, python/typing, etc.). The submodules are large;
+`make init-submodules` clones the read-only upstream sources
+under `references/` (RBS and ruby/ruby on the `ruby_4_0` branch,
+which the builtin-catalog extraction and its gates read). The submodules are large;
 `init-submodules` already passes `--filter=blob:none` so first-
 clone bandwidth stays reasonable.
 

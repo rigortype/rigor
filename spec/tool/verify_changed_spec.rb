@@ -389,7 +389,10 @@ RSpec.describe "bin/verify-changed spec selection" do
 
     it "selects only the mirror spec for an engine path, where the default adds the drift set" do
       quick, = selection_for(engine_path, quick: true)
-      expect(quick).to eq(["spec/rigor/inference/statement_evaluator_spec.rb"])
+      # The mirror spec and the specs named for the modules under `statement_evaluator/`.
+      expect(quick).to eq(%w[spec/rigor/inference/statement_evaluator/def_arguments_and_assertions_spec.rb
+                             spec/rigor/inference/statement_evaluator/pattern_bindings_spec.rb
+                             spec/rigor/inference/statement_evaluator_spec.rb])
       full, = selection_for(engine_path)
       expect(full).to include("spec/rigor/inference/statement_evaluator_spec.rb", *drift)
     end

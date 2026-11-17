@@ -65,7 +65,7 @@ members:
     - lib/rigor/sig_gen/observation_collector.rb
   in_source_constants:
     reads:
-    - lib/rigor/analysis/runner.rb
+    - lib/rigor/analysis/runner/scope_seed.rb
     - lib/rigor/inference/last_line/implicit_self.rb
     - lib/rigor/inference/self_call_ivar_writes.rb
     - lib/rigor/lens/run.rb
@@ -200,7 +200,7 @@ members:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/lens/run.rb
     copies:
-    - lib/rigor/analysis/runner.rb
+    - lib/rigor/analysis/runner/scope_seed.rb
     - lib/rigor/inference/project_seed_tables.rb
   discovered_singleton_def_sources:
     reads:
@@ -209,7 +209,7 @@ members:
     - lib/rigor/inference/refined_dispatch/class_object.rb
     - lib/rigor/lens/run.rb
     copies:
-    - lib/rigor/analysis/runner.rb
+    - lib/rigor/analysis/runner/scope_seed.rb
     - lib/rigor/inference/project_seed_tables.rb
   discovered_method_visibilities:
     reads:
@@ -343,7 +343,7 @@ members:
     - lib/rigor/scope/resolution_chain/relevance.rb
     - lib/rigor/sig_gen/bot_proposal_guard.rb
     copies:
-    - lib/rigor/analysis/runner.rb
+    - lib/rigor/analysis/runner/scope_seed.rb
     - lib/rigor/inference/project_seed_tables.rb
   discovered_prepends:
     reads:
@@ -353,7 +353,7 @@ members:
     - lib/rigor/scope/resolution_chain.rb
     - lib/rigor/sig_gen/bot_proposal_guard.rb
     copies:
-    - lib/rigor/analysis/runner.rb
+    - lib/rigor/analysis/runner/scope_seed.rb
     - lib/rigor/inference/project_seed_tables.rb
   discovered_extends:
     reads:
@@ -369,7 +369,7 @@ members:
     - lib/rigor/scope/resolution_chain/relevance.rb
     - lib/rigor/sig_gen/bot_proposal_guard.rb
     copies:
-    - lib/rigor/analysis/runner.rb
+    - lib/rigor/analysis/runner/scope_seed.rb
     - lib/rigor/inference/project_seed_tables.rb
   unpositioned_mixins:
     reads:
@@ -379,7 +379,7 @@ members:
     - lib/rigor/scope/resolution_chain.rb
     - lib/rigor/scope/resolution_chain/relevance.rb
     copies:
-    - lib/rigor/analysis/runner.rb
+    - lib/rigor/analysis/runner/scope_seed.rb
     - lib/rigor/inference/project_seed_tables.rb
   discovered_class_sources:
     reads:
@@ -393,14 +393,15 @@ members:
     - lib/rigor/inference/singleton_hook_decline.rb
     - lib/rigor/scope/resolution_chain.rb
     copies:
-    - lib/rigor/analysis/runner.rb
+    - lib/rigor/analysis/runner/scope_seed.rb
     - lib/rigor/inference/project_seed_tables.rb
   constant_sources:
     reads:
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/analysis/runner/scope_seed.rb
     - lib/rigor/protection/discovery_seed.rb
     copies:
-    - lib/rigor/analysis/runner.rb
+    - lib/rigor/analysis/runner/scope_seed.rb
     - lib/rigor/inference/project_seed_tables.rb
     - lib/rigor/language_server/project_context.rb
     - lib/rigor/protection/discovery_seed.rb
@@ -409,14 +410,14 @@ members:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/project_seed_tables.rb
     copies:
-    - lib/rigor/analysis/runner.rb
+    - lib/rigor/analysis/runner/scope_seed.rb
     - lib/rigor/inference/project_seed_tables.rb
   constant_shadowers:
     reads:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/project_seed_tables.rb
     copies:
-    - lib/rigor/analysis/runner.rb
+    - lib/rigor/analysis/runner/scope_seed.rb
     - lib/rigor/inference/project_seed_tables.rb
   published_constant_names:
     reads:
@@ -440,7 +441,7 @@ members:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/sig_gen/generator.rb
     copies:
-    - lib/rigor/analysis/runner.rb
+    - lib/rigor/analysis/runner/scope_seed.rb
     - lib/rigor/inference/project_seed_tables.rb
     - lib/rigor/sig_gen/generator.rb
   struct_member_layouts:
@@ -448,7 +449,7 @@ members:
     - lib/rigor/analysis/runner.rb
     - lib/rigor/sig_gen/generator.rb
     copies:
-    - lib/rigor/analysis/runner.rb
+    - lib/rigor/analysis/runner/scope_seed.rb
     - lib/rigor/inference/project_seed_tables.rb
     - lib/rigor/sig_gen/generator.rb
   param_inferred_types:

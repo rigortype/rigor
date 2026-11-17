@@ -10,7 +10,7 @@
 # Counts are `wc -l` (physical lines), taken at the commit this file was last regenerated against.
 lib/rigor/analysis/incremental_session.rb: 2100
 lib/rigor/analysis/rule_catalog.rb: 1300
-lib/rigor/analysis/runner.rb: 3100
+lib/rigor/analysis/runner.rb: 2900
 lib/rigor/analysis/runner/diagnostic_aggregator.rb: 1600
 lib/rigor/analysis/runner/pool_coordinator.rb: 1200
 lib/rigor/cli/check_command.rb: 1300

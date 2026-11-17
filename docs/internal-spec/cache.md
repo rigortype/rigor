@@ -2372,11 +2372,11 @@ ADR-45 `analysis.run-diagnostics` slot:
 
 | Row | Source | Catches |
 | --- | --- | --- |
-| `:stat` file, per analyzed file | `analyzed_file_entries` | an edit to any file the run analyzed |
-| `:stat` file, per discovered-not-analyzed file | `discovery_file_entries` ([#684](https://github.com/rigortype/rigor/issues/684)) | an edit to a file a widened run only discovered |
-| `:stat` file, per `pre_eval:` file | `pre_eval_file_entries` ([#352](https://github.com/rigortype/rigor/issues/352)) | an edit to an ADR-17 pre-evaluated file |
-| `:stat` file, per **template** file the run READ — the ones that produced a unit AND the ones that failed | `template_unit_file_entries` ([#392](https://github.com/rigortype/rigor/issues/392)) | an edit to a `.erb` / `.rbx` / … a plugin claimed, including one whose transform raised or whose bytes could not be read |
-| names glob, per configured root, on a run that widened its discovery | `discovery_glob_entries` ([#1583](https://github.com/rigortype/rigor/issues/1583)) | a file APPEARING under a configured path a run over path arguments discovers, including when the widening had added no file before it |
+| `:stat` file, per analyzed file | `Runner::DependencyRows.analyzed_file_entries` | an edit to any file the run analyzed |
+| `:stat` file, per discovered-not-analyzed file | `Runner::DependencyRows.discovery_file_entries` ([#684](https://github.com/rigortype/rigor/issues/684)) | an edit to a file a widened run only discovered |
+| `:stat` file, per `pre_eval:` file | `Runner::DependencyRows.pre_eval_file_entries` ([#352](https://github.com/rigortype/rigor/issues/352)) | an edit to an ADR-17 pre-evaluated file |
+| `:stat` file, per **template** file the run READ — the ones that produced a unit AND the ones that failed | `Runner::DependencyRows.template_unit_file_entries` ([#392](https://github.com/rigortype/rigor/issues/392)) | an edit to a `.erb` / `.rbx` / … a plugin claimed, including one whose transform raised or whose bytes could not be read |
+| names glob, per configured root, on a run that widened its discovery | `Runner::DependencyRows.discovery_glob_entries` ([#1583](https://github.com/rigortype/rigor/issues/1583)) | a file APPEARING under a configured path a run over path arguments discovers, including when the widening had added no file before it |
 | names glob, per claimed `template_globs:` pattern | `template_unit_glob_entries` (#392) | a template APPEARING under or vanishing from a claimed glob |
 | `:stat` file, per `.rbs` under every signature root and under Rigor's own `data/` trees (`vendored_gem_sigs/`, `core_overlay/`, `capability_roles/`) | `RunDescriptor#files` → `RbsDescriptor.file_entries` | an edit to a signature file the run read |
 | names glob, per signature root (`**/*.rbs`) | `RunDescriptor#globs` (#979) | a `.rbs` APPEARING under or vanishing from a signature root |
@@ -2384,8 +2384,8 @@ ADR-45 `analysis.run-diagnostics` slot:
 | glob, per plugin-listed directory | `IoBoundary#cache_descriptor` ([#954](https://github.com/rigortype/rigor/issues/954)) | a file appearing in a directory a plugin listed |
 | every row of a producer entry the plugin was served from | `IoBoundary#cache_descriptor`, replayed by `Plugin::Base#cache_for` ([#1558](https://github.com/rigortype/rigor/issues/1558)) | an edit to a served producer's input, which this run never read |
 | glob, per producer `watch:` pattern | `Plugin::Base#watch_glob_entries` (ADR-60 WD3) | an edit under a producer's declared watch |
-| `:kind` file, per analysis root | `root_presence_entries` ([#1962](https://github.com/rigortype/rigor/issues/1962)) | a root appearing, vanishing, or turning from a directory into a file or back, which moves its path-error row (`no such file or directory`, `not a Ruby file`) while the analysed set stays the same |
-| `:kind` file, per `pre_eval:` entry and per project signature root (configured, or the auto-detected `sig`) | `root_presence_entries` (#1962, [#1555](https://github.com/rigortype/rigor/issues/1555)) | a missing `pre_eval:` file or signature root being created, or a directory and a file trading places there, which no other row covers |
+| `:kind` file, per analysis root | `Runner::DependencyRows.root_presence_entries` ([#1962](https://github.com/rigortype/rigor/issues/1962)) | a root appearing, vanishing, or turning from a directory into a file or back, which moves its path-error row (`no such file or directory`, `not a Ruby file`) while the analysed set stays the same |
+| `:kind` file, per `pre_eval:` entry and per project signature root (configured, or the auto-detected `sig`) | `Runner::DependencyRows.root_presence_entries` (#1962, [#1555](https://github.com/rigortype/rigor/issues/1555)) | a missing `pre_eval:` file or signature root being created, or a directory and a file trading places there, which no other row covers |
 
 The ADR-103 effects sidecar validates against this same descriptor, but its identity is one
 generation per analysed-path set, not per root set. So the root `:kind` rows can cost it a

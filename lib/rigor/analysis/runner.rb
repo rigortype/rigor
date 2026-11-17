@@ -56,6 +56,9 @@ require_relative "template_units"
 require_relative "runner/effect_envelope_pass"
 require_relative "runner/effect_annotation_residual_pass"
 require_relative "runner/buffer_pool_dispatcher"
+require_relative "runner/dependency_rows"
+require_relative "runner/effect_cache_entries"
+require_relative "runner/scope_seed"
 
 module Rigor
   module Analysis
@@ -506,7 +509,7 @@ module Rigor
         # (sequential + fork-worker) through `project_scope_seed_tables`. Empty unless the project lists
         # `pre_eval:` files that declare publishable constants, so a project without one is byte-identical.
         @project_pre_eval_constants = {}.freeze
-        # Issue #663 — the listed set {#publishable_pre_eval_constants} asks "is this writer one of ours?"
+        # Issue #663 — the listed set {ScopeSeed.publishable_pre_eval_constants} asks "is this writer one of ours?"
         # against; a function of the configuration alone, so it outlives every discovery rebuild.
         @pre_eval_path_set = nil
         # ADR-84 WD2 — per-run identity token for the user-method return memo's bucket (see
@@ -1166,35 +1169,12 @@ module Rigor
         nil
       end
 
-      # The read half of the serving entry (#482). A miss, a stale dependency, a corrupt entry and a
-      # stored value of the wrong shape are one answer — nil, "collect it again" — because none of them
-      # can be told apart from the outside and all of them have the same remedy. An entry from before the
-      # split simply does not exist under this producer id, so an older cache re-collects once.
       def peek_effect_summary(descriptor)
-        cached = @cache_store.peek_validated(
-          producer_id: RunCacheKey::RUN_EFFECTS_TABLE_PRODUCER_ID, key_descriptor: descriptor
-        )
-        return nil unless cached.is_a?(Array) && cached.length == 3
-        return nil unless cached[0].is_a?(Effects::EffectTable) && cached[1].is_a?(Hash) &&
-                          cached[2].is_a?(Hash)
-
-        cached
-      rescue StandardError
-        nil
+        EffectCacheEntries.peek_effect_summary(@cache_store, descriptor)
       end
 
-      # The read half of the collections entry — only ever asked by {#forced_file_effects}, on the paths
-      # that need per-file form. The stored shape is `[collections]`; an entry from before the split is
-      # `[collections, table]` and its first member is the same Hash, so it still reads.
       def peek_effect_collections(descriptor)
-        cached = @cache_store.peek_validated(
-          producer_id: RunCacheKey::RUN_EFFECTS_PRODUCER_ID, key_descriptor: descriptor
-        )
-        return nil unless cached.is_a?(Array) && cached.first.is_a?(Hash)
-
-        cached.first
-      rescue StandardError
-        nil
+        EffectCacheEntries.peek_effect_collections(@cache_store, descriptor)
       end
 
       # The write half, run only after a miss, so nothing here recomputes anything. Two entries under one
@@ -1220,22 +1200,11 @@ module Rigor
       end
 
       def write_effect_entry(producer_id, descriptor, payload, dependencies)
-        @cache_store.fetch_or_validate(
-          producer_id: producer_id, key_descriptor: descriptor,
-          generation_cap: RunCacheKey::EFFECTS_GENERATION_CAP
-        ) { [payload, dependencies] }
+        EffectCacheEntries.write_effect_entry(@cache_store, producer_id, descriptor, payload, dependencies)
       end
 
-      # An empty table over non-empty summaries is {#close_effect_graph}'s fail-soft answer, not a
-      # result — persisting it would freeze one run's propagation failure into every warm hit until the
-      # next invalidation. Storing nil instead makes the warm hit re-run the fixpoint, which is exactly
-      # the retry the fail-soft posture wants.
       def storable_effect_table(collections)
-        table = @effect_table
-        return nil if table.nil?
-        return nil if table.empty? && collections.any? { |_, collection| !collection.summaries.empty? }
-
-        table
+        EffectCacheEntries.storable_effect_table(@effect_table, collections)
       end
       private :serve_effect_collections, :served_from_effect_entries?,
               :effects_key_descriptor, :peek_effect_summary,
@@ -1598,48 +1567,17 @@ module Rigor
         Cache::Descriptor.new(files: entries, globs: globs.uniq)
       end
 
-      # #1962 / #1555 — a kind row per path the run's answer depends on the presence and kind of, not only its
-      # bytes. An analysis root: its path errors (`no such file or directory`, `not a Ruby file`) answer to whether
-      # it exists and whether it is a directory or a file, while what a directory root holds is the analysed-file
-      # set the key carries. A `pre_eval:` entry: `pre-eval.file-not-found` answers to whether it is a file (one
-      # that is has its `:stat` row from {#pre_eval_file_entries}). A project signature root, configured or the
-      # auto-detected `sig`: the loader reads a directory and a file differently, and #979's listing rows cover a
-      # file appearing under a root that existed, not the root appearing. A kind row rather than an existence row,
-      # because a directory replaced by a file of the same name leaves an existence row fresh. The `--incremental`
-      # slot records kind rows for the same paths ({#incremental_slot_rows}, {#baseline_dependency_rows}, #1977).
       def root_presence_entries(expansion)
-        (expansion.fetch(:roots) + @configuration.pre_eval + signature_root_candidates)
-          .uniq.map { |path| Cache::Descriptor::FileEntry.kind(path: path) }
+        DependencyRows.root_presence_entries(expansion.fetch(:roots), @configuration.pre_eval,
+                                             signature_root_candidates)
       end
 
-      # Every file a plugin read or probed through its `IoBoundary` (#577 / #613), and every directory it listed
-      # (#954), as the boundaries stand when asked.
       def plugin_boundary_rows
-        files = []
-        globs = []
-        @plugin_registry.plugins.each do |plugin|
-          # Read the boundary WITHOUT triggering its lazy `@io_boundary ||=` initializer: plugin instances
-          # are frozen after the run, and a plugin that never built a boundary read no files through it,
-          # so it contributes no dependencies.
-          boundary = plugin.instance_variable_get(:@io_boundary)
-          next unless boundary
-
-          # #629 — a boundary carries GlobEntry listing rows too (`IoBoundary#list_directory`), and they
-          # are the only edge back to a file the run decided was ABSENT from a directory it consulted.
-          boundary_descriptor = boundary.cache_descriptor
-          files.concat(boundary_descriptor.files)
-          globs.concat(boundary_descriptor.globs)
-        end
-        Cache::Descriptor.new(files: files, globs: globs)
+        DependencyRows.plugin_boundary_rows(@plugin_registry.plugins)
       end
 
-      # One glob row per producer `watch:` pattern (ADR-60 WD3), recomputed against the tree as it stands.
       def producer_watch_glob_entries
-        @plugin_registry.plugins.flat_map do |plugin|
-          plugin.class.producers.each_value.flat_map do |prod|
-            prod[:watch] ? plugin.send(:watch_glob_entries, prod[:watch]) : []
-          end
-        end
+        DependencyRows.producer_watch_glob_entries(@plugin_registry.plugins)
       end
 
       # ADR-45 WD2 (#1507) — the rows `rigor check --incremental`'s run-result slot records beside the analysed
@@ -1693,15 +1631,10 @@ module Rigor
         )
       end
 
-      # Whether every boundary row that appeared or changed during the per-file loop is one some file's analysis
-      # was credited with. A row outside every file's attribution would ride this run's `run` rows only, and the
-      # next narrowed run — which does not repeat the read — would drop it.
       def analysis_reads_attributed?
         post = @post_analysis_plugin_rows || plugin_boundary_rows
         pre = @pre_analysis_plugin_rows || post
-        credited = @analysis_reads.each_value.flat_map(&:itself).to_set
-        (post.files - pre.files).all? { |row| credited.include?(row) } &&
-          (post.globs - pre.globs).all? { |row| credited.include?(row) }
+        DependencyRows.analysis_reads_attributed?(post, pre, @analysis_reads)
       end
 
       # ADR-45 WD2 (#1507) — the rows a FULL run records for the inputs an incremental recheck does not re-derive,
@@ -1729,11 +1662,6 @@ module Rigor
       # change time it cannot read, and passes over a `pinned` one.
       BaselineRows = Data.define(:owned, :pinned)
 
-      # A loader's two readers {Cache::RbsDescriptor} takes signature roots from. `core_root` (issue #2517) is the
-      # selected core, which the slot key names by path only, so its files are `owned` rows like the project's own.
-      SignatureRoots = Struct.new(:signature_paths, :core_root)
-      private_constant :SignatureRoots
-
       # @param files — the run's analysed-path set.
       def baseline_dependency_rows(files:)
         return nil if pool_mode? || !@collect_stats || @analyzed_files.empty?
@@ -1753,21 +1681,8 @@ module Rigor
         )
       end
 
-      # The signature tree's rows, the project's own and the rest.
       def signature_rows
-        roots = SignatureRoots.new(@snapshots.signature_paths, @configuration.core_root)
-        own = (signature_root_candidates + [@configuration.core_root].compact)
-              .map { |root| File.join(File.absolute_path(root.to_s), "") }
-        own_files, other_files = Cache::RbsDescriptor.file_entries(roots, comparator: :stat)
-                                                     .partition { |row| within?(row.path, own) }
-        own_globs, other_globs = Cache::RbsDescriptor.glob_entries(roots).partition { |row| within?(row.root, own) }
-        [Cache::Descriptor.new(files: own_files, globs: own_globs.uniq),
-         Cache::Descriptor.new(files: other_files, globs: other_globs.uniq)]
-      end
-
-      def within?(path, roots)
-        directory = File.join(File.absolute_path(path.to_s), "")
-        roots.any? { |root| directory.start_with?(root) }
+        DependencyRows.signature_rows(@snapshots.signature_paths, @configuration.core_root, signature_root_candidates)
       end
 
       # The project's own signature roots, whether or not they exist:
@@ -1778,77 +1693,32 @@ module Rigor
         Environment.project_signature_root_candidates(@configuration.signature_paths)
       end
 
-      # One names-mode listing row per directory the discovery widening globbed, so a file appearing there is seen
-      # as well as an edit to one that existed. Issue #1583 — keyed on the widening decision, not on what it
-      # added: a run over `lib/b.rb` alone in `lib` widens to nothing, and a `lib/a.rb` created afterwards must
-      # still move the answer of the run-result cache and the `--incremental` slot.
       def discovery_glob_entries
-        return [] unless @discovery_widened
-
-        @configuration.paths.select { |root| File.directory?(root) }.map do |root|
-          Cache::Descriptor::GlobEntry.compute(root: root, pattern: PathExpansion::RUBY_GLOB, mode: :names)
-        end
+        DependencyRows.discovery_glob_entries(@discovery_widened, @configuration.paths)
       end
 
-      # Issue #2987 — one names-mode listing row per bundle `sig/` layout ({Environment::BundleSigDiscovery.discover}'s
-      # two globs). The signature rows list only the directories the loader read, so a gem that GAINS a `sig/`
-      # (or loses it) while its version and lock entry stand still sits in none of them, and the run-result
-      # slot kept serving the environment built without (or with) it.
       def bundle_sig_glob_entries
-        root = Environment::BundleSigDiscovery.resolve_bundle_path(
-          bundle_path: @configuration.bundler_bundle_path, project_root: Dir.pwd,
-          auto_detect: @configuration.bundler_auto_detect
-        )
-        return [] if root.nil?
-
-        Environment::BundleSigDiscovery::SIG_GLOBS.map do |pattern|
-          Cache::Descriptor::GlobEntry.compute(root: root.to_s, pattern: pattern, mode: :names)
-        end
+        DependencyRows.bundle_sig_glob_entries(@configuration.bundler_bundle_path, @configuration.bundler_auto_detect)
       end
 
       def unanalysed_pre_eval_entries(files)
-        analysed = files.to_set { |path| File.absolute_path(path) }
-        outside = @configuration.pre_eval.reject { |path| analysed.include?(File.absolute_path(path)) }
-        outside.map do |path|
-          if File.file?(path)
-            Cache::Descriptor::FileEntry.stat(path: path, digest: Cache::FileDigest.hexdigest(path))
-          else
-            kind_entries([path]).first
-          end
-        end
+        DependencyRows.unanalysed_pre_eval_entries(files, @configuration.pre_eval, @buffer)
       end
 
-      # #1977 — one `:kind` row per path, the row {#root_presence_entries} records in the plain slot.
       def kind_entries(paths)
-        paths.uniq.map do |path|
-          Cache::Descriptor::FileEntry.kind(path: @buffer ? @buffer.resolve(path) : path)
-        end
+        DependencyRows.kind_entries(paths, @buffer)
       end
       private :plugin_boundary_rows, :producer_watch_glob_entries, :kind_entries, :root_presence_entries,
               :analysis_reads_attributed?, :signature_root_candidates, :discovery_glob_entries,
               :bundle_sig_glob_entries,
-              :unanalysed_pre_eval_entries, :signature_rows, :within?
+              :unanalysed_pre_eval_entries, :signature_rows
 
-      # Issue #684 — the project files this run DISCOVERED but did not analyse. A widened run's diagnostics
-      # are a function of them (that is the entire point: the method whose absence would have been reported
-      # is defined in one of them), so the run-result cache must invalidate when one changes. Empty on every
-      # run whose discovery expansion is its analysis expansion, which is every whole-project run.
       def discovery_file_entries(expansion)
-        return [] if @project_discovery_expansion.nil?
-
-        analyzed = expansion.fetch(:files).to_set
-        analyzed_file_entries(
-          { files: @project_discovery_expansion.fetch(:files).reject { |path| analyzed.include?(path) } }
-        )
+        DependencyRows.discovery_file_entries(expansion, @project_discovery_expansion, @buffer)
       end
 
       def analyzed_file_entries(expansion)
-        expansion.fetch(:files).map do |path|
-          physical = @buffer ? @buffer.resolve(path) : path
-          # ADR-87 WD1 — validation-only dependency descriptor, so the stat-then-digest `:stat` comparator
-          # applies (the env-cache KEY files stay `:digest`).
-          Cache::Descriptor::FileEntry.stat(path: physical, digest: Cache::FileDigest.hexdigest(physical))
-        end
+        DependencyRows.analyzed_file_entries(expansion, @buffer)
       end
 
       # #392 — one `:names` row per claimed `template_globs:` pattern, whether or not it matched. The file
@@ -1858,37 +1728,12 @@ module Rigor
         template_units.glob_entries
       end
 
-      # Every template the run READ, successes and failures alike: a `plugin_loader` row produced by a
-      # template that would not compile must not outlive the edit that fixes it, and a buffer-bound path is
-      # digested at the bytes the run actually read.
-      #
-      # #392 — the TEMPLATE files behind the run's units. The key slot carries the compiled Ruby's digest
-      # (`template_units_digest`), which is what decides whether a cached answer describes this source; these
-      # entries are the validation half, so a template edited between two runs re-globs and re-digests here
-      # exactly as an analysed `.rb` file does. Both are needed: a transform that compiles two different
-      # templates to the same Ruby must still not resurrect the wrong PATH in a diagnostic.
       def template_unit_file_entries
-        template_units.source_paths.filter_map do |path|
-          physical = template_units.physical_path(path, @buffer)
-          next unless File.file?(physical)
-
-          Cache::Descriptor::FileEntry.stat(path: physical, digest: Cache::FileDigest.hexdigest(physical))
-        end
+        DependencyRows.template_unit_file_entries(template_units, @buffer)
       end
 
-      # Issue #352 — a `pre_eval:` file is a real input to the run's diagnostics: its `def`s populate the
-      # ADR-17 patched-method registry and (since #352) its constants populate the project seed. ADR-17 WD5
-      # permits listing a file under `pre_eval:` and NOT under `paths:`, and such a file never appears in the
-      # expansion — so without this entry, editing one would leave the run-result cache serving diagnostics
-      # computed against the previous version. The common case (a `lib/core_ext/` file that is also under
-      # `paths:`) contributes a duplicate entry, which the descriptor's per-path validation absorbs.
       def pre_eval_file_entries
-        @configuration.pre_eval.filter_map do |path|
-          physical = @buffer ? @buffer.resolve(path) : path
-          next unless File.file?(physical)
-
-          Cache::Descriptor::FileEntry.stat(path: physical, digest: Cache::FileDigest.hexdigest(physical))
-        end
+        DependencyRows.pre_eval_file_entries(@configuration.pre_eval, @buffer)
       end
 
       # Runs every project-wide pre-pass (`load_plugins` +
@@ -2657,36 +2502,15 @@ module Rigor
         merged
       end
 
-      # The three mixin tables: the ADR-24 instance-side `include` map, its issue #1123 `prepend` twin
-      # (which carries the instance-ancestor order the include table's set-shaped value cannot), and the
-      # #898 singleton-side `extend` table. Grouped here because they are read as one picture of a class's
-      # ancestry, and split out of {#project_scope_seed_tables} to keep it under the complexity budget.
       def seed_mixin_tables(tables)
-        tables[:discovered_includes] = @project_discovered_includes unless @project_discovered_includes.empty?
-        tables[:discovered_prepends] = @project_discovered_prepends unless @project_discovered_prepends.empty?
-        tables[:discovered_extends] = @project_discovered_extends unless @project_discovered_extends.empty?
-        tables[:unpositioned_mixins] = @project_unpositioned_mixins unless @project_unpositioned_mixins.empty?
+        ScopeSeed.seed_mixin_tables(tables, @project_discovered_includes, @project_discovered_prepends,
+                                    @project_discovered_extends, @project_unpositioned_mixins)
       end
 
-      # ADR-46 slice 1 / issue #644 — the two SOURCE-ATTRIBUTION tables, read by the recording accessors
-      # (`Scope#record_class_dependency` for the class-declaration map, `Scope#record_constant_dependency`
-      # for the constant-write map). The class-declaration map rides every run: an ancestor-order reader also
-      # asks whether a class is declared in more than one file. The constant-write map rides only a recording
-      # run. Extracted to keep {#project_scope_seed_tables} under the complexity budget.
-      #
-      # Issue #617 — the census's binding writes, grouped by last segment, ride every run instead: a constant
-      # compound write whose plain read resolves nothing reads its binding off them, a TYPE rather than an edge.
-      # Issue #1290's shadowing writes ride beside them for the lexical ladder, for the same reason.
       def seed_dependency_attribution_tables(tables)
-        writers = constant_writer_index
-        tables[:constant_writers] = writers unless writers.empty?
-        shadowers = constant_shadower_index
-        tables[:constant_shadowers] = shadowers unless shadowers.empty?
-        tables[:discovered_class_sources] = @project_discovered_class_sources unless
-          @project_discovered_class_sources.empty?
-        return unless @record_dependencies
-
-        tables[:constant_sources] = @project_constant_sources unless @project_constant_sources.empty?
+        ScopeSeed.seed_dependency_attribution_tables(tables, constant_writer_index, constant_shadower_index,
+                                                     @project_discovered_class_sources, @record_dependencies,
+                                                     @project_constant_sources)
       end
 
       # Issue #260 — the mutable starting point {#project_scope_seed_tables} fills in: a copy of the opt-in
@@ -2733,71 +2557,9 @@ module Rigor
         @published_constant_name_set ||= Inference::ProjectSeedTables.published_constant_names(@project_constant_values)
       end
 
-      # Issue #644 — the seeded `in_source_constants` table, joining the two cross-file constant producers.
-      # The whole-project literal table wins over a `pre_eval:` publication of the same name: both describe
-      # the same assignment, the literal table pins the value the write actually carries while ADR-17's
-      # widener erases it to the class, and listing a file under `pre_eval:` must never LOSE precision. The
-      # per-file table still wins over both (`ScopeIndexer.index`'s merge) — same-file stays the most
-      # specific authority.
-      #
-      # ADR-124 — a `prebuilt:` runner computes no literal table of its own; a `discovery_seed:` (the editor
-      # publish, ADR-124) brings the project's, which then plays the same part.
       def merged_seed_constants
-        pre_eval = publishable_pre_eval_constants
-        literal = literal_seed_constants
-        return literal if pre_eval.empty?
-        return pre_eval if literal.empty?
-
-        pre_eval.merge(literal).freeze
-      end
-
-      # The project's literal constant table: this run's, or the one a `discovery_seed:` carries (ADR-124).
-      def literal_seed_constants
-        return @project_constant_values unless @project_constant_values.empty? && @discovery_seed
-
-        @discovery_seed.fetch(:in_source_constants, @project_constant_values)
-      end
-
-      # The per-name writer paths the #663 retraction reads: this run's census, or the one a `discovery_seed:` carries
-      # (ADR-124).
-      def constant_writer_sources
-        return @project_constant_sources unless @project_constant_sources.empty? && @discovery_seed
-
-        @discovery_seed.fetch(:constant_sources, @project_constant_sources)
-      end
-
-      # Issue #663 — the `pre_eval:` publication with every name an UNLISTED file also assigns retracted.
-      # Without this a listed `X = :a` answered `Symbol` at every reader while a sibling `X = "str"` decided
-      # the runtime value half the time: a confident wrong type, not lost precision, and the one asymmetry
-      # #644's precedence work left standing. The retraction costs the opt-in nothing where it earns its
-      # keep — a name only listed files write is untouched, and where the literal table also publishes it
-      # already won (above).
-      #
-      # Conflict is read off #644's write attribution, which censuses every assigning form, so a name the
-      # listed file's own typed walk widened is retracted by an unlisted `X += 1` or `A, X = 1, 2` as
-      # readily as by a plain reassignment. Among LISTED files the rule is unchanged: `PreEvalConstants`
-      # widens first and drops only on disagreement, so two listed files writing `1` and `2` still publish
-      # `Integer` rather than being retracted for being two.
-      def publishable_pre_eval_constants
-        return @project_pre_eval_constants if @project_pre_eval_constants.empty?
-
-        listed = pre_eval_path_set
-        kept = @project_pre_eval_constants.reject { |name, _| unlisted_constant_writer?(name, listed) }
-        kept.size == @project_pre_eval_constants.size ? @project_pre_eval_constants : kept.freeze
-      end
-
-      # True when some file outside `listed` assigns `name`. The wildcard key is consulted alongside the
-      # name's own attribution ([#668](https://github.com/rigortype/rigor/issues/668)): a `k::X = 7` names
-      # no target, and a listed file kept out of `paths:` (ADR-17 WD5 permits it) contributes no censused
-      # name of its own for the wildcard's paths to have been folded into.
-      def unlisted_constant_writer?(name, listed)
-        segment = name.split("::").last
-        sources = constant_writer_sources
-        writers = sources[name]
-        wildcard = sources["#{Inference::ScopeIndexer::DYNAMIC_TARGET_PREFIX}#{segment}"]
-        [writers, wildcard].any? do |paths|
-          paths&.any? { |path| !listed.include?(File.absolute_path(path)) }
-        end
+        ScopeSeed.merged_seed_constants(@project_pre_eval_constants, @project_constant_values, @discovery_seed,
+                                        @project_constant_sources, pre_eval_path_set)
       end
 
       # The listed `pre_eval:` files, expanded so a census path and a configured one compare as the same
@@ -2806,23 +2568,13 @@ module Rigor
         @pre_eval_path_set ||= @configuration.pre_eval.to_set { |path| File.absolute_path(path) }
       end
 
-      # ADR-46 — seed the instance + singleton `"path:line"` def-source tables (each only when non-empty).
-      # Extracted to keep {#project_scope_seed_tables} under the complexity budget. The singleton table (slice 4
-      # extension) rides the same seed so a pooled `WorkerSession` records singleton symbol edges identically.
       def seed_def_source_tables(tables)
-        tables[:discovered_def_sources] = @project_discovered_def_sources unless @project_discovered_def_sources.empty?
-        return if @project_discovered_singleton_def_sources.empty?
-
-        tables[:discovered_singleton_def_sources] = @project_discovered_singleton_def_sources
+        ScopeSeed.seed_def_source_tables(tables, @project_discovered_def_sources,
+                                         @project_discovered_singleton_def_sources)
       end
 
-      # ADR-48 — seed the Data + Struct member-layout tables (each only when non-empty). Extracted to keep
-      # {#project_scope_seed_tables} under the complexity budget.
       def seed_member_layout_tables(tables)
-        tables[:data_member_layouts] = @project_data_member_layouts unless @project_data_member_layouts.empty?
-        return if @project_struct_member_layouts.empty?
-
-        tables[:struct_member_layouts] = @project_struct_member_layouts
+        ScopeSeed.seed_member_layout_tables(tables, @project_data_member_layouts, @project_struct_member_layouts)
       end
 
       # ADR-46 slice 1 — when dependency recording is enabled, wrap the per-file analysis so the cross-file

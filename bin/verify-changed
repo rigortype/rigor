@@ -416,6 +416,27 @@ for path in ${changed[@]+"${changed[@]}"}; do
       add_mirror_spec "${mirror%.rb}_spec.rb"
       add_mirror_dir_specs "${mirror%.rb}"
       ;;
+    # Issue #3298 — a script under bin/. Its spec is spec/tool/<name>_spec.rb with
+    # the hyphens of the script's name as underscores, which is why the identifier
+    # rules never found one: they match a basename WITH its extension, and a script
+    # has none, so `land-pr` could not reach `land_pr_spec.rb`. A change to any of
+    # these ran no spec locally and no uncovered line said so, the selection's own
+    # script included: `bin/verify-changed` did not select
+    # spec/tool/verify_changed_spec.rb. The gem arm below already spells the same
+    # hyphen-to-underscore mapping for a plugin directory.
+    bin/*)
+      script="${path#bin/}"
+      stem="spec/tool/${script//-/_}"
+      before="$specs"
+      # A prefix glob, as the gem arm below uses: the spec is not always the exact
+      # mirror name (`bin/rigor-worktree` is pinned by
+      # spec/tool/rigor_worktree_reference_clone_spec.rb), and a script may grow a
+      # second spec file beside the first.
+      for spec in "$stem"_spec.rb "$stem"_*_spec.rb; do
+        [[ -f "$spec" ]] && add_spec "$spec"
+      done
+      [[ "$specs" == "$before" ]] && uncovered+="$path (no spec under ${stem}_*)"$'\n'
+      ;;
     sig/*.rbs)
       mirror="lib/${path#sig/}"
       mirror="${mirror%.rbs}.rb"

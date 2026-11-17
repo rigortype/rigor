@@ -56,6 +56,40 @@ RSpec.describe "bin/verify-changed spec selection" do
     [specs, uncovered]
   end
 
+  # Issue #3298 — a script under bin/. The identifier rules match a basename WITH its extension, and a
+  # script has none, so `land-pr` could never reach `land_pr_spec.rb`: a change to any bin/ script ran
+  # no spec locally and no uncovered line said so. The selection's own script was included in that, which
+  # is why this file could not have caught it before.
+  describe "a script under bin/" do
+    it "selects its spec through the hyphen-to-underscore mirror" do
+      specs, uncovered = selection_for("bin/land-pr")
+      expect(uncovered).to be_empty
+      expect(specs).to eq(["spec/tool/land_pr_spec.rb"])
+    end
+
+    it "selects this file for a change to the selection's own script" do
+      specs, = selection_for("bin/verify-changed")
+      expect(specs).to include("spec/tool/verify_changed_spec.rb")
+    end
+
+    # `bin/rigor-worktree` is pinned by spec/tool/rigor_worktree_reference_clone_spec.rb, not by an
+    # exact mirror name, so the rule is a prefix glob as the gem arm's is. A strict mirror would report
+    # this script as uncovered while a spec for it exists.
+    it "selects a spec whose name only begins with the script's" do
+      specs, uncovered = selection_for("bin/rigor-worktree")
+      expect(uncovered).to be_empty
+      expect(specs).to eq(["spec/tool/rigor_worktree_reference_clone_spec.rb"])
+    end
+
+    # The other half of the gate: a script with no spec is REPORTED, not silently covered. `bin/setup`
+    # has none, and the uncovered line is what tells a reader that CI is the only check.
+    it "reports a script with no spec on the uncovered line" do
+      specs, uncovered = selection_for("bin/setup")
+      expect(specs).to be_empty
+      expect(uncovered).to include("bin/setup")
+    end
+  end
+
   it "selects few specs for one fixture's demo.rb, by its directory" do
     specs, uncovered = selection_for("spec/integration/fixtures/block_content_ivar_capture/demo.rb")
     expect(uncovered).to be_empty

@@ -39,6 +39,11 @@ require_relative "check_rules/plugin_api_surface"
 require_relative "check_rules/receiver_predicates"
 require_relative "check_rules/suppression"
 require_relative "check_rules/undefined_method"
+require_relative "check_rules/override_param_narrowed"
+require_relative "check_rules/override_return_widened"
+require_relative "check_rules/override_support"
+require_relative "check_rules/override_visibility"
+require_relative "check_rules/visibility_mismatch"
 require_relative "check_rules/always_raises"
 require_relative "check_rules/raise_non_exception"
 require_relative "check_rules/rigor_testing"
@@ -77,22 +82,6 @@ module Rigor
     module CheckRules
       # ADR-87 WD4 — the canonical rule-id table lives in the light `check_rules/rule_ids.rb` (required at the
       # top of this file) so {Analysis::RuleCatalog} can read it without loading the engine.
-
-      # ADR-35 slice 1 — the public > protected > private ordering used to decide whether an override reduces
-      # visibility. The override rules' ancestor walk is bounded by `Scope::ANCESTOR_WALK_LIMIT`, the
-      # resolution chain's.
-      VISIBILITY_RANK = { public: 2, protected: 1, private: 0 }.freeze
-
-      # ADR-35 WD10 (issue #1716) — the object-lifecycle hooks the three override rules skip. `initialize` is
-      # reached through `Class#new` on the class the caller names, and the copy hooks are handed an instance
-      # of the receiver's own class by `dup` / `clone`, so neither is called with the PARENT's declared
-      # arguments through a parent-typed reference; `new` / `dup` / `clone` discard all four returns.
-      LIFECYCLE_HOOKS = %i[initialize initialize_copy initialize_dup initialize_clone].freeze
-
-      # The names CRuby makes private on every non-singleton `def` whatever section it is written in
-      # (`vm_method.c` `rb_method_entry_make`), so a source-discovered visibility for them is not the
-      # runtime one and `def.override-visibility-reduced` cannot prove a reduction.
-      IMPLICITLY_PRIVATE_METHODS = (LIFECYCLE_HOOKS + %i[respond_to_missing?]).freeze
 
       # The token expansion (`resolve_rule_token` / `expand_rule_tokens` / `expand_token`) lives in the light
       # `check_rules/rule_ids.rb`, so {SeverityStamp} can apply the `disable:` list on the engine-free hit path.
@@ -176,9 +165,9 @@ module Rigor
         when Prism::DefNode
           [
             refinement_aware_return_type_mismatch(path, node, scope_index, lexical_sites),
-            override_visibility_diagnostic(path, node, scope_index),
-            override_return_widened_diagnostic(path, node, scope_index),
-            override_param_narrowed_diagnostic(path, node, scope_index)
+            OverrideVisibility.diagnostic(path, node, scope_index),
+            OverrideReturnWidened.diagnostic(path, node, scope_index),
+            OverrideParamNarrowed.diagnostic(path, node, scope_index)
           ].compact
         when Prism::IfNode, Prism::UnlessNode
           [unreachable_branch_diagnostic(path, node, scope_index)].compact
@@ -347,7 +336,7 @@ module Rigor
           RigorTesting.assert_diagnostic(path, node, scope_index),
           AlwaysRaises.diagnostic(path, node, facts, lexical_sites, raise_shield),
           RaiseNonException.diagnostic(path, node, scope_index),
-          visibility_mismatch_diagnostic(path, node, facts, lexical_sites)
+          VisibilityMismatch.diagnostic(path, node, facts, lexical_sites)
         ].compact
       end
 
@@ -1032,223 +1021,6 @@ module Rigor
           return :falsey if FALSEY_LITERAL_NODES.any? { |klass| predicate.is_a?(klass) }
 
           nil
-        end
-
-        # v0.1.2 — `def.method-visibility-mismatch`. Fires when an explicit-receiver `Prism::CallNode`
-        # targets a user-class method whose `discovered_method_visibilities` entry is `:private`. The rule
-        # is intentionally narrow:
-        #
-        # - Only `:private`. `:protected` access depends on subclass tracking the engine does not yet
-        #   model; broadening waits for that surface.
-        # - Only user classes whose visibility table the indexer built. RBS-known classes (stdlib, gems)
-        #   are NOT consulted yet — RBS visibility is reliable but surfacing it would broaden the rule to a
-        #   level the per-rule false-positive triage hasn't covered.
-        # - Implicit-self calls are skipped (always allowed for private). Calls whose receiver is
-        #   `Prism::SelfNode` are also skipped — Ruby 2.7+ permits `self.foo` for private methods.
-        # - Receiver MUST resolve to a `Type::Nominal` so the rule has a single class identity to query.
-        #   Unions / Dynamic / shape carriers are skipped.
-        # - Issue #1568 — a module the class PREPENDS sits ahead of it in Ruby's order, so a definition there
-        #   is what the call reaches; the class's own private `def` answers only when nothing prepended
-        #   defines the name ({#reached_definer_visibility}).
-        # - Issue #1984 — a class-object receiver (`Type::Singleton`, `K.x`) is checked against the singleton side:
-        #   the definition the call reaches on `K`'s singleton chain (its own singleton methods, its extended
-        #   modules' instance methods, then the superclass's singleton chain) must be recorded `:private`
-        #   (`private_class_method`, `class << self` with `private`, a private method of an extended module).
-        # - Issue #1984 — Ruby hands a private call to `method_missing`, so a `method_missing` or
-        #   `respond_to_missing?` a project entry on the receiver's chain records, on the side the call reaches,
-        #   declines the rule ({#missing_hook_on_chain?}).
-        def visibility_mismatch_diagnostic(path, call_node, facts, lexical_sites = nil)
-          return nil unless explicit_non_self_receiver?(call_node.receiver)
-
-          scope = facts.scope
-          return nil if scope.nil?
-
-          # ADR-67 WD6b — an inferred-parameter receiver's nominal type is an open-call-site lower bound; a
-          # private-method visibility firing against it is an FP by construction. Decline.
-          return nil if ReceiverPredicates.inferred_param_receiver?(call_node, scope)
-
-          receiver_type = facts.receiver_type
-          case receiver_type
-          when Type::Nominal then instance_visibility_mismatch(path, call_node, scope, receiver_type, lexical_sites)
-          when Type::Singleton then singleton_visibility_mismatch(path, call_node, scope, receiver_type, lexical_sites)
-          end
-        end
-
-        def instance_visibility_mismatch(path, call_node, scope, receiver_type, lexical_sites)
-          visibility = scope.discovered_method_visibility(receiver_type.class_name, call_node.name)
-          return nil unless visibility == :private
-
-          reached = reached_definer_visibility(scope, receiver_type.class_name, call_node.name)
-          return nil if reached == :undecided
-          return nil unless reached.nil? || reached == :private
-          return nil if missing_hook_on_chain?(scope, receiver_type.class_name, :instance)
-          # ADR-121 WD7 — a refinement in effect (or one Rigor cannot read) may redefine the method, public.
-          return nil if ReceiverPredicates.refined_method_in_effect?(receiver_type.class_name, call_node, scope,
-                                                                     :instance, lexical_sites)
-
-          build_visibility_mismatch_diagnostic(path, call_node, receiver_type.class_name)
-        end
-
-        # Issue #1984 — the singleton side reads only the reached definer: a private singleton method may be inherited
-        # (`private_class_method :new` on a superclass) or come from an extended module, so there is no own-table
-        # gate as on the instance side. It reports only:
-        #
-        # - a constant receiver (`K.x`, `A::K.x`): `self.class.x` or a local may hold a subclass that makes the name
-        #   public again (`public_class_method :new`, a template-method `def self.x`);
-        # - a call inside a `def` ({#load_time_call?}): code that runs while the files load (a class body's
-        #   `ALL = [K.new]` before its `private_class_method :new`) may run before the call is private;
-        # - no class on the chain may have had every singleton name made public (`K.public_class_method(*names)`,
-        #   `K.singleton_class.class_eval { … }`; {#singleton_wildcard_contested?}).
-        def singleton_visibility_mismatch(path, call_node, scope, receiver_type, lexical_sites)
-          class_name = receiver_type.class_name
-          return nil unless call_node.receiver.is_a?(Prism::ConstantReadNode) ||
-                            call_node.receiver.is_a?(Prism::ConstantPathNode)
-          return nil unless private_singleton_candidate?(scope, call_node.name)
-          return nil if load_time_call?(scope, call_node)
-          return nil unless reached_definer_visibility(scope, class_name, call_node.name, :singleton) == :private
-          return nil if missing_hook_on_chain?(scope, class_name, :singleton)
-          return nil if singleton_wildcard_contested?(scope, class_name)
-          return nil if ReceiverPredicates.refined_method_in_effect?(class_name, call_node, scope, :singleton,
-                                                                     lexical_sites)
-
-          build_visibility_mismatch_diagnostic(path, call_node, "singleton(#{class_name})")
-        end
-
-        # ADR-129 WD1 — a run-scoped Memo: one `[discovery, names]` slot keyed on the discovery index's identity, the
-        # only input the name set reads.
-        PRIVATE_NAMES_MEMO = TypingState.memo(
-          :check_rules_private_singleton_names,
-          run_scoped: true, audit: "private singleton names",
-          reason: "one [discovery, names] slot keyed on the discovery index's identity; the name " \
-                  "set reads only its method-visibility tables"
-        )
-        private_constant :PRIVATE_NAMES_MEMO
-
-        # Issue #1984 — the table-only gate the singleton side asks before it reads a chain, as the instance side asks
-        # its own table first: whether any class records `name` private, on its singleton side or on its instance
-        # side (an extended module's private method is private on the extender's singleton). Without it every
-        # `Widget.new` would read, and file the dependency edges of, the whole singleton chain. The set is memoised per
-        # discovery index.
-        def private_singleton_candidate?(scope, name)
-          DependencyRecorder.read_visibility("*", name) if DependencyRecorder.active?
-          discovery = scope.discovery
-          if Inference::MemoAudit.enabled? && Inference::MemoAudit.suspended?
-            return private_recorded_names(discovery.discovered_method_visibilities).include?(name.to_sym)
-          end
-
-          state = TypingState.current
-          slot = state[PRIVATE_NAMES_MEMO]
-          unless slot && slot[0].equal?(discovery)
-            names = Inference::MemoAudit.key_audit("private singleton names") do
-              private_recorded_names(discovery.discovered_method_visibilities)
-            end
-            slot = [discovery, names]
-            state[PRIVATE_NAMES_MEMO] = slot
-            return slot[1].include?(name.to_sym)
-          end
-          Inference::MemoAudit.check("private singleton names", slot[1], name) do
-            private_recorded_names(discovery.discovered_method_visibilities)
-          end.include?(name.to_sym)
-        end
-
-        def private_recorded_names(tables)
-          tables.each_value.with_object(Set.new) do |table, names|
-            table.each { |slot, visibility| names << (slot.is_a?(Array) ? slot.last : slot) if visibility == :private }
-          end
-        end
-
-        # Issue #1984 — whether the call is outside every `def` the file's deferred ranges name. A `def` is named
-        # wherever it is written in a class body, at the top level or in a `class_eval` block, so a call in it is not
-        # load time and may be reported. The top level, class bodies, and blocks and lambdas that are not such a `def`
-        # (a `map { … }` or `define_method` block, a `-> { }`) are load time and decline: such code may run while the
-        # files load, before a later `private_class_method` or in a load order where the private declaration has not
-        # run yet.
-        def load_time_call?(scope, call_node)
-          rows = scope.discovered_deferred_ranges[scope.source_path]
-          return true if rows.nil?
-
-          offset = call_node.location.start_offset
-          # A row with no side (a `def` in a block, a `define_method` name) is a block's range or no range at all.
-          rows.none? { |(start, finish, _name, kind, _owner)| !kind.nil? && start <= offset && offset < finish }
-        end
-
-        SINGLETON_WILDCARD_SLOT = %i[singleton *].freeze
-        private_constant :SINGLETON_WILDCARD_SLOT
-
-        # Issue #1984 — whether a project class on `class_name`'s singleton chain has its wildcard singleton slot
-        # contested: a call the walk saw may have made any of its singleton methods public.
-        def singleton_wildcard_contested?(scope, class_name)
-          discovery = scope.discovery
-          chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
-          chain.entries.any? do |entry|
-            DependencyRecorder.read_visibility(entry.name, SINGLETON_WILDCARD_SLOT.last) unless entry.external?
-            !entry.external? && discovery.contested?(:discovered_method_visibilities,
-                                                     [entry.name, SINGLETON_WILDCARD_SLOT])
-          end
-        end
-
-        VISIBILITY_MISSING_HOOKS = %i[method_missing respond_to_missing?].freeze
-        private_constant :VISIBILITY_MISSING_HOOKS
-
-        # Issue #1984 — whether a project entry on `class_name`'s chain for `side` records a `method_missing` or
-        # `respond_to_missing?` on the side that entry stands for (a singleton entry's singleton methods, a mixin's
-        # instance methods), or the chain cannot be read whole. Ruby sends a private call to `method_missing`, so
-        # such a hook may answer it.
-        def missing_hook_on_chain?(scope, class_name, side)
-          chain = Scope::ResolutionChain.for(scope, class_name.to_s, side, :methods)
-          return true if chain.truncated?
-
-          chain.entries.any? do |entry|
-            next false if entry.external?
-
-            kind = entry.side == :singleton ? :singleton : :instance
-            VISIBILITY_MISSING_HOOKS.any? { |hook| records_hook?(scope, entry.name, hook, kind) }
-          end
-        end
-
-        def records_hook?(scope, owner, hook, kind)
-          return true if scope.discovered_method?(owner, hook, kind)
-
-          !(kind == :singleton ? scope.singleton_def_for(owner, hook) : scope.user_def_for(owner, hook)).nil?
-        end
-
-        # Issue #1568, ADR-119 C1c — the recorded visibility of the definition a call on `class_name` reaches: the
-        # first project entry on the class's {Scope::ResolutionChain} from its head that records the name, so a
-        # module the class PREPENDS answers ahead of the class. `Inference::DefinerResolution` reads it with the
-        # `:visibility` question's default answer. It is `:undecided` wherever the chain does not settle the order
-        # (an unpositioned or forked mixin, a conditional include) or an ancestor ahead of the definer may define
-        # the name (one RBS does not know), and the caller declines; a definer whose visibility slot ADR-119's
-        # producers contest is not alone (`DefinerResolution` asks the next candidate too), so it is `:undecided`
-        # there without a read of the table here. nil is nothing recording the name at all, and the class's own
-        # visibility stands. An ancestor the project does not declare is passed over, as the method lookup passes it.
-        def reached_definer_visibility(scope, class_name, method_name, side = :instance)
-          case Inference::DefinerResolution.resolve(scope, class_name, method_name, side, question: :visibility)
-          in Inference::DefinerResolution::Known(answer:)
-            answer
-          in Inference::DefinerResolution::UNKNOWN
-            :undecided
-          in Inference::DefinerResolution::ABSENT
-            nil
-          end
-        end
-
-        def explicit_non_self_receiver?(receiver)
-          return false if receiver.nil?
-          return false if receiver.is_a?(Prism::SelfNode)
-
-          true
-        end
-
-        def build_visibility_mismatch_diagnostic(path, call_node, receiver_name)
-          Diagnostic.from_message_loc(
-            call_node,
-            rule: RULE_VISIBILITY_MISMATCH,
-            path: path,
-            message: "private method `#{call_node.name}' called on #{receiver_name} receiver",
-            severity: :error,
-            receiver_type: receiver_name,
-            method_name: call_node.name.to_s
-          )
         end
 
         # Pulls a single concrete class name from an ivar write's rvalue type. Returns nil when the type is
@@ -2200,7 +1972,7 @@ module Rigor
           # Issue #1362 — a body that ends on a builtin global still on its declared seed, or on a local copied from
           # one, is judged by the file's writes to the global, as for an argument ({#single_argument_mismatch}).
           inferred = DeclarationSourcedGuard.written_type(last_expr, inner_scope) || inner_scope.type_of(last_expr)
-          return nil if dynamic_top?(inferred)
+          return nil if OverrideSupport.dynamic_top?(inferred)
 
           severity = compare_return(declared, inferred)
           return nil if severity.nil?
@@ -2262,13 +2034,13 @@ module Rigor
               Reflection.singleton_method_definition(self_type.class_name, def_node.name, scope: scope)
             end
           return nil if method_def.nil?
-          return nil unless defined_on?(method_def, self_type.class_name)
+          return nil unless OverrideSupport.defined_on?(method_def, self_type.class_name)
           return nil if replaced_receiver_def?(def_node, replaced_defs)
 
           override = Rigor::RbsExtended.read_return_type_override(method_def, environment: scope.environment)
           return override if override
 
-          declared_return_union(method_def, scope.environment)
+          OverrideSupport.declared_return_union(method_def, scope.environment)
         end
 
         # Which side a receiverless `def` defines, from the indexer's own record of THAT node: the instance table
@@ -2317,30 +2089,6 @@ module Rigor
             recorded.location.end_offset == def_node.location.end_offset
         end
 
-        # `type_vars:` — ADR-35 WD9 tier 1. When the caller supplies a generic-instantiation
-        # substitution map (parent-side, keyed by the parent class's declared type-parameter names),
-        # a `-> T` return is translated at its instantiated type (`-> Integer`) rather than degrading
-        # to `Dynamic[Top]`. The default empty map is the pre-WD9 behaviour, under which any type
-        # variable degrades to `Dynamic[Top]` and the rule stays silent.
-        def declared_return_union(method_def, environment, type_vars: {})
-          translated = method_def.method_types.filter_map do |mt|
-            Inference::RbsTypeTranslator.translate(
-              mt.type.return_type,
-              self_type: nil, instance_type: nil, type_vars: type_vars,
-              alias_expander: environment&.rbs_loader
-            )
-          rescue StandardError
-            nil
-          end
-          return nil if translated.empty?
-
-          translated.size == 1 ? translated.first : Type::Combinator.union(*translated)
-        end
-
-        def dynamic_top?(type)
-          type.is_a?(Type::Dynamic) || (type.respond_to?(:top?) && type.top?.yes?)
-        end
-
         # Returns the severity to emit at, or nil to stay silent. The first-cut implementation only fires
         # on proven (`:no`) mismatches; `:maybe` is treated as silent until the analyzer's narrowing
         # becomes precise enough to avoid noise on common patterns (`{}` → declared `Hash[K, V]`,
@@ -2362,447 +2110,6 @@ module Rigor
             message: "return-type mismatch on `#{def_node.name}': " \
                      "declared #{declared.describe(:short)}, inferred #{inferred.describe(:short)}",
             severity: severity,
-            method_name: def_node.name.to_s
-          )
-        end
-
-        # ADR-35 slice 1 — `def.override-visibility-reduced`. The Liskov signature rule for visibility: an
-        # instance-method override MUST NOT reduce the visibility it inherits (public → protected/private,
-        # or protected → private), because a caller holding the supertype that invokes the method breaks
-        # when handed the subtype.
-        #
-        # Slice-1 scope (ADR-35 WD1, visibility carve-out): both the override and the shadowed method must
-        # have a STATICALLY OBSERVABLE visibility. The override's visibility is read from the
-        # source-discovered table; the parent is resolved against the project-discovered ancestor chain
-        # (user-source classes / modules only — RBS-known ancestors, whose accessibility RBS models as
-        # public/private only, are a deferred follow-on). When either side is not observable the rule stays
-        # silent.
-        def override_visibility_diagnostic(path, def_node, scope_index)
-          return nil unless def_node.receiver.nil? # instance methods only
-          return nil if IMPLICITLY_PRIVATE_METHODS.include?(def_node.name)
-
-          scope = scope_index[def_node]
-          return nil if scope.nil?
-
-          self_type = scope.self_type
-          return nil unless self_type.respond_to?(:class_name)
-
-          class_name = self_type.class_name.to_s
-          method_name = def_node.name
-
-          override_visibility = scope.discovered_method_visibility(class_name, method_name)
-          return nil if override_visibility.nil?
-          # Issue #2013 — a contested slot (a later `define_method` or alias gave the name another visibility, or a
-          # write the walk cannot place) proves no reduction.
-          return nil if scope.discovery.contested?(:discovered_method_visibilities, [class_name, method_name])
-
-          parent = nearest_ancestor_visibility(scope, class_name, method_name)
-          return nil if parent.nil?
-
-          parent_class, parent_visibility = parent
-          # Unknown ancestor visibility (e.g. the defining file was not in the analyzed set) → cannot
-          # prove a reduction, stay silent.
-          return nil if parent_visibility.nil?
-          return nil unless visibility_reduced?(parent_visibility, override_visibility)
-          # Issue #1569 — a module function's instance copy is private because `module_function` made it so; the
-          # author's intent is the public singleton copy, so that reduction is not reported.
-          return nil if scope.module_function_def?(class_name, def_node)
-
-          build_override_visibility_diagnostic(
-            path, def_node, parent_class, parent_visibility, override_visibility
-          )
-        end
-
-        # Returns true when `override_visibility` is strictly more restrictive than `parent_visibility`
-        # under the public > protected > private ordering.
-        #
-        # The nil guard below is defence, not dead code. `VISIBILITY_RANK` is a closed literal hash read
-        # with a dynamic key, so a symbol outside the table reads as nil at runtime. The engine folds that
-        # read to the nil-free value union `0 | 1 | 2`, which `internal-spec/inference-engine.md` declares
-        # OPTIMISTIC rather than proof — and since issue #313 that mark survives the `.nil?` fold and the
-        # `||` composition, so no suppression directive is needed here.
-        def visibility_reduced?(parent_visibility, override_visibility)
-          parent_rank = VISIBILITY_RANK[parent_visibility]
-          override_rank = VISIBILITY_RANK[override_visibility]
-          return false if parent_rank.nil? || override_rank.nil?
-
-          override_rank < parent_rank
-        end
-
-        # The project ancestors whose definitions `class_name`'s own `def` OVERRIDES are the entries AFTER the
-        # class on its {Scope::ResolutionChain}, nearest first; {#nearest_ancestor_visibility} and
-        # {#nearest_ancestor_method_def} each read the first of them that answers their question through
-        # `Inference::DefinerResolution` (ADR-119 C1c), `from:` the position after the class. Both are instance
-        # side only: the singleton override rules do not exist, and the singleton side's own read lands with
-        # ADR-119's singleton design.
-        #
-        # Issue #1568 — the walk this replaced was breadth-first from the class's direct ancestors, and those
-        # include the modules the class PREPENDS. A prepended module sits BEFORE the class in Ruby's order: its
-        # `def` overrides the class's, not the other way round, so `prepend P` with a public `P#foo` and a
-        # private `C#foo` reported `C#foo` as reducing `P#foo`'s visibility. It also reached `Base` before a
-        # module included through an included module (#1567's order).
-        #
-        # ADR-119 WD3 — for the two override lints *absent* always counts: a chain that does not settle (a mixin
-        # whose position the tables cannot vouch for, a fork whose worlds disagree, a conditional or
-        # block-scoped `include`), or an external ancestor ahead of the parent that RBS does not know or knows
-        # and declares the name in, is `UNKNOWN`, and the lint stays silent rather than answer from the
-        # breadth-first order the walk used before (`Scope::ResolutionChain::MasterOrder`) where the order is
-        # not known. The two lints read only the `[owner, value]` of a `Known`.
-        #
-        # ADR-46 slice 3 — an ancestor the project does not declare ends the walk's reach into it, and a class
-        # defined LATER under that name would change the answer; `DefinerResolution` files the negative class
-        # edge of each external entry it tests.
-        def overridden_ancestors_start(scope, class_name)
-          # Issue #2979 — past the entries of the names bound to the same class (`K = Struct.new("Named", …)`):
-          # a `def` there redefines the class's method rather than overriding an ancestor's.
-          chain = Scope::ResolutionChain.for(scope, class_name.to_s, :instance, :methods)
-          chain.ancestors_start(scope, class_name.to_s)
-        end
-
-        # `[defining_class, visibility]` for the nearest user-source ancestor that defines an instance
-        # method `method_name`, or nil.
-        def nearest_ancestor_visibility(scope, class_name, method_name)
-          from = overridden_ancestors_start(scope, class_name)
-          return nil if from.nil?
-
-          case Inference::DefinerResolution.resolve(scope, class_name, method_name, :instance,
-                                                    question: :override, from: from) do |ancestor|
-                 # Stop at the nearest ancestor that DEFINES the method; its visibility may be nil (unknown) —
-                 # the caller treats unknown as "cannot prove a reduction" and stays silent. Never fabricate
-                 # `:public` from a missing entry (that produced a large false-positive cluster on
-                 # cross-file Rails concerns). The `:unrecorded` marker stands for that nil in the answer.
-                 next unless scope.user_def_for(ancestor, method_name)
-
-                 scope.discovered_method_visibility(ancestor, method_name) || :unrecorded
-               end
-          in Inference::DefinerResolution::Known(answer: [owner, visibility])
-            [owner, visibility == :unrecorded ? nil : visibility]
-          in Inference::DefinerResolution::UNKNOWN # the case/in contract needs one arm per answer
-            nil
-          in Inference::DefinerResolution::ABSENT # rubocop:disable Lint/DuplicateBranch -- see above
-            nil
-          end
-        end
-
-        def build_override_visibility_diagnostic(path, def_node, parent_class, parent_visibility, override_visibility)
-          Diagnostic.from_name_loc(
-            def_node,
-            rule: RULE_OVERRIDE_VISIBILITY_REDUCED,
-            path: path,
-            message: "visibility of `#{def_node.name}' reduced from #{parent_visibility} to " \
-                     "#{override_visibility} (overrides #{parent_class}##{def_node.name}); " \
-                     "breaks substitutability",
-            severity: :warning,
-            method_name: def_node.name.to_s
-          )
-        end
-
-        # The authored-override resolution shared by the Liskov override rules
-        # (`def.override-return-widened` and `def.override-param-narrowed`): the def must be an instance
-        # method whose own class declares it in RBS, and a project-discovered ancestor must also declare
-        # it. Returns `[scope, override_method, parent_class, parent_method]`, or nil (the rule does not
-        # fire) when any gate is unmet.
-        def resolve_authored_override(def_node, scope_index)
-          return nil unless def_node.receiver.nil? # instance methods only (singleton: follow-on)
-          return nil if LIFECYCLE_HOOKS.include?(def_node.name) # ADR-35 WD10: outside substitutability
-
-          scope = scope_index[def_node]
-          return nil if scope.nil?
-
-          self_type = scope.self_type
-          return nil unless self_type.respond_to?(:class_name)
-
-          class_name = self_type.class_name.to_s
-          method_name = def_node.name
-
-          override_method = safe_instance_method_definition(class_name, method_name, scope)
-          return nil if override_method.nil?
-          return nil unless defined_on?(override_method, class_name)
-
-          parent = nearest_ancestor_method_def(scope, class_name, method_name)
-          return nil if parent.nil?
-
-          parent_class, parent_method = parent
-          [scope, override_method, parent_class, parent_method]
-        end
-
-        # ADR-35 slice 2 — `def.override-return-widened`. The Liskov signature rule for returns
-        # (covariance): an override may *narrow* the return it inherits (return a more specific type) but
-        # MUST NOT *widen* it. A caller holding the supertype uses the result as the parent's return type;
-        # a wider override return breaks that use.
-        #
-        # WD1 gate (proper, type-direction): both the override and the shadowed ancestor method must carry
-        # an explicitly-authored RBS signature. The override side is gated by `defined_on?` (the RBS
-        # method is declared on the overriding class itself, not merely inherited); the parent side is the
-        # nearest project-discovered ancestor whose RBS declares the method. Inference-only either side →
-        # silent.
-        #
-        # Fires only on a proven (`:no`) widening; generic / `untyped` / `self` parent returns degrade to
-        # `Dynamic[Top]` and accept everything, so they stay silent (FP-safe). `self`/`instance` are
-        # translated with `self_type: nil` on both sides, so a parent `-> self` and an override `-> self`
-        # never fire.
-        def override_return_widened_diagnostic(path, def_node, scope_index)
-          resolved = resolve_authored_override(def_node, scope_index)
-          return nil if resolved.nil?
-
-          scope, override_method, parent_class, parent_method = resolved
-          parent_type_vars = ancestor_instantiation_type_vars(scope, parent_class)
-          override_return = declared_return_union(override_method, scope.environment)
-          parent_return = declared_return_union(parent_method, scope.environment, type_vars: parent_type_vars)
-          return nil if override_return.nil? || parent_return.nil?
-          return nil if dynamic_top?(parent_return) # untyped / unbound-generic parent contract
-          return nil if void_over_nil?(override_method, parent_return)
-
-          return nil unless parent_return.accepts(override_return).no?
-
-          build_override_return_widened_diagnostic(
-            path, def_node, parent_class, parent_return, override_return
-          )
-        end
-
-        # A `-> void` override of a parent return of exactly `nil` (or `NilClass`) is exempt (#3046): both
-        # say "no useful value", and callers cannot use a void return. Keyed on the declared `void` of every
-        # arm (the translator reads `void` as top, so a `-> top` override still fires); any non-nil parent
-        # return still fires.
-        def void_over_nil?(override_method, parent_return)
-          return false unless nil_type?(parent_return)
-
-          override_method.method_types.all? { |mt| mt.type.return_type.is_a?(::RBS::Types::Bases::Void) }
-        end
-
-        # `nil`, or the nominal `NilClass`, whose only value it is.
-        def nil_type?(type)
-          return type.value.nil? if type.is_a?(Type::Constant)
-
-          type.is_a?(Type::Nominal) && type.class_name == "NilClass" && type.type_args.empty?
-        end
-
-        # `[defining_class, RBS::Definition::Method]` for the nearest project-discovered ancestor whose
-        # RBS declares `method_name` (not the starting class's own declaration), or nil.
-        def nearest_ancestor_method_def(scope, class_name, method_name)
-          from = overridden_ancestors_start(scope, class_name)
-          return nil if from.nil?
-
-          passed_owners = []
-          case Inference::DefinerResolution.resolve(scope, class_name, method_name, :instance,
-                                                    question: :override, from: from) do |ancestor|
-                 override_parent_answer(scope, ancestor, method_name, passed_owners)
-               end
-          in Inference::DefinerResolution::Known(owner:, answer:)
-            # The nearest declaration must be the one that answers: an ancestor asked past for a project
-            # owner the walk never reached (one the Ruby chain does not hold) leaves the rule silent.
-            unless answer.last == RBS_ONLY_OWNER ||
-                   passed_owners.any? { |passed| passed != normalize_class_name(owner) }
-              method_def = safe_instance_method_definition(owner, method_name, scope)
-              method_def && [owner, method_def]
-            end
-          in Inference::DefinerResolution::UNKNOWN # the case/in contract needs one arm per answer
-            nil
-          in Inference::DefinerResolution::ABSENT # rubocop:disable Lint/DuplicateBranch -- see above
-            nil
-          end
-        end
-
-        # The answer an RBS-only owner gives the override walk: it ends the walk, and the rule stays silent.
-        RBS_ONLY_OWNER = :rbs_only_owner
-        private_constant :RBS_ONLY_OWNER
-
-        # One project ancestor's answer to the override walk. The signature text is the answer two worlds
-        # compare: an `RBS::Definition::Method` has no structural equality of its own. Only an ancestor whose
-        # own RBS declares the method answers with it (#3046). One that inherits the declaration from another
-        # project class or module is asked past, so that owner answers at its own entry; the owner is recorded
-        # in `passed_owners`, which the answering owner must match. One that inherits it from an RBS-only owner
-        # the project chain cannot see ends the walk silent ({RBS_ONLY_OWNER}): that owner is the nearest
-        # declaration, and RBS-only ancestors are #130's.
-        def override_parent_answer(scope, ancestor, method_name, passed_owners)
-          method_def = safe_instance_method_definition(ancestor, method_name, scope)
-          return nil if method_def.nil?
-          return method_def.method_types.map(&:to_s) if declared_by?(method_def, ancestor)
-
-          owner = method_def.implemented_in || method_def.defined_in
-          return RBS_ONLY_OWNER unless owner && scope.discovered_classes.key?(normalize_class_name(owner))
-
-          passed_owners << normalize_class_name(owner)
-          nil
-        end
-
-        # True when `ancestor`'s own RBS declares `method_def`: on its body, or through an interface it
-        # includes itself (RBS records the including class as `implemented_in`).
-        def declared_by?(method_def, ancestor)
-          return true if defined_on?(method_def, ancestor)
-          return false unless method_def.defined_in&.interface?
-
-          normalize_class_name(method_def.implemented_in) == normalize_class_name(ancestor)
-        end
-
-        def safe_instance_method_definition(class_name, method_name, scope)
-          Reflection.instance_method_definition(class_name, method_name, scope: scope)
-        rescue StandardError
-          nil
-        end
-
-        # True when `method_def`'s RBS declaration lives on `class_name` itself (rather than being
-        # inherited from an ancestor).
-        def defined_on?(method_def, class_name)
-          defined_in = method_def.defined_in
-          return false if defined_in.nil?
-
-          normalize_class_name(defined_in.to_s) == normalize_class_name(class_name)
-        end
-
-        def normalize_class_name(name)
-          name.to_s.delete_prefix("::")
-        end
-
-        # ADR-35 WD9 tier 1 — generic-instantiation-aware comparison. Builds the substitution map
-        # `{ parent_type_param_name => instantiated Rigor::Type }` for the parent contract as the
-        # overriding subclass instantiates it (RBS `class Sub < Parent[Concrete]` / `include
-        # _Iface[Concrete]`). Mirrors the ADR-4 Phase 2d dispatcher zip (`build_type_vars`): the
-        # parent's declared type-parameter names zipped against the subclass-side instantiation args.
-        #
-        # Returns `{}` — restoring the pre-WD9 behaviour under which any parent type variable degrades
-        # to `Dynamic[Top]` and the rule stays silent — whenever the subclass does not instantiate the
-        # ancestor generically, the RBS definition cannot be built, arities disagree, or an argument
-        # fails to translate. This is the FP-safety contract: substitution only ever *adds* precision
-        # (a `-> T` compared at `-> Integer`); an unbound / unresolved generic keeps degrading to
-        # silence, never a false `:no`.
-        def ancestor_instantiation_type_vars(scope, parent_class)
-          self_type = scope.self_type
-          return {} unless self_type.respond_to?(:class_name)
-
-          args = ancestor_instantiation_args(scope, self_type.class_name.to_s, parent_class)
-          return {} if args.nil? || args.empty?
-
-          param_names = Reflection.class_type_param_names(parent_class, scope: scope)
-          return {} if param_names.empty? || param_names.size != args.size
-
-          translated = args.map do |arg|
-            Inference::RbsTypeTranslator.translate(
-              arg, self_type: nil, instance_type: nil, type_vars: {},
-                   alias_expander: scope.environment&.rbs_loader
-            )
-          rescue StandardError
-            nil
-          end
-          return {} if translated.any?(&:nil?)
-
-          param_names.zip(translated).to_h
-        end
-
-        # The RBS type arguments the subclass applies to `parent_class` in its ancestry, or nil when
-        # the subclass has no RBS definition or does not name that ancestor. Reads the resolved
-        # instance-ancestor list (`RBS::Definition#ancestors`), whose `Ancestor::Instance` entries carry
-        # the instantiation `.args` for each superclass / included module. Fail-soft: any RBS build
-        # error yields nil, which the caller treats as "no instantiation" and degrades to silence.
-        def ancestor_instantiation_args(scope, subclass_name, parent_class)
-          definition = Reflection.instance_definition(subclass_name, scope: scope)
-          return nil if definition.nil?
-
-          target = normalize_class_name(parent_class)
-          ancestor = definition.ancestors.ancestors.find do |anc|
-            anc.respond_to?(:args) && normalize_class_name(anc.name.to_s) == target
-          end
-          ancestor&.args
-        rescue ::RBS::BaseError, StandardError
-          nil
-        end
-
-        def build_override_return_widened_diagnostic(path, def_node, parent_class, parent_return, override_return)
-          Diagnostic.from_name_loc(
-            def_node,
-            rule: RULE_OVERRIDE_RETURN_WIDENED,
-            path: path,
-            message: "return type of `#{def_node.name}' widened from #{parent_return.describe(:short)} " \
-                     "to #{override_return.describe(:short)} (overrides #{parent_class}##{def_node.name}); " \
-                     "breaks substitutability",
-            severity: :warning,
-            method_name: def_node.name.to_s
-          )
-        end
-
-        # ADR-35 slice 3 — `def.override-param-narrowed`. The Liskov signature rule for parameters
-        # (contravariance): an override may *widen* a parameter (accept a supertype — accepting more is
-        # safe) but MUST NOT *narrow* it. A caller holding the supertype passes a parent-typed argument; a
-        # narrowed override parameter cannot accept it.
-        #
-        # Direction (ADR-35 WD3, corrected): fire on `override_param.accepts(parent_param) == :no` — the
-        # override's (narrowed) slot cannot accept the wider parent argument type. WD4: type comparison at
-        # matching POSITIONAL parameter indices only; arity / keyword-requiredness divergence is out of
-        # scope for v1. Same WD1 both-sides-authored gate as slice 2; `untyped` / unbound-generic /
-        # interface parent params degrade to `Dynamic[Top]` and are skipped (FP-safe). To avoid
-        # overload-arm ambiguity, both sides must have exactly one method type.
-        def override_param_narrowed_diagnostic(path, def_node, scope_index)
-          resolved = resolve_authored_override(def_node, scope_index)
-          return nil if resolved.nil?
-
-          scope, override_method, parent_class, parent_method = resolved
-          parent_type_vars = ancestor_instantiation_type_vars(scope, parent_class)
-          override_params = positional_param_types(override_method, environment: scope.environment)
-          parent_params = positional_param_types(parent_method, type_vars: parent_type_vars,
-                                                                environment: scope.environment)
-          return nil if override_params.nil? || parent_params.nil?
-
-          index = first_narrowed_param_index(override_params, parent_params)
-          return nil if index.nil?
-
-          build_override_param_narrowed_diagnostic(
-            path, def_node, parent_class, index, parent_params[index], override_params[index]
-          )
-        end
-
-        # Translated positional (required + optional) parameter types of a method's single method type, or
-        # nil when the method is overloaded (multiple method types — arm mapping is ambiguous) or the
-        # parameter list is not introspectable. Per-position translation failures yield `nil` at that slot
-        # (skipped by the comparison). `self`/`instance` translate with `self_type: nil` (→
-        # `Dynamic[Top]`), matching the return-side handling.
-        # `type_vars:` — ADR-35 WD9 tier 1, parent side only. Substitutes the generic-instantiation
-        # map (parent class's type params → the subclass's instantiation) so a parent `(T)` parameter
-        # is compared at its instantiated type. Empty (the default, and the override side) keeps the
-        # pre-WD9 degrade-to-`Dynamic[Top]` behaviour.
-        def positional_param_types(method_def, type_vars: {}, environment: nil)
-          method_types = method_def.method_types
-          return nil unless method_types.size == 1
-
-          func = method_types.first.type
-          return nil unless func.respond_to?(:required_positionals)
-
-          (func.required_positionals + func.optional_positionals).map do |param|
-            Inference::RbsTypeTranslator.translate(
-              param.type, self_type: nil, instance_type: nil, type_vars: type_vars,
-                          alias_expander: environment&.rbs_loader
-            )
-          rescue StandardError
-            nil
-          end
-        end
-
-        # Index of the first positional parameter the override narrows relative to the parent, or nil. A
-        # position is a violation when the override's slot cannot accept the parent's argument type
-        # (`override_param.accepts(parent_param) == :no`). Positions where either side is
-        # missing/untranslatable, or the parent type degraded to `Dynamic[Top]` (untyped / unbound generic
-        # / interface), are skipped.
-        def first_narrowed_param_index(override_params, parent_params)
-          count = [override_params.size, parent_params.size].min
-          count.times do |i|
-            override_param = override_params[i]
-            parent_param = parent_params[i]
-            next if override_param.nil? || parent_param.nil?
-            next if dynamic_top?(parent_param) || dynamic_top?(override_param)
-
-            return i if override_param.accepts(parent_param).no?
-          end
-          nil
-        end
-
-        def build_override_param_narrowed_diagnostic(path, def_node, parent_class, index, parent_param, override_param)
-          Diagnostic.from_name_loc(
-            def_node,
-            rule: RULE_OVERRIDE_PARAM_NARROWED,
-            path: path,
-            message: "parameter #{index + 1} of `#{def_node.name}' narrowed from " \
-                     "#{parent_param.describe(:short)} to #{override_param.describe(:short)} " \
-                     "(overrides #{parent_class}##{def_node.name}); breaks substitutability",
-            severity: :warning,
             method_name: def_node.name.to_s
           )
         end

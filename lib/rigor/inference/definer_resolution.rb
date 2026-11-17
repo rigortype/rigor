@@ -28,7 +28,7 @@ module Rigor
     # It migrates one question at a time: `SourceArity` (C1b, C2-c) asks for the receiver's own side, instance or
     # singleton; the override lints (C1c) and the C2 typing sites (`ExpressionTyper#resolve_typing_def_with_owner`,
     # `StatementEvaluator#own_definer_node`) read the instance side; `RefinedDispatch::OwnMethod.certain_owner?` and
-    # `CheckRules#reached_definer_visibility` pass the side they hold.
+    # `CheckRules::VisibilityMismatch` pass the side they hold.
     module DefinerResolution
       Known = Data.define(:answer, :owner)
       UnknownResult = Data.define
@@ -230,7 +230,7 @@ module Rigor
       # this question does read.
       #
       # Issue #2134 — the contest is a read of the slot, so a question that reads it files `visibility:<owner>#<name>`:
-      # an answer block may answer from RBS without reading the slot itself (`nearest_ancestor_method_def`).
+      # an answer block may answer from RBS without reading the slot itself (`OverrideSupport`).
       def possible?(scope, hit, method_name, reads_visibility)
         discovery = scope.discovery
         owner = hit.owner

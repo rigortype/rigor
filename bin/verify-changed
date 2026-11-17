@@ -172,7 +172,7 @@ add_spec() {
 add_mirror_spec() { [[ -f "$1" ]] && add_spec "$1"; }
 # add_mirror_dir_specs <spec path without .rb>: every spec below the mirror
 # directory, whether or not a same-named spec exists (`lib/rigor/analysis/check_rules.rb`
-# has none; `spec/rigor/analysis/check_rules/` is its spec directory).
+# has none; `spec/rigor/analysis/check_rules/` is its spec directory, over the cap since it reached 35).
 #
 # Bounded, identically in both tiers. The unit-spec root (`lib/rigor.rb` ->
 # `spec/rigor/`, 721 specs) never applies, and a directory over the cap is named in
@@ -180,7 +180,7 @@ add_mirror_spec() { [[ -f "$1" ]] && add_spec "$1"; }
 # a whole module's specs: a `--quick` run for `lib/rigor/cli.rb` selected 50 and
 # took 9 min 7 s on a loaded host. Counts at the time of writing: cli 49,
 # method_dispatcher 49, effects 45, environment 40 (all over); plugin 27, type
-# 26, sig_gen 25, check_rules 21 (selected).
+# 26, sig_gen 25 (selected); check_rules was 21 (selected) and is now 35 (over).
 unit_spec_root=spec/rigor
 mirror_dir_cap=30
 add_mirror_dir_specs() {

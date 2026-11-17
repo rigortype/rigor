@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "rule_walk"
+require_relative "override_visibility"
 require_relative "../../scope/resolution_chain"
 require_relative "../../source/constant_path"
 require_relative "../../source/node_children"
@@ -201,7 +202,7 @@ module Rigor
         # discovery table does not hold, or one a later `define_method` / alias / unplaceable write contests
         # (#2013). `initialize` and the other lifecycle hooks are private whatever the table says.
         def method_visibility(scope, class_name, method_name)
-          return :private if CheckRules::IMPLICITLY_PRIVATE_METHODS.include?(method_name)
+          return :private if OverrideVisibility::IMPLICITLY_PRIVATE_METHODS.include?(method_name)
           return nil if scope.discovery.contested?(:discovered_method_visibilities, [class_name, method_name])
 
           scope.discovered_method_visibility(class_name, method_name)

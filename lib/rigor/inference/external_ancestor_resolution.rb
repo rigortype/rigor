@@ -91,7 +91,7 @@ module Rigor
       end
 
       # True when the RBS declaration found for the name sits on `class_name` itself rather than on an
-      # ancestor; mirrors `CheckRules#defined_on?` and `SigGen::Generator#declared_on_class_itself?`.
+      # ancestor; mirrors `CheckRules::OverrideSupport.defined_on?` and `SigGen::Generator#declared_on_class_itself?`.
       def declared_on_class?(definition, class_name)
         return false if definition.nil?
         return false unless definition.respond_to?(:defined_in)

@@ -575,9 +575,9 @@ RSpec.describe Rigor::Analysis::CheckRules::ArgumentType do
     #   translates to a nominal, not a singleton).
     # - `return param if bounded.empty?` in `resolve_param_bounds`: with no bounded type parameter the
     #   substitution it builds maps every type to itself.
-    # - the three arms of `rigor_type_admits_nil?` and `rigor_type_accepts_arg?`'s `Dynamic` / `Top`
-    #   test: a `rigor:v1:param` override carries only a refinement carrier; `untyped`, `nil` and `non-
-    #   empty-string | nil` were tried and the parameter kept its RBS type.
+    # - `return true if type.is_a?(Type::Dynamic) ...` and the `union_contains_nil?` arm of `rigor_type_admits_nil?`, and
+    #   `rigor_type_accepts_arg?`'s `Dynamic` / `Top` test: a `rigor:v1:param` override carries only a refinement
+    #   carrier; `untyped` and `non-empty-string | nil` were tried and the parameter kept its RBS type.
     # - `return true if loader.nil?` and `return true if methods.nil? || methods.empty?` in the two
     #   interface helpers: the environment of an indexed snippet always has a loader, and an interface
     #   with no methods (`_Empty`, tried) makes `all?` true exactly as the guard does.
@@ -592,13 +592,6 @@ RSpec.describe Rigor::Analysis::CheckRules::ArgumentType do
     # - `return true if class_name.nil?` and `return true if definition.nil?` in
     #   `interface_accepts_arg?` / `arg_class_has_method?`: `single_concrete_arg_class?` has already
     #   required a concrete RBS-known class.
-    # - `return written_argument_mismatch(...) if written`, its `plain_argument_rejects?` guard and the
-    #   `nil_member?` line in `plain_argument_rejects?`: the read path reaches the same verdict as the
-    #   written path for every global tried (`$VERBOSE` set to `true` and to `nil`, read bare, copied
-    #   and joined, and `$stdout`).
-    # - the `declared_only_rejection?` test in `read_argument_mismatch`: it needs a joined builtin
-    #   global whose declared members the file never writes, and whether it is withheld there differs
-    #   between a plain script and an rspec process (it reads which classes the host has loaded).
     # - `return false unless DeclarationSourcedGuard.gradual_narrowed?`, `return true if rest.empty?`
     #   and `return true if rest.size == members.size`: widening a parameter keeps its classes, so an
     #   argument that is not a narrowed `Dynamic` is rejected before and after; an empty `rest` is the
@@ -682,6 +675,9 @@ RSpec.describe Rigor::Analysis::CheckRules::ArgumentType do
           %a{rigor:v1:param: value is non-empty-string}
           def pick_ov: (String value) -> void
                      | (Integer value) -> void
+          %a{rigor:v1:param: value is NilClass}
+          def pk_nc: (String value) -> void
+                   | (Integer value) -> void
           def ==: (Sink other) -> bool
           def +: (Sink other) -> Sink
           def self.build: (Integer n) -> Sink
@@ -866,6 +862,22 @@ RSpec.describe Rigor::Analysis::CheckRules::ArgumentType do
 
       it "is silent for a global the file writes a nil to when the parameter admits nil" do
         expect(fired("$VERBOSE = nil\n#{sink}s.take_nilable($VERBOSE)\n")).to eq([])
+      end
+
+      it "is silent for a nil against overloads whose `rigor:v1:param` override is `NilClass`" do
+        expect(fired("#{sink}s.pk_nc(nil)\n")).to eq([])
+      end
+
+      it "judges a read of a builtin global by what the file wrote to it, in the message too" do
+        source = %($PROGRAM_NAME = "x"\nclass Q\n  def f\n    Sink.new.take_int($PROGRAM_NAME)\n  end\nend\n)
+
+        expect(fired(source)).to eq([msg(4, "value", "Integer", '"x"')])
+      end
+
+      it "withholds the members of a joined global the file never writes" do
+        source = %($PROGRAM_NAME = "r"\ndef f\n  Sink.new.take_mode(rand > 0.5 ? $PROGRAM_NAME : "w")\nend\n)
+
+        expect(fired(source)).to eq([])
       end
 
       it "is silent for a nil read from a constructor-seeded ivar that no method writes" do

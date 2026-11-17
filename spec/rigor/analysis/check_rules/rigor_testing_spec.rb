@@ -66,6 +66,14 @@ RSpec.describe Rigor::Analysis::CheckRules::RigorTesting do
       expect(row.message).to include(%(expected "String", got "1"))
     end
 
+    it "is silent inside Rigor's own Testing module, where the call is the implementation" do
+      source = "module Rigor\n  module Testing\n    def self.go = Testing.assert_type(\"String\", 1)\n  end\nend\n"
+      call, scope_index = call_for(source)
+      inner = innermost_call(call, :assert_type)
+
+      expect(described_class.assert_diagnostic("mem.rb", inner, scope_index)).to be_nil
+    end
+
     it "is silent for an `assert_type` on an unrelated receiver" do
       call, scope_index = call_for(%(Elsewhere.assert_type("String", 1)\n))
 

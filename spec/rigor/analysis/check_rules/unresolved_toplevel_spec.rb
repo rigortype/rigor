@@ -5,11 +5,15 @@ require "spec_helper"
 # ADR-116 WD1 / C4 — {CheckRules::UnresolvedToplevel.diagnostic} on a parsed snippet and its scope index, with no
 # runner. `runner_check_rules_spec.rb` pins the rule through the whole run.
 RSpec.describe Rigor::Analysis::CheckRules::UnresolvedToplevel do
-  # `Reflection.instance_method_definition("Object", ...)` in `diagnostic` is a guard no example here isolates: the
-  # Kernel methods it admits are also admitted by the `ObjectMixins` and `main`-singleton probes.
-  def diagnostic_for(source, name)
+  # Two guards in `diagnostic` no example here isolates: `Reflection.instance_method_definition("Object", ...)` (the
+  # Kernel methods it admits are also admitted by the `ObjectMixins` and `main`-singleton probes) and
+  # `ReceiverPredicates.source_declared_method?(scope, "Object", ...)`. For the second, a file that reopens `Object`
+  # (`def`, `private def`, `attr_reader`, `alias_method`, `class_eval`) stays silent without it, so another probe
+  # answers; reopening `Kernel` or `BasicObject` fires with and without it.
+  def diagnostic_for(source, name, environment: nil)
     program = Prism.parse(source).value
-    scope_index = Rigor::Inference::ScopeIndexer.index(program, default_scope: Rigor::Scope.empty)
+    scope = environment ? Rigor::Scope.empty(environment: environment) : Rigor::Scope.empty
+    scope_index = Rigor::Inference::ScopeIndexer.index(program, default_scope: scope)
     call = find_call(program, name)
     eval_ranges = Rigor::Analysis::CheckRules.send(:receiver_eval_block_ranges, program)
     described_class.diagnostic("mem.rb", call, scope_index, eval_ranges)
@@ -34,6 +38,20 @@ RSpec.describe Rigor::Analysis::CheckRules::UnresolvedToplevel do
 
   it "is silent for a Kernel method" do
     expect(diagnostic_for("puts 1\n", :puts)).to be_nil
+  end
+
+  it "is silent for a method the file adds to `Object`" do
+    expect(diagnostic_for("class Object\n  def reopened = 1\nend\nreopened\n", :reopened)).to be_nil
+  end
+
+  it "is silent for a `pre_eval:` patch on `Kernel`, which `main` reaches through Object's ancestors" do
+    patches = Rigor::Inference::ProjectPatchedMethods
+    entry = patches::Entry.new(class_name: "Kernel", method_name: :patched_helper, kind: :instance,
+                               source_path: "patch.rb", source_line: 1)
+    environment = Rigor::Environment.for_project(project_patched_methods: patches.new(entries: [entry]))
+
+    expect(diagnostic_for("patched_helper\n", :patched_helper, environment: environment)).to be_nil
+    expect(diagnostic_for("patched_helper\n", :patched_helper)).not_to be_nil
   end
 
   it "is silent for a toplevel def in the same file" do

@@ -41,6 +41,9 @@
 #     them together but assigns the PR number only at `gh pr create`, so a session
 #     holding issue #3219 does not thereby hold PR #3253. Pass `--pr <n>` and the
 #     expansion is done for you (`gh pr view --json closingIssuesReferences`).
+#     The number to hold is the one that will LAND: `bin/land-pr` drops the PR it
+#     landed, so a PR that corrects an earlier one's record — about #3256, landing
+#     as #3296 — has to hold both, or the landing leaves a claim behind.
 #   * Local to this clone. A cloud session, or a session on another machine, does
 #     not see these refs. Claims are not pushed: a remote ref would add network
 #     latency to every check for a case the factory does not run today.

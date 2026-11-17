@@ -509,7 +509,7 @@ module Rigor
         # (sequential + fork-worker) through `project_scope_seed_tables`. Empty unless the project lists
         # `pre_eval:` files that declare publishable constants, so a project without one is byte-identical.
         @project_pre_eval_constants = {}.freeze
-        # Issue #663 — the listed set {#publishable_pre_eval_constants} asks "is this writer one of ours?"
+        # Issue #663 — the listed set {ScopeSeed.publishable_pre_eval_constants} asks "is this writer one of ours?"
         # against; a function of the configuration alone, so it outlives every discovery rebuild.
         @pre_eval_path_set = nil
         # ADR-84 WD2 — per-run identity token for the user-method return memo's bucket (see

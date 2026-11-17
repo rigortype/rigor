@@ -353,14 +353,18 @@ RSpec.describe Rigor::Inference::DefinerResolution do # rubocop:disable RSpec/Sp
       RUBY
     end
 
-    # A module the project declares without a `def` is an external entry no table can vouch for: a macro in
-    # `included do`, or a hook defined outside the body (`def Q.included(b) = ...`), defines on the includer with
-    # nothing recorded. It declines, as does a gem module declared nowhere and absent from RBS (a future gem-source
-    # approach, `dependencies.source_inference`, could read it).
-    it "declines on a declared def-less module whose body holds nothing" do
+    # A module the project declares without a `def` is an external entry, because the chain holds it under its
+    # spelling with nothing recorded on it. Issue #3282 — it no longer declines by itself: the project read its
+    # body, and an empty body defines nothing, which is what Ruby answers here. What the old decline was really
+    # protecting against is a module that defines on the includer with nothing filed under the name, and those
+    # shapes still decline, each on its own evidence: a macro in `included do` through its `[:instance, name]`
+    # entry (the example below), and a hook `def` through its `[:singleton, :included]` entry (the one after).
+    # A gem module declared nowhere and absent from RBS declines too (a future gem-source approach,
+    # `dependencies.source_inference`, could read it).
+    it "answers past a declared def-less module whose body holds nothing, as Ruby does" do
       source = "class B; def foo = 1; end\nmodule Empty; end\nclass C < B; include Empty; end\n"
       expect(RubyRun.stdout("#{source}p C.instance_method(:foo).owner\n").chomp).to eq("B")
-      expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq(:unknown)
+      expect(owner_of(resolve(project_scope("a.rb" => source), :foo))).to eq("B")
     end
 
     it "declines on a concern whose included block calls a macro (custom_macro)" do

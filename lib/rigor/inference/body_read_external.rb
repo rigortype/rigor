@@ -28,7 +28,14 @@ module Rigor
     #      `define_method`, `send` or `refine` rewrites its table under a name no argument spells.
     #   4. The bucket carries no open-names mark for the side (`Struct.new(*FIELDS)`, `attr_accessor(*NAMES)`),
     #      which says this side holds names no table spells.
-    #   5. No `[side, name]` envelope entry and no recorded `def` names it. The envelope clause is what keeps a
+    #   5. The module defines no hook of its own with a `def`. A hook's body is a method body, and what it does to
+    #      the includer is not recorded in the module's bucket: `def Q.included(b) = b.attr_reader(:foo)` gives the
+    #      INCLUDER `foo` with nothing filed under the name, and Ruby answers the includer as the owner
+    #      (`definer_resolution_witness_spec.rb`). A concern's `included do` block is the opposite case and must
+    #      still be skipped: the walk reads the block and files what it defines, so `Paginable`'s bucket holds
+    #      `[:instance, :by_id]` and `[:hook_extend, "<included>", :included]` but no `[:singleton, :included]`.
+    #      That is the discriminator — a recorded hook `def` versus a read hook block.
+    #   6. No `[side, name]` envelope entry and no recorded `def` names it. The envelope clause is what keeps a
     #      concern honest: `Paginable`'s bucket DOES hold `[:instance, :paginate_by_max_id]` for what its hook
     #      block defines, so a read of THAT name still declines here, and is answered on the includer through the
     #      `<included>` entry the chain holds separately.
@@ -49,9 +56,28 @@ module Rigor
         bucket = scope.parameter_envelopes_of(declared)
         return false if Scope::DiscoveryIndex.rewritten_surface?(bucket)
         return false if Scope::DiscoveryIndex.open_names_on?(bucket, entry.side)
+        return false if hook_def?(bucket)
         return false if bucket.key?([entry.side, method_name.to_sym])
 
         own_def(scope, declared, entry.side, method_name).nil?
+      end
+
+      # The sides a hook `def` of the module's own is filed under. `Scope#discovered_method?` is not enough: a hook
+      # written OUTSIDE the module body (`def Q.included`) reaches no def table under the module's name, and only
+      # the envelope records it — under `:object_singleton` as well as `:singleton`.
+      # `:object_singleton` is {Scope::DiscoveryIndex::ENVELOPE_OBJECT_SINGLETON_KIND}'s value, spelled here
+      # rather than referenced: this file is required from {DefinerResolution} before `Rigor::Scope` is loaded,
+      # and a constant in an assignment resolves at load time where one in a method body does not.
+      HOOK_DEF_SIDES = %i[singleton object_singleton].freeze
+      private_constant :HOOK_DEF_SIDES
+
+      # Whether the module defines one of Ruby's mixin hooks as a singleton method of its own, however spelled
+      # (`def self.included`, `class << self`, or `def Q.included` outside the body). `Relevance` asks the same
+      # question of the same `HOOKS` set, for the same reason.
+      def hook_def?(bucket)
+        Scope::ResolutionChain::Relevance::HOOKS.any? do |hook|
+          HOOK_DEF_SIDES.any? { |side| bucket.key?([side, hook]) }
+        end
       end
 
       def own_def(scope, class_name, side, method_name)

@@ -17,14 +17,11 @@ require "spec_helper"
 #   indexed snippet has a scope.
 # - `return nil if OverrideSupport.dynamic_top?(inferred)`: a `Dynamic` body (`def ret_int(x) = x`) is declined by the
 #   `compare_return` line after it, whose `accepts` is `maybe`, not `no`; `top?` is never defined (#3303).
-# - `return nil if declared_only_return?(...)` and its first guard: both need a body mixing a builtin global's declared
-#   seed with another type after the file writes the global (`$stdout = StringIO.new` and `c ? $stdout : 1`); whether
-#   the verdict is withheld there differs between a plain script and an rspec process (it reads which classes the host
-#   has loaded), so no example here pins it. The runner examples in `override_and_return_type_spec.rb` do not either.
-# - the `refinement_def?` test of `diagnostic` (replacing `... ? nil : diagnostic` with `diagnostic` fails nothing):
-#   a `refine String do def upcase = nil end` body is typed with no `self` class in a snippet indexed against an empty
-#   scope, so the rule is silent there with or without the test; the example below pins that silence only.
-#   `spec/integration/refinement_using_scope_spec.rb` reaches the test through the runner.
+# - the `refinement_def?` test of `diagnostic` (replacing `... ? nil : diagnostic` with `diagnostic` fails no example
+#   here, none in `spec/integration/refinement_using_scope_spec.rb`, and changes no CLI output on a `refine` body): a
+#   `refine String do def upcase = nil end` body is typed with no `self` class in a snippet indexed against an empty
+#   scope, and the rule answers nil for such a `def` before the test is asked, so no spec pins it. See the issue
+#   filed from #3308's review.
 RSpec.describe Rigor::Analysis::CheckRules::ReturnType do
   def defs_in(node, found = [])
     found << node if node.is_a?(Prism::DefNode)
@@ -77,6 +74,9 @@ RSpec.describe Rigor::Analysis::CheckRules::ReturnType do
       end
       module Mod
         def mval: () -> Integer
+      end
+      class GOut
+        def pick: (bool) -> StringIO
       end
     RBS
   end
@@ -170,6 +170,12 @@ RSpec.describe Rigor::Analysis::CheckRules::ReturnType do
     it "reports a class written as `class ::Foo`, and not one nested in a module that has no declaration" do
       expect([fired(%(class ::Foo\n  def ret_int = "a"\nend\n)).size,
               fired(%(module M\n  class Foo\n    def ret_int = "a"\n  end\nend\n))]).to eq([1, []])
+    end
+
+    it "withholds the declared-only members of a joined builtin global" do
+      source = "$stdout = StringIO.new\nclass GOut\n  def pick(c) = c ? $stdout : StringIO.new\nend\n"
+
+      expect(fired(source)).to eq([])
     end
 
     it "judges a body ending on a builtin global by the file's writes to it" do

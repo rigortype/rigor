@@ -575,9 +575,10 @@ RSpec.describe Rigor::Analysis::CheckRules::ArgumentType do
     #   translates to a nominal, not a singleton).
     # - `return param if bounded.empty?` in `resolve_param_bounds`: with no bounded type parameter the
     #   substitution it builds maps every type to itself.
-    # - `return true if type.is_a?(Type::Dynamic) ...` and the `union_contains_nil?` arm of `rigor_type_admits_nil?`, and
-    #   `rigor_type_accepts_arg?`'s `Dynamic` / `Top` test: a `rigor:v1:param` override carries only a refinement
-    #   carrier; `untyped` and `non-empty-string | nil` were tried and the parameter kept its RBS type.
+    # - `return true if type.is_a?(Type::Dynamic) || ...Top` and the `union_contains_nil?` arm of
+    #   `rigor_type_admits_nil?`, and `rigor_type_accepts_arg?`'s `Dynamic` / `Top` test: a `rigor:v1:param`
+    #   override carries only a refinement carrier or a class name (`NilClass` reaches the `nil_member?` arm and is
+    #   pinned); `untyped` and `non-empty-string | nil` were tried and the parameter kept its RBS type.
     # - `return true if loader.nil?` and `return true if methods.nil? || methods.empty?` in the two
     #   interface helpers: the environment of an indexed snippet always has a loader, and an interface
     #   with no methods (`_Empty`, tried) makes `all?` true exactly as the guard does.
@@ -589,6 +590,8 @@ RSpec.describe Rigor::Analysis::CheckRules::ArgumentType do
     #   (both) and `plain_argument_rejects?` (both): `Acceptance.accepts` answers yes for either side,
     #   so the line after answers as they do (tried `untyped`, `top` and `Object` parameters and
     #   arguments).
+    # - the `nil_member?` line of `plain_argument_rejects?`: a written nil reaches the same verdict through the
+    #   translated parameter (`$VERBOSE = nil` read against `Integer`, `Integer?` and an overload set, tried).
     # - `return true if class_name.nil?` and `return true if definition.nil?` in
     #   `interface_accepts_arg?` / `arg_class_has_method?`: `single_concrete_arg_class?` has already
     #   required a concrete RBS-known class.
@@ -872,6 +875,12 @@ RSpec.describe Rigor::Analysis::CheckRules::ArgumentType do
         source = %($PROGRAM_NAME = "x"\nclass Q\n  def f\n    Sink.new.take_int($PROGRAM_NAME)\n  end\nend\n)
 
         expect(fired(source)).to eq([msg(4, "value", "Integer", '"x"')])
+      end
+
+      it "is silent for a builtin global the file wrote a value the parameter accepts" do
+        source = %($PROGRAM_NAME = "x"\nclass Q\n  def f\n    Sink.new.take_string($PROGRAM_NAME)\n  end\nend\n)
+
+        expect(fired(source)).to eq([])
       end
 
       it "withholds the members of a joined global the file never writes" do

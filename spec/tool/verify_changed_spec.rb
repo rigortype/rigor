@@ -293,41 +293,44 @@ RSpec.describe "bin/verify-changed spec selection" do
   end
 
   # #3277: a module with a spec directory and no same-named spec. Before the
-  # directory rule, check_rules.rb selected none of spec/rigor/analysis/check_rules/.
+  # directory rule, check_rules.rb selected none of spec/rigor/analysis/check_rules/; it did select them
+  # when the rule landed, and the directory has since grown past the bound (35 specs, see #3289), so these
+  # examples build their tree in a temporary repository rather than lean on a real directory's size.
   describe "the directory mirror rule" do
+    def spec_files(dir, count, nested: false)
+      count.times.to_h { |i| ["#{dir}#{'/deep/er' if nested && i.odd?}/s#{i}_spec.rb", "# spec\n"] }
+    end
+
+    def list_in_temp_repo(files, path, quick:)
+      with_temp_repo(files) do |dir|
+        env = { "VERIFY_CHANGED_PATHS" => path }
+        args = ["HEAD", *("--quick" if quick), "--list-specs"]
+        out, err, status = Open3.capture3(clean_env.merge(env), "bin/verify-changed", *args, chdir: dir)
+        expect(status.exitstatus).to eq(0), err
+        # The default tier also names the drift specs, which this repository lacks.
+        [out.lines.map(&:strip).reject(&:empty?).select { |spec| File.exist?(File.join(dir, spec)) }, err]
+      end
+    end
+
     it "selects every spec under the mirror directory when there is no same-named spec" do
-      expect(File.exist?(File.join(root, "spec/rigor/analysis/check_rules_spec.rb"))).to be(false)
-      expected = Dir.glob("spec/rigor/analysis/check_rules/**/*_spec.rb", base: root)
-      expect(expected.length).to be > 5
+      files = { "lib/rigor/a/b.rb" => "" }.merge(spec_files("spec/rigor/a/b", 6, nested: true))
       [false, true].each do |quick|
-        specs, = selection_for("lib/rigor/analysis/check_rules.rb", quick: quick)
-        expect(specs).to include(*expected), "quick=#{quick}"
+        specs, = list_in_temp_repo(files, "lib/rigor/a/b.rb", quick: quick)
+        expect(specs).to match_array(files.keys.grep(%r{\Aspec/}).sort), "quick=#{quick}"
       end
     end
 
     it "does not pull in a sibling module's directory" do
-      specs, = selection_for("lib/rigor/analysis/check_rules.rb", quick: true)
-      expect(specs.grep(%r{\Aspec/rigor/analysis/(?!check_rules/)})).to be_empty
+      files = { "lib/rigor/a/b.rb" => "" }.merge(spec_files("spec/rigor/a/b", 2))
+                                          .merge(spec_files("spec/rigor/a/c", 2))
+      specs, = list_in_temp_repo(files, "lib/rigor/a/b.rb", quick: true)
+      expect(specs).not_to be_empty
+      expect(specs.grep(%r{\Aspec/rigor/a/(?!b/)})).to be_empty
     end
 
     # The bound, on a temporary repository so the counts are exact: the real
     # directories drift (cli 49, check_rules 21 at the time of writing).
     describe "its bound" do
-      def spec_files(dir, count, nested: false)
-        count.times.to_h { |i| ["#{dir}#{'/deep/er' if nested && i.odd?}/s#{i}_spec.rb", "# spec\n"] }
-      end
-
-      def list_in_temp_repo(files, path, quick:)
-        with_temp_repo(files) do |dir|
-          env = { "VERIFY_CHANGED_PATHS" => path }
-          args = ["HEAD", *("--quick" if quick), "--list-specs"]
-          out, err, status = Open3.capture3(clean_env.merge(env), "bin/verify-changed", *args, chdir: dir)
-          expect(status.exitstatus).to eq(0), err
-          # The default tier also names the drift specs, which this repository lacks.
-          [out.lines.map(&:strip).reject(&:empty?).select { |spec| File.exist?(File.join(dir, spec)) }, err]
-        end
-      end
-
       [false, true].each do |quick|
         context "with quick=#{quick}" do
           it "selects nothing for the unit-spec root" do

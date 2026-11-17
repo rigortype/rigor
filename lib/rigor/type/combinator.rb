@@ -284,7 +284,7 @@ module Rigor
       # Recognises the carriers that participate in literal-string flow tracking: any `Constant<String>`
       # (constants are literal by construction), the `literal-string` Refined carrier, an `Intersection`
       # containing `literal-string`, or a `Union` whose every member qualifies. Used by
-      # `ExpressionTyper#type_of_interpolated_string` and the `LiteralStringFolding` dispatcher tier so
+      # `ExpressionTyper::Composites.type_of_interpolated_string` and the `LiteralStringFolding` dispatcher tier so
       # propagation through interpolation and `+`/`*` composition stays consistent.
       def literal_string_compatible?(type)
         case type

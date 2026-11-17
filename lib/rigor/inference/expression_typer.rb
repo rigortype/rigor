@@ -55,6 +55,9 @@ require_relative "struct_fold_safety"
 require_relative "unknown_store_widening"
 require_relative "unthreaded_rebinds"
 require_relative "version_guard"
+require_relative "expression_typer/composites"
+require_relative "expression_typer/per_element_assemblers"
+require_relative "expression_typer/writes"
 
 module Rigor
   module Inference
@@ -250,7 +253,7 @@ module Rigor
       private_constant :PRISM_DISPATCH
 
       # Sentinel distinguishing "the key is not a value-pinned literal" from the legitimate literal hash
-      # keys `nil` and `false` (see {#static_hash_key}).
+      # keys `nil` and `false` (see {Composites.static_hash_key}).
       NO_STATIC_HASH_KEY = Object.new.freeze
       private_constant :NO_STATIC_HASH_KEY
 
@@ -494,13 +497,48 @@ module Rigor
         end
       end
 
+      # @api private — public only so {Writes} can call it on the typer it is given.
+      def dynamic_top
+        Type::Combinator.untyped
+      end
+
+      # @api private — public only so {Writes} can call it on the typer it is given.
+      #
+      # Resolves a constant reference through Ruby's lexical constant lookup. Delegates to the shared
+      # `Reflection.resolve_constant_type` owner so the same walk (registry singleton, discovered class,
+      # in-source value, RBS constant, across the peeled `::` prefix candidates) is reused by
+      # `Inference::Narrowing`'s `Constant[Regexp]` match-operand recognition. Returns the matched
+      # `Rigor::Type` or nil; the caller decides whether to fall back.
+      def resolve_constant_name(name, rooted: false, caller_derived: true)
+        Reflection.resolve_constant_type(name, scope: scope, rooted: rooted, caller_derived: caller_derived)
+      end
+
       private
 
       attr_reader :scope, :tracer
 
-      def dynamic_top
-        Type::Combinator.untyped
-      end
+      # One-line delegators for the node typers `PRISM_DISPATCH` names (and `statements_or_nil`, which the rescue
+      # typers call) whose bodies live in the modules under `expression_typer/` (ADR-116 C3); each passes the values it
+      # reads from this typer (`scope`, `tracer`) and the typer itself, so the module reads no instance variable.
+      def type_of_statements_node(node) = Composites.type_of_statements_node(node, self)
+      def type_of_program(node) = Composites.type_of_program(node, self)
+      def type_of_hash(node) = Composites.type_of_hash(node, self)
+      def type_of_interpolated_string(node) = Composites.type_of_interpolated_string(node, self)
+      def type_of_embedded_statements(node) = Composites.type_of_embedded_statements(node, self)
+      def type_of_class_or_module(node) = Composites.type_of_class_or_module(node, self)
+      def type_of_else(node) = Composites.type_of_else(node, self)
+      def type_of_when_or_in(node) = Composites.type_of_when_or_in(node, self)
+      def type_of_ensure(node) = Composites.type_of_ensure(node, self)
+      def type_of_range(node) = Composites.type_of_range(node, self)
+      def statements_or_nil(node) = Composites.statements_or_nil(node, self)
+      def type_of_shareable_constant(node) = Composites.type_of_shareable_constant(node, self)
+      def type_of_implicit(node) = Composites.type_of_implicit(node, self)
+      def array_type_for(node) = Composites.array_type_for(node, self)
+      def parentheses_type_for(node) = Composites.parentheses_type_for(node, self)
+      def type_of_assignment_write(node) = Writes.type_of_assignment_write(node, self)
+      def type_of_compound_variable_write(node) = Writes.type_of_compound_variable_write(node, scope, self)
+      def type_of_compound_constant_write(node) = Writes.type_of_compound_constant_write(node, scope, self)
+      def type_of_index_compound_write(node) = Writes.type_of_index_compound_write(node, scope, tracer)
 
       def type_of_literal_value(node)
         Type::Combinator.constant_of(node.value)
@@ -516,189 +554,6 @@ module Rigor
 
       def type_of_nil(_node)
         Type::Combinator.constant_of(nil)
-      end
-
-      # All `*WriteNode` flavours expose a `.value` rvalue child. Their type is the type of that rvalue.
-      # Binding the result back into the scope is the responsibility of the statement-level evaluator
-      # (Slice 3), never of `type_of` itself.
-      def type_of_assignment_write(node)
-        type_of(node.value)
-      end
-
-      # `v += 1` / `@v ||= x` / `$v &&= x` as an EXPRESSION. The value of a compound write is the value it
-      # stores, which is a function of the variable's CURRENT binding — not of the rvalue alone. Typing it as
-      # `type_of(node.value)` answered `1` for `total += 1` whatever `total` held.
-      #
-      # `StatementEvaluator#compound_eval` already computes the right answer on the straight-line path, so the
-      # gap only showed where a body is typed WITHOUT that evaluator: the block-return pass types a
-      # single-statement body by expression alone, and issue #617 residue (3) is the live consequence —
-      # `total = 0; r = [1, 2].map { total += 1 }` folded to `[1, 1]`, and `r.last == 1` fired a false
-      # `flow.always-truthy-condition` on a program where it is `2`. Under the per-element fold the captured
-      # local is already bound to its converged `Integer` (issue #587 (b)); reading that binding here is what
-      # turns the stale pin into the honest `Integer`.
-      #
-      # The algebra is `StatementEvaluator#compound_result_type`'s, deliberately: the two must not disagree
-      # about what a compound write evaluates to. An unbound target is `Dynamic[top]` — the same fallback the
-      # evaluator takes — and an operator the receiver does not answer widens to `Dynamic[top]` rather than
-      # inventing the rvalue.
-      #
-      # Constant targets have {#type_of_compound_constant_write}, over the same algebra. Index targets have their
-      # own handler, {#type_of_index_compound_write}.
-      def type_of_compound_variable_write(node)
-        compound_write_value(node, compound_write_current_binding(node), type_of(node.value))
-      end
-
-      # `H ||= 0` / `Conf::LIMIT += 1` as an EXPRESSION: the value it stores, by
-      # {#type_of_compound_variable_write}'s algebra. Typed as the rvalue alone, `H = { x: 1 }; v = (H ||= 0);
-      # v[:x]` reported `Integer#[]` on a program whose `v` is `H`, and `F.transform_values { |e| F ||= 0 }`
-      # folded every value to `0`.
-      #
-      # A constant has no scope binding, so its current binding is what a plain read of the same spelling
-      # resolves to at the write site — the lexical ladder, the in-source table of plain writes, then RBS —
-      # less the caller-derived rungs a top-level body keeps for reads Ruby raises on. The memoization idiom
-      # (`def registry = REGISTRY ||= {}`, legal where a plain `REGISTRY = {}` is a dynamic constant
-      # assignment) writes a constant nothing else binds, so an unresolved target keeps the rvalue reading
-      # exactly as an unbound variable does — unless a write other than a memo binds it
-      # ({#written_constant_binding}). A path whose base renders no static name (`klass::X`, `self::X`) names
-      # no binding the resolver can look up, and reads as unbound too, on the same condition.
-      def type_of_compound_constant_write(node)
-        rhs = type_of(node.value)
-        compound_write_value(node, compound_write_constant_binding(node), rhs)
-      end
-
-      def compound_write_value(node, current, rhs)
-        case node
-        when Prism::LocalVariableOrWriteNode, Prism::InstanceVariableOrWriteNode,
-             Prism::ClassVariableOrWriteNode, Prism::GlobalVariableOrWriteNode,
-             Prism::ConstantOrWriteNode, Prism::ConstantPathOrWriteNode
-          # An UNBOUND target is the memoization idiom (`def self.default = @default ||= new`): nothing
-          # has written the variable on any path the analyzer saw, so the stored value is the rvalue.
-          # Reading it as `Dynamic[top] | rhs` would skip every memoized singleton in `sig-gen`
-          # (ADR-5 optimism; three `.default` readers went `sig.skipped.untyped-return` without this).
-          #
-          # The index rule's exception applies: an rvalue with no truthy part makes the write a guard, not a
-          # memo. `@settings ||= raise "boot first"` returns only when something the analyzer did not see set
-          # `@settings`, and `@verbose ||= false` answers `true` once one did, so the value is that unseen
-          # binding — `Dynamic[top]`, the statement evaluator's reading of an unbound target — never the
-          # rvalue's `bot` or `false` alone. A local is no exception: the scope a loop body is typed from does
-          # not carry what the previous iteration stored.
-          if current.nil?
-            return rhs unless Narrowing.narrow_truthy(rhs).is_a?(Type::Bot)
-
-            current = dynamic_top
-          end
-
-          Type::Combinator.union(Narrowing.narrow_truthy(current), rhs)
-        when Prism::LocalVariableAndWriteNode, Prism::InstanceVariableAndWriteNode,
-             Prism::ClassVariableAndWriteNode, Prism::GlobalVariableAndWriteNode,
-             Prism::ConstantAndWriteNode, Prism::ConstantPathAndWriteNode
-          # `&&=` is no memo: an unset target returns its own `nil` without evaluating the rvalue (a constant or
-          # class variable raises instead). Beside the rvalue, an UNBOUND target's value is its own falsey value —
-          # `nil` when unset, or a falsey value a write the analyzer did not see stored — which
-          # `narrow_falsey(Dynamic[top])` carries as `Dynamic[top]`, the statement evaluator's reading. The index
-          # rule says the same of `h[k] &&= v`. Read as the rvalue, `if (@x &&= 1)` folded always-truthy on a
-          # program that takes the else arm.
-          Type::Combinator.union(Narrowing.narrow_falsey(current || dynamic_top), rhs)
-        else
-          compound_operator_result(current || dynamic_top, rhs, node.binary_operator)
-        end
-      end
-
-      # `h[k] += v` / `h[k] ||= v` / `h[k] &&= v` as an EXPRESSION. Like a variable compound write, its value is
-      # what it stores through `[]=` — the dispatched `h[k] + v`, `truthy(h[k]) | v`, `falsey(h[k]) | v` — which
-      # reads the slot's current type, recorded indexed narrowing included. Typed as the rvalue alone it answered
-      # `1` for `counts[w] += 1`, so `r = words.map { |w| counts[w] += 1 }` pinned every position to `1` and
-      # `r.last == 1` drew a false `flow.always-truthy-condition`.
-      #
-      # The statement evaluator already owned that algebra for the straight-line write and the `[]=` widening
-      # join, so this reads its answer rather than keeping a second copy. It asks for the value alone, not a
-      # whole `evaluate`: the widening and the narrowing record are scope effects a value position discards,
-      # and the memoizing `@cache[k] ||= build(k)` tail is common enough not to pay for them.
-      #
-      # One exception carries over, narrowed, from {#type_of_compound_variable_write}: a memoizing `||=` whose
-      # slot the analyzer has no evidence about reads as the rvalue. The evaluator's value method owns it,
-      # because it is decided on the `[]` read the evaluator performs.
-      def type_of_index_compound_write(node)
-        StatementEvaluator.new(scope: scope, tracer: tracer).index_compound_write_value(node)
-      end
-
-      def compound_write_current_binding(node)
-        case node
-        when Prism::LocalVariableOperatorWriteNode, Prism::LocalVariableOrWriteNode,
-             Prism::LocalVariableAndWriteNode then scope.local(node.name)
-        when Prism::InstanceVariableOperatorWriteNode, Prism::InstanceVariableOrWriteNode,
-             Prism::InstanceVariableAndWriteNode then scope.ivar(node.name)
-        when Prism::ClassVariableOperatorWriteNode, Prism::ClassVariableOrWriteNode,
-             Prism::ClassVariableAndWriteNode then scope.cvar(node.name)
-        else scope.global(node.name)
-        end
-      end
-
-      def compound_write_constant_binding(node)
-        case node
-        when Prism::ConstantOperatorWriteNode, Prism::ConstantOrWriteNode, Prism::ConstantAndWriteNode
-          full_name = node.name.to_s
-          rooted = false
-        else
-          full_name = Source::ConstantPath.qualified_name_or_nil(node.target)
-          return unnamed_path_binding(node.target) if full_name.nil?
-
-          rooted = Source::ConstantPath.rooted?(node.target)
-        end
-        resolve_constant_name(full_name, rooted: rooted, caller_derived: false) ||
-          written_constant_binding(full_name, rooted)
-      end
-
-      # A constant the plain read cannot resolve may still be bound: another file writes a value that never
-      # published (`H = { x: 1 }`), the compound write withdrew one by being the second writer the census
-      # counts, or this file writes it in a form its own table does not carry (`A, B = …`, `A = B = …`). The
-      # value is one the analyzer does not have, so the binding is `Dynamic[top]` rather than the memo's
-      # unbound reading. The one write that does not bind is a memo `||=` no other file shares, so the
-      # memoization idiom keeps that reading however often its file repeats it; memos of the name in two files
-      # bind, since either may load first and set what the other reads.
-      #
-      # Which name the write reads is the ladder's to decide, not the spelling's: the same resolution runs
-      # again with only the census's binding names in the in-source table, so `Other::REGISTRY` elsewhere
-      # leaves a top-level `REGISTRY ||= {}` its memo reading. Two census spellings the ladder cannot reach
-      # still bind: a write through a base nothing names (`k::X = 1`), which may have written any of them,
-      # and a path the census keeps as written ([#690](https://github.com/rigortype/rigor/issues/690)), so
-      # `Foo::BAR = …` inside `module M` binds `M::Foo::BAR ||= 0`.
-      def written_constant_binding(full_name, rooted)
-        names = scope.bound_constant_names(full_name)
-        return nil if names.empty?
-        return dynamic_top if names.any? { |name| unladdered_census_name?(name, full_name) }
-
-        written = names.to_h { |name| [name, dynamic_top] }
-        probe = scope.with_discovery(scope.discovery.with(in_source_constants: written))
-        Reflection.resolve_constant_type(full_name, scope: probe, rooted: rooted, caller_derived: false)
-      end
-
-      def unladdered_census_name?(name, full_name)
-        return true if name.start_with?(ScopeIndexer::DYNAMIC_TARGET_PREFIX)
-
-        name.include?("::") && full_name.end_with?("::#{name}")
-      end
-
-      # `self::X ||= v` / `klass::X ||= v` name no constant the resolver can look up, so any binding write
-      # that shares the last segment may be the one the base reaches. The answer now depends on other files'
-      # writes, and this path never reaches `Reflection.resolve_constant_type`, which records the
-      # `constant:<segment>` edge for every other form — so it records the edge itself, or an incremental
-      # run keeps serving the reading from before another file's write of the segment appeared.
-      def unnamed_path_binding(target)
-        segment = target.name&.to_s
-        return nil if segment.nil?
-
-        Analysis::DependencyRecorder.read_name(:constant, segment) if Analysis::DependencyRecorder.active?
-        dynamic_top unless scope.bound_constant_names(segment).empty?
-      end
-
-      def compound_operator_result(current, rhs, operator)
-        MethodDispatcher.dispatch(
-          receiver_type: current,
-          method_name: operator.to_sym,
-          arg_types: [rhs],
-          environment: scope.environment
-        ) || dynamic_top
       end
 
       # Slice 7 phase 1 — instance/class/global variable reads. Each lookup returns the type currently bound
@@ -725,14 +580,6 @@ module Rigor
 
       def type_of_global_variable_read(node)
         scope.global(node.name) || dynamic_top
-      end
-
-      def type_of_statements_node(node)
-        statements_type_for(node)
-      end
-
-      def type_of_program(node)
-        statements_type_for(node.statements)
       end
 
       # Recognised position that does not produce a value: parameter lists and individual parameter
@@ -913,190 +760,12 @@ module Rigor
         # a second source of truth for the same key.
       end
 
-      # Resolves a constant reference through Ruby's lexical constant lookup. Delegates to the shared
-      # `Reflection.resolve_constant_type` owner so the same walk (registry singleton, discovered class,
-      # in-source value, RBS constant, across the peeled `::` prefix candidates) is reused by
-      # `Inference::Narrowing`'s `Constant[Regexp]` match-operand recognition. Returns the matched
-      # `Rigor::Type` or nil; the caller decides whether to fall back.
-      def resolve_constant_name(name, rooted: false, caller_derived: true)
-        Reflection.resolve_constant_type(name, scope: scope, rooted: rooted, caller_derived: caller_derived)
-      end
-
-      # Slice 5 phase 1 upgrades hash literals to `HashShape{...}` when every entry is a static `AssocNode`
-      # whose key is a value-pinned scalar literal — Symbol, plain String, Integer, Float, `true`, `false`,
-      # or `nil` (covering `{ a: 1, "b" => 2 }` and `{ 1 => 2, 1.0 => 4 }` alike) — falling back to the
-      # generic `Hash[K, V]` form otherwise. Splatted entries (`{ **other }`) and dynamic keys widen to the
-      # underlying `Hash[K, V]` form by unioning the types each entry exposes — a splat exposes the `[K, V]`
-      # of the hash it copies plus a `Dynamic[top]` arm (see {#hash_splat_pair}), so every entry contributes a
-      # pair. A splat never keeps a shape, even over an exact closed one.
-      def type_of_hash(node)
-        elements = node.respond_to?(:elements) ? node.elements : []
-        # v0.0.7 — `{}` resolves to the empty `HashShape{}` carrier rather than `Nominal[Hash]`, mirroring the
-        # v0.0.6 empty-array literal change. Both forms erase to plain `Hash`, but `HashShape{}` pins the
-        # literal's known size (zero) so HashShape projections (`empty?`, `first`, `count`, …) fold against it.
-        return Type::Combinator.hash_shape_of({}) if elements.empty?
-
-        shape = static_hash_shape_for(elements)
-        return shape if shape
-
-        keys, values = generic_hash_pairs_for(elements)
-        Type::Combinator.nominal_of(
-          Hash,
-          type_args: [Type::Combinator.union(*keys), Type::Combinator.union(*values)]
-        )
-      end
-
-      # Builds `HashShape{...}` when every entry is an `AssocNode` whose key is a value-pinned scalar
-      # literal (Symbol, plain String, Integer, Float, true, false, nil). Returns nil otherwise so the
-      # caller falls back to the generic shape.
-      #
-      # Duplicate keys are LAST-WINS, matching the runtime (`{ a: 1, a: 2 }` keeps `a: 2`; Ruby itself
-      # only warns under `-w`). Key identity is Ruby `Hash` `eql?` identity because `pairs` is a native
-      # Hash — `1` and `1.0` stay distinct entries, `1.0` and `1.00` collide. The plain re-assignment
-      # also reproduces the runtime's ordering: the key keeps its FIRST insertion position while the
-      # value comes from the LAST occurrence.
-      def static_hash_shape_for(elements)
-        pairs = {}
-        elements.each do |entry|
-          return nil unless entry.is_a?(Prism::AssocNode)
-
-          key = static_hash_key(entry.key)
-          return nil if key.equal?(NO_STATIC_HASH_KEY)
-
-          pairs[key] = type_of(entry.value)
-        end
-        return nil if pairs.empty?
-
-        Type::Combinator.hash_shape_of(pairs)
-      end
-
-      # Returns the value-pinned scalar literal carried by a hash key node, or {NO_STATIC_HASH_KEY} when
-      # the key is dynamic (a computed expression, an interpolated string — SymbolNode#value /
-      # StringNode#unescaped are nil under interpolation — a constant, a local, …). `nil` / `false` are
-      # real key values here, hence the sentinel rather than a nil return.
-      def static_hash_key(node)
-        case node
-        when Prism::SymbolNode
-          raw = node.value
-          raw.nil? ? NO_STATIC_HASH_KEY : raw.to_sym
-        when Prism::StringNode
-          node.unescaped || NO_STATIC_HASH_KEY
-        when Prism::IntegerNode, Prism::FloatNode then node.value
-        when Prism::TrueNode then true
-        when Prism::FalseNode then false
-        when Prism::NilNode then nil
-        else NO_STATIC_HASH_KEY
-        end
-      end
-
-      def generic_hash_pairs_for(elements)
-        keys = []
-        values = []
-        elements.each do |entry|
-          if entry.is_a?(Prism::AssocNode)
-            keys << type_of(entry.key)
-            values << type_of(entry.value)
-          else
-            key, value = hash_splat_pair(entry)
-            keys << key
-            values << value
-          end
-        end
-        [keys, values]
-      end
-
-      # The `[K, V]` a `**splat` entry adds to the literal: what the analysis can read of the hash it copies, each
-      # side joined with `Dynamic[top]`. Ruby inserts every pair of that hash, so leaving the entry out typed
-      # `o = { a: :z }; { **o, b: :y }` as `Hash[:b, :y]` and folded `h[:a] == :z` on correct code.
-      #
-      # The `Dynamic[top]` arm is there even when the copy is read exactly. The literal builds a new hash that no
-      # declaration describes, while `MutationRejoin` regrows a `Hash[K, V]` after `[]=` / `merge!` only when it
-      # already carries a gradual arm, because it reads a precise one as a declared claim. Without the arm
-      # `h = { **o }; h[:b] = 2; h[:b] == 2` would fold always-falsey and `h[:e] = "s"; h[:e].upcase` would fire
-      # `call.undefined-method`, where the `Hash` a splat-only literal used to type as had stayed quiet. The same
-      # arm stands in for what the analysis cannot read: an anonymous `**`, an untyped value, a nominal other than
-      # `Hash`, an open shape's unlisted entries, and a hash filled through an alias the engine does not track,
-      # which still reads `{}`.
-      def hash_splat_pair(entry)
-        untyped = Type::Combinator.untyped
-        copied = entry.value && splatted_hash_pair(type_of(entry.value))
-        return [untyped, untyped] if copied.nil?
-
-        copied.map { |side| Type::Combinator.union(side, untyped) }
-      end
-
-      # The `[K, V]` the analysis can read of a splatted value, or nil when it reads nothing: a shape's keys and
-      # values, a `Hash[K, V]`'s type arguments (through a difference over one, `non-empty-hash[K, V]`), and the
-      # join over a union's members. `nil` reads as nothing because `**nil` splats nothing (Ruby 3.4+; earlier
-      # Rubies raise). A `Hash` subclass is not read: its own type arguments, if any, are not `Hash`'s `K` and `V`.
-      def splatted_hash_pair(type)
-        case type
-        when Type::HashShape then splatted_shape_pair(type)
-        when Type::Nominal then type.class_name == "Hash" && type.type_args.size == 2 ? type.type_args : nil
-        when Type::Difference then splatted_hash_pair(type.base)
-        when Type::Union then joined_hash_pair(type.members.filter_map { |member| splatted_hash_pair(member) })
-        end
-      end
-
-      def splatted_shape_pair(shape)
-        return nil if shape.pairs.empty?
-
-        [Type::Combinator.union(*shape.pairs.keys.map { |k| Type::Combinator.constant_of(k) }),
-         Type::Combinator.union(*shape.pairs.values)]
-      end
-
-      def joined_hash_pair(pairs)
-        return nil if pairs.empty?
-
-        [Type::Combinator.union(*pairs.map(&:first)), Type::Combinator.union(*pairs.map(&:last))]
-      end
-
-      # An interpolated string `"#{a}b#{c}"` is `literal-string` when every part contributes literal-bearing
-      # material: plain text segments are literal by construction, embedded expressions count when their type
-      # is itself literal-string-compatible (a `Constant<String>`, the `literal-string` carrier, an
-      # `Intersection` containing it, or a `Union` whose members all qualify). Otherwise the result widens to
-      # plain `Nominal[String]` as before.
-      def type_of_interpolated_string(node)
-        return Type::Combinator.literal_string if interpolation_parts_literal?(node.parts)
-
-        Type::Combinator.nominal_of(String)
-      end
-
-      def interpolation_parts_literal?(parts)
-        parts.all? { |part| interpolation_part_literal?(part) }
-      end
-
-      def interpolation_part_literal?(part)
-        case part
-        when Prism::StringNode
-          true
-        when Prism::EmbeddedStatementsNode, Prism::EmbeddedVariableNode
-          Type::Combinator.literal_string_compatible?(type_of(part))
-        else
-          false
-        end
-      end
-
       def type_of_interpolated_symbol(_node)
         Type::Combinator.nominal_of(Symbol)
       end
 
-      def type_of_embedded_statements(node)
-        statements_type_for(node.statements)
-      end
-
       def type_of_def(node)
         Type::Combinator.constant_of(node.name)
-      end
-
-      # `class Foo; body; end`, `module Foo; body; end`, and `class << x; body; end` evaluate to the value of
-      # the body's last expression, or `nil` when the body is empty. We do not track class/module scope yet,
-      # so the body is typed in the surrounding scope and that result is returned.
-      def type_of_class_or_module(node)
-        body = node.body
-        return Type::Combinator.constant_of(nil) if body.nil?
-
-        type_of(body)
       end
 
       # `alias x y`, `alias $x $y`, and `undef foo` all evaluate to nil at runtime; the constant carrier
@@ -1116,10 +785,6 @@ module Rigor
       # value is read; the post-scope belongs to whichever walk owns the statement.
       def type_of_conditional(node)
         LoopValueRecord.fetch(node, scope) || LoopValueRecord.miss { scope.evaluate(node, tracer: tracer).first }
-      end
-
-      def type_of_else(node)
-        statements_or_nil(node.statements)
       end
 
       # `a && b` / `a || b` in value position. Issue #1016: this handler used to type both operands in the
@@ -1250,12 +915,6 @@ module Rigor
         { value: type.value }
       end
 
-      # `when` clauses for `case` and `in` clauses for `case ... in` have the same body shape; we reuse one
-      # handler for both Prism node classes.
-      def type_of_when_or_in(node)
-        statements_or_nil(node.statements)
-      end
-
       # `begin; body; rescue R => e; r1; rescue; r2; else; e; ensure; f; end`. The result is the union of
       # every value-producing branch: the body (or the else-clause when present, since it replaces the body's
       # value when no exception fires), plus each rescue body in the rescue chain. The ensure clause runs but
@@ -1324,10 +983,6 @@ module Rigor
         )
       end
 
-      def type_of_ensure(node)
-        statements_or_nil(node.statements)
-      end
-
       # `return`, `break`, `next`, `retry`, and `redo` all transfer control instead of producing a value.
       # Their type is Bot, the empty type that absorbs cleanly under union (e.g. `Constant[1] | Bot ==
       # Constant[1]`), so the surrounding control-flow handlers collapse correctly when one branch jumps.
@@ -1357,55 +1012,6 @@ module Rigor
         Type::Combinator.nominal_of(Proc)
       end
 
-      def type_of_range(node)
-        left_static, left = static_range_endpoint(node.left)
-        right_static, right = static_range_endpoint(node.right)
-        if left_static && right_static
-          range = static_range_value(left, right, node.exclude_end?)
-          return Type::Combinator.constant_of(range) if range
-        end
-
-        nominal_range_for_endpoints(node.left, node.right)
-      end
-
-      # The `Range` the static endpoints denote, or nil when Ruby would refuse to build it (`1.."a"`,
-      # `"a"..1` raise `ArgumentError: bad value for range`). The literal is a runtime error,
-      # not a constant, so the fold declines and the caller types it as a plain Range.
-      def static_range_value(left, right, exclude_end)
-        Range.new(left, right, exclude_end)
-      rescue ArgumentError
-        nil
-      end
-
-      # Derives `Nominal[Range, [T]]` from the endpoint expression types when at least one endpoint is
-      # statically typeable. The element parameter is the union of the endpoint types (lifted from
-      # `Constant<v>` to `Nominal<v.class>` so the carrier matches what `Range#each` would yield). Falls back
-      # to bare `Nominal[Range]` when no endpoint contributes a typable shape.
-      def nominal_range_for_endpoints(left_node, right_node)
-        endpoints = [left_node, right_node].compact.map { |n| range_endpoint_element_type(n) }
-        endpoints.reject! { |t| Type::Combinator.untyped?(t) }
-        return Type::Combinator.nominal_of("Range") if endpoints.empty?
-
-        Type::Combinator.nominal_of("Range", type_args: [Type::Combinator.union(*endpoints)])
-      end
-
-      def range_endpoint_element_type(node)
-        type = type_of(node)
-        case type
-        when Type::Constant
-          value = type.value
-          return Type::Combinator.untyped if value.nil?
-
-          Type::Combinator.nominal_of(value.class.name)
-        when Type::IntegerRange
-          Type::Combinator.nominal_of("Integer")
-        when Type::FloatRange
-          Type::Combinator.nominal_of("Float")
-        else
-          type
-        end
-      end
-
       # v0.0.7 — non-interpolated regex literals lift to `Constant<Regexp>` so `Constant<String>#scan(/regex/)`
       # / `#match(/regex/)` etc. can fold through the catalog tier. Interpolated regexes (`/foo#{x}/`) reach
       # the early return for any node that is not a `Prism::RegularExpressionNode`, which keeps the conservative
@@ -1417,35 +1023,6 @@ module Rigor
         Type::Combinator.constant_of(regex)
       rescue StandardError
         Type::Combinator.nominal_of(Regexp)
-      end
-
-      # A range endpoint folds to a static value when it is a literal (`IntegerNode` / `StringNode`) or when
-      # its *evaluated* type is a `Constant<v>` carrying a range-able value (Integer / Float / String —
-      # matching the literal-path value kinds). The evaluated arm lets `(1..n)` fold to `Constant<Range>`
-      # when per-call body inference has pinned `n` to a constant (fact2 chain). A `nil` node is a
-      # beginless/endless boundary: keep today's static-nil behaviour (which yields `Constant<Range>` only
-      # when the *other* end is also static, preserving today's beginless/endless path).
-      def static_range_endpoint(node)
-        return [true, nil] if node.nil?
-        return [true, node.value] if node.is_a?(Prism::IntegerNode)
-        return [true, node.unescaped] if node.is_a?(Prism::StringNode) && node.respond_to?(:unescaped)
-
-        type = type_of(node)
-        if type.is_a?(Type::Constant)
-          value = type.value
-          return [true, value] if value.is_a?(Integer) || value.is_a?(Float) || value.is_a?(String)
-        end
-
-        [false, nil]
-      end
-
-      # Helper for the many control-flow handlers that read a body `Prism::StatementsNode` or treat its
-      # absence as nil. Note that Prism uses nil (rather than an empty `StatementsNode`) for missing bodies
-      # in many node kinds.
-      def statements_or_nil(statements_node)
-        return Type::Combinator.constant_of(nil) if statements_node.nil?
-
-        statements_type_for(statements_node)
       end
 
       def type_of_virtual(node)
@@ -1512,17 +1089,6 @@ module Rigor
         Type::Combinator.positive_int
       end
 
-      # `# shareable_constant_value:` magic comment wraps the next constant write. Type is the wrapped
-      # write's value.
-      def type_of_shareable_constant(node)
-        type_of(node.write)
-      end
-
-      # `{ x: }` shorthand hash. The implicit value is the call to `x` (or a local read of `x`). Delegate.
-      def type_of_implicit(node)
-        type_of(node.value)
-      end
-
       def local_read(node)
         scope.local(node.name) || dynamic_top
       end
@@ -1531,43 +1097,6 @@ module Rigor
       # `:it`, matching the binding `BlockParameterBinder` installs for `Prism::ItParametersNode`.
       def it_read(_node)
         scope.local(:it) || dynamic_top
-      end
-
-      # Slice 5 phase 1 upgrades array literals to `Tuple[T1..Tn]` when every element is a non-splat value.
-      # Splatted entries (`[*xs, 1]`) preserve the Slice 4 phase 2d behavior: we union the contributed
-      # element types and emit `Nominal[Array, [union]]`.
-      #
-      # v0.0.6 — the empty literal `[]` resolves to the empty `Tuple[]` carrier rather than the raw
-      # `Nominal[Array]`. Both carriers erase to RBS `Array`, but `Tuple[]` pins the literal's known arity
-      # (zero), which lets the per-element block fold concatenate across all-empty positions like `[1,
-      # 2].flat_map { |_| [] }`.
-      def array_type_for(node)
-        elements = node.elements
-        return Type::Combinator.tuple_of if elements.empty?
-
-        if elements.any?(Prism::SplatNode)
-          element_types = elements.map { |e| type_of(e) }
-          element_union = Type::Combinator.union(*element_types)
-          return Type::Combinator.nominal_of(Array, type_args: [element_union])
-        end
-
-        Type::Combinator.tuple_of(*elements.map { |e| type_of(e) })
-      end
-
-      def parentheses_type_for(node)
-        body = node.body
-        return Type::Combinator.constant_of(nil) if body.nil?
-
-        type_of(body)
-      end
-
-      def statements_type_for(statements_node)
-        return Type::Combinator.constant_of(nil) if statements_node.nil?
-
-        body = statements_node.body
-        return Type::Combinator.constant_of(nil) if body.empty?
-
-        type_of(body.last)
       end
 
       # Indexed-collection narrowing — `receiver[key]` after a prior `receiver[key] ||= default` reads the
@@ -6129,7 +5658,7 @@ module Rigor
         per_position = evaluate_per_element_positions(call_node.block, element_types, name)
         return nil if per_position.nil?
 
-        assemble_per_element_result(name, per_position, element_types) ||
+        PerElementAssemblers.assemble_per_element_result(name, per_position, element_types) ||
           undecided_fold_floor(name, element_types, receiver_type)
       end
 
@@ -6842,215 +6371,9 @@ module Rigor
         result
       end
 
-      PER_ELEMENT_ASSEMBLERS = {
-        map: :assemble_map_result,
-        collect: :assemble_map_result,
-        filter_map: :assemble_filter_map_result,
-        flat_map: :assemble_flat_map_result,
-        collect_concat: :assemble_flat_map_result,
-        select: :assemble_select_result,
-        filter: :assemble_select_result,
-        find_all: :assemble_select_result,
-        reject: :assemble_reject_result,
-        take_while: :assemble_take_while_result,
-        drop_while: :assemble_drop_while_result,
-        partition: :assemble_partition_result,
-        count: :assemble_count_result,
-        find: :assemble_find_result,
-        detect: :assemble_find_result,
-        rfind: :assemble_rfind_result,
-        find_index: :assemble_find_index_result,
-        index: :assemble_find_index_result,
-        rindex: :assemble_rindex_result
-      }.freeze
-      private_constant :PER_ELEMENT_ASSEMBLERS
-
-      def assemble_per_element_result(method_name, per_position, element_types)
-        handler = PER_ELEMENT_ASSEMBLERS[method_name]
-        send(handler, per_position, element_types) if handler
-      end
-
-      def assemble_map_result(per_position, _element_types)
-        Type::Combinator.tuple_of(*per_position)
-      end
-
-      def assemble_select_result(per_position, element_types)
-        assemble_filter_result(per_position, element_types, keep_on_truthy: true)
-      end
-
-      def assemble_reject_result(per_position, element_types)
-        assemble_filter_result(per_position, element_types, keep_on_truthy: false)
-      end
-
-      # `select` / `filter` / `reject`: keeps each receiver element whose per-position predicate result
-      # folds to a decisive `Constant` — Ruby-truthy for `select` / `filter`, Ruby-falsey for `reject`. The
-      # surviving elements assemble into a `Tuple`, strictly tighter than the RBS-projected `Array[Elem]`.
-      #
-      # Folds tightly only when EVERY position is a `Constant`: a single non-`Constant` position leaves the
-      # result cardinality unknown (the element might or might not survive), so this assembler declines and
-      # {#undecided_fold_floor} answers `Array[Elem]`. `[].select` style empty results are sound — an empty `Tuple`
-      # is the empty-array carrier.
-      def assemble_filter_result(per_position, element_types, keep_on_truthy:)
-        return nil unless per_position.all?(Type::Constant)
-
-        kept = element_types.each_index.filter_map do |index|
-          element_types[index] if truthy_constant?(per_position[index]) == keep_on_truthy
-        end
-        Type::Combinator.tuple_of(*kept)
-      end
-
-      # `take_while` / `drop_while`: stops at the first falsey `Constant` position when every preceding
-      # position is a truthy `Constant` (or takes/drops all elements when every position is a truthy
-      # `Constant`). Declines when an undecided position precedes the stopping point.
-      def assemble_take_while_result(per_position, element_types)
-        cutoff = leading_truthy_cutoff(per_position)
-        return nil if cutoff.nil?
-
-        Type::Combinator.tuple_of(*element_types[0...cutoff])
-      end
-
-      def assemble_drop_while_result(per_position, element_types)
-        cutoff = leading_truthy_cutoff(per_position)
-        return nil if cutoff.nil?
-
-        Type::Combinator.tuple_of(*element_types[cutoff..])
-      end
-
-      def leading_truthy_cutoff(per_position)
-        first_falsey_index = per_position.index { |type| falsey_constant?(type) }
-        return (per_position.all?(Type::Constant) ? per_position.size : nil) if first_falsey_index.nil?
-        return nil unless per_position[0...first_falsey_index].all?(Type::Constant)
-
-        first_falsey_index
-      end
-
-      # `partition`: returns `Tuple[truthy_tuple, falsey_tuple]` when every position folds to a `Constant`.
-      def assemble_partition_result(per_position, element_types)
-        return nil unless per_position.all?(Type::Constant)
-
-        truthy = assemble_filter_result(per_position, element_types, keep_on_truthy: true)
-        falsey = assemble_filter_result(per_position, element_types, keep_on_truthy: false)
-        Type::Combinator.tuple_of(truthy, falsey)
-      end
-
-      # `count`: returns `Constant[Integer]` of the truthy positions when every position folds to a `Constant`.
-      def assemble_count_result(per_position, _element_types)
-        return nil unless per_position.all?(Type::Constant)
-
-        Type::Combinator.constant_of(per_position.count { |type| truthy_constant?(type) })
-      end
-
-      # `filter_map` folds tightly only when every per-position result is a `Constant`: positions whose
-      # value is `nil` or `false` drop, the rest survive in declaration order. When any position is
-      # non-Constant the dispatcher declines (returns nil) so the RBS tier widens to `Array[U]`.
-      def assemble_filter_map_result(per_position, _element_types = nil)
-        return nil unless per_position.all?(Type::Constant)
-
-        kept = per_position.reject { |type| type.value.nil? || type.value == false }
-        Type::Combinator.tuple_of(*kept)
-      end
-
-      # `flat_map` flattens a single level: if the per-position result is a `Tuple`, its elements are
-      # concatenated; if it's a non-Array scalar carrier (`Constant<…>` over a non-Array literal) it
-      # contributes one element. We fold tightly only when every per-position result is one of those two
-      # recognisable shapes — `Nominal[Array[T]]`, `Union[…]`, and other opaque carriers decline so the RBS
-      # tier widens to `Array[U]`.
-      #
-      # `Type::Constant` only ever holds non-Array scalars (the carrier rejects Array literals), so a single
-      # `Constant` safely contributes itself as a single Tuple element.
-      def assemble_flat_map_result(per_position, _element_types = nil)
-        flattened = per_position.flat_map { |type| flat_map_contribution(type) }
-        return nil if flattened.nil? || flattened.any?(&:nil?)
-
-        Type::Combinator.tuple_of(*flattened)
-      end
-
-      def flat_map_contribution(type)
-        case type
-        when Type::Tuple then type.elements
-        when Type::Constant then [type]
-        else [nil]
-        end
-      end
-
-      # `find` / `detect`: returns the first receiver element whose block result is Ruby-truthy, or `nil`
-      # when no position folds to truthy.
-      #
-      # When the first decisive truthy position is found, the answer is the corresponding receiver element,
-      # joined with the element of every earlier position whose result is not a `Type::Constant`: such a
-      # position may match first, but the search ends at the truthy one whatever it answers, so the call
-      # never returns `nil`. When every position folds to falsey, the answer is `Constant[nil]`. With no
-      # decisive truthy position and some undecided one, it declines ({#undecided_fold_floor}).
-      def assemble_find_result(per_position, element_types)
-        candidates = first_match_candidates(per_position)
-        return candidates if candidates.nil? || candidates.equal?(NO_MATCH)
-
-        Type::Combinator.union(*candidates.map { |index| element_types[index] })
-      end
-
-      # `rfind`: reverse of `find` — returns the last receiver element whose block result is Ruby-truthy,
-      # joined with any undecided positions to its right.
-      def assemble_rfind_result(per_position, element_types)
-        candidates = last_match_candidates(per_position)
-        return candidates if candidates.nil? || candidates.equal?(NO_MATCH)
-
-        Type::Combinator.union(*candidates.map { |index| element_types[index] })
-      end
-
-      # `find_index` / `index`: returns the index of the first truthy position, or `Constant[nil]` when
-      # nothing matches, on {#assemble_find_result}'s terms.
-      def assemble_find_index_result(per_position, _element_types = nil)
-        candidates = first_match_candidates(per_position)
-        return candidates if candidates.nil? || candidates.equal?(NO_MATCH)
-
-        Type::Combinator.union(*candidates.map { |index| Type::Combinator.constant_of(index) })
-      end
-
-      # `rindex`: returns the index of the last truthy position, or `Constant[nil]` when nothing matches.
-      def assemble_rindex_result(per_position, _element_types = nil)
-        candidates = last_match_candidates(per_position)
-        return candidates if candidates.nil? || candidates.equal?(NO_MATCH)
-
-        Type::Combinator.union(*candidates.map { |index| Type::Combinator.constant_of(index) })
-      end
-
+      # Read by {PerElementAssemblers} (lexically: the constant is private to this class).
       NO_MATCH = Type::Combinator.constant_of(nil)
       private_constant :NO_MATCH
-
-      # The positions `find` may stop at — the first decisive truthy one and every undecided one before it —
-      # `NO_MATCH` when every position folds falsey, or nil when an undecided position has no truthy one after it.
-      def first_match_candidates(per_position)
-        first_truthy_index = per_position.index { |type| truthy_constant?(type) }
-        if first_truthy_index.nil?
-          return per_position.all?(Type::Constant) ? NO_MATCH : nil
-        end
-
-        undecided = (0...first_truthy_index).reject { |index| per_position[index].is_a?(Type::Constant) }
-        undecided + [first_truthy_index]
-      end
-
-      # The positions `rfind` / `rindex` may stop at — the last decisive truthy one and every undecided one
-      # after it — `NO_MATCH` when every position folds falsey, or nil when an undecided position has no
-      # truthy one before it.
-      def last_match_candidates(per_position)
-        last_truthy_index = per_position.rindex { |type| truthy_constant?(type) }
-        if last_truthy_index.nil?
-          return per_position.all?(Type::Constant) ? NO_MATCH : nil
-        end
-
-        undecided = ((last_truthy_index + 1)...per_position.size).reject do |index|
-          per_position[index].is_a?(Type::Constant)
-        end
-        [last_truthy_index] + undecided
-      end
-
-      def truthy_constant?(type)
-        type.is_a?(Type::Constant) && !type.value.nil? && type.value != false
-      end
-
-      def falsey_constant?(type)
-        type.is_a?(Type::Constant) && (type.value.nil? || type.value == false)
-      end
 
       # Per-pair block fold for `HashShape#transform_keys` and `HashShape#transform_values` (and their bang
       # variants).

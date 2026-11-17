@@ -72,7 +72,7 @@ members:
     - lib/rigor/reflection.rb
     copies:
     - lib/rigor/analysis/runner.rb
-    - lib/rigor/inference/expression_typer.rb
+    - lib/rigor/inference/expression_typer/writes.rb
     - lib/rigor/inference/project_seed_tables.rb
   discovered_methods:
     reads:

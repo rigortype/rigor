@@ -14,10 +14,50 @@ module Rigor
       def statements_or_nil: (untyped statements_node) -> Type::t
       def fallback_for: (untyped node, family: Symbol) -> Type::t
       def record_fallback: (untyped node, family: Symbol, inner_type: Type::t) -> void
+      def resolve_constant_name: (String name, ?rooted: bool, ?caller_derived: bool) -> Type::t?
       def type_of_virtual: (untyped node) -> Type::t
       def call_receiver_type_for: (untyped node) -> Type::t?
       def call_arg_types: (untyped node) -> Array[Type::t]
       def block_return_type_for: (untyped call_node, Type::t? receiver_type, Array[Type::t] arg_types) -> Type::t?
+
+      # The entries of the node-typer modules under `expression_typer/` that sig-gen renders a return for, and the
+      # private helpers that receive `typer` and that sig-gen renders a return for (without a declaration `typer`
+      # reads `Dynamic[top]` inside them). The rest is undeclared (#3315): a row there would be residue.
+      module Composites
+        def self?.type_of_statements_node: (untyped node, ExpressionTyper typer) -> Type::t
+        def self?.type_of_program: (untyped node, ExpressionTyper typer) -> Type::t
+        def self?.type_of_hash: (untyped node, ExpressionTyper typer) -> (Type::HashShape | Type::Nominal)
+        def self?.type_of_interpolated_string: (untyped node, ExpressionTyper typer) -> (Type::Nominal | Type::Refined)
+        def self?.type_of_embedded_statements: (untyped node, ExpressionTyper typer) -> Type::t
+        def self?.type_of_class_or_module: (untyped node, ExpressionTyper typer) -> Type::t
+        def self?.type_of_else: (untyped node, ExpressionTyper typer) -> Type::t
+        def self?.type_of_when_or_in: (untyped node, ExpressionTyper typer) -> Type::t
+        def self?.type_of_ensure: (untyped node, ExpressionTyper typer) -> Type::t
+        def self?.type_of_range: (untyped node, ExpressionTyper typer) -> (Type::Constant | Type::Nominal)
+        def self?.type_of_shareable_constant: (untyped node, ExpressionTyper typer) -> Type::t
+        def self?.type_of_implicit: (untyped node, ExpressionTyper typer) -> Type::t
+        def self?.array_type_for: (untyped node, ExpressionTyper typer) -> (Type::Nominal | Type::Tuple)
+        def self?.parentheses_type_for: (untyped node, ExpressionTyper typer) -> Type::t
+        def self?.statements_or_nil: (untyped statements_node, ExpressionTyper typer) -> Type::t
+        def self?.static_hash_shape_for: (untyped elements, ExpressionTyper typer) -> (Type::HashShape | nil)
+        def self?.generic_hash_pairs_for: (untyped elements, ExpressionTyper typer) -> [Array[untyped], Array[untyped]]
+        def self?.interpolation_part_literal?: (untyped part, ExpressionTyper typer) -> (false | true)
+        def self?.nominal_range_for_endpoints: (untyped left_node, untyped right_node, ExpressionTyper typer) -> Type::Nominal
+        def self?.static_range_endpoint: (untyped node, ExpressionTyper typer) -> ([false, nil] | [true, Float | Integer | String] | [true, nil])
+        def self?.statements_type_for: (untyped statements_node, ExpressionTyper typer) -> Type::t
+      end
+
+      module Writes
+        def self?.type_of_assignment_write: (untyped node, ExpressionTyper typer) -> Type::t
+        def self?.type_of_compound_variable_write: (untyped node, Scope scope, ExpressionTyper typer) -> Type::t
+        def self?.type_of_compound_constant_write: (untyped node, Scope scope, ExpressionTyper typer) -> Type::t
+        def self?.type_of_index_compound_write: (untyped node, Scope scope, FallbackTracer? tracer) -> Type::t
+        def self?.compound_write_value: (untyped node, Type::t? current, Type::t rhs, Scope scope, ExpressionTyper typer) -> Type::t
+        def self?.compound_write_constant_binding: (untyped node, Scope scope, ExpressionTyper typer) -> Type::t?
+        def self?.written_constant_binding: (String full_name, bool rooted, Scope scope, ExpressionTyper typer) -> Type::t?
+        def self?.unnamed_path_binding: (untyped target, Scope scope, ExpressionTyper typer) -> Type::Dynamic?
+        def self?.compound_operator_result: (Type::t current, Type::t rhs, untyped operator, Scope scope, ExpressionTyper typer) -> Type::t
+      end
     end
 
     class StatementEvaluator

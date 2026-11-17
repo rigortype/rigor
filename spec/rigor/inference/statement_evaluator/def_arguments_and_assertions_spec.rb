@@ -8,6 +8,10 @@ require "prism"
 # an `RBS::Extended` `assert` annotation. The examples call its entries directly, over a scope from `Scope.empty`, with
 # a stub evaluator where the module calls back (`eval_def`, its only callback) and a stub plugin registry for the
 # plugin path; the `RBS::Extended` example goes through the runner because it needs a loaded signature.
+#
+# One guard no example distinguishes: `resolve_call_method`'s `return nil if receiver_type.nil?`. A nil receiver type
+# (a receiver-less call on a scope with no `self` type) reaches `assertion_class_name`, which answers nil for it, and
+# the next guard returns nil: the answer is the same either way.
 RSpec.describe Rigor::Inference::StatementEvaluator::DefArgumentsAndAssertions do
   let(:combinator) { Rigor::Type::Combinator }
   let(:integer) { combinator.nominal_of("Integer") }

@@ -3,8 +3,8 @@
 require "spec_helper"
 require "tmpdir"
 
-# Issue #1615 (ADR-119 C2-e) — `StatementEvaluator#source_decomposition_projection` reads the receiver's OWN
-# class's `deconstruct` / `deconstruct_keys` def and types its body. It used to take the raw def slot, so
+# Issue #1615 (ADR-119 C2-e) — `StatementEvaluator::PatternBindings.source_decomposition_projection` reads the
+# receiver's OWN class's `deconstruct` / `deconstruct_keys` def and types its body. It used to take the raw def slot, so
 #
 # - a slot rebuilt from an ADR-85 seed bundle is a `DefHandle`, which has no `body`, and the read crashed or
 #   went untyped on a warm recheck; and

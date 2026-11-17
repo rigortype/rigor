@@ -54,6 +54,21 @@ module Rigor
       def record_closure_escape_if_any: (untyped node) -> Scope
       def evaluate_block_if_present: (untyped node) -> void
       def eval_class_body: (untyped node, Array[ClassFrame] new_context) -> [Type::t, Scope]
+      # @api private: public for DefArgumentsAndAssertions, which calls it back on the evaluator it is given.
+      def eval_def: (untyped node) -> [Type::Constant, Scope]
+
+      # The two entries `HANDLERS` reaches through `StatementEvaluator`. `bind_rescue_reference`, `apply_in_pattern_bindings`
+      # and the private helpers are undeclared: sig-gen renders no return for them (`sig.skipped.untyped-return`, #3315).
+      module PatternBindings
+        def self?.eval_match_pattern: (untyped node, Scope scope, FallbackTracer? tracer, StatementEvaluator evaluator) -> [Rigor::Type::App | Rigor::Type::Bot | Rigor::Type::BoundMethod | Rigor::Type::Constant | Rigor::Type::DataClass | Rigor::Type::DataInstance | Rigor::Type::Difference | Rigor::Type::Dynamic | Rigor::Type::FloatRange | Rigor::Type::HashShape | Rigor::Type::IntegerRange | Rigor::Type::Intersection | Rigor::Type::Maybe | Rigor::Type::Nominal | Rigor::Type::Refined | Rigor::Type::Result | Rigor::Type::Singleton | Rigor::Type::StructClass | Rigor::Type::StructInstance | Rigor::Type::Top | Rigor::Type::Tuple | Rigor::Type::Union, untyped]
+        def self?.eval_match_write: (untyped node, Scope scope, StatementEvaluator evaluator) -> [Rigor::Type::App | Rigor::Type::Bot | Rigor::Type::BoundMethod | Rigor::Type::Constant | Rigor::Type::DataClass | Rigor::Type::DataInstance | Rigor::Type::Difference | Rigor::Type::Dynamic | Rigor::Type::FloatRange | Rigor::Type::HashShape | Rigor::Type::IntegerRange | Rigor::Type::Intersection | Rigor::Type::Maybe | Rigor::Type::Nominal | Rigor::Type::Refined | Rigor::Type::Result | Rigor::Type::Singleton | Rigor::Type::StructClass | Rigor::Type::StructInstance | Rigor::Type::Top | Rigor::Type::Tuple | Rigor::Type::Union, untyped]
+      end
+
+      # `evaluate_def_arguments`, `apply_rbs_extended_assertions` and `apply_plugin_assertions` are undeclared for the same
+      # reason (#3315).
+      module DefArgumentsAndAssertions
+        def self?.apply_rspec_matcher_narrowing: (untyped call_node, Scope current_scope) -> Scope
+      end
     end
 
     module MethodDispatcher

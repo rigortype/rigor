@@ -10,7 +10,8 @@ module Rigor
     # - {UNKNOWN} — the chain does not stand for this name (a mark not discharged, a fork, a retro world that
     #   answers otherwise), a candidate disagrees, the walk was cut by the budget, an external ancestor ahead of
     #   the candidate may answer first (one RBS does not know, or knows and declares the name in; one it knows
-    #   and whose declaration lacks the name is skipped);
+    #   and whose declaration lacks the name is skipped, as is one the PROJECT declares whose body was read and
+    #   wrote nothing under the name — {BodyReadExternal}, #3282);
     # - {ABSENT} — no project entry, no external entry and not the implicit `Object` can answer.
     #
     # On the singleton side (ADR-119 WD3, errata 2026-10-08) the chain is `K`'s singleton, its extends' instance

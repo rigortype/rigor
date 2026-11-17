@@ -382,6 +382,7 @@ members:
     - lib/rigor/analysis/check_rules/undefined_method.rb
     - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/body_read_external.rb
     - lib/rigor/inference/in_effect_refinements/scope_reads.rb
     - lib/rigor/inference/refined_dispatch/constructed_class.rb
     - lib/rigor/inference/refined_dispatch/own_method.rb

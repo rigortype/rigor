@@ -66,10 +66,10 @@ RSpec.describe "a read past a project module whose body was read (#3282)" do
 
   # `Donor` holds the `def` the read finds. The includer mixes it in first and `mixin` last, so `mixin` is the
   # nearer ancestor and the read of `mine` passes it on the way to `Donor`.
-  DONOR = "module Donor\n  def mine = 7\nend\n"
+  def donor = "module Donor\n  def mine = 7\nend\n"
 
   # Everything but the module under test, which a Rails concern has no RBS for.
-  PROJECT_ONLY = %w[Kx Donor].freeze
+  def project_only = %w[Kx Donor]
 
   def includer(name, mixin) = "class #{name}\n  include Donor\n  include #{mixin}\nend\n"
 
@@ -77,21 +77,24 @@ RSpec.describe "a read past a project module whose body was read (#3282)" do
   let(:paginable_shape) { hook_block("    def self.listed = 3\n") }
 
   it "types a read past a concern whose whole body is an included block" do
-    write_project({ "0_donor.rb" => DONOR, "a_pg.rb" => concern("Pg", paginable_shape), "k.rb" => includer("Kx", "Pg") },
-                  ["Kx.new.mine.zork"], declare: PROJECT_ONLY)
+    write_project({ "0_donor.rb" => donor,
+                    "a_pg.rb" => concern("Pg", paginable_shape), "k.rb" => includer("Kx", "Pg") },
+                  ["Kx.new.mine.zork"], declare: project_only)
     expect(undefined_messages).to eq(["undefined method `zork' for 7"])
   end
 
   # Coverage, not a pin: this shape types on `master` too, because a reopening files the module's own body entry.
   # It is here so that a change which breaks the multi-file case is caught.
   it "types a read past such a concern reopened in another file, both bodies read" do
-    write_project({ "0_donor.rb" => DONOR, "a_pg.rb" => concern("Pg", ""), "b_reopen.rb" => "module Pg\n#{paginable_shape}end\n",
-                    "k.rb" => includer("Kx", "Pg") }, ["Kx.new.mine.zork"], declare: PROJECT_ONLY)
+    write_project({ "0_donor.rb" => donor,
+                    "a_pg.rb" => concern("Pg", ""), "b_reopen.rb" => "module Pg\n#{paginable_shape}end\n",
+                    "k.rb" => includer("Kx", "Pg") }, ["Kx.new.mine.zork"], declare: project_only)
     expect(undefined_messages).to eq(["undefined method `zork' for 7"])
   end
 
   it "types a read past an empty project module, which records nothing at all" do
-    write_project({ "0_donor.rb" => DONOR, "a_pm.rb" => "module Pm\nend\n", "k.rb" => includer("Kx", "Pm") }, ["Kx.new.mine.zork"], declare: PROJECT_ONLY)
+    write_project({ "0_donor.rb" => donor, "a_pm.rb" => "module Pm\nend\n", "k.rb" => includer("Kx", "Pm") },
+                  ["Kx.new.mine.zork"], declare: project_only)
     expect(undefined_messages).to eq(["undefined method `zork' for 7"])
   end
 
@@ -104,20 +107,23 @@ RSpec.describe "a read past a project module whose body was read (#3282)" do
     it "declines where the concern's hook block defines the name the read looks up" do
       # The block's `def mine` lands on the includer, and the concern's bucket holds `[:instance, :mine]`, so this
       # module may be the definer of exactly this name.
-      write_project({ "0_donor.rb" => DONOR, "a_pg.rb" => concern("Pg", hook_block("    def mine = 3\n")), "k.rb" => includer("Kx", "Pg") },
-                    ["Kx.new.mine.zork"], declare: PROJECT_ONLY)
+      write_project({ "0_donor.rb" => donor,
+                      "a_pg.rb" => concern("Pg", hook_block("    def mine = 3\n")), "k.rb" => includer("Kx", "Pg") },
+                    ["Kx.new.mine.zork"], declare: project_only)
       expect(undefined_messages).to be_empty
     end
 
     it "declines where the module rewrites its own method table under a name no argument spells" do
-      write_project({ "0_donor.rb" => DONOR, "a_pg.rb" => concern("Pg", "  class_eval(code)\n"), "k.rb" => includer("Kx", "Pg") },
-                    ["Kx.new.mine.zork"], declare: PROJECT_ONLY)
+      write_project({ "0_donor.rb" => donor,
+                      "a_pg.rb" => concern("Pg", "  class_eval(code)\n"), "k.rb" => includer("Kx", "Pg") },
+                    ["Kx.new.mine.zork"], declare: project_only)
       expect(undefined_messages).to be_empty
     end
 
     it "declines where the module's side holds names no table spells" do
-      write_project({ "0_donor.rb" => DONOR, "a_pg.rb" => concern("Pg", "  attr_accessor(*NAMES)\n"), "k.rb" => includer("Kx", "Pg") },
-                    ["Kx.new.mine.zork"], declare: PROJECT_ONLY)
+      write_project({ "0_donor.rb" => donor,
+                      "a_pg.rb" => concern("Pg", "  attr_accessor(*NAMES)\n"), "k.rb" => includer("Kx", "Pg") },
+                    ["Kx.new.mine.zork"], declare: project_only)
       expect(undefined_messages).to be_empty
     end
   end

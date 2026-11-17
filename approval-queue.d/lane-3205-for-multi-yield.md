@@ -21,8 +21,10 @@ also return one, and their `each` yields one array (Ruby binds `[A, B]`). Nothin
 type separates the two cases, and the engine reads only the parameter count the dispatcher answers
 with, so it cannot separate them either. The issue did not say what to bind there.
 
-One case is in fact unambiguous and is floored regardless, which the decision below accepts rather
-than solves: a subclass that overrides `each` to declare a single ARRAY parameter
+Only a declaration of TWO OR MORE block parameters escapes the floor. A single array parameter, a
+splat (`{ (*untyped) -> void }`) and an empty parameter list are all floored, and the first of those is
+unambiguous, which the decision below accepts rather than solves: a subclass that overrides `each` to
+declare a single ARRAY parameter
 (`def each: () { ([String, Integer]) -> void } -> void`) has stated that the pair is yielded whole,
 and Ruby binds the array for it. `MethodDispatcher#expected_block_param_types` answers with the
 parameter types and no declaring owner, so telling that declaration from the generic

@@ -95,7 +95,7 @@ RSpec.describe "Runner descriptor assemblers" do
       stub_files(:kind_entries, :discovery_file_entries, :required_missing_entries, :unanalysed_pre_eval_entries)
       stub_globs(:discovery_glob_entries, :bundle_sig_glob_entries)
       allow(runner).to receive_messages(pool_mode?: false, signature_root_candidates: [],
-                                                  signature_rows: signature_pair)
+                                        signature_rows: signature_pair)
     end
 
     let(:signature_pair) do

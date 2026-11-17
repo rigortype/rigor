@@ -37,7 +37,7 @@ require_relative "../../support/ancestry_walker_scan"
 # - ancestry reached through `Reflection` or `Environment` (`rbs_loader.ancestor_names_for`, RBS class
 #   ordering), which is RBS's ancestry, not the discovery tables';
 # - a walk split across files — a helper in another file called in a loop, or a table read once and passed
-#   into a helper that loops over it (`CheckRules#direct_subclasses`) — and mutual recursion across files;
+#   into a helper that loops over it (`SelfUndefinedMethod.direct_subclasses`) — and mutual recursion across files;
 # - dispatch through `send` / `public_send`, or a reader spelled as a String;
 # - a copy of the tables held in an instance variable and walked there (`Effects::PluginFacts#ancestry`,
 #   which walks the includes and superclasses its plugin facts were built from);

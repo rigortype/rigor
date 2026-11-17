@@ -112,8 +112,8 @@ module Rigor
       # `defines:write`, `refines:write`, `defines_any`, `refines_any`, and `main_mixin` for every top-level mixin: its
       # reader asks about each, and one shared key is a deliberate precision trade-off (a mixin moving anywhere
       # re-checks every write that read them). The rules that read the census record these keys
-      # (`CheckRules#record_global_census`), and `Analysis::Incremental.changed_global_census_keys` fires them for
-      # every entry that appeared in or vanished from a file's census.
+      # (`SpecialGlobalWrite.record_global_census`), and `Analysis::Incremental.changed_global_census_keys` fires
+      # them for every entry that appeared in or vanished from a file's census.
       def dependency_key(entry)
         case entry
         when DEFINES_ANY then "defines_any"

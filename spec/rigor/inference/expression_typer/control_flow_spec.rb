@@ -6,8 +6,14 @@ require "prism"
 # ADR-116 C4 — `ExpressionTyper::ControlFlow` types the control-flow nodes in value position: `if` / `unless` and
 # `and` / `or` (delegated to the statement evaluator), `case` with its three-valued `when` certainty, and `begin` /
 # `rescue` / `expr rescue fallback`. The examples parse a snippet and call the entry with a scope that binds the
-# locals the snippet reads and a real typer over it, the module's callbacks being `type_of`, `statements_or_nil` and
-# `typer_under`.
+# locals the snippet reads and a real typer over it, the module's callbacks being `type_of`, `statements_or_nil`,
+# `typer_under` and `block_level_jump?`.
+#
+# Three guards no example distinguishes: `case_when_branch_certainty`'s `return :maybe if results.empty?` (a `when` clause
+# always has a condition, so `results` is never empty); `type_of_case`'s `return type_of_case_simple_union(node, typer) if
+# node.is_a?(CaseMatchNode)` (a `case ... in` through the predicate path types the same arms and the same `nil`, tried with
+# class, literal and binding patterns); and `type_of_loop`'s `return constant_of(nil) if break_free_condition_loop?` (a
+# loop nothing breaks out of evaluates to `nil` either way; the guard only skips evaluating the body).
 RSpec.describe Rigor::Inference::ExpressionTyper::ControlFlow do
   let(:combinator) { Rigor::Type::Combinator }
   let(:integer) { combinator.nominal_of("Integer") }
@@ -17,6 +23,8 @@ RSpec.describe Rigor::Inference::ExpressionTyper::ControlFlow do
   let(:typer) { Rigor::Inference::ExpressionTyper.new(scope: scope) }
 
   def node_of(source) = Prism.parse(source, scopes: [%i[n s u b]]).value.statements.body.first
+
+  def typer_over(over) = Rigor::Inference::ExpressionTyper.new(scope: over)
 
   def case_type(source, over = scope)
     described_class.type_of_case(node_of(source), over, nil, Rigor::Inference::ExpressionTyper.new(scope: over))
@@ -75,6 +83,24 @@ RSpec.describe Rigor::Inference::ExpressionTyper::ControlFlow do
       expect(case_type("case when n then 1 else 2 end").describe).to eq("1 | 2")
     end
 
+    it "keeps the arms after a decided one that a later `when` may still reach, until the first certain match" do
+      expect(case_type("case n when Integer then 1 when foo then 2 end").describe).to eq("1")
+    end
+
+    it "types a predicate-less `case` through the evaluator, which narrows each arm by its condition" do
+      expect(case_type("case when u.is_a?(String) then u else 0 end").describe).to eq("0 | String")
+    end
+
+    it "keeps a Regexp `when` against a Constant subject as undecided" do
+      one = scope.with_local(:n, combinator.constant_of("abc"))
+
+      expect(case_type("case n when /a/ then 1 else 2 end", one).describe).to eq("1 | 2")
+    end
+
+    it "keeps a `when` whose pattern is typed but not a Constant as undecided" do
+      expect(case_type("case u when n then 1 else 2 end").describe).to eq("1 | 2")
+    end
+
     it "types a `case ... in` as the union of its clauses and the `else`" do
       expect(case_type("case n\nin Integer then 1\nin String then :a\nend").describe).to eq("1 | :a | nil")
     end
@@ -90,6 +116,14 @@ RSpec.describe Rigor::Inference::ExpressionTyper::ControlFlow do
 
     it "lets an `else` clause replace the body's value" do
       expect(begin_type("begin; n; rescue; s; else; 1; end").describe).to eq("1 | String")
+    end
+
+    it "forgets the `$!` an enclosing clause bound and reads a written local as Dynamic[top] in a rescue arm" do
+      entered = scope.with_global(:"$!", string)
+
+      expect(described_class.type_of_begin(node_of("begin; 1; rescue; $!; end"), entered, typer_over(entered)).describe)
+        .to eq("1 | Dynamic[top]")
+      expect(begin_type("begin; n = s; rescue; n; end").describe).to eq("Dynamic[top] | String")
     end
 
     it "types an empty body as nil and leaves `ensure` out of the value" do

@@ -7,13 +7,16 @@ require "prism"
 # the scope. The examples parse a snippet and call the entry with the scope and a real typer over it, the way
 # `ExpressionTyper`'s delegators do, so each is checked against the module and not through `PRISM_DISPATCH`.
 #
-# Two guards no example distinguishes, after trying the inputs named:
+# Three guards no example distinguishes, after trying the inputs named:
 #
 # - `symbol_type_for`'s `return nominal_of(Symbol) if raw.nil?` and `string_type_for`'s `return nominal_of(String) if
 #   unescaped.nil?`. A `SymbolNode#value` / `StringNode#unescaped` is nil only for a node Prism builds under an
 #   interpolation (`:"a#{b}"` is an `InterpolatedSymbolNode`, `"a#{b}"` an `InterpolatedStringNode`), which never
 #   reaches these two entries; tried a plain, an empty, a `%s()`, a `?a` character, a heredoc and a `%w` element, and
 #   each reads a String value.
+# - `type_of_regexp`'s `return nominal_of(Regexp) unless node.is_a?(RegularExpressionNode)`. An
+#   `InterpolatedRegularExpressionNode` has no `unescaped`, so without the guard `node.unescaped` raises
+#   `NoMethodError`, which the method's own `rescue StandardError` turns into the same `Nominal[Regexp]`.
 RSpec.describe Rigor::Inference::ExpressionTyper::LeafNodes do
   let(:combinator) { Rigor::Type::Combinator }
   let(:scope) { Rigor::Scope.empty }
@@ -132,6 +135,25 @@ RSpec.describe Rigor::Inference::ExpressionTyper::LeafNodes do
       expect(described_class.type_of_instance_variable_read(node_of("@a"), scope, typer)).to equal(combinator.untyped)
       expect(described_class.type_of_class_variable_read(node_of("@@b"), scope, typer)).to equal(combinator.untyped)
       expect(described_class.type_of_global_variable_read(node_of("$c"), scope, typer)).to equal(combinator.untyped)
+    end
+
+    it "records why an unbound instance variable is dynamic, and only then" do
+      unbound_node = node_of("@a")
+      bound_node = node_of("@a")
+      bound = scope.with_ivar(:@a, integer)
+
+      described_class.type_of_instance_variable_read(unbound_node, scope, typer)
+      described_class.type_of_instance_variable_read(bound_node, bound, typer_over(bound))
+
+      expect(scope.dynamic_origin(unbound_node)).to eq(Rigor::Inference::DynamicOrigin::INFERRED_RETURN_UNTYPED)
+      expect(scope.dynamic_origin(bound_node)).to be_nil
+    end
+
+    it "types `self` directly in a `refine` block body as `Dynamic[top]`, though its self type is bound" do
+      refined = scope.with_block_self_type(string, keeps_unknown: Rigor::Scope::REFINEMENT_BLOCK_SELF)
+
+      expect(described_class.type_of_self_node(node_of("self"), refined, typer_over(refined)))
+        .to equal(combinator.untyped)
     end
 
     it "types `self` as the scope's self type, and `Dynamic[top]` at the top level" do

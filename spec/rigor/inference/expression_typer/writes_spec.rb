@@ -97,5 +97,14 @@ RSpec.describe Rigor::Inference::ExpressionTyper::Writes do
 
       expect(described_class.type_of_index_compound_write(node, bound, nil).describe).to eq("2")
     end
+
+    it "hands the tracer to the evaluator, so a fallback inside the write is recorded on it" do
+      tracer = Rigor::Inference::FallbackTracer.new
+      bound = scope.with_local(:x, combinator.hash_shape_of({ a: combinator.constant_of(1) }))
+
+      described_class.type_of_index_compound_write(node_of("x[NoSuchConstant] += 1"), bound, tracer)
+
+      expect(tracer.events.map(&:node_class)).to include(Prism::ConstantReadNode)
+    end
   end
 end

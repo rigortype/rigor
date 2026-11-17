@@ -38,7 +38,7 @@ What stayed, and why. `type_of_virtual` (fallback for synthetic nodes; reached f
 
 `NO_MATCH` stayed in `ExpressionTyper`, and `PerElementAssemblers` reads it lexically, because moving its initialiser would add a row to `admission_census.yml`, a gate-row decision this slice does not make. The only gate row that changed is `admission_census.yml`'s `in_source_constants` copy, re-keyed from `expression_typer.rb` to `expression_typer/writes.rb`.
 
-`sig/`: the entries sig-gen renders a return for are declared; the others (`LeafNodes.type_of_yield`, `ControlFlow.type_of_conditional`, `ControlFlow.type_of_loop`, `PerElementAssemblers.assemble_per_element_result`) and every private helper are undeclared, as in #3318, because a declaration would raise `SIG_PROVENANCE_RESIDUE` (#3315).
+`sig/`: the entries sig-gen renders a return for are declared, and so are the private helpers that receive `typer` and that sig-gen renders a return for (without a declaration `typer` reads `Dynamic[top]` inside them). Left undeclared, as in #3318, because a declaration would raise `SIG_PROVENANCE_RESIDUE`: `LeafNodes.type_of_yield`, `ControlFlow.type_of_conditional`, `ControlFlow.type_of_loop`, `PerElementAssemblers.assemble_per_element_result` and the helpers sig-gen renders nothing for (#3315).
 
 ## To undo
 

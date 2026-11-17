@@ -93,6 +93,16 @@ RSpec.describe Rigor::Configuration::Loader do
     end
   end
 
+  describe ".resolve_plugins_io_paths!" do
+    it "replaces the section on the hash it is given and leaves the original section unmodified" do
+      section = { "allowed_paths" => ["x"], "network" => "allowlist" }
+      out = { "plugins_io" => section }
+      described_class.resolve_plugins_io_paths!(out, "/base")
+      expect(out["plugins_io"]).to eq({ "allowed_paths" => ["/base/x"], "network" => "allowlist" })
+      expect(section).to eq({ "allowed_paths" => ["x"], "network" => "allowlist" })
+    end
+  end
+
   describe ".discover" do
     it "answers the first present candidate in `.rigor.yml`, `.rigor.dist.yml` order, or nil" do
       Dir.mktmpdir do |dir|

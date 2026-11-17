@@ -274,7 +274,7 @@ RSpec.describe Rigor::Configuration::Coercion do
                                                           { "namespace" => "App::*", "effect" => [] }])
       expect(coerced).to eq([{ "match" => "lib/**", "namespace" => nil, "effect" => %w[io.file] },
                              { "match" => nil, "namespace" => "App::*", "effect" => [] }])
-      expect(coerced).to all(be_frozen)
+      expect(coerced).to be_frozen.and all(be_frozen)
     end
 
     it "rejects an envelope that is not a mapping, names neither or both selectors, or has no bound" do
@@ -292,6 +292,11 @@ RSpec.describe Rigor::Configuration::Coercion do
         .to eq("effects.envelopes[0].match is empty")
     end
 
+    it "freezes the selector strings it keeps" do
+      coerced = described_class.coerce_effects_envelopes([{ "match" => +"lib/**", "effect" => [] }])
+      expect(coerced.first["match"]).to be_frozen
+    end
+
     it "names the index of the failing envelope" do
       expect(error_message { described_class.coerce_effects_envelopes([{ "match" => "a", "effect" => [] }, 7]) })
         .to eq("effects.envelopes[1] is not a mapping: 7")
@@ -302,6 +307,16 @@ RSpec.describe Rigor::Configuration::Coercion do
     it "keeps a literal entry as written, with or without glob characters in a missing directory" do
       expect(described_class.expand_pre_eval_entries(%w[a.rb b.rb a.rb])).to eq(%w[a.rb b.rb])
       expect(described_class.expand_pre_eval_entries(["/nonexistent-rigor-dir/*.rb"])).to eq([])
+    end
+
+    it "treats `?` and a character class as glob characters too" do
+      Dir.mktmpdir do |dir|
+        %w[a1.rb b1.rb c1.rb].each { |name| File.write(File.join(dir, name), "") }
+        expect(described_class.expand_pre_eval_entries([File.join(dir, "?1.rb")]).map { File.basename(it) })
+          .to eq(%w[a1.rb b1.rb c1.rb])
+        expect(described_class.expand_pre_eval_entries([File.join(dir, "[ab]1.rb")]).map { File.basename(it) })
+          .to eq(%w[a1.rb b1.rb])
+      end
     end
 
     it "expands a glob in sorted order and folds the results together" do

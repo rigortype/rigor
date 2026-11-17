@@ -1,0 +1,9 @@
+module Rigor
+  module Analysis
+    module CheckRules
+      module Suppression
+        def self?.filter_suppressed: (Array[Diagnostic] diagnostics, comments: untyped, disabled_rules: Array[String]) -> Array[Diagnostic]
+      end
+    end
+  end
+end

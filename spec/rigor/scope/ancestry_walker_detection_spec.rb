@@ -45,11 +45,11 @@ require_relative "../../support/ancestry_walker_scan"
 #   position.
 # The allow-list: `file#method` => the reason it may keep walking.
 ALLOWED_ANCESTRY_WALKERS = {
-  "lib/rigor/analysis/check_rules.rb#direct_hook_mixins" =>
+  "lib/rigor/analysis/check_rules/undefined_method.rb#direct_hook_mixins" =>
     "issues #2975 and #2986: an `included` / `prepended` hook of a superclass's direct mixin extends that " \
     "superclass, whose singleton the class inherits, so it reads `#own_mixin_edges` for each class " \
     "`Scope::ResolutionChain#level_classes` gives, one hop each; a union for withholding",
-  "lib/rigor/analysis/check_rules.rb#own_mixin_edges" =>
+  "lib/rigor/analysis/check_rules/undefined_method.rb#own_mixin_edges" =>
     "issues #2975, #2986 and #2992: Ruby runs an `included` / `prepended` hook, and a concern's `included do` / " \
     "`prepended do` block, for the direct includer or prepender only, and the chain's levels flatten each class's " \
     "transitive mixins and do not keep the edge, so it reads one class's or module's own mixin and prepend lists " \

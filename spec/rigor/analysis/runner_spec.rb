@@ -701,10 +701,10 @@ RSpec.describe Rigor::Analysis::Runner do
     # project's OWN signature instead, the same way any third-party value with no in-repo `.rb` definition
     # would. `ActiveRecord::Relation`'s `open_receivers:` protection is a loaded PLUGIN's manifest entry,
     # which does not exist in this test at all; what protects `Widget.new.ttl.round` here is
-    # `Rigor::Analysis::CheckRules::GEM_OVERLAY_OPEN_RECEIVERS`, GATED on the loaded RBS actually including
-    # the `data/gem_overlay/activesupport/` directory (`CheckRules#gem_overlay_loaded?`) — which this test's
-    # Gemfile.lock (below) makes true. The must-NOT-protect sibling right after this one locks NO gem at
-    # all and shows the same class name getting NO exemption without that.
+    # `CheckRules::ReceiverPredicates::GEM_OVERLAY_OPEN_RECEIVERS`, GATED on the loaded RBS actually
+    # including the `data/gem_overlay/activesupport/` directory (`ReceiverPredicates.gem_overlay_loaded?`) —
+    # which this test's Gemfile.lock (below) makes true. The must-NOT-protect sibling right after this one locks NO
+    # gem at all and shows the same class name getting NO exemption without that.
     def run_duration_reader_project(tmpdir)
       FileUtils.mkdir_p(File.join(tmpdir, "sig"))
       File.write(File.join(tmpdir, "Gemfile.lock"), gemfile_lock_content("activesupport"))
@@ -752,7 +752,7 @@ RSpec.describe Rigor::Analysis::Runner do
       Dir.mktmpdir("rigor-as-overlay-duration-unrelated-") do |tmpdir|
         FileUtils.mkdir_p(File.join(tmpdir, "sig"))
         # No Gemfile.lock at all here — nothing makes any gem overlay (activesupport's included) eligible,
-        # so `CheckRules#gem_overlay_loaded?` must read false for this run. The project happens to declare
+        # so `ReceiverPredicates.gem_overlay_loaded?` must read false for this run. The project happens to declare
         # its OWN class under the exact qualified name `ActiveSupport::Duration` — coincidence, not a
         # dependency on the gem — the same way `sig/`-augmented project classes work anywhere else.
         File.write(File.join(tmpdir, "sig", "duration.rbs"), <<~RBS)
@@ -1085,7 +1085,7 @@ RSpec.describe Rigor::Analysis::Runner do
       end
 
       # Regression: the dispatcher's `try_project_patched_method` tier resolved the call's TYPE through the registry,
-      # but `CheckRules#undefined_method_diagnostic` ran an independent "does this method exist?" probe that ignored the
+      # but `CheckRules::UndefinedMethod.diagnostic` ran an independent "does this method exist?" probe that ignored the
       # registry — so a patched method on a concretely-typed receiver (`Nominal[String]` / `Constant["hello"]`) would
       # type correctly yet still fire `call.undefined-method`. The fix consults the registry in CheckRules at the same
       # precedence the dispatcher does.

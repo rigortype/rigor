@@ -39,6 +39,7 @@ members:
     - lib/rigor/analysis/check_rules/rbs_receiver_surface.rb
     - lib/rigor/analysis/check_rules/shadowed_rescue_collector.rb
     - lib/rigor/analysis/check_rules/source_arity.rb
+    - lib/rigor/analysis/check_rules/undefined_method.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/analysis/template_units.rb
     - lib/rigor/inference/in_effect_refinements/scope_reads.rb
@@ -378,7 +379,7 @@ members:
     - lib/rigor/inference/project_seed_tables.rb
   discovered_class_sources:
     reads:
-    - lib/rigor/analysis/check_rules.rb
+    - lib/rigor/analysis/check_rules/undefined_method.rb
     - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/in_effect_refinements/scope_reads.rb

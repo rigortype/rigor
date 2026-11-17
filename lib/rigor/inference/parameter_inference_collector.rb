@@ -43,7 +43,7 @@ module Rigor
       end
 
       # The dispatch class for a receiver type, for the subset the collector resolves to a user
-      # `def` (mirrors `CheckRules#concrete_class_name` for the carriers a user-method receiver
+      # `def` (mirrors `CheckRules::ReceiverPredicates.concrete_class_name` for the carriers a user-method receiver
       # is typed as). `class_name_of` is the Nominal/Singleton-only variant for an implicit-self
       # `self_type`.
       def concrete_class_name(type)

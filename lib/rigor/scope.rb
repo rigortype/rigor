@@ -1895,7 +1895,7 @@ module Rigor
     # Companion to {#user_def_for}: returns the `"path:line"` where the project defines `class_name#method_name`
     # (instance-side), or nil. Populated only by the cross-file project pre-pass
     # ({Inference::ScopeIndexer.discovered_def_index_for_paths}) — a `Prism::Location` hides its source file, so
-    # the site is recorded at scan time. `CheckRules#undefined_method_diagnostic` consults this to name the
+    # the site is recorded at scan time. `CheckRules::UndefinedMethod.diagnostic` consults this to name the
     # defining file when a project monkey-patch on a core/stdlib/gem class is called cross-file, so the diagnostic
     # can point at `pre_eval:` (ADR-17) instead of reading as a bare unresolved call.
     def user_def_site_for(class_name, method_name)
@@ -1903,7 +1903,7 @@ module Rigor
       site = table && table[method_name.to_sym]
       # ADR-88 WD3 — record the SAME instance-side cross-file method edge {#user_def_for} records, so a
       # move / body-edit of `class_name#method_name`'s definition re-checks the consumer that named the
-      # defining file. `CheckRules#undefined_method_diagnostic` reads this to set `project_definition_site`
+      # defining file. `CheckRules::UndefinedMethod.diagnostic` reads this to set `project_definition_site`
       # (`"path:line"`) on a `call.undefined-method` for a project monkey-patch; without the edge, a line-shift
       # in the defining file left the cached diagnostic pointing at a stale line (the ADR-46 symbol-granularity
       # closure never re-checked the caller). Recording keys on the source-entry PRESENCE (truthy `site`),
@@ -2251,7 +2251,7 @@ module Rigor
     # `define_method`, `attr_*` and the whole singleton side, none of which contributes a `Prism::DefNode` —
     # and the suppression probe shared by the `call.*` check rules needs the broader one.
     #
-    # Why it must walk at all: `Analysis::CheckRules#source_declared_method?` asked `discovered_method?`,
+    # Why it must walk at all: `ReceiverPredicates.source_declared_method?` asked `discovered_method?`,
     # which is keyed on the receiver's OWN name, while the typer resolves the same call through this
     # ancestry. A project class whose `sig/` declares it without its project superclass therefore drew
     # `call.undefined-method` on a method `dump_type` resolved on the same line of the same run — writing

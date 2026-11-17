@@ -40,7 +40,7 @@ module Rigor
           Type::Combinator.nominal_of(receiver.class_name)
         end
 
-        # Issue #2438 — the one predicate behind {try_dispatch} and `CheckRules#undefined_method_diagnostic`, so the
+        # Issue #2438 — the one predicate behind {try_dispatch} and `CheckRules::UndefinedMethod.diagnostic`, so the
         # typer and the `call.undefined-method` rule cannot disagree about `C.instance`: a call this tier types is
         # never reported as undefined, whatever a project sidecar of `C` lists.
         def answers?(scope, receiver, method_name, no_arguments)

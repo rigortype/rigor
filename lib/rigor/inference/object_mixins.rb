@@ -174,7 +174,7 @@ module Rigor
       end
       private_class_method :source_defines?
 
-      # The same "is this mixin's surface enumerable" reading `Analysis::CheckRules#known_mixin?` gives a
+      # The same "is this mixin's surface enumerable" reading `UndefinedMethod.known_mixin?` gives a
       # class's own includes (#746): a project class or module, or an RBS declaration Rigor did not
       # synthesize to keep a broken signature buildable.
       def declared?(scope, name)

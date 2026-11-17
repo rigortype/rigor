@@ -11275,7 +11275,7 @@ module Rigor
       # The returned `def_sources` map mirrors `def_nodes` but stores a `"path:line"` String per `(class_name,
       # method_name)` instead of the `Prism::DefNode`. A `Prism::Location` does not expose its source file through
       # public API, so the source site is captured here, in the pre-pass loop that still holds `path`.
-      # `CheckRules#undefined_method_diagnostic` consults the seeded copy to name the defining file when a project
+      # `CheckRules::UndefinedMethod.diagnostic` consults the seeded copy to name the defining file when a project
       # monkey-patch on a core/stdlib/gem class is called cross-file (ADR-17). First write wins, matching `def_nodes`'
       # own merge order.
       #

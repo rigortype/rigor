@@ -72,10 +72,10 @@ RSpec.describe Rigor::Analysis::CheckRules::CallFacts do
       it "is resolved once for #{label}" do
         program, scope_index = index_for(source)
         call_node = program.statements.body.first
-        allow(Rigor::Analysis::CheckRules).to receive(:trustworthy_signature).and_call_original
+        allow(Rigor::Analysis::CheckRules::ReceiverPredicates).to receive(:trustworthy_signature).and_call_original
 
         expect(rules_for(call_node, scope_index)).to eq(expected_rules)
-        expect(Rigor::Analysis::CheckRules).to have_received(:trustworthy_signature).once
+        expect(Rigor::Analysis::CheckRules::ReceiverPredicates).to have_received(:trustworthy_signature).once
       end
     end
   end

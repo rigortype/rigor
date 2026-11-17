@@ -55,7 +55,7 @@ MANUAL_DRIFT_README_MANUAL_LINKS = File.read(File.join(MANUAL_DRIFT_REPO_ROOT, "
                                        .scan(%r{(https://[a-z0-9.-]+)/manual/([a-z0-9-]+)/}).uniq.freeze
 
 # Axis 5: families whose ids are contributed at runtime rather than by the engine, so the vocabulary cannot be
-# enumerated here. `CheckRules.known_suppression_token?` takes the same under-warning stance for the same reason.
+# enumerated here. `Suppression.known_suppression_token?` takes the same under-warning stance for the same reason.
 MANUAL_DRIFT_OPEN_VOCABULARY_FAMILIES = %w[plugin generated].freeze
 
 # Axis 5: `| `family.*` | description |` rows of the taxonomy table → the declared prefix (dropping the `.*` /
@@ -270,7 +270,7 @@ RSpec.describe "manual accuracy" do
   #
   # The comparison reads the FULL emitted vocabulary, not `ALL_RULES` alone. `CheckRules` owns 26 ids; the
   # non-check families (`dynamic.*`, `pre-eval.*`, `rbs.coverage.*`, `rbs_extended.*`) are emitted elsewhere
-  # and admitted per-family by `CheckRules.known_suppression_token?`. Reading only `ALL_RULES` here would
+  # and admitted per-family by `Suppression.known_suppression_token?`. Reading only `ALL_RULES` here would
   # report those families as false gaps.
   describe "declared diagnostic families (diagnostic-policy.md § Identifier taxonomy)" do
     it "parses the taxonomy table (guards the regex against a table reformat)" do

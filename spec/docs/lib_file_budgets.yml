@@ -8,7 +8,7 @@
 # gets a row. Raising a budget is a reviewed diff in the PR that needs it, with the reason in its body.
 #
 # Counts are `wc -l` (physical lines), taken at the commit this file was last regenerated against.
-lib/rigor/analysis/check_rules.rb: 5300
+lib/rigor/analysis/check_rules.rb: 3700
 lib/rigor/analysis/incremental_session.rb: 2100
 lib/rigor/analysis/rule_catalog.rb: 1300
 lib/rigor/analysis/runner.rb: 3100

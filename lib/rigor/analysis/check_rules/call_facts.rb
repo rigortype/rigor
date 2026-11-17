@@ -43,8 +43,8 @@ module Rigor
           @receiver_type ||= @scope.type_of(@call_node.receiver)
         end
 
-        # The signature `CheckRules.receiver_signature` resolves, its block run on the first ask only. A nil answer
-        # is remembered too. A block that raises leaves it unresolved, so the next ask raises as it did before.
+        # The signature `ReceiverPredicates.receiver_signature` resolves, its block run on the first ask only. A nil
+        # answer is remembered too. A block that raises leaves it unresolved, so the next ask raises as it did before.
         def receiver_signature
           return @receiver_signature if @receiver_signature_resolved
 

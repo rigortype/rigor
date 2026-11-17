@@ -3,7 +3,7 @@
 # Issue #723 — a class whose `sig/` declares it WITHOUT its project superclass MUST NOT draw
 # `call.undefined-method` for a method that superclass defines in source.
 #
-# `Analysis::CheckRules#source_declared_method?` asked `Scope#discovered_method?`, which is keyed on the
+# `ReceiverPredicates.source_declared_method?` asked `Scope#discovered_method?`, which is keyed on the
 # receiver's own name, while the typer resolves the same call through the project ancestor walk. The two
 # then contradicted each other on one line of one run: `dump_type: :admin_val` and
 # `undefined method 'admin_val'`, same file, same column. It is #653's incentive with the project's own

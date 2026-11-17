@@ -69,7 +69,9 @@ LINK_INTEGRITY_SKILL_FLOORS = {
 
 # The `references/` git submodules hold vendored upstream sources. Contributors check them out, but CI
 # does not (the test job runs without submodules), so a link into `references/` is legitimately present
-# locally yet absent in CI — never gate it here.
+# locally yet absent in CI — never gate it here. Some ADR and design-note links also point at trees that
+# were removed from `references/` (PHPStan, TypeProf, Tapioca, …) and now live in the separate
+# `rigor-references` repository; they are historical citations and cannot resolve in any checkout.
 LINK_INTEGRITY_REFERENCES_ROOT = File.expand_path("../../references", __dir__)
 
 # Paths (relative to docs/) whose links are intentionally not gated — see the header comment.

@@ -193,8 +193,16 @@ fi
 if [ "$with_references" -eq 1 ]; then
   echo "==> cloning references/ submodule checkouts (read-only)"
   ref_failures=0
+  # Only the submodules THIS branch registers. A clone that had a since-removed submodule keeps its
+  # directory (and `.git` file) under references/ after a pull; copying it would hand every new worktree
+  # a stale, untracked tree, or fail verification once its gitdir is gone.
+  registered=$(git -C "$wt" config -f .gitmodules --get-regexp '^submodule\..*\.path$' 2>/dev/null | awk '{print $2}' || true)
   for d in "$main"/references/*/; do
     name=$(basename "$d")
+    case $'\n'"$registered"$'\n' in
+      *$'\n'"references/$name"$'\n'*) ;;
+      *) echo "  skip references/$name (not a submodule of this branch; leftover from a removed one?)"; continue ;;
+    esac
     if [ ! -e "${d}.git" ]; then echo "  skip references/$name (not initialized in main)"; continue; fi
     # `git worktree add` has already created an EMPTY placeholder directory for
     # every registered submodule path. Copying onto it would nest the checkout

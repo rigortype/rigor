@@ -2,7 +2,9 @@
 # Diagnose common submodule corruption modes.
 #
 # Reports issues but does not fix them automatically. Recovery procedures are
-# documented in AGENTS.md under "References under references/".
+# documented in .claude/skills/rigor-add-reference/SKILL.md § "Recovery cookbook".
+# Run it from the main clone or a linked worktree: the shared .git/modules is read through
+# `git rev-parse --git-common-dir`.
 #
 # Exit code: 0 if all checks pass, 1 if any issue is found.
 
@@ -78,14 +80,30 @@ for name in $config_names; do
   fi
 done
 
-# 3. .git/modules/ subtrees that are not referenced by .gitmodules.
-if [ -d .git/modules ] && [ -n "$gitmodules_names" ]; then
-  found_dirs=$(find .git/modules -type d -name objects 2>/dev/null | sed 's|/objects$||' | sed 's|^.git/modules/||')
+# 3. .git/modules/ subtrees that are not referenced by .gitmodules. In a linked worktree `.git` is a
+# file, so read the shared module store through the common git dir.
+modules_dir="$(git rev-parse --git-common-dir)/modules"
+if [ -d "$modules_dir" ] && [ -n "$gitmodules_names" ]; then
+  found_dirs=$(find "$modules_dir" -type d -name objects 2>/dev/null | sed 's|/objects$||' | sed "s|^$modules_dir/||")
   for dir in $found_dirs; do
     if ! printf '%s\n' $gitmodules_names | grep -qx -- "$dir"; then
-      fail ".git/modules/$dir is orphaned (no matching .gitmodules entry)"
-      note "    fix: rm -rf .git/modules/$dir  # only after confirming the path is unused"
+      fail "$modules_dir/$dir is orphaned (no matching .gitmodules entry)"
+      note "    fix: rm -rf $modules_dir/$dir  # only after confirming the path is unused"
     fi
+  done
+fi
+
+# 4. Directories under references/ that no .gitmodules entry names: what a pull leaves behind when a
+# submodule is removed upstream while its working tree is populated here.
+if [ -f .gitmodules ] && [ -d references ]; then
+  for dir in references/*/; do
+    dir=${dir%/}
+    [ -d "$dir" ] || continue
+    case $'\n'"$paths"$'\n' in
+      *$'\n'"$dir"$'\n'*) continue ;;
+    esac
+    fail "$dir is not a submodule path in .gitmodules (left behind by a removed submodule?)"
+    note "    fix: rm -rf $dir  # read-only upstream material; only after confirming nothing there is needed"
   done
 fi
 

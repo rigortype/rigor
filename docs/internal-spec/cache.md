@@ -1192,7 +1192,7 @@ declared classes unchanged. The seed bundles already carry the
 `deferred_ranges` table, so no row moves and `SCHEMA` is unchanged.
 
 The `global_census:<entry>` keys in `missing` are recorded by the
-`global.*` write rules (`CheckRules#global_aliased?`,
+`global.*` write rules (`CheckRules::SpecialGlobalWrite.global_aliased?`,
 `#program_may_answer?` and `#refined_writer_in_effect?`) for each
 `Inference::GlobalWriteCensus` entry they ask about
 ([#2158](https://github.com/rigortype/rigor/issues/2158)):
@@ -1201,7 +1201,7 @@ setter's method and each hatch, `global_census:defines_any`,
 `global_census:refines:write`, `global_census:refines_any`, and one
 `global_census:main_mixin` for every top-level mixin
 (`GlobalWriteCensus.dependency_key`). A question over several entries
-(`CheckRules#census_holds_any?`) records only the entries present when
+(`CheckRules::SpecialGlobalWrite.census_holds_any?`) records only the entries present when
 one is, since the answer stays until every one of them vanishes, and
 every entry when none is. That rests on an invariant: every census entry
 can only move a write toward being silenced, and a reported write always

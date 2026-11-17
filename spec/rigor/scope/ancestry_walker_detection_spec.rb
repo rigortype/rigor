@@ -37,7 +37,7 @@ require_relative "../../support/ancestry_walker_scan"
 # - ancestry reached through `Reflection` or `Environment` (`rbs_loader.ancestor_names_for`, RBS class
 #   ordering), which is RBS's ancestry, not the discovery tables';
 # - a walk split across files — a helper in another file called in a loop, or a table read once and passed
-#   into a helper that loops over it (`CheckRules#direct_subclasses`) — and mutual recursion across files;
+#   into a helper that loops over it (`SelfUndefinedMethod.direct_subclasses`) — and mutual recursion across files;
 # - dispatch through `send` / `public_send`, or a reader spelled as a String;
 # - a copy of the tables held in an instance variable and walked there (`Effects::PluginFacts#ancestry`,
 #   which walks the includes and superclasses its plugin facts were built from);
@@ -55,13 +55,13 @@ ALLOWED_ANCESTRY_WALKERS = {
     "transitive mixins and do not keep the edge, so it reads one class's or module's own mixin and prepend lists " \
     "one hop, never further (a concern's dependencies come from `Scope::ResolutionChain.concern_dependencies`); " \
     "a union for withholding",
-  "lib/rigor/analysis/check_rules.rb#method_defined_on_known_subclass?" =>
+  "lib/rigor/analysis/check_rules/self_undefined_method.rb#method_defined_on_known_subclass?" =>
     "descendant walk over the inverted superclass table: any subclass defining the name withholds " \
     "`call.self-undefined-method`; order-independent",
-  "lib/rigor/analysis/check_rules.rb#mixin_may_answer?" =>
+  "lib/rigor/analysis/check_rules/special_global_write.rb#mixin_may_answer?" =>
     "union over every module an ancestor mixes in: any that may answer withholds a `global.*` write " \
     "diagnostic; order-independent",
-  "lib/rigor/analysis/check_rules.rb#self_undefined_method_diagnostics" =>
+  "lib/rigor/analysis/check_rules/self_undefined_method.rb#diagnostics" =>
     "calls the closedness gate once per recorded miss; the gate withholds `call.self-undefined-method` " \
     "unless the class's own direct edges and its subclass closure are closed, and walks no ancestor",
   "lib/rigor/analysis/check_rules/shadowed_rescue_collector.rb#project_chain_covered?" =>

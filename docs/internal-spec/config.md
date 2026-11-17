@@ -16,7 +16,7 @@ without the other:
 
 | Artifact | Owns |
 | --- | --- |
-| [`lib/rigor/configuration.rb`](../../lib/rigor/configuration.rb) | `DEFAULTS` — which keys exist, their defaults, and the coercers that give each value its runtime meaning. |
+| [`lib/rigor/configuration/defaults.rb`](../../lib/rigor/configuration/defaults.rb), [`lib/rigor/configuration/coercion.rb`](../../lib/rigor/configuration/coercion.rb) | `DEFAULTS` — which keys exist, their defaults — and the coercers that give each value its runtime meaning. |
 | [`schemas/rigor-config.schema.json`](../../schemas/rigor-config.schema.json) | The declared shape of every key, including keys this implementation never reads (§ Reserved namespaces). |
 
 The schema is **not documentation of the loader** — it is authoritative in its own right, and it is
@@ -83,7 +83,7 @@ otherwise degrades to would accept every call.
 One tier-2 check does not run at load: an `effects.snapshot.reach` **preset name** is validated where
 the snapshot expands it, because presets are registered by plugins and the plugins load *from* the
 configuration being validated. Load time checks the entry's shape; the registry is only complete once
-analysis begins. The two halves are `Configuration#coerce_effects_reach` and
+analysis begins. The two halves are `Configuration::Coercion.coerce_effects_reach` and
 `Rigor::Effects::EntryPoints.resolve!`, and the CLI renders both the same way. Tier 3 is for a
 value that is well-formed but **does not do what it appears to do** — the class of mistake whose only
 symptom is confusing and downstream. Usually it resolves to nothing: a missing signature path, an

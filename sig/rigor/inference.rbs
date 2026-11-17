@@ -22,7 +22,8 @@ module Rigor
       # The entries of the node-typer modules under `expression_typer/` that sig-gen renders a return for. Undeclared
       # (#3315): `LeafNodes.type_of_yield`, `ControlFlow.type_of_conditional`, `ControlFlow.type_of_loop` and
       # `PerElementAssemblers.assemble_per_element_result` (sig-gen renders no return, so a row would be residue), and
-      # every private helper (they receive `typer` as a threaded parameter, which reads `Dynamic[top]` undeclared).
+      # the private helpers sig-gen renders no return for. The helpers it does render a return for, and that receive
+      # `typer`, are declared so that `typer.type_of(...)` inside them reads `Type::t`, as it did in the class.
       module LeafNodes
         def self?.type_of_literal_value: (untyped node) -> Type::Constant
         def self?.type_of_true: (untyped node) -> Type::Constant
@@ -70,6 +71,11 @@ module Rigor
         def self?.array_type_for: (untyped node, ExpressionTyper typer) -> (Type::Nominal | Type::Tuple)
         def self?.parentheses_type_for: (untyped node, ExpressionTyper typer) -> Type::t
         def self?.statements_or_nil: (untyped statements_node, ExpressionTyper typer) -> Type::t
+        def self?.static_hash_shape_for: (untyped elements, ExpressionTyper typer) -> (Type::HashShape | nil)
+        def self?.generic_hash_pairs_for: (untyped elements, ExpressionTyper typer) -> [Array[untyped], Array[untyped]]
+        def self?.interpolation_part_literal?: (untyped part, ExpressionTyper typer) -> (false | true)
+        def self?.nominal_range_for_endpoints: (untyped left_node, untyped right_node, ExpressionTyper typer) -> Type::Nominal
+        def self?.static_range_endpoint: (untyped node, ExpressionTyper typer) -> ([false, nil] | [true, Float | Integer | String] | [true, nil])
       end
 
       module Constants
@@ -91,6 +97,11 @@ module Rigor
         def self?.type_of_begin: (untyped node, Scope scope, ExpressionTyper typer) -> Type::t
         def self?.type_of_rescue: (untyped node, Scope scope, ExpressionTyper typer) -> Type::t
         def self?.type_of_rescue_modifier: (untyped node, Scope scope, ExpressionTyper typer) -> Type::t
+        def self?.type_of_case_simple_union: (untyped node, ExpressionTyper typer) -> Type::t
+        def self?.case_when_branch_certainty: (Type::t subject_type, untyped when_node, Scope scope, ExpressionTyper typer) -> (:maybe | :no | :yes)
+        def self?.case_when_pattern_certainty: (Type::t subject_type, untyped pattern_node, Scope scope, ExpressionTyper typer) -> (:maybe | :no | :yes)
+        def self?.literal_pattern_value: (untyped pattern_node, ExpressionTyper typer) -> (nil | { value: untyped })
+        def self?.rescue_chain_types: (untyped rescue_node, untyped body, Scope scope, ExpressionTyper typer) -> Array[untyped]
       end
     end
 

@@ -158,7 +158,8 @@ module Rigor
         recording = Analysis::DependencyRecorder.active?
         (from...stop).any? do |index|
           entry = chain.entries[index]
-          next false unless entry.external?
+          # Issue #3282 — a project module whose body was read and lacks the name cannot be the definer.
+          next false if !entry.external? || BodyReadExternal.lacks?(scope, entry, method_name)
 
           Analysis::DependencyRecorder.read_missing(:class, entry.raw.to_s.split("::").last) if recording
           !external_lacks?(scope, entry.candidates, entry.side, method_name)
@@ -363,4 +364,5 @@ module Rigor
   end
 end
 
+require_relative "body_read_external"
 require_relative "singleton_hook_decline"

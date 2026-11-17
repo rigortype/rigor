@@ -414,6 +414,14 @@ module Rigor
         bucket.key?(ENVELOPE_DYNAMIC_MARK) || bucket.key?(ENVELOPE_REFINED_MARK)
       end
 
+      # Issue #3282 — whether an envelope bucket says this SIDE of the class may hold a name no table spells, which
+      # is the open-names mark for the side or the side-agnostic one. A bucket that does not carry one, does not
+      # {.rewritten_surface?} and holds no `[side, name]` entry for the name has said all it has to say about the
+      # name: the project read every declaring body and none of them wrote it.
+      def self.open_names_on?(bucket, kind)
+        OPEN_NAMES_MARKS.fetch(kind).any? { |mark| bucket.key?(mark) }
+      end
+
       # Issue #992 — the class key a WHOLE-PROJECT discovery pass adds to `discovered_parameter_envelopes`
       # (`ScopeIndexer#finalize_def_index`), with an empty bucket. A single file's walk alone — `run_source`,
       # the LSP `prebuilt:` scope — sees one `def` and cannot see the reopening, subclass or `class_eval` in

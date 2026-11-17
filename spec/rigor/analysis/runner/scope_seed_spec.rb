@@ -36,6 +36,14 @@ RSpec.describe Rigor::Analysis::Runner::ScopeSeed do
   end
 
   describe ".seed_def_source_tables" do
+    it "leaves the singleton table out when it is empty" do
+      tables = {}
+
+      described_class.seed_def_source_tables(tables, { "A#m" => "a.rb:1" }, {})
+
+      expect(tables).to eq(discovered_def_sources: { "A#m" => "a.rb:1" })
+    end
+
     it "seeds the instance and singleton def-source tables, each only when non-empty" do
       both = {}
       described_class.seed_def_source_tables(both, { "A#m" => "a.rb:1" }, { "A.m" => "a.rb:2" })
@@ -106,8 +114,20 @@ RSpec.describe Rigor::Analysis::Runner::ScopeSeed do
       expect(merged(values: { "X" => :literal })).to eq("X" => :literal)
     end
 
+    it "answers the very literal table when no `pre_eval:` constant is published, without a copy" do
+      values = { "X" => :literal }
+
+      expect(merged(values: values)).to equal(values)
+    end
+
     it "answers the `pre_eval:` publication when the run has no literal table" do
       expect(merged(pre_eval: { "X" => :published })).to eq("X" => :published)
+    end
+
+    it "answers the very `pre_eval:` publication when the run has no literal table, without a copy" do
+      published = { "X" => :published }
+
+      expect(merged(pre_eval: published)).to equal(published)
     end
 
     it "lets the literal table win over a `pre_eval:` publication of the same name, and keeps the rest of both" do

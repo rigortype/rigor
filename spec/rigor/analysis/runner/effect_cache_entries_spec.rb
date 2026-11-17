@@ -43,8 +43,10 @@ RSpec.describe Rigor::Analysis::Runner::EffectCacheEntries do
       expect(described_class.peek_effect_summary(stored, descriptor)).to be_nil
     end
 
-    it "answers nil for a miss, a wrong arity and a wrong member type" do
-      [nil, [table, {}], [{}, {}, {}], [table, [], {}], [table, {}, []], :not_an_array].each do |bad|
+    it "answers nil for a miss, a wrong arity, too short or too long, and a wrong member type" do
+      too_short = [table, {}]
+      too_long = [table, {}, {}, {}]
+      [nil, too_short, too_long, [{}, {}, {}], [table, [], {}], [table, {}, []], :not_an_array].each do |bad|
         expect(described_class.peek_effect_summary(store(key::RUN_EFFECTS_TABLE_PRODUCER_ID => bad), descriptor))
           .to be_nil
       end

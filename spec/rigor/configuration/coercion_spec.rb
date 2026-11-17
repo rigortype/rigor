@@ -23,7 +23,7 @@ RSpec.describe Rigor::Configuration::Coercion do
       expect(described_class.coerce_target_ruby("3.4")).to eq("3.4")
       expect(described_class.coerce_target_ruby("3.4.1")).to eq("3.4.1")
       expect(described_class.coerce_target_ruby("latest")).to eq("latest")
-      expect(described_class.coerce_target_ruby("3.4")).to be_frozen
+      expect(described_class.coerce_target_ruby(+"3.4")).to be_frozen
     end
 
     it "reads a YAML float as its spelling" do
@@ -63,7 +63,7 @@ RSpec.describe Rigor::Configuration::Coercion do
     it "reads nil as unset and answers a frozen copy of a path" do
       expect(described_class.coerce_core_root(nil)).to be_nil
       expect(described_class.coerce_core_root("core")).to eq("core")
-      expect(described_class.coerce_core_root("core")).to be_frozen
+      expect(described_class.coerce_core_root(+"core")).to be_frozen
     end
 
     it "rejects a value that is not a path String, and an empty one" do
@@ -259,7 +259,7 @@ RSpec.describe Rigor::Configuration::Coercion do
       coerced = described_class.coerce_effects_attribution({ "Net::HTTP.get" => %w[io.net.http io.net] })
       expect(coerced).to eq({ "Net::HTTP.get" => %w[io.net io.net.http] })
       expect(coerced).to be_frozen
-      expect(described_class.coerce_effects_attribution(nil)).to eq({})
+      expect(described_class.coerce_effects_attribution(nil)).to eq({}).and be_frozen
     end
 
     it "rejects an attribution key that is not a method key and a label that is malformed" do

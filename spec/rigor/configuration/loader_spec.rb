@@ -76,7 +76,7 @@ RSpec.describe Rigor::Configuration::Loader do
       Dir.mktmpdir do |dir|
         path = write(dir, "bad.yml", "a: [unclosed\n")
         expect(error_message { described_class.load_with_includes(path) })
-          .to match(/\A#{Regexp.escape(File.absolute_path(path))}:\d+:\d+: not valid YAML: /)
+          .to match(/\A#{Regexp.escape(File.absolute_path(path))}:1:\d+: not valid YAML: did not find expected/)
       end
     end
 

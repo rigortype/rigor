@@ -20,9 +20,9 @@ module Rigor
       # The rule is exact rather than heuristic — the receiver must be a `Singleton[C]` whose `C` the project
       # pre-pass recorded as including `Singleton` — so a class that does not include the mixin is untouched,
       # and a project that defines its own `Singleton` module is the one case that would misfire. Guarded by
-      # {own_singleton_include?}: when the included name resolves to a project-declared class or module (a
-      # top-level `Singleton`, or `M::Singleton` inside `module M`), the tier declines, because then the name
-      # means something else entirely.
+      # {includes_singleton_mixin?}: when the included name resolves to a project-declared top-level `Singleton`,
+      # the tier declines, because then the name means something else entirely (a nested `M::Singleton` is read as
+      # the stdlib mixin; see that method).
       module SingletonMixinDispatch
         MIXIN_NAMES = Ractor.make_shareable(Set["Singleton", "::Singleton"])
         private_constant :MIXIN_NAMES

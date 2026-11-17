@@ -14,9 +14,9 @@ module Rigor
     # Unlike {DataInstance}, a `Struct` instance is **mutable** — `s.x = v`, `s[:x] = v`, and escape can
     # invalidate the member map. The folding tier therefore only projects member reads off a **fresh**
     # instance (the transient receiver of a `.new(...).x` / `.with(...).x` chain, which provably cannot
-    # have been mutated between materialisation and the read); a read off a *stored* binding degrades to
-    # `Dynamic[top]` rather than fold a possibly-stale member value. Promoting the fold to mutation-free
-    # bound locals is the deferred slice 3 (see ADR).
+    # have been mutated between materialisation and the read) or a mutation-free bound local
+    # (`Inference::StructFoldSafety`, ADR-48 slice 3); a read off any other stored binding degrades to
+    # `Dynamic[top]` rather than fold a possibly-stale member value.
     #
     # That mutability-gating lives in the dispatch tier (`StructFolding`), not the carrier: the carrier
     # itself just records the member map. Like {DataInstance}, non-folded methods project to the

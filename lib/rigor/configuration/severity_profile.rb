@@ -13,7 +13,8 @@ module Rigor
     #   Useful for incremental adoption on legacy code.
     # - `balanced` (**default**): Current Rigor stance — most rules `:error`; `dump.type` `:info`; uncertain
     #   rules `:warning`.
-    # - `strict`: Every rule is `:error`. CI-friendly.
+    # - `strict`: Rules report at `:error`, except the few the table below deliberately holds lower
+    #   (`flow.unreachable-clause`, `effect.unknown-label`, the suppression rules, `:off` opt-ins). CI-friendly.
     #
     # The resolution order, first match wins:
     #
@@ -111,9 +112,8 @@ module Rigor
           "flow.dead-assignment" => :warning,
           "flow.always-truthy-condition" => :warning,
           # ADR-47 WD4: stays :info (not :warning like its siblings) in the
-          # default balanced profile until the regression-corpus FP gate is
-          # green; promote to :warning once Mastodon/GitLab/Redmine triage
-          # to zero net false positives.
+          # default balanced profile. The 16-corpus sweep fired zero times, which is not
+          # evidence for a louder default; promotion waits for a real firing to triage.
           "flow.unreachable-clause" => :info,
           "flow.duplicate-hash-key" => :warning,
           "flow.return-in-ensure" => :warning,

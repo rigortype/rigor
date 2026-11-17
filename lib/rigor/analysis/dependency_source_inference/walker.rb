@@ -27,9 +27,9 @@ module Rigor
       # only loads `.rb` files.
       module Walker
         # Top-level directories that MUST NOT participate in gem-source inference even when the user lists
-        # them under `roots:`. The check is case-insensitive against the first segment of `roots:`; nested
-        # `spec/` / `test/` directories deeper inside `lib/` are NOT filtered (a few gems legitimately ship
-        # `lib/.../spec/`).
+        # them under `roots:`. The check is case-insensitive against each whole `roots:` entry, so a deeper
+        # entry such as `spec/support` is not matched; nested `spec/` / `test/` directories inside `lib/` are
+        # NOT filtered either (a few gems legitimately ship `lib/.../spec/`).
         HARD_EXCLUDED_ROOTS = %w[spec test bin].freeze
 
         # Walker outcome wrapping the harvested method catalog plus a budget-exceeded flag. ADR-10 slice 4
@@ -250,7 +250,7 @@ module Rigor
         end
 
         # Walks a Prism subtree, accumulating method definitions under their qualified class name. Mirrors
-        # the shape of `Inference::ScopeIndexer#walk_methods` but stays decoupled from `Scope` because
+        # the shape of `Inference::ScopeIndexer#walk_methods_and_def_nodes` but stays decoupled from `Scope` because
         # gem-source inference runs without a scope context.
         def walk_node(node, qualified_prefix, in_singleton_class, harvest, budget)
           return unless node.is_a?(Prism::Node)

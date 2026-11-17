@@ -18,9 +18,10 @@ module Rigor
       # `mutate.self` plus the framework meaning — and an envelope forbidding `io` in a service object is
       # not violated by a helper that happens to call `render_to_string`.
       #
-      # `render` additionally keeps a **taint**: the template is not an effect unit yet (ADR-103 WD11 /
-      # issue #392), so what the view does is genuinely unknown and the summary says so rather than
-      # pretending the action stops at the `render` line.
+      # `render` additionally keeps a **taint**: a template is an effect unit (ADR-103 WD11 / issue #392)
+      # reached through the `rails_render` callee edge, but a render whose target the rule cannot resolve
+      # leaves what the view does genuinely unknown, and the summary says so rather than pretending the
+      # action stops at the `render` line.
       #
       # ## The self-path rows
       #
@@ -46,8 +47,9 @@ module Rigor
         RESPONSE_WRITERS = %w[redirect_to redirect_back redirect_back_or_to head].freeze
 
         # The render family. Same labels, plus the `template-not-analysed` taint: what the controller does
-        # is fully stated, and what the TEMPLATE does is unknown until views are effect units (ADR-103
-        # WD11 / issue #392). A summary that stopped at the `render` line and read exhaustive would be
+        # is fully stated, and what the TEMPLATE does arrives through the callee edge only when the rule
+        # resolves the target (ADR-103 WD11 / issue #392); otherwise it is unknown. A summary that stopped
+        # at the `render` line and read exhaustive would be
         # the one genuinely misleading row in the whole Rails layer.
         RENDERERS = %w[render render_to_string render_to_body].freeze
 

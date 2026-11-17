@@ -48,7 +48,7 @@ module Rigor
         File.exist?(path) ? NOT_A_RUBY_FILE : NO_SUCH_PATH
       end
 
-      # The error diagnostics for `bad` (from {unusable}). A bad path among valid ones is a warning that it was
+      # The diagnostics for `bad` (from {unusable}). A bad path among valid ones is a warning that it was
       # skipped; a bad path that leaves nothing to analyse is an error, so a lone typo is not masked.
       def diagnostics(bad, any_files:)
         severity = any_files ? :warning : :error

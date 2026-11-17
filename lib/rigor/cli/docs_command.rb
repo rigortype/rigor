@@ -158,11 +158,6 @@ module Rigor
         end
       end
 
-      # A key the rendered pages hand out for a document the gem does not carry (ADR-74 ships the manual and
-      # handbook; the ADR / specification / notes corpus and the repository trees stay out). The key is
-      # still answerable — it names a real path — so this routes rather than failing: a reader who followed
-      # `[ADR-103][adr/103-effect-labels]` out of `rigor docs` gets told where that document is, which is the
-      # whole point of handing them the key instead of a dead relative path or a `master` URL.
       # Categories this command serves itself. A name that fails to resolve inside one of them is a typo,
       # not an unpackaged document, and must reach the did-you-mean listing rather than be routed to a
       # repository path that does not exist — `rigor docs list` and `rigor docs pathh` are the cases
@@ -170,6 +165,11 @@ module Rigor
       PACKAGED_CATEGORIES = %w[manual handbook].freeze
       private_constant :PACKAGED_CATEGORIES
 
+      # A key the rendered pages hand out for a document the gem does not carry (ADR-74 ships the manual and
+      # handbook; the ADR / specification / notes corpus and the repository trees stay out). The key is
+      # still answerable — it names a real path — so this routes rather than failing: a reader who followed
+      # `[ADR-103][adr/103-effect-labels]` out of `rigor docs` gets told where that document is, which is the
+      # whole point of handing them the key instead of a dead relative path or a `master` URL.
       def unpackaged_doc(query)
         return nil unless query.include?("/")
         return nil if PACKAGED_CATEGORIES.include?(query.split("/").first)

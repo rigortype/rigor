@@ -9,7 +9,7 @@ module Rigor
     # nothing (negative edges — adding that symbol later must re-check the consumer).
     #
     # Thread-local and activated per `analyze_file` only when the runner opts in (`record_dependencies: true`);
-    # a normal run never activates it, so {active?} is a single nil-check and the instrumented `Scope`
+    # a normal run never activates it, so {active?} is a single integer read and the instrumented `Scope`
     # accessors pay nothing. Recording is purely observational — it never changes a diagnostic.
     #
     # Modelled on {Inference::BudgetTrace}: process-thread-local state, a cheap disabled fast path, and a

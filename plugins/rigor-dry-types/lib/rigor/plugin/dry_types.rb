@@ -20,7 +20,7 @@ module Rigor
     # and publishes the resulting `{aliased_name => underlying_class}` table as the `:dry_type_aliases`
     # cross-plugin fact (ADR-9). Other dry-rb adapter plugins consume this fact:
     #
-    # - `rigor-dry-struct` reads it so `attribute :city, Types::String` promotes `address.city` from
+    # - `rigor-dry-struct` reads it so `attribute :city, Types::String` promotes `address.city`
     #   from an untyped value to `String` via ADR-18's `returns_from_arg:` fact lookup.
     # - `rigor-dry-validation` / `rigor-dry-schema` read it for per-key type recognition in `schema { … }`
     #   / `params { … }` blocks (separate plugin slice).
@@ -65,12 +65,11 @@ module Rigor
       )
 
       # Cached alias-table producer (ADR-60 WD3 record-and-validate). The scan Prism-parses every `.rb` file
-      # under the project's `paths:` tree to find `include Dry.Types()` declarations — an expensive pass that
-      # ran on EVERY invocation (cold and warm) because `#prepare` called {AliasScanner.scan} directly, with
-      # no cache. It now rides `cache_for`: a warm run re-globs + re-digests the watched tree (cheap SHA over
-      # file bytes, no AST build) and reuses the cached table instead of re-parsing. This is the dominant win
-      # even for a project that ships no dry-types module — the parse still has to run to prove that, and now
-      # the empty result is cached too.
+      # under the project's `paths:` tree to find `include Dry.Types()` declarations, which is expensive, so
+      # it rides `cache_for`: a warm run re-globs + re-digests the watched tree (cheap SHA over file bytes,
+      # no AST build) and reuses the cached table instead of re-parsing. That holds even for a project that
+      # ships no dry-types module — the parse has to run once to prove that, and the empty result is cached
+      # too.
       #
       # `watch:` covers exactly the files the scan reads: one glob per project `paths:` entry, co-extensive
       # with {#scannable_paths}. A {Cache::Descriptor::GlobEntry} digests every file matching its glob, so a

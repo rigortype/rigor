@@ -214,9 +214,6 @@ module Rigor
       private :analyze_with_effects
       private :analyze_attributed
 
-      # ADR-103 WD6 / #386 — the worker-side mirror of `Runner#effect_envelope_index`. Derived from the
-      # same configuration and the session's own environment, so a worker's `≤` lane is the one the
-      # parent would have computed for the same file.
       # ADR-103 WD10 / #387 — the worker-side mirror of `Runner#effect_plugin_facts`. The superclass table
       # arrives with the coordinator's scope seed, so a worker resolves an `ActiveRecord::Base` row through
       # the same project ancestry the parent would have walked.
@@ -229,6 +226,9 @@ module Rigor
       end
       private :effect_plugin_facts
 
+      # ADR-103 WD6 / #386 — the worker-side mirror of `Runner#effect_envelope_index`. Derived from the
+      # same configuration and the session's own environment, so a worker's `≤` lane is the one the
+      # parent would have computed for the same file.
       def effect_envelope_index
         @effect_envelope_index ||= Effects::EnvelopeIndex.build(
           configuration: @configuration, environment: @environment, plugin_facts: effect_plugin_facts
@@ -294,9 +294,9 @@ module Rigor
       end
       private :built_in_collectors
 
-      # Read-once snapshot of the per-worker reporters so the caller (or the eventual Phase 4b pool
-      # aggregator) can merge into a single coordinator-side reporter. Both reporters dedupe at write time,
-      # so a post-hoc concat + de-dup at the entry-key level is sound.
+      # Read-once snapshot of the per-worker reporters so the caller (the pool coordinator) can merge into a
+      # single coordinator-side reporter. The reporters dedupe at write time, so a post-hoc
+      # concat + de-dup at the entry-key level is sound.
       #
       # Issue #696 — `definition_build_failures` rides this channel rather than a coordinator-side snapshot,
       # and it has to. Under the pool the PARENT never analyses a file, so its loader never demands a
@@ -368,7 +368,7 @@ module Rigor
       # instances registered, each tagged with the plugin id the coordinator de-duplicates by — including the
       # positioned batches of {Plugin::Base#emit_once} (#1060), which ride the same records. Marshal-clean
       # (frozen Hashes of Strings and Symbols, and frozen `Diagnostic` copies for a batch) so the fork pool
-      # ships them back like the three drains above;
+      # ships them back like the drains above;
       # a registration made on the PARENT during `#prepare` is already visible to the coordinator through
       # the pre-fork session, and one a worker makes while analysing its slice arrives through the payload.
       # Entries are not cleared — a drain is a read, and the parent session is drained again on the degrade

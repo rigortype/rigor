@@ -26,7 +26,7 @@ module Rigor
       # Two plugins claiming one path is a conflict with no principled winner, so registration order decides
       # and the later claim is dropped; the loser is not a diagnostic (the project chose both plugins).
       # @param previous — a warm index from an earlier run of the same project (#1038). Every unit in it
-      #   whose template is unchanged on disk is carried over instead of recompiled; see the class note.
+      #   whose template is unchanged on disk is carried over instead of recompiled; see {TemplateUnits}' class note.
       def self.collect(registry:, root: Dir.pwd, buffer: nil, previous: nil)
         claims = claims_for(registry)
         claimed = claims.flat_map(&:last).uniq

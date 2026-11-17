@@ -22,7 +22,7 @@ module Rigor
         ]
       )
 
-      # Issue 2 & 5: use robust positional binding extractor and preserve module context
+      # The enclosing module (when the recognizer is handed one) is the receiver; `RbNaCl` is the fallback.
       ffi_binding_recognizer :sodium_function do |node, module_name|
         next [] unless node.is_a?(Prism::CallNode) && node.name == :sodium_function
 

@@ -22,17 +22,15 @@ module Rigor
       # - `resource :name`
       # - `get/post/patch/put/delete "path", to:, as:`
       # - `root to: "..."` / `root "..."`
-      # - `scope "path", as: :name do ... end` (with `as:` key)
-      # - One level of `namespace :foo do ... end`
-      # - One level of nested `resources` (`resources :users do; resources :posts; end`)
+      # - `scope "path", as: :name do ... end`, and the `path:` / `module:` / `controller:` keyword forms
+      # - `namespace :foo do ... end`
+      # - Nested `resources` (`resources :users do; resources :posts; end`)
       # - `member do ... end` / `collection do ... end` inside `resources`
+      # - `mount Engine, as:, at:` (registers the `<as>_path` helper only), `direct(:name) { |obj| ... }`
       #
-      # Out of scope for v0.1.0 (silent skips):
+      # Not interpreted (silent skips):
       #
-      # - `scope path:` / `scope module:` (path/module-only, no `as:`)
       # - Constraints (`constraints: { id: /\d+/ }`)
-      # - `mount` / engine routes
-      # - `direct(:name) { |obj| ... }`
       # - Format restrictions
       module RoutesParser
         # Standard resource actions Rails generates by default.
@@ -89,7 +87,7 @@ module Rigor
                                   controllers: context.controller_class_names)
         end
 
-        # For every registered alias rule `(from_str, to_str, arity_delta)`, find every existing entry whose
+        # For every registered alias rule `(from_str, to_str)`, find every existing entry whose
         # name contains `from_str` and register an aliased entry with `from_str → to_str` substitution. The
         # pattern matches GitLab's shorthand-helper idiom: a loop over registered route names that invokes
         # `direct(new_name) do |project, *args| send("#{name}_url", project&.namespace, project, *args) end`
@@ -410,8 +408,8 @@ module Rigor
           end
 
           # ADR-39: inflection delegates to the shared `Rigor::Plugin::Inflector`, which uses the real
-          # `ActiveSupport::Inflector` (the authority Rails uses to generate helper names) when available,
-          # and a built-in approximation otherwise.
+          # `ActiveSupport::Inflector` (the authority Rails uses to generate helper names) and has no
+          # built-in approximation: when ActiveSupport cannot be loaded it raises rather than guess.
           def singularize(word)
             Rigor::Plugin::Inflector.singularize(word)
           end
@@ -612,7 +610,7 @@ module Rigor
           context.push_namespace(name) { interpret_block_body(node, context) }
         end
 
-        # `devise_for :users [, skip: [...], path: "..."]` — generates the standard Devise route-helper
+        # `devise_for :users [, skip: [...]]` — generates the standard Devise route-helper
         # catalogue for the named resource. Symbol-literal first arg only; non-literal forms (e.g. dynamic
         # resource names built from constants) are silently skipped because the helper SET depends on the
         # literal name and we cannot statically resolve a variable here. `skip:` is read so the project's
@@ -644,7 +642,8 @@ module Rigor
         end
 
         # `mount Foo::Engine, at: '/path', as: :name` — mounted Rails engines. The mount adds a single
-        # helper for the mount point itself: `<as>_path` / `<as>_url` (arity 0). The engine's own internal
+        # helper for the mount point itself: `<as>_path` / `<as>_url` (arity = the enclosing scopes' dynamic
+        # segment count, 0 at top level). The engine's own internal
         # helpers are out of scope (they'd need the engine's routes.rb available; almost no static parser
         # follows that). Mastodon uses `mount Sidekiq::Web, at: 'sidekiq', as: :sidekiq` and similar.
         #
@@ -705,8 +704,9 @@ module Rigor
         # adds the given prefix to every helper registered inside. Dynamic path segments (`:slug`) are
         # counted so nested-resource arities stay correct.
         #
-        # When `as:` is absent the block is interpreted without any prefix change — helper names are
-        # unaffected by the scope's path, which matches Rails' behaviour for path-only scopes.
+        # When `as:` is absent helper names are unaffected by the scope's path, which matches Rails'
+        # behaviour for path-only scopes; a path carrying dynamic segments still contributes its path and
+        # arity (see `interpret_scope_frame`).
         def handle_scope(node, context)
           options = options_hash(node)
           context.push_module(options[:module]) do
@@ -801,13 +801,6 @@ module Rigor
           end
         end
 
-        # ADR-102 WD3 — the controller a `resources` / `resource` declaration dispatches to.
-        #
-        # `resources :users` serves `UsersController`; a SINGULAR `resource :profile` serves the PLURAL
-        # `ProfilesController` — Rails pluralises the controller even though the routes are singular, and
-        # that is the one point where the two shapes disagree. An explicit `controller:` wins outright,
-        # including its `controller: "admin/users"` module-path and `controller: "/users"` absolute forms.
-        #
         # Whether a `resources` / `resource` declaration actually routes anything to its own controller.
         #
         # `only: []` strips every default action, and the two shapes it appears in mean opposite things:
@@ -841,6 +834,13 @@ module Rigor
           end
         end
 
+        # ADR-102 WD3 — the controller a `resources` / `resource` declaration dispatches to.
+        #
+        # `resources :users` serves `UsersController`; a SINGULAR `resource :profile` serves the PLURAL
+        # `ProfilesController` — Rails pluralises the controller even though the routes are singular, and
+        # that is the one point where the two shapes disagree. An explicit `controller:` wins outright,
+        # including its `controller: "admin/users"` module-path and `controller: "/users"` absolute forms.
+        #
         # `only: []` (or an `except:` that removes every action) declares no routes at all and so names no
         # controller; the callers gate on {#routed?} rather than this method re-deriving it.
         def record_resource_controller(context, options, name, plural:)
@@ -1230,13 +1230,13 @@ module Rigor
           end
         end
 
-        # Maps an action keyword to the route-helper entry it produces. The five "named-helper" actions
-        # (`:index` / `:show` / `:new` / `:edit` plus singular-resource `:show`) generate a distinct
-        # helper; the three "verb-only" actions (`:create` / `:update` / `:destroy`) Rails serves under the
-        # same path-helper Rails reuses for show / index forms — so we emit them too, otherwise an `only:
-        # [:create]` resource (e.g. Mastodon's `resource :inbox, only: [:create]`) registers NO helpers and
-        # downstream callers see a false `unknown-helper inbox_path`. The HelperTable already dedupes by
-        # name, so a resource that lists both `:show` and `:update` does not double-register.
+        # Maps an action keyword to the route-helper entry it produces. The four "named-helper" actions
+        # (`:index` / `:show` / `:new` / `:edit`) generate a distinct helper; the three "verb-only" actions
+        # (`:create` / `:update` / `:destroy`) Rails serves under the same path-helper Rails reuses for
+        # show / index forms — so we emit them too, otherwise an `only: [:create]` resource (e.g.
+        # Mastodon's `resource :inbox, only: [:create]`) registers NO helpers and downstream callers see a
+        # false `unknown-helper inbox_path`. A resource listing both `:show` and `:update` therefore adds
+        # two same-named entries; `HelperTable` groups entries by name, so that is harmless.
         def entry_for_action(action, name:, singular:, base_arity:, path_base:, helper_prefix:, plural:)
           case action
           when :index then index_entry(plural, helper_prefix, name, base_arity, path_base, singular)
@@ -1289,9 +1289,8 @@ module Rigor
           # `unknown-helper`.
           #
           # Rails adds `_index_` whenever `singular == plural` — including for UNCOUNTABLE nouns (Redmine's
-          # `resources :news` registers `news_index_path` for the index). The earlier "skip UNCOUNTABLE"
-          # carve-out was empirically wrong; only the IRREGULAR-singular path (e.g. `media → medium`)
-          # actually has `singular != plural` and skips `_index_`.
+          # `resources :news` registers `news_index_path` for the index). Only an IRREGULAR singular (e.g.
+          # `media → medium`) has `singular != plural` and skips `_index_`.
           index_name = if name.to_s == singular
                          "#{helper_prefix}#{name}_index_path"
                        else

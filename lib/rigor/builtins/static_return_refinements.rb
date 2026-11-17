@@ -25,9 +25,8 @@ module Rigor
     #   `Singleton[Kernel]` receiver) AND the instance-receiver shape (an implicit-self call
     #   like `__dir__` inside any class body, or `obj.__dir__` on an instance).
     # - `kind: :singleton` / `kind: :instance` restrict the match to one of the two shapes.
-    # - The handler is called with `(arg_types)` so future entries can refine based on
-    #   argument types (e.g. a `File.expand_path(string)` entry that returns
-    #   `non-empty-string` regardless of the upstream return).
+    # - The handler is called with `(arg_types)` so an entry can refine based on argument
+    #   types (as the `IO.read` / `File.read` entries do, keying on whether a length is given).
     #
     # The override fires ABOVE RBS dispatch — if RBS would have returned a wider type
     # (`String?` for `Kernel#__dir__`), the override returns the refined union
@@ -99,13 +98,12 @@ module Rigor
       # Looks up a refined return type for the given call.
       #
       # @param owner_class_name — the class on which the method is defined
-      #   (e.g., `"Kernel"`). Pass `nil` when the caller hasn't resolved a defining owner
-      #   yet — the lookup will then fall back to matching by `(method_name, kind)` against
-      #   entries whose owner is currently in the table.
+      #   (e.g., `"Kernel"`). A `nil` owner (the caller has not resolved one) returns `nil`; the
+      #   dispatcher resolves candidates through {owners_for} first.
       # @param kind — one of `:singleton`, `:instance`. The caller passes the shape of
       #   the actual call site; the table stores `:both` for entries that match either.
       # @param arg_types — positional argument types. Forwarded to the
-      #   handler so future entries can discriminate on argument shape.
+      #   handler so an entry can discriminate on argument shape.
       # @return the refined return type, or `nil` when no override
       #   matches.
       def self.lookup(owner_class_name:, method_name:, kind:, arg_types: [])
@@ -119,7 +117,7 @@ module Rigor
 
       # Indexed view by `(method_name, kind)` — used by the dispatcher when the receiver's
       # owner is not yet resolved but the method name alone uniquely identifies a stdlib
-      # override (today: `__dir__` → Kernel). The table is small and the index rebuild cost
+      # override (e.g. `__dir__` → Kernel). The table is small and the index rebuild cost
       # trivial, but precomputing keeps `dispatch`'s hot path free of an O(n) scan.
       OWNERS_BY_METHOD = OVERRIDES.each_with_object({}) do |((owner, mname, _kind), _h), acc|
         acc[mname] ||= []
@@ -128,14 +126,14 @@ module Rigor
       Ractor.make_shareable(OWNERS_BY_METHOD)
       private_constant :OWNERS_BY_METHOD
 
-      # @return the candidate owner class names for a bare method-name
-      #   lookup. Empty when no override names this method.
+      # The miss result of {owners_for}: the miss case is overwhelmingly common, so share one
+      # frozen empty array instead of allocating a fresh `[]` per non-refined method.
       NO_OWNERS = [].freeze
       private_constant :NO_OWNERS
 
-      # Consulted on every dispatch (`try_static_refinement`); the miss case is overwhelmingly
-      # common, so share one frozen empty array instead of allocating a fresh `[]` per
-      # non-refined method.
+      # @return the candidate owner class names for a bare method-name
+      #   lookup. Empty when no override names this method. Consulted on every dispatch
+      #   (`try_static_refinement`).
       def self.owners_for(method_name)
         OWNERS_BY_METHOD[method_name.to_sym] || NO_OWNERS
       end

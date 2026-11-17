@@ -15,7 +15,7 @@ module Rigor
     # A run has one identity for its diagnostics and one for its effect summaries. The diagnostics identity
     # is today's and is deliberately untouched by this file: collection is observational, so a diagnostics
     # entry computed with effects on is valid for a run with effects off and vice versa. The effects
-    # identity is that identity **plus** the three things that change what a summary means without changing
+    # identity is that identity **plus** the four things that change what a summary means without changing
     # a single analyzed byte:
     #
     # - the **vocabulary version** ({Registry#vocabulary_version}) — a rename or a removal re-reads every
@@ -31,7 +31,7 @@ module Rigor
     #
     # This module is the ONE place that answers it. {.digest} is the string form (what the ADR-46 snapshot
     # payload carries beside `return_summaries`) and {.descriptor} is the {Cache::Descriptor} form (what the
-    # ADR-45 whole-run effects slot is keyed by): the same three inputs, spelled for the two stores.
+    # ADR-45 whole-run effects slot is keyed by): the same four inputs, spelled for the two stores.
     #
     # Nothing here is consulted when collection is off — no entry is written, no key is perturbed, and the
     # `effects:` block stays out of `Configuration#to_h` so enabling the feature invalidates no existing
@@ -78,7 +78,7 @@ module Rigor
       # The effects identity as a cache KEY descriptor: the run's own diagnostics key descriptor plus one
       # `configs:` entry carrying {.digest}. Composing (rather than rebuilding) is what makes the effects
       # slot inherit every diagnostics-invalidating input — engine version, engine source, RBS libraries,
-      # the analyzed-path set — for free, so "the effects identity is the diagnostics identity plus three
+      # the analyzed-path set — for free, so "the effects identity is the diagnostics identity plus four
       # things" is a property of the code rather than a claim about it.
       #
       # @param base — the run's diagnostics key descriptor

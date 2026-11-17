@@ -149,8 +149,9 @@ module Rigor
             end
           end
 
-          # `before_action :set_user, only: %i[show edit]` → `[[:set_user, [:show, :edit], nil]]`.
-          # `except:` rides the third slot. `prepend_before_action` is the same chain; `after_action` and
+          # `before_action :set_user, only: %i[show edit]` → `[[:set_user, [:show, :edit], nil, false]]`.
+          # `except:` rides the third slot and the presence of `if:` / `unless:` the fourth.
+          # `prepend_before_action` is the same chain; `after_action` and
           # `around_action` are not — an assign made after the render cannot be a seed.
           def filter_chain(node)
             body = node.body

@@ -40,7 +40,7 @@ module Rigor
     # - An intervening mutator from {MutationWidening::SHAPE_MUTATORS} runs against the receiver
     #   (e.g. `params.delete(:f)`, `params.clear`, `params.default = 0`, `buf.delete_prefix!("x")`).
     #
-    # All three are implemented in `StatementEvaluator#eval_call`'s post-dispatch path through
+    # The last two are implemented in `StatementEvaluator#eval_call`'s post-dispatch path through
     # {.invalidate_after_call}.
     module IndexedNarrowing
       # Literal Prism nodes whose Ruby value the analyzer trusts as a stable address. Symbol /

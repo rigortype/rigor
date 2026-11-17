@@ -850,7 +850,7 @@ module Rigor
         # that holds a type ({TYPE_CHILDREN}). Members equal after {erase_facets} merge into the erased form, at the
         # first one's position; a member no other matches keeps its facet, and {absorb_contained_members} compares
         # the erased forms too. The facet scan runs on every join and allocates nothing (no enumerator, no array),
-        # so the merge costs only where a facet is present, which is nowhere until ADR-130 slice 1b.
+        # so the merge costs only where a facet is present.
         def merge_erased_members(members)
           return members if members.size < 2
           return members unless members.any? { |member| facet_bearing?(member) }

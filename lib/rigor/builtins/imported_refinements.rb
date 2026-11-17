@@ -18,8 +18,8 @@ module Rigor
     # - The `rigor:v1:return:` RBS::Extended directive
     #   ([`Rigor::RbsExtended.read_return_type_override`](../rbs_extended.rb)), which overrides
     #   a method's RBS-declared return type with a refinement carrier.
-    # - Future `RBS::Extended` directives that accept a refinement name in any type position
-    #   (`param:`, `assert: x is non-empty-string`, …).
+    # - The other `RBS::Extended` directives that accept a refinement name in a type position
+    #   (`param:`, `assert: x is non-empty-string`, …), which parse through `parse(payload)`.
     # - The display side: `Type::Difference#describe` already recognises the same shapes and
     #   prints the kebab-case spelling without consulting the registry.
     #
@@ -494,8 +494,8 @@ module Rigor
         end
 
         # Returns a {TypeNode::RangeLiteral} when the scanner sits on a Ruby range literal, `nil`
-        # (without consuming input) otherwise. `nil` and an absent endpoint both become Ruby's
-        # `nil` endpoint; the two spellings denote the same range.
+        # otherwise (a bare `..` with no endpoint is consumed, then rejected). `nil` and an absent
+        # endpoint both become Ruby's `nil` endpoint; the two spellings denote the same range.
         def scan_range_literal
           return nil unless @scanner.scan(RANGE_LITERAL)
 
@@ -562,7 +562,7 @@ module Rigor
         end
 
         # ADR-13 follow-up — every leaf-literal AST node (`IntegerLiteral` / `SymbolLiteral` /
-        # `StringLiteral`) carries a Ruby value that lifts directly to a `Constant<value>`
+        # `StringLiteral` / `RangeLiteral`) carries a Ruby value that lifts directly to a `Constant<value>`
         # carrier through the same helper.
         LITERAL_AST_NODES = [
           TypeNode::IntegerLiteral, TypeNode::SymbolLiteral, TypeNode::StringLiteral, TypeNode::RangeLiteral

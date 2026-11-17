@@ -156,13 +156,6 @@ module Rigor
       # whose canonical id starts with `<family>.`. Per ADR-8 § "1".
       RULE_FAMILIES = %w[call flow assert dump def global suppression static effect].freeze
 
-      # Families of diagnostics the engine emits OUTSIDE the CheckRules catalogue (aggregator-level and
-      # reporter-level diagnostics such as `rbs_extended.unsatisfied-conformance`,
-      # `dynamic.dependency-source.*`, `rbs.coverage.*`, `pre-eval.parse-error`), plus the `plugin.` prefix
-      # reserved for plugin-produced identifiers. `suppression.unknown-rule` treats a dotted token whose
-      # first segment appears here as KNOWN and stays silent: these ids are legitimate suppression /
-      # `severity_overrides:` vocabulary the light rule-id table cannot enumerate (plugins load dynamically;
-      # aggregator ids live in the engine-heavy runner), so under-warning is the FP-safe direction.
       # The `pre-eval.*` ids (ADR-17 WD6) the bare family wildcard `pre-eval` expands to. Emitted by the
       # `pre_eval:` pre-pass, outside the CheckRules catalogue, so the family cannot ride `RULE_FAMILIES`
       # (which also drives the catalogue and the config audit over `ALL_RULES`).
@@ -170,6 +163,13 @@ module Rigor
         pre-eval.parse-error pre-eval.file-not-found pre-eval.duplicate-declaration
       ].freeze
 
+      # Families of diagnostics the engine emits OUTSIDE the CheckRules catalogue (aggregator-level and
+      # reporter-level diagnostics such as `rbs_extended.unsatisfied-conformance`,
+      # `dynamic.dependency-source.*`, `rbs.coverage.*`, `pre-eval.parse-error`), plus the `plugin.` prefix
+      # reserved for plugin-produced identifiers. `suppression.unknown-rule` treats a dotted token whose
+      # first segment appears here as KNOWN and stays silent: these ids are legitimate suppression /
+      # `severity_overrides:` vocabulary the light rule-id table cannot enumerate (plugins load dynamically;
+      # aggregator ids live in the engine-heavy runner), so under-warning is the FP-safe direction.
       NON_CHECK_DIAGNOSTIC_FAMILIES = %w[rbs_extended dynamic rbs pre-eval plugin plugin_trust].freeze
 
       # Bare (dot-less) diagnostic ids the engine emits outside the catalogue (see the `rule:` literals in

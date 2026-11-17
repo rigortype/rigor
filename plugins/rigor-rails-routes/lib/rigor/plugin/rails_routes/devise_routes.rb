@@ -17,12 +17,11 @@ module Rigor
       # Scope:
       #
       # - Recognises the standard controllers (`:sessions`, `:passwords`, `:confirmations`, `:unlocks`,
-      #   `:registrations`, `:omniauth_callbacks`).
+      #   `:registrations`); `:omniauth_callbacks` contributes only the two scoped arity-2 helpers.
       # - Honours `skip: [...]` to suppress controllers the project disables.
-      # - Honours `path: "..."` to remap the URL path (does NOT remap the helper-name prefix — Devise uses
-      #   the resource name for the helper, not the path).
-      # - Does NOT yet honour `as: "..."` overrides, `class_name:`, `controllers: { ... }` (these are rare;
-      #   expand on demand).
+      # - Does NOT honour `path: "..."` (it remaps only the URL path; Devise names the helpers after the
+      #   resource, so the helper set is unaffected and the entry's `path` is informational), `as: "..."`
+      #   overrides, `class_name:` or `controllers: { ... }` (these are rare; expand on demand).
       # - `omniauth_callbacks` helpers are dynamic — the provider name is supplied at call time
       #   (`user_facebook_omniauth_authorize_path`) and Devise declares them from the configured providers,
       #   which live in an initializer this static parser does not read. The suffix patterns are registered

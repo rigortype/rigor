@@ -18,12 +18,14 @@ module Rigor
       # - `plugin.rails-i18n.missing-locale` (warning) when the key resolves in some configured locales but
       #   is absent from at least one. Suppressed when the call passes `default:` (the user has signalled
       #   they're aware of the partial coverage).
-      # - `plugin.rails-i18n.wrong-interpolation` (error) when the call's interpolation hash uses keys that
-      #   don't match the value's `%{var}` placeholders, or omits a required placeholder.
+      # - `plugin.rails-i18n.wrong-interpolation` (error) when the call omits a `%{var}` placeholder the
+      #   value requires.
+      # - `plugin.rails-i18n.extra-interpolation` (warning) when the call passes a non-reserved keyword the
+      #   value has no placeholder for.
       module Analyzer
         TRANSLATE_METHODS = %i[t translate].freeze
 
-        # Methods that are always I18n receivers (`I18n.t`, `::I18n.t`).
+        # Constant receivers that always mean I18n (`I18n.t`, `::I18n.t`).
         I18N_RECEIVER_NAMES = %w[I18n ::I18n].freeze
 
         # Matches controller file paths so lazy keys (`.key`) can be expanded to

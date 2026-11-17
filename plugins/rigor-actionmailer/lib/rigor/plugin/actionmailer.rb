@@ -33,7 +33,7 @@ module Rigor
     #    `app/views/<mailer_underscore>/<action>.{html,text}.{erb,haml,slim}` must exist. Missing
     #    actions get a `missing-view` diagnostic anchored on the action's `def`.
     #
-    # ## Limitations (v0.1.0)
+    # ## Limitations
     #
     # - Direct-superclass match only.
     # - Action methods are read from the syntactic instance-side `def` list. `define_method` actions are

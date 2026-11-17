@@ -30,7 +30,7 @@ module Rigor
       class DeadAssignmentCollector
         # ADR-53 Track B — the node classes the shared {RuleWalk} dispatches to this collector. The legacy
         # walk visits EVERY `DefNode` (it descends into all of them, nested defs included, processing each
-        # separately — `gather_*` barrier at nested defs so an outer def never sees an inner def's locals),
+        # separately — `gather_write_nodes` stops at nested defs so an outer def never reports an inner def's writes),
         # so the collector needs no context gate: it fires at every `def` the shared full DFS reaches,
         # exactly like the legacy walk.
         NODE_CLASSES = [Prism::DefNode].freeze

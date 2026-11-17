@@ -262,7 +262,7 @@ module Rigor
           # The view-side reading of a render target, which differs from the controller's in exactly one
           # place: a bare positional name is a PARTIAL here. `template:` is the escape hatch an author uses
           # when they mean otherwise, and `layout:` in a view names a partial too — the same reading
-          # {Effects::CalleeRule.rails_render_partial} takes, for the same reason.
+          # {Rigor::Effects::CalleeRule.rails_render_partial} takes, for the same reason.
           def template_target(call, directory)
             explicit = string_option(call, "template")
             return qualify(explicit, directory) if explicit

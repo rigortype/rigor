@@ -4,7 +4,7 @@ module Rigor
   class Environment
     # Frozen read-only RBS query facade.
     # [ADR-15](../../../docs/adr/15-ractor-concurrency.md) Phase 2b extracts the read-only surface of
-    # {RbsLoader} into this carrier so future Ractor-isolated workers can share one Reflection across the
+    # {RbsLoader} into this carrier so Ractor-isolated workers can share one Reflection across the
     # pool while keeping the per-Ractor mutable accelerator state (per-process memo Hashes) where it belongs.
     #
     # Backing tables (all frozen at construction):

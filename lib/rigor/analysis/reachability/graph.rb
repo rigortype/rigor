@@ -241,7 +241,7 @@ module Rigor
         Undecidable = Data.define(:fqn, :path, :line, :reason)
 
         # @param root_fqns — declarations that are entry points regardless of who references
-        #   them (config-declared globs in this slice; plugin-supplied roots are #349).
+        #   them (the config-declared entry-point globs, plus the roots plugins publish: {PluginRoots}, #349).
         # @param foreign — predicate answering "is this FQN owned by something outside the project?" —
         #   a reopened gem or stdlib class must never be a candidate (WD6). Defaults to "nothing is foreign".
         # @param dynamic_uses — sites where a constant is reached by name at runtime.
@@ -281,8 +281,7 @@ module Rigor
           # production for the same reason an unreached one is not dead (#1732).
           live_namespaces = namespace_only(test_only, production)
           test_only -= live_namespaces
-          # The data-file demotion applies to BOTH buckets it can speak to, which is what the tier
-          # contract says and what the implementation had narrowed (#370). See {#tainted}.
+          # The data-file demotion applies to BOTH buckets it can speak to (#370). See {#tainted}.
           undecidable = tainted(unreached).merge(tainted(test_only))
           undecidable = spread_undecidable(edges, undecidable, unreached | test_only,
                                            through: namespaces | live_namespaces)

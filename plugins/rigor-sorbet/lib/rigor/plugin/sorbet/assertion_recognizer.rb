@@ -47,8 +47,8 @@ module Rigor
       # static return type is `Constant[nil]`.
       module AssertionRecognizer
         # Method names this recogniser claims as Sorbet assertions. The plugin checks call sites against
-        # this set before any catalog lookup so a `T.let` call inside an analysed file always resolves
-        # through this module.
+        # this set before any catalog lookup so a `T.let` call inside an enforced file (see the plugin's
+        # sigil gate) resolves through this module.
         SORBET_ASSERTIONS = %i[let cast must must_because unsafe reveal_type assert_type! bind].freeze
 
         module_function

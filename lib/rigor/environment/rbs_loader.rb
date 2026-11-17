@@ -1878,13 +1878,8 @@ module Rigor
         @cache_store = cache_store
         @virtual_rbs = virtual_rbs.map { |name, content| [name.to_s.dup.freeze, content.to_s.dup.freeze].freeze }.freeze
         # Per-loader memoization bucket. Held as a single mutable Hash so the loader instance itself can be
-        # `.freeze`d (per ADR-15 reflection-facade contract) without losing the lazy-memo behaviour. Slot
-        # names currently consulted: `:env`, `:env_loaded`, `:env_build_warned`, `:definition_build_warned`,
-        # `:definition_build_details`, `:definition_build_reported`, `:definition_build_failures`,
-        # `:definition_build_deferred_count`, `:definition_build_deferred_first`,
-        # `:definition_build_summary_warned`, `:member_consistency`, `:member_consistency_proven`, `:internal_demand`,
-        # `:internal_demand_status`, `:builder`, `:reflection`,
-        # `:instance_definitions_table`, `:singleton_definitions_table`.
+        # `.freeze`d (per ADR-15 reflection-facade contract) without losing the lazy-memo behaviour. Slots are
+        # created on first use by the `@state[:name]` readers below, so there is no fixed list.
         # Constructed via `Hash.new` (NOT a `{ ... }` literal) so Rigor's `HashShape` narrowing doesn't
         # infer a fixed key set from the initial state and fold post-initial slot reads (e.g.
         # `@state[:env_loaded]`) to a constant `nil`.
@@ -2070,13 +2065,6 @@ module Rigor
         @state[:ruby_library_roots] ||= RubyLibraryRoots.shared
       end
 
-      # Issue #2174 — the subset of `signature_paths:` the user configured (every entry is also in
-      # `@signature_paths`), and the features the project's source requires: read only by
-      # {#ruby_library_reopen?}.
-      # Issue #610 — the subset of `signature_paths:` a bundled PLUGIN contributed. Loaded last and allowed to stand
-      # down against a colliding generic arity ({.add_deferred_signatures}). Issue #2978 — and the subset that stands
-      # down member by member to the rest. Every entry of either is also in `@signature_paths`, so the env cache
-      # descriptor already digests these files.
       # Issue #3030 — every `.rbs` file this loader reads from its `signature_paths:`, the `_`-prefixed directories of
       # its `rbs collection` gem directories left out ({.project_sig_files}).
       def signature_files
@@ -2084,11 +2072,18 @@ module Rigor
       end
       private :signature_files
 
+      # Issue #610 — the subset of `signature_paths:` a bundled PLUGIN contributed. Loaded last and allowed to stand
+      # down against a colliding generic arity ({.add_deferred_signatures}). Issue #2978 — and the subset that stands
+      # down member by member to the rest. Every entry of either is also in `@signature_paths`, so the env cache
+      # descriptor already digests these files.
       def assign_partition(deferred_signature_paths, subordinate_signature_paths)
         @deferred_signature_paths = deferred_signature_paths.map { |p| Pathname(p) }.freeze
         @subordinate_signature_paths = subordinate_signature_paths.map { |p| Pathname(p) }.freeze
       end
 
+      # Issue #2174 — the subset of `signature_paths:` the user configured (every entry is also in
+      # `@signature_paths`), and the features the project's source requires: read only by
+      # {#ruby_library_reopen?}.
       def assign_reopen_inputs(project_signature_paths, required_features)
         @project_signature_paths = project_signature_paths.map { |p| Pathname(p) }.freeze
         @required_features = required_features.map { |feature| feature.to_s.dup.freeze }.freeze
@@ -3243,7 +3238,7 @@ module Rigor
       # The Reflection consumes the loader's already-warmed cache producers (or, when no `cache_store` is
       # set, eagerly walks the env). Once constructed, the Reflection carries the derived tables
       # independently and never re-consults the loader — making it safe to share across Ractors while the
-      # loader stays per- process / per-Ractor for write-path operations.
+      # loader stays per-process / per-Ractor for write-path operations.
       def reflection
         @state[:reflection] ||= begin
           require_relative "reflection"

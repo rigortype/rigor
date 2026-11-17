@@ -212,10 +212,8 @@ module Rigor
         end
 
         # ADR-15 Phase 4b — routes per-file analysis to either the sequential coordinator-side Environment
-        # (legacy path, default) or a Ractor worker pool built around {WorkerSession} (opt-in via
-        # `workers:`). The sequential path is bit-for-bit unchanged from v0.1.4 / earlier; the pool path is
-        # the substrate exercised by phase 4c when `RIGOR_RACTOR_WORKERS` / `.rigor.yml`
-        # `parallel.workers:` is wired.
+        # (default) or a worker pool built around {WorkerSession} (opt-in via `workers:`, which
+        # `RIGOR_RACTOR_WORKERS` / `.rigor.yml` `parallel.workers:` set; the backend is {#pool_backend}'s).
         #
         # Sequential mode also snapshots `class_decl_paths` from the local environment after the per-file
         # loop completes so `RunStats` can attribute the RBS class universe between project-sig and bundled
@@ -608,8 +606,8 @@ module Rigor
         #   run-level facts and disclosures) for end-of-pool merge.
         #
         # The Ruby 4.0+ Ractor model uses a single per-Ractor mailbox (no `Ractor.yield`); workers push
-        # back via `Ractor.main.send`. The coordinator drains its mailbox via `Ractor.receive` until it has
-        # counted exactly `pool.size` `:done` messages.
+        # back via `Ractor.main.send`. The coordinator drains its mailbox via `Ractor.receive` until every
+        # worker has terminated (see the monitor loop below).
         #
         # Diagnostic order: original path order. Workers may complete files out of order; the coordinator
         # re-orders via the `results_by_path` Hash before flattening.
@@ -830,8 +828,8 @@ module Rigor
 
         # ADR-15 Amendment (2026-05-20) — fork-based worker pool, the active backend for `workers > 0`.
         # Builds ONE {WorkerSession} on the parent, then `fork`s N children that copy-on-write inherit it.
-        # Each child analyses a contiguous slice of `files` and writes a Marshal'd `{results:, reporters:}`
-        # payload to a temp file; the parent `Process.wait`s every child, merges the payloads, and re-orders
+        # Each child analyses a contiguous slice of `files` and writes a Marshal'd {WorkerPayload}
+        # to a temp file; the parent `Process.wait`s every child, merges the payloads, and re-orders
         # diagnostics by original path order.
         #
         # Separate processes have separate GC heaps and `vm->ci_table` (immune to Ruby Bug #22075) and

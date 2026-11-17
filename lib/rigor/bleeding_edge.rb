@@ -25,8 +25,9 @@ module Rigor
   # identically on the miss path and the warm-hit path, so a warm HIT re-resolves under the
   # current selector. A behaviour feature that altered analysis results themselves would poison
   # warm caches across selector changes, because the selector is not part of the cache key. The
-  # two queued consumers (#253, #254) change what a separate command measures, not what `check`
-  # analyses, so neither is affected.
+  # two mutation-measurement consumers (#253, #254) change what a separate command measures, not
+  # what `check` analyses, so neither is affected; `effects-on-by-default` spells out its own
+  # argument at its entry.
   #
   # Each feature carries a **stable feature id** — part of the ADR-50 WD1 contract
   # vocabulary: the config, the `show` command, and the eventual CHANGELOG migration note all

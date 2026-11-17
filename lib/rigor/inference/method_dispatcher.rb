@@ -51,7 +51,7 @@ module Rigor
     #
     # Given `(receiver_type, method_name, arg_types, block_type, environment)`, the dispatcher
     # returns the inferred result type or `nil` when no rule matches. `nil` is a deliberately
-    # blunt "I don't know" signal: callers (today only `ExpressionTyper`) own the fail-soft
+    # blunt "I don't know" signal: callers (`ExpressionTyper`, `StatementEvaluator`, `GuardRebinding`) own the fail-soft
     # fallback and decide whether to record a `FallbackTracer` event.
     #
     # Tier order is documented inline in `resolve`; the precise-tier group is built from
@@ -870,7 +870,7 @@ module Rigor
       EMPTY_CONTRIBUTIONS = [].freeze
       private_constant :EMPTY_CONTRIBUTIONS
 
-      # Collects every plugin's flow / dynamic-return contribution for one call site. Two
+      # Collects every plugin's flow / dynamic-return contribution for one call site. Three
       # prunings keep this off the hot path on plugin-heavy projects (it was the #1 allocation
       # site and a top CPU cost):
       #
@@ -920,8 +920,7 @@ module Rigor
 
       # Runs the precision tiers in order and returns the first non-nil answer. Each tier owns its own receiver/argument
       # shape checks; a tier that does not recognise the receiver returns nil so the next tier
-      # can try. The RBS tier sits below this chain and is invoked by the outer `dispatch`
-      # method.
+      # can try. The RBS tier sits below this chain and is invoked by `resolve`.
       #
       # The precise-tier folders, consulted in order via the uniform `_DispatchTier` interface
       # (`try_dispatch(CallContext) -> Type?`). Order is significant: ConstantFolding's
@@ -939,9 +938,9 @@ module Rigor
       # singleton folders are mutually exclusive — each fires only on `Singleton[<its
       # class>]`, the first check in every `try_dispatch` — so at most one can match a given
       # receiver and their relative trial order was never observable. Compiling them into a
-      # class-name table turns nine no-op trials per call into one Hash read, skipped entirely
+      # class-name table turns a no-op trial per folder into one Hash read, skipped entirely
       # when the receiver is not a `Singleton` (the overwhelmingly common case). The table sits
-      # where the original eight sat in the old flat list: after ShapeDispatch, before KernelDispatch.
+      # after ShapeDispatch, before KernelDispatch.
       STDLIB_SINGLETON_FOLDERS = Ractor.make_shareable({
         "File" => FileFolding,
         "Shellwords" => ShellwordsFolding,
@@ -1343,7 +1342,7 @@ module Rigor
       # dispatch uses to resolve `self.class.some_class_method`. The same logic answers
       # `Foo.class` as `Singleton[Class]` (deliberate; calling `.class` on a class object yields
       # `Class`, the metaclass). We also special-case `is_a?`-adjacent calls and the trivial
-      # `instance_of?(self)` later as the rule catalogue grows; for now only `class` is handled.
+      # `instance_of?(self)` later as the rule catalogue grows; today `class` and `new` are handled.
       def try_meta_introspection(receiver_type, method_name, arg_types = [], context = nil)
         case method_name
         when :class then meta_class(receiver_type, context&.environment)

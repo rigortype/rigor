@@ -5,13 +5,13 @@ require "prism"
 module Rigor
   module Plugin
     class ShouldaMatchers < Rigor::Plugin::Base
-      # Walks every `RSpec.describe <ModelConst> do ... end` / `describe <ModelConst> do ... end` block and
-      # validates the shoulda-matchers calls inside its body (any depth of nested `describe` / `context`)
-      # against the `:model_index` published by `rigor-activerecord`.
+      # Validates the shoulda-matchers calls inside an `RSpec.describe <ModelConst> do ... end` /
+      # `describe <ModelConst> do ... end` block (any depth of nested `describe` / `context`) against the
+      # `:model_index` published by `rigor-activerecord`.
       #
-      # The "anchor" for cross-checking is the OUTERMOST describe block whose argument is a constant —
-      # that constant names the model being specced. Nested `describe ".some_method"` (String / Symbol
-      # args) does NOT change the anchor.
+      # The "anchor" for cross-checking is the INNERMOST enclosing describe block whose argument is a
+      # constant — that constant names the model being specced. Nested `describe ".some_method"` (String /
+      # Symbol args) does NOT change the anchor; a nested describe on another constant does.
       #
       # ## Recognised matcher calls (v0.1.0)
       #

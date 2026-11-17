@@ -43,8 +43,9 @@ module Rigor
     # any), and emits one {MethodCandidate} per def.
     #
     # The scope, as it stands after the slices that widened the MVP:
-    # - Instance and singleton methods inside a nameable `class` / `module` body are considered. Top-level /
-    #   DSL-block defs have no nameable receiver and are not candidates.
+    # - Instance and singleton methods inside a nameable `class` / `module` body are considered. A top-level `def`
+    #   has no class to declare under and is only reported (`sig.skipped.top-level-def`, #1676); a DSL-block `def`
+    #   has no nameable receiver and is not a candidate.
     # - Parameter types are `untyped` per ADR-14 § "Robustness principle compliance" clause 2 unless
     #   `--params=observed` supplies call-site observations; the parameter LIST always mirrors the def's runtime
     #   shape (required / optional / rest / trailing / keyword / keyword-rest / forwarding / block). Issue #778

@@ -60,7 +60,7 @@ module Rigor
       private
 
       # A malformed key cannot arrive from `Configuration` (tier 2 rejects it), but this class is also
-      # constructed straight from a Hash in specs and by a future plugin channel (#387), so an
+      # constructed straight from a Hash in specs (plugin rows go through {PluginFacts}, #387), so an
       # unparseable key is dropped rather than raised on: attribution is an enrichment, and a bad row
       # must not take a run down.
       def build_rows(table)

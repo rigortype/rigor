@@ -1968,9 +1968,9 @@ module Rigor
         runner.synthetic_method_index&.surface_digest
       end
 
-      # The answer {#recheck} gives when {#served_effects_stale?}: a full baseline, reported as a recheck that
-      # re-analysed every file. {#run_incremental} reads `rebaselined` so it neither runs a second baseline
-      # nor reports the run as warm.
+      # The answer {#recheck} gives when {#discovery_moved?}, {#served_effects_stale?} or {#synthetic_surface_moved?}:
+      # a full baseline, reported as a recheck that re-analysed every file. {#run_incremental} reads `rebaselined` so it
+      # neither runs a second baseline nor reports the run as warm.
       def rebaseline_recheck(changed, added, removed)
         diagnostics = baseline
         recheck_result(diagnostics, [changed, added, removed],

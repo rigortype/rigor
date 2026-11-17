@@ -26,14 +26,14 @@ module Rigor
     #           job_base_classes: ["ApplicationJob", "ActiveJob::Base"]  # default; optional
     #           recurring_paths: ["config/recurring.yml"]        # default; optional
     #
-    # ## Limitations (v0.1.0)
+    # ## Limitations
     #
     # - Direct-superclass match only. `class WelcomeJob < BaseJob` where `BaseJob < ApplicationJob` is
     #   NOT discovered. Add `BaseJob` to `job_base_classes` if needed.
     # - The `#perform` arity is read from the syntactic parameter list. Methods built via
     #   `define_method` are out of scope.
     # - Required keyword arguments are recognised but not validated at the call site (positional arity
-    #   only for v0.1.0).
+    #   only).
     class Activejob < Rigor::Plugin::Base
       manifest(
         id: "activejob",

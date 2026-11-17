@@ -212,16 +212,6 @@ module Rigor
         @entries.transform_values(&:source)
       end
 
-      # The index's cache identity: every unit's digest (source bytes + transform id + synthesis version)
-      # keyed by path, plus every FAILURE keyed by path, hashed once. nil only when the run's plugins
-      # claimed no globs at all, so a project with no template-unit plugin perturbs no cache key.
-      #
-      # The failures are in it because a run that produced only failures still produced an ANSWER — one
-      # `plugin_loader` row per file — and without them that run's key equalled the no-templates key. A
-      # later run whose template now compiles, or whose template is gone, reconstructed the same key, and
-      # the ADR-87 boot-slim probe (which loads no plugin, so its slot is always absent) served the stale
-      # rows. The slot now exists whenever any plugin claimed a glob, which is exactly the condition under
-      # which the probe's key is knowingly unreconstructable.
       def build_declined_unit_keys
         declined = @stats.keys - @entries.keys
         return NO_DECLINED_KEYS if declined.empty?
@@ -258,6 +248,16 @@ module Rigor
       end
       private :strip_handler
 
+      # The index's cache identity: every unit's digest (source bytes + transform id + synthesis version)
+      # keyed by path, plus every FAILURE keyed by path, hashed once. nil only when the run's plugins
+      # claimed no globs at all, so a project with no template-unit plugin perturbs no cache key.
+      #
+      # The failures are in it because a run that produced only failures still produced an ANSWER — one
+      # `plugin_loader` row per file — and without them that run's key equalled the no-templates key. A
+      # later run whose template now compiles, or whose template is gone, reconstructed the same key, and
+      # the ADR-87 boot-slim probe (which loads no plugin, so its slot is always absent) served the stale
+      # rows. The slot now exists whenever any plugin claimed a glob, which is exactly the condition under
+      # which the probe's key is knowingly unreconstructable.
       def digest
         return nil if @claimed_globs.empty?
 

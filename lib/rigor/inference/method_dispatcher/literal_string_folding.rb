@@ -22,12 +22,14 @@ module Rigor
       # Result rule:
       #
       # - `+`, `<<`, `concat`: receiver and argument MUST both be
-      #   `Type::Combinator.literal_string_compatible?`. The result is `literal-string`. `<<` and `concat`
+      #   `Type::Combinator.literal_string_compatible?`. The result is `literal-string`, or
+      #   `non-empty-literal-string` when either side is provably non-empty. `<<` and `concat`
       #   mutate the receiver at runtime; the analyzer does not track that mutation against the local's
       #   binding, but the call's *return value* is the receiver itself, and the receiver stays
       #   literal-bearing because every appended slice was literal-bearing too.
       # - `*`: receiver MUST be literal-bearing; argument MUST be integer-typed. The result is
-      #   `literal-string`.
+      #   `literal-string` (`non-empty-literal-string` for a non-empty receiver and a positive count,
+      #   `Constant[""]` for a zero count; a negative count declines).
       # - `join`: receiver MUST be `Tuple[…]` with every element literal-string-compatible; the optional
       #   separator argument MUST also be literal-string-compatible. Result: `literal-string`. Empty
       #   `Tuple[]` lifts too — `[].join` is the empty string at runtime, which is literal-bearing

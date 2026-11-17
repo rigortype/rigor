@@ -133,10 +133,10 @@ module Rigor
 
       # The per-collector diagnostic builders {.diagnose} folds over, in the historical emission order
       # (value-use-void → always-truthy → unreachable-clause → shadowed-rescue → ivar-write →
-      # dead-assignment → duplicate-hash-key → return-in-ensure). Keys match {.build_node_collectors}'
-      # roles; each value is a `(path, results)` module_function on this module. `void_value_use` leads
-      # because its standalone walk used to run before this fold, and the emission order is byte-identical
-      # output, not an implementation detail.
+      # dead-assignment → duplicate-hash-key → return-in-ensure → plugin-api-surface). Keys match
+      # {.build_node_collectors}' roles; each value is a `(path, results)` module_function on this module.
+      # `void_value_use` leads because its standalone walk used to run before this fold, and the emission order is
+      # byte-identical output, not an implementation detail.
       COLLECTOR_DIAGNOSTIC_BUILDERS = {
         void_value_use: :void_value_use_diagnostics,
         always_truthy: :always_truthy_condition_diagnostics,
@@ -233,7 +233,7 @@ module Rigor
       end
 
       # ADR-53 Track B — the {RuleWalk}-hosted built-in collectors (the main
-      # pass and the four fact collectors) all ride one traversal of the
+      # pass and the fact collectors) all ride one traversal of the
       # file instead of one walk each. Returns the populated collectors
       # keyed by role so the caller can build the diagnostics from each
       # collector's `results`. Used on the standalone path (no converged
@@ -424,10 +424,10 @@ module Rigor
         end
       end
 
-      # ADR-47 — `flow.unreachable-clause`. One diagnostic per `when` clause
+      # ADR-47 — `flow.unreachable-clause`. One diagnostic per `when` / `in` clause
       # the flow engine's narrowing proves can never match (its narrowed
-      # subject is `bot`). The squiggle lands on the dead clause's body,
-      # mirroring `flow.unreachable-branch`.
+      # subject is `bot`), and per `else` it proves never runs. The squiggle lands
+      # on the dead clause's body, mirroring `flow.unreachable-branch`.
       def unreachable_clause_diagnostics(path, results)
         results.map do |result|
           build_unreachable_clause_diagnostic(path, result)
@@ -869,13 +869,8 @@ module Rigor
                                                       call_node.receiver)
 
           definition_site = project_definition_site(scope, class_name, call_node.name, kind)
-          # Issue #735 — the site is evidence, and whose RBS this is decides what it is evidence OF. On a
-          # BUNDLED declaration (core / stdlib / a gem) the class is not the project's, so a project `def`
-          # on it is the ADR-17 monkey-patch this rule surfaces with the `pre_eval:` nudge. On the
-          # project's OWN sidecar `sig/` the declaration describes the source being analysed, the "patch"
-          # is just another of the project's files, and the nudge is not something a user can act on: it
-          # asks them to `pre_eval:` their own application. `rigor sig-gen --write` on redmine turned 29
-          # `call.undefined-method` into 171 through exactly this reading, 49 of them here.
+          # Issue #735 — a project `def` on a class the project's own sidecar `sig/` declares is not an ADR-17
+          # monkey-patch; see {#project_sidecar_owns_method?}.
           return nil if project_sidecar_owns_method?(scope, class_name, call_node.name, kind)
 
           build_undefined_method_diagnostic(path, call_node, rendered_receiver, definition_site, class_name)
@@ -997,8 +992,9 @@ module Rigor
         #   with `module_function` / `def self.` has a real, enumerable surface and keeps firing.
         # - Issue #723 — the project's own ancestry. Everything above answered "the RBS does not have
         #   it"; a project ancestor still might, and the typer has already resolved the site through
-        #   exactly this walk. It is last because it is the only probe here that walks the class graph
-        #   (see {#ancestry_declares_method?} for why that placement is load-bearing, not tidiness).
+        #   exactly this walk. It sits late because it walks the class graph and so records an ADR-46 ancestry
+        #   edge (see {#ancestry_declares_method?} for why that placement is load-bearing, not tidiness).
+        # - The other probes are described at their own definitions.
         def last_resort_surface_answers?(receiver_type, class_name, call_node, scope, kind, lexical_sites = nil)
           return true if lexically_defined_method?(class_name, call_node, scope, kind, lexical_sites)
           return true if project_patched_through_ancestors?(scope, class_name, call_node.name, kind,
@@ -1795,10 +1791,6 @@ module Rigor
         CORE_OVERLAY_OPEN_RECEIVERS = Set["OpenStruct"].freeze
         private_constant :CORE_OVERLAY_OPEN_RECEIVERS
 
-        # ADR-26 — whether `class_name` is declared "open" by a
-        # loaded plugin (manifest `open_receivers:`). An open
-        # class responds beyond its RBS surface, so the
-        # `call.undefined-method` rule must not fire for it.
         # True when the receiver class responds beyond an enumerable
         # RBS method table, so proving a call "undefined" against it is
         # unsound: a plugin-declared open receiver, a Rigor-bundled-
@@ -1919,6 +1911,8 @@ module Rigor
           loader.ruby_library_reopen?(class_name)
         end
 
+        # ADR-26 — whether a loaded plugin declares `class_name` "open" (manifest `open_receivers:`): it responds
+        # beyond its RBS surface.
         def open_receiver?(class_name, scope)
           registry = scope.environment&.plugin_registry
           return false if registry.nil?
@@ -2670,7 +2664,7 @@ module Rigor
           return true if lookup_method(member, class_name, method_name, scope)
           return true if project_patched_through_ancestors?(scope, class_name, method_name, :instance)
 
-          # Issue #723 — the arm's own RBS does not have it; its project ancestry still might. Last, for
+          # Issue #723 — the arm's own RBS does not have it; its project ancestry still might. Late, for
           # the reason {#ancestry_declares_method?} carries: this is the probe that walks the class graph.
           return true if ancestry_declares_method?(scope, class_name, method_name, :instance)
 
@@ -3407,9 +3401,6 @@ module Rigor
           build_unreachable_branch_diagnostic(path, dead_branch, polarity)
         end
 
-        # Returns `:truthy` / `:falsey` for a syntactically-literal predicate, or nil for anything else.
-        # `TrueNode`, `FalseNode`, `NilNode` are the unambiguous cases. Numeric / string / symbol literals
-        # are always truthy in Ruby (any non-`false` / non-`nil` value is truthy, including `0` and `""`).
         TRUTHY_LITERAL_NODES = [
           Prism::TrueNode, Prism::IntegerNode, Prism::FloatNode,
           Prism::StringNode, Prism::SymbolNode, Prism::RegularExpressionNode
@@ -3419,6 +3410,9 @@ module Rigor
         FALSEY_LITERAL_NODES = [Prism::FalseNode, Prism::NilNode].freeze
         private_constant :FALSEY_LITERAL_NODES
 
+        # Returns `:truthy` / `:falsey` for a syntactically-literal predicate, or nil for anything else.
+        # `TrueNode`, `FalseNode`, `NilNode` are the unambiguous cases. Numeric / string / symbol literals
+        # are always truthy in Ruby (any non-`false` / non-`nil` value is truthy, including `0` and `""`).
         def literal_predicate_polarity(predicate)
           return :truthy if TRUTHY_LITERAL_NODES.any? { |klass| predicate.is_a?(klass) }
           return :falsey if FALSEY_LITERAL_NODES.any? { |klass| predicate.is_a?(klass) }
@@ -4913,21 +4907,6 @@ module Rigor
           )
         end
 
-        # ADR-35 slice 2 — `def.override-return-widened`. The Liskov signature rule for returns
-        # (covariance): an override may *narrow* the return it inherits (return a more specific type) but
-        # MUST NOT *widen* it. A caller holding the supertype uses the result as the parent's return type;
-        # a wider override return breaks that use.
-        #
-        # WD1 gate (proper, type-direction): both the override and the shadowed ancestor method must carry
-        # an explicitly-authored RBS signature. The override side is gated by `defined_on?` (the RBS
-        # method is declared on the overriding class itself, not merely inherited); the parent side is the
-        # nearest project-discovered ancestor whose RBS declares the method. Inference-only either side →
-        # silent.
-        #
-        # Fires only on a proven (`:no`) widening; generic / `untyped` / `self` parent returns degrade to
-        # `Dynamic[Top]` and accept everything, so they stay silent (FP-safe). `self`/`instance` are
-        # translated with `self_type: nil` on both sides, so a parent `-> self` and an override `-> self`
-        # never fire.
         # The authored-override resolution shared by the Liskov override rules
         # (`def.override-return-widened` and `def.override-param-narrowed`): the def must be an instance
         # method whose own class declares it in RBS, and a project-discovered ancestor must also declare
@@ -4957,6 +4936,21 @@ module Rigor
           [scope, override_method, parent_class, parent_method]
         end
 
+        # ADR-35 slice 2 — `def.override-return-widened`. The Liskov signature rule for returns
+        # (covariance): an override may *narrow* the return it inherits (return a more specific type) but
+        # MUST NOT *widen* it. A caller holding the supertype uses the result as the parent's return type;
+        # a wider override return breaks that use.
+        #
+        # WD1 gate (proper, type-direction): both the override and the shadowed ancestor method must carry
+        # an explicitly-authored RBS signature. The override side is gated by `defined_on?` (the RBS
+        # method is declared on the overriding class itself, not merely inherited); the parent side is the
+        # nearest project-discovered ancestor whose RBS declares the method. Inference-only either side →
+        # silent.
+        #
+        # Fires only on a proven (`:no`) widening; generic / `untyped` / `self` parent returns degrade to
+        # `Dynamic[Top]` and accept everything, so they stay silent (FP-safe). `self`/`instance` are
+        # translated with `self_type: nil` on both sides, so a parent `-> self` and an override `-> self`
+        # never fire.
         def override_return_widened_diagnostic(path, def_node, scope_index)
           resolved = resolve_authored_override(def_node, scope_index)
           return nil if resolved.nil?

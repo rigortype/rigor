@@ -252,7 +252,7 @@ module Rigor
     # reopens an RBS module without restating its `include`s makes it a project entry whose chain lists only
     # the edges the project writes, so its ancestry is read less what that chain lists. The ancestry comes from
     # the declarations (`RbsLoader#declared_ancestry`), so a definition that fails to build still yields what
-    # it declares. Where it cannot be read whole, {.ancestry_unknown?} keeps the later RBS-only mixins out
+    # it declares. Where it cannot be read whole, {.ancestry_unknown_before?} keeps the later RBS-only mixins out
     # instead of stopping here.
     def mixin_ancestry_stop?(owner, scope, external)
       loader = rbs_loader_for(scope, nil)

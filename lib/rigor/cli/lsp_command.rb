@@ -295,7 +295,7 @@ module Rigor
         project_context = LanguageServer::ProjectContext.new(
           configuration: configuration, configuration_loader: -> { Configuration.load(config_path) }
         )
-        # Single source of truth for buffer state — threaded to Server + all three providers.
+        # Single source of truth for buffer state — threaded to Server + every provider.
         buffer_table = LanguageServer::BufferTable.new
         debouncer = LanguageServer::Debouncer.new
         publisher = LanguageServer::DiagnosticPublisher.new(

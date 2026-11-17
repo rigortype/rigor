@@ -136,9 +136,10 @@ module Rigor
       end
 
       # The match contract stays narrow: `Singleton[X]` receivers (class-level DSL calls) for every
-      # entry, plus `Nominal[Y]` receivers only for entries whose declared `self_type` binds an
-      # instance — the `requires do ... requires do ... end` nesting shape inside a Grape `params`
-      # body, where `self` is already the ParamsScope instance the call evaluates on.
+      # entry, plus `Nominal[Y]` receivers only for entries whose declared `self_type` names an
+      # instance class, or that are `:lexical` ({#entry_matches?}) — the `requires do ... requires do ... end`
+      # nesting shape inside a Grape `params` body, where `self` is already the ParamsScope instance the call
+      # evaluates on.
       def singleton_receiver_class_name(receiver_type)
         return nil unless receiver_type.is_a?(Type::Singleton)
 

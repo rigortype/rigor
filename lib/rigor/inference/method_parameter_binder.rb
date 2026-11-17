@@ -9,24 +9,6 @@ require_relative "rbs_type_translator"
 
 module Rigor
   module Inference
-    # Builds the entry scope of a method body by translating the method's parameter list into a
-    # `name -> Rigor::Type` map.
-    #
-    # Parameter types come from the surrounding class's RBS signature when one is available;
-    # otherwise every parameter defaults to `Dynamic[Top]`. The default is the Slice 1 fail-soft
-    # answer for unknown values, so a method whose RBS signature is missing or whose parameters
-    # cannot be matched still binds every name into the scope (a method body whose `Local x`
-    # reads return `Dynamic[Top]` instead of falling through to the unbound-local
-    # `Dynamic[Top]` event is the same observable type, but the binding presence is what later
-    # slices need to attach narrowing facts to).
-    #
-    # The class context (`class_path:`) and `singleton:` flag are supplied by the caller (the
-    # StatementEvaluator) which threads them as the lexical class scope. The binder makes no
-    # assumption about how that context was computed; it only uses it to build the
-    # `(class_name, method_name)` lookup key for `Rigor::Environment::RbsLoader#instance_method`
-    # / `#singleton_method`.
-    #
-    # See docs/internal-spec/inference-engine.md for the binding contract.
     # Leaf-name extraction for a destructured positional parameter (`Prism::MultiTargetNode`).
     # Stateless; lifted out of {MethodParameterBinder} so the binder's class length stays in
     # budget.
@@ -162,6 +144,24 @@ module Rigor
       end
     end
 
+    # Builds the entry scope of a method body by translating the method's parameter list into a
+    # `name -> Rigor::Type` map.
+    #
+    # Parameter types come from the surrounding class's RBS signature when one is available;
+    # otherwise every parameter defaults to `Dynamic[Top]`. The default is the Slice 1 fail-soft
+    # answer for unknown values, so a method whose RBS signature is missing or whose parameters
+    # cannot be matched still binds every name into the scope (a method body whose `Local x`
+    # reads return `Dynamic[Top]` instead of falling through to the unbound-local
+    # `Dynamic[Top]` event is the same observable type, but the binding presence is what later
+    # slices need to attach narrowing facts to).
+    #
+    # The class context (`class_path:`) and `singleton:` flag are supplied by the caller (the
+    # StatementEvaluator) which threads them as the lexical class scope. The binder makes no
+    # assumption about how that context was computed; it only uses it to build the
+    # `(class_name, method_name)` lookup key for `Rigor::Environment::RbsLoader#instance_method`
+    # / `#singleton_method`.
+    #
+    # See docs/internal-spec/inference-engine.md for the binding contract.
     class MethodParameterBinder
       # @param class_path — the qualified name of the class the method is defined in
       #   (e.g., `"Foo::Bar"`), or `nil` for a top-level `def` outside any class. When `nil` (or

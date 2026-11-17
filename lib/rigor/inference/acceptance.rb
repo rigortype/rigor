@@ -427,7 +427,8 @@ module Rigor
         # `Class` (when `T` is a class) and always an instance of `Module`. Without this rule a method whose
         # parameter is typed `Class | Module` would reject every `is_a?(SomeClass)` call and similar
         # introspection patterns. The rule conservatively answers `:yes` for `Module` (every singleton is at
-        # least a Module) and for `Class` / `Object` / `BasicObject` (the class object inherits from those).
+        # least a Module) and for `Class` / `Object` / `Kernel` / `BasicObject` (the class object inherits from
+        # or includes those).
         # Other Nominals fall through to the default `:no`.
         CLASS_OBJECT_NOMINALS = %w[Module Class Object Kernel BasicObject].freeze
         private_constant :CLASS_OBJECT_NOMINALS

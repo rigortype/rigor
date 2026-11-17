@@ -15,10 +15,11 @@ module Rigor
       # parsed by {SigParser} and recorded in the {Catalog} under its qualified `(class_name, method_name,
       # kind)` key.
       #
-      # Anything we don't recognise (a stray `sig { ... }` not followed by a `def`, a `def` with no
-      # preceding `sig`, malformed sig blocks, etc.) is reported back to the caller through
-      # `parse_errors:` so the plugin can emit a `plugin.sorbet.parse-error` diagnostic. Walking is
-      # otherwise infallible — a bad sig block does not abort the catalog build for the rest of the file.
+      # A malformed or misplaced `sig` (a stray `sig { ... }` not followed by a `def`, two `sig`s in a row,
+      # a block with no `returns` / `void`) is returned from {walk} as a {ParseError} so the plugin can emit
+      # a `plugin.sorbet.parse-error` diagnostic. A `def` with no preceding `sig` is not an error; it just
+      # records nothing. Walking is otherwise infallible — a bad sig block does not abort the catalog build
+      # for the rest of the file.
       module CatalogWalker
         # Detected error during walking. `kind` is one of: `:no_block` / `:empty_block` /
         # `:missing_returns_or_void` / `:duplicate_sig` / `:dangling_sig`.
@@ -388,7 +389,7 @@ module Rigor
           in_singleton_class || def_node.receiver.is_a?(Prism::SelfNode)
         end
 
-        # Resolves a constant-path node (`Foo::Bar`, `::Foo::Bar`) to its dot-separated name. Returns nil
+        # Resolves a constant-path node (`Foo::Bar`, `::Foo::Bar`) to its `::`-joined name. Returns nil
         # for the rare dynamic-prefix shape so the walker doesn't guess a qualified name in that case.
         def qualified_name_for(node)
           case node

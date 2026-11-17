@@ -44,7 +44,7 @@ module Rigor
     #   `plugins_io.allowed_url_hosts: [...]`. The HTTP fetch is GET-only over HTTPS, capped at
     #   {URL_TIMEOUT_SECONDS} wall time and {URL_MAX_BYTES} body size; non-2xx responses raise
     #   {AccessDeniedError} so plugin code doesn't have to rescue mid-build.
-    # - `#cache_descriptor` — flushes the accumulated entries into a fresh {Cache::Descriptor} for the
+    # - `#cache_descriptor` — snapshots the accumulated entries into a fresh {Cache::Descriptor} for the
     #   contribution that built it. URL fetches contribute `ConfigEntry` rows keyed `"url:#{url}"` with the
     #   response body's SHA-256 so contributions invalidate when the remote document changes.
     # - `#replay(descriptor)` — records a {Cache::Descriptor}'s rows as though this boundary had observed

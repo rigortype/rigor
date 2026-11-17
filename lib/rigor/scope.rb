@@ -578,9 +578,9 @@ module Rigor
       bind_local(name, type, keep_marks: false)
     end
 
-    # The one body behind {#with_local} and {#with_mutated_local}, which differ only in whether the two marks a
-    # write drops survive. Passing the kept sets through unchanged, rather than dropping and re-adding them, keeps
-    # a mutation's rebind to the one `rebuild` a write costs.
+    # The one body behind {#with_local} and {#with_mutated_local}, which differ only in whether the marks a
+    # write drops (construction facts, declaration-sourced, optimistic) survive. Passing the kept sets through
+    # unchanged, rather than dropping and re-adding them, keeps a mutation's rebind to the one `rebuild` a write costs.
     def bind_local(name, type, keep_marks:)
       # `rigor trace` — the moment a local enters the scope.
       Inference::FlowTracer.bind(name, type) if Inference::FlowTracer.active?
@@ -921,7 +921,8 @@ module Rigor
     # (`r << x`), a content floor after a closure or callee mutated it, an element or member write through it. The
     # binding still names the same object, so this is not a flow-live write, and the marks `with_local` drops stay:
     # ADR-58's declaration-sourced mark and issue #286's optimistic nil-freeness mark, with the miss answer issue
-    # #1302 records in it. A source-level write keeps going through `with_local`, which drops both.
+    # #1302 records in it, and the #2555 construction facts. A source-level write keeps going through `with_local`,
+    # which drops all of them.
     #
     # Two other per-local tables are deliberately still dropped. An ADR-82 `local_origins` cause explains the
     # `Dynamic` the ASSIGNMENT bound, and a floor's `Dynamic[top]` has a different cause. Issue #667's
@@ -1900,7 +1901,7 @@ module Rigor
     def user_def_site_for(class_name, method_name)
       table = @discovery.discovered_def_sources[class_name.to_s]
       site = table && table[method_name.to_sym]
-      # ADR-88 WD3 — record the SAME instance-side cross-file method edge {#user_def_for} records at :378, so a
+      # ADR-88 WD3 — record the SAME instance-side cross-file method edge {#user_def_for} records, so a
       # move / body-edit of `class_name#method_name`'s definition re-checks the consumer that named the
       # defining file. `CheckRules#undefined_method_diagnostic` reads this to set `project_definition_site`
       # (`"path:line"`) on a `call.undefined-method` for a project monkey-patch; without the edge, a line-shift
@@ -2640,7 +2641,7 @@ module Rigor
 
     # Joins this scope with another at a control-flow merge point. The joined scope is bound to every local that
     # BOTH branches bind, with the type widened to the union of both sides. Names bound in only one branch are
-    # dropped from the joined scope; the eventual statement-level evaluator (Slice 3 phase 2) is responsible for
+    # dropped from the joined scope; `Inference::StatementEvaluator` is responsible for
     # nil-injecting half-bound names where the language semantics demand it. The two scopes MUST share the same
     # Environment.
     def join(other)
@@ -3092,7 +3093,6 @@ module Rigor
       root[0] == kind && root[1] == name
     end
 
-    # ADR-58 WD1 — set/clear the declaration-sourced provenance mark.
     # Issue #667 — the #667 carrier's add/drop pair. Deliberately not reusing
     # {#add_declaration_sourced} / {#drop_declaration_sourced_for}: the two sets are joined by opposite
     # policies, so sharing the storage would make every future edit to either one a decision about both.
@@ -3130,6 +3130,7 @@ module Rigor
       mine.merge(theirs).freeze
     end
 
+    # ADR-58 WD1 — set/clear the declaration-sourced provenance mark.
     def add_declaration_sourced(kind, name)
       ref = [kind.to_sym, name.to_sym]
       return @declaration_sourced if @declaration_sourced.include?(ref)

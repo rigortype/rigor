@@ -8,8 +8,9 @@ module Rigor
   module LanguageServer
     # LSP server lifecycle state machine + JSON-RPC method dispatcher. State machine: `:uninitialized` →
     # `:initialized` → `:shutdown` → `:exited`. {#dispatch} routes (method, params) to the matching handler and
-    # returns the response payload (`nil` for notifications); out-of-state requests return `InvalidRequest`
-    # (-32002) / `MethodNotFound` (-32601). Full v1 capability surface (document sync, publishDiagnostics,
+    # returns the response payload (`nil` for notifications); out-of-state requests return
+    # `ServerNotInitialized` (-32002) / `InvalidRequest` (-32600), and an unknown or unwired method returns
+    # `MethodNotFound` (-32601). Full v1 capability surface (document sync, publishDiagnostics,
     # hover, completion, sig-help, folding, selection, and watched-file invalidation) is implemented.
     class Server # rubocop:disable Metrics/ClassLength
       # JSON-RPC error codes per LSP spec § "Response Message".

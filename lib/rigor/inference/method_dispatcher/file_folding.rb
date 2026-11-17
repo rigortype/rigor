@@ -20,9 +20,9 @@ module Rigor
       #
       # Default policy (`fold_platform_specific_paths == false`): decline the fold so the RBS tier answers with
       # `Nominal[String]` / `Tuple[Nominal[String], Nominal[String]]` / `bool`. That is the platform-agnostic
-      # envelope — every concrete answer the method could legally return on any platform fits inside it. The future
+      # envelope — every concrete answer the method could legally return on any platform fits inside it. The
       # `non-empty-string` refinement carrier (see
-      # [imported-built-in-types.md](../../../../../docs/type-specification/imported-built-in-types.md)) will
+      # [imported-built-in-types.md](../../../../../docs/type-specification/imported-built-in-types.md)) could
       # tighten the basename/dirname/join cases further without leaking platform specifics; today we leave them at
       # the nominal envelope.
       #

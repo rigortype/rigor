@@ -20,8 +20,8 @@ module Rigor
     #
     # - {RECURSION_GUARD} — `ExpressionTyper#infer_user_method_return` detected a `(receiver, method)` cycle
     #   and returned `Dynamic[top]` (the de-facto recursion-depth budget, effective depth 1).
-    # - {ANCESTOR_WALK_LIMIT} — `resolve_user_def_through_ancestors` hit the 100-node BFS cap and gave up
-    #   resolving the self-call.
+    # - {ANCESTOR_WALK_LIMIT} — a `Scope` ancestor walk hit its 100-node cap ({Scope::ANCESTOR_WALK_LIMIT}) and
+    #   gave up rather than read an answer off a cut chain.
     # - {HKT_FUEL_EXHAUSTED} — `HktReducer` ran out of its reduction fuel budget and unwound to `app.bound`.
     # - {RECURSION_UNROLL_FUEL} — the constant-arg recursion unroll (ADR-55 slice 1) exhausted its per-entry
     #   fuel and fell back to the plain `(receiver, method)` guard (in-cycle call → `Dynamic[top]`).
@@ -29,6 +29,7 @@ module Rigor
     #   cap without converging and collapsed the summary to `untyped` (today's behaviour).
     # - {BLOCK_WRITEBACK_CAP} — the block / loop write-back fixpoint ({BodyFixpoint.converge}) collapsed a
     #   local that had not converged to `Dynamic[top]`.
+    # - {CALLEE_CHAIN_CAP} — {CalleeMutationChain} walked past its node cap from one parameter and took it as mutated.
     #
     # Enabled only when `RIGOR_BUDGET_TRACE` is set (to any non-empty value) in the environment, or via
     # {enable!} in tests. When disabled, {hit} is a single boolean check and returns immediately, so normal

@@ -9,7 +9,7 @@ module Rigor
   class CLI
     # `rigor skill` — discover and print the SKILL.md files bundled with the `rigortype` gem.
     #
-    # Rigor ships a small set of Agent Skills under `skills/` that walk an AI coding agent through onboarding
+    # Rigor ships Agent Skills under `skills/` that walk an AI coding agent through workflows such as onboarding
     # (`rigor-project-init`), baseline reduction (`rigor-baseline-reduce`), and authoring a plugin
     # (`rigor-plugin-author`). When Rigor is installed via `mise` / `gem install` / etc. the SKILL files live inside the
     # gem checkout — the project being analysed has no copy, so an AI agent has no a priori way to find them.

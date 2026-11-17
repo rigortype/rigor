@@ -276,7 +276,7 @@ module Rigor
         end
         private_class_method :dry_types_call?
 
-        # Resolves a `Prism::ConstantPathNode` / `Prism::ConstantReadNode` chain to its dot-separated
+        # Resolves a `Prism::ConstantPathNode` / `Prism::ConstantReadNode` chain to its `::`-joined
         # name (e.g. `"App::Types"`). Returns nil for the dynamic-prefix shape so the scanner treats
         # those as opaque rather than guessing.
         def qualified_name_for(node)

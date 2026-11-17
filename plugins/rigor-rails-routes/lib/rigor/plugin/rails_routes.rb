@@ -15,16 +15,16 @@ module Rigor
     # against the project's `config/routes.rb`.
     #
     # Tier 1A of the [Rails plugins roadmap](../../../../../docs/design/20260508-rails-plugins-roadmap.md).
-    # Statically interprets the routes DSL via Prism — no `rails` runtime dependency. Recognised v0.1.0
-    # surface:
+    # Statically interprets the routes DSL via Prism — no `rails` runtime dependency. Core recognised
+    # surface (the parser covers more; its header lists the full set):
     #
     # - `Rails.application.routes.draw do ... end`
     # - `resources :name [, only: [...] | except: [...]]`
     # - `resource :name`
     # - `get/post/patch/put/delete "/path", to:, as:`
     # - `root to: "..."` / `root "..."`
-    # - One level of `namespace :foo do ... end`
-    # - One level of nested `resources`
+    # - `namespace :foo do ... end`
+    # - Nested `resources`
     #
     # The plugin publishes its parsed `:helper_table` through the ADR-9 cross-plugin fact store;
     # `rigor-actionpack` Phase 4 consumes it for route-helper validation in controller code.
@@ -41,14 +41,14 @@ module Rigor
     # recognises the namespace their `prefix` / `version` declarations open rather than enumerating names
     # it cannot know.
     #
-    # ## Limitations (v0.1.0)
+    # ## Limitations
     #
-    # - `scope :path:` / `scope :module:` / `scope :as:` are not interpreted — helpers nested inside these
-    #   constructs are silently skipped.
-    # - Constraints / format restrictions / mountable engines are out of scope.
-    # - The English inflector is intentionally tiny: it handles `posts` ↔ `post`, `users` ↔ `user`,
-    #   `categories` ↔ `category`, `boxes` ↔ `box`. Custom inflections (`fish` ↔ `fish`, `child` ↔
-    #   `children`) are out of scope; users who need them ship a hand-written RBS for the affected helper.
+    # - Constraints and format restrictions are not interpreted; a `mount`ed engine contributes only its
+    #   own `as:` helper, not the routes inside the engine.
+    # - Inflection is the real `ActiveSupport::Inflector` (ADR-39), with no built-in approximation: when it
+    #   cannot be loaded the inflection-dependent checks go silent rather than guess. Project-specific
+    #   inflection rules are not read, except the acronyms parsed from `config/initializers/inflections.rb`
+    #   ({Acronyms}), which only affect controller-class-name composition.
     class RailsRoutes < Rigor::Plugin::Base
       manifest(
         id: "rails-routes",
@@ -231,10 +231,8 @@ module Rigor
         )
       end
 
-      # The load-error path used to emit the same warning on every analyzed file in the project. On large
-      # monorepos (Mastodon: 1,302 files; Solidus: ~1,000 files) and on legacy projects without a top-level
-      # `config/routes.rb`, this multiplied a single root cause into 1,000+ identical diagnostics. The
-      # error is project-global — report it once per run.
+      # The load error is project-global, so `diagnostics_for_file` reports it once per run (via
+      # `disclose_load_error`) rather than once per analyzed file.
 
       def helper_table_or_nil
         # Memoise the build *attempt*, not just a truthy result: when the routes file is missing or

@@ -126,6 +126,8 @@ module Rigor
       # not invalidate the receiver's facts.
       def pure_self_returner?(method_name) = PURE_SELF_RETURNERS.include?(method_name)
 
+      NO_ARG_TYPES = [].freeze
+
       # Returns a scope with the call's receiver widened, for every variable the receiver expression
       # can evaluate to ({ReceiverAlias.candidates}) whose current binding is a literal-shape carrier
       # (`Tuple` / `HashShape`) or an empty-witness refinement (`non-empty-array` /
@@ -136,8 +138,6 @@ module Rigor
       # scope the arguments are evaluated in. They are what the widened carrier JOINS its added
       # content evidence from (issue #560); an empty list means "no evidence", which reproduces the
       # pre-join behaviour exactly.
-      NO_ARG_TYPES = [].freeze
-
       # `rewritten_element` is the element a typed element rewriter stores ({RewriteMutation.typed}), or `nil`.
       def widen_after_call(call_node:, current_scope:, arg_types: NO_ARG_TYPES, rewritten_element: nil)
         return current_scope if pure_self_returner?(call_node.name)
@@ -535,14 +535,15 @@ module Rigor
       # Straight-line evidence is ALWAYS incomplete, so a straight-line join may never close the
       # parameter it contributes to.
       #
-      # This seam sees ONE store — the call being evaluated. The widening it feeds is a one-way
-      # door: it replaces the literal carrier with a `Nominal`, and {#widen_for_mutator} declines a
-      # `Nominal` outright, so the NEXT store is invisible. Closing over one sample of a growing
+      # This seam sees ONE store — the call being evaluated. The widening it feeds replaces the
+      # literal carrier with a `Nominal`, and {MutationRejoin.widen_nominal} re-grows a `Nominal`
+      # only while a parameter still carries a gradual arm, so a join that closed the parameter
+      # would leave the NEXT store invisible. Closing over one sample of a growing
       # population is therefore a wrong type, not an imprecise one:
       #
       #     a = []
       #     a.push(1)          # joins -> Array[Integer]
-      #     a.push("s")        # DECLINED -- pre-state is a Nominal now
+      #     a.push("s")        # DECLINED -- pre-state is a closed Nominal now
       #     a.last.upcase      # correct Ruby, prints "S"
       #
       # closed to `Array[Integer]` and drew `undefined method 'upcase' for Integer` on code that

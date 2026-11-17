@@ -15,7 +15,7 @@ module Rigor
       #
       # For each discovered channel, the discoverer:
       #
-      # - Records every public instance-side `def` whose name isn't an ActionCable framework hook
+      # - Records every instance-side `def` directly in the class body whose name isn't an ActionCable framework hook
       #   (`subscribed`, `unsubscribed`, `_`-prefixed). These are the action methods clients can invoke
       #   via `subscription.perform("action_name", data)`.
       # - Records every literal-string `stream_from "name"` call as a registered stream name.

@@ -18,7 +18,7 @@ module Rigor
     # It is `db/schema.rb` for effects: a generated artefact a project commits, whose diff in a pull
     # request *is* the review signal, whose freshness CI checks, and where intent is expressed by
     # committing the regenerated file rather than by annotating code. It emits no diagnostic and never
-    # enters `rigor check`'s stream ([ADR-102](../adr/102-unused-code-reachability-report.md)).
+    # enters `rigor check`'s stream ([ADR-102](../../../docs/adr/102-unused-code-reachability-report.md)).
     #
     # Two tables, chosen so a diff is **attributable**:
     #

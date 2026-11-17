@@ -876,8 +876,8 @@ module Rigor
     end
 
     # ADR-13 slice 3b — guards every reporter call so the in-RbsExtended-module call sites can record events
-    # uniformly without nil-checking each time. When the reporter is nil (the v0.1.0 → v0.1.3 default for call
-    # sites that do not yet thread `environment:`), the call is a no-op and the parser stays fail-soft.
+    # uniformly without nil-checking each time. When the reporter is nil (a call site that does not
+    # thread `environment:`), the call is a no-op and the parser stays fail-soft.
     #
     # Issue #805 — the location is flattened to `(path, line, column)` here, at record time, because the
     # entry is drained out of every fork-pool worker and an `RBS::Location` neither survives `Marshal.dump`

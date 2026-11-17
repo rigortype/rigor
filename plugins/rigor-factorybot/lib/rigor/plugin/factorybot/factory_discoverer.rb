@@ -19,7 +19,8 @@ module Rigor
       #
       # - `factory :users do ... end` — symbol form
       # - `factory "users" do ... end` — string form
-      # - `factory :users, aliases: [:author] do ... end` — alias form
+      # - `factory :users, aliases: [:author] do ... end` — alias form (indexed under `:users` only; the
+      #   aliases are not registered)
       #
       # Inside a factory block, attribute declarations come in several shapes. Only literal-name forms
       # are recognised (Symbol arg / String arg):
@@ -77,7 +78,7 @@ module Rigor
           nil
         end
 
-        # Yields `(factory_name, [attribute_names])` for every `factory :name do ... end` call
+        # Yields `(factory_name, attribute_names, model_class)` for every `factory :name do ... end` call
         # discovered in the subtree. The walker recurses into top-level wrapping blocks
         # (`FactoryBot.define do ... end`) and into arbitrary container nodes so factories inside
         # `module` / `class` blocks are still picked up.

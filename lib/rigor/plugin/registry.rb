@@ -215,8 +215,8 @@ module Rigor
     # provenance (slice 5) can iterate over loaded plugin instances in deterministic order.
     #
     # The registry is read-only after construction; ordering is the order in which {Rigor::Plugin::Loader}
-    # resolved configuration entries, which is project-config order with plugin-id alphabetical as the
-    # tie-breaker.
+    # resolved configuration entries: project-config order, reordered only by the `manifest(consumes:)`
+    # topological sort.
     #
     # ADR-15 Phase 3 — alongside the instantiated `plugins`, the registry carries `blueprints`: a frozen,
     # Ractor-shareable list of {Blueprint} that records how to re-instantiate the same plugin set in a worker

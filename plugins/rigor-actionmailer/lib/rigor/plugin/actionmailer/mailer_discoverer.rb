@@ -23,13 +23,13 @@ module Rigor
       #   IoBoundary's cache descriptor (so the cache invalidates when the template changes); missing
       #   templates are recorded so the plugin can surface a diagnostic on the action's `def`.
       #
-      # Limitations (intentional for v0.1.0):
+      # Limitations (intentional):
       #
       # - Direct-superclass match only. `class CustomerMailer < BaseMailer` where `BaseMailer <
       #   ApplicationMailer` is NOT discovered. Add `BaseMailer` to `mailer_base_classes` if needed.
       # - Action methods are read from the syntactic instance-side `def` list. Methods built via
-      #   `define_method`, `private`, or non-action helpers (e.g. methods starting with `_`) are out of
-      #   scope. The discoverer filters obvious non-actions (`initialize`, names prefixed with `_`).
+      #   `define_method` are out of scope. The discoverer filters non-actions (`initialize`, names
+      #   prefixed with `_`, and methods that are not public — see {#collect_action_defs}).
       class MailerDiscoverer
         DEFAULT_VIEWS_ROOT = "app/views"
         VIEW_FORMATS = %w[html text].freeze
@@ -212,7 +212,7 @@ module Rigor
         # - methods starting with `_` (Ruby convention for private/internal)
         # - `def self.<name>` (singleton-side)
         # - methods that are not public at the end of the class body, read in source order: after a bare
-        #   `private` / `protected` (until a `public` switches back), named by `private :foo` /
+        #   `private` / `protected` / `module_function` (until a `public` switches back), named by `private :foo` /
         #   `protected :foo`, or defined inline (`private def foo`) — Rails builds `action_methods` from the
         #   public instance methods. `public :foo` after a `protected` section makes `foo` an action again.
         # Methods named by a callback or `helper_method` macro (see {#collect_callback_names}) stay actions:

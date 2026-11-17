@@ -67,8 +67,8 @@ module Rigor
         # carrying only a hint that the value should not be used. Mapping it to `untyped` made Rigor looser
         # than the toolchain it reads — `Dynamic[top]` is consistent with everything at a gradual boundary,
         # where `top` demands proof — so a caller could silently depend on a return whose author declared
-        # "don't rely on this". See ADR-92 WD2; `special-types.md` § `void` (a distinct carrier + a value-use
-        # diagnostic) remains unimplemented and marked.
+        # "don't rely on this". See ADR-92 WD2. The value-use diagnostic is a side table, not a carrier
+        # (ADR-100, {VoidOrigin}); the distinct `void` carrier of `special-types.md` § `void` remains unimplemented.
         RBS::Types::Bases::Void => :translate_top,
         RBS::Types::Optional => :translate_optional,
         RBS::Types::Union => :translate_union,

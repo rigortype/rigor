@@ -27,10 +27,9 @@ module Rigor
       # A branch join keeps the mark when both arms stamp it: `if c then r = @count else r = @count end` stamps
       # `(:local, :r)` on each arm, and `join_declaration_sourced` INTERSECTS, so the mark survives. Only an
       # *asymmetric* join drops it, by that intersection rather than by reaching `with_local`. The normative
-      # statement — establishment, drop, join and the full list of
-      # unmarked shapes, each verified against the implementation — is
-      # `docs/internal-spec/inference-engine.md` § "Declaration-sourced provenance mark (ADR-58)"; keep this
-      # comment subordinate to it.
+      # statement — establishment, drop, join and the full list of unmarked shapes, each verified against the
+      # implementation — is `docs/internal-spec/inference-engine.md` § "Declaration-sourced provenance mark (ADR-58)";
+      # keep this comment subordinate to it.
       #
       # So `marked?` matches exactly the node shapes the scope actually models and invents no propagation of its
       # own; anything flow-live keeps firing.

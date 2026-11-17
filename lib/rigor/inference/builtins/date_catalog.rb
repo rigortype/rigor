@@ -20,9 +20,9 @@ module Rigor
       # `iso8601` etc. The Ruby-side prelude (`lib/date.rb`) only contributes `Date#infinite?` and the
       # nested `Date::Infinity` class; the bulk of the surface is in C.
       #
-      # Date / DateTime receivers are not lifted to a `Constant` carrier today (there is no Date literal
-      # node — the closest is `Date.today` / `Date.parse(...)`, which produce `Nominal[Date]`). The
-      # catalog wiring therefore mostly governs:
+      # There is no Date literal node, so a Date / DateTime receiver is a `Constant` carrier only when
+      # deterministic constructor folding built it (`Date.new`); `Date.today` / `Date.parse(...)` produce
+      # `Nominal[Date]`. The catalog wiring therefore mostly governs:
       #
       # 1. The Integer-typed reader surface (`#year`, `#month`, `#day`, `#wday`, `#hour`, `#min`, `#sec`) —
       #    RBS-declared `Integer` is preserved through dispatch.

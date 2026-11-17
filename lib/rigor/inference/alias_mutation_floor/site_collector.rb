@@ -205,6 +205,11 @@ module Rigor
 
         def local?(read) = read.is_a?(Prism::LocalVariableReadNode) || read.is_a?(Prism::ItLocalVariableReadNode)
 
+        # A site's key is the start of the outermost loop or block that holds it (it may run again after any later
+        # point inside that loop), else where it has handed its locals on: its end (the receiver of a call has handed
+        # its locals on before the call's message runs, while the call's own arguments are handed on by the call
+        # itself), or its block's start. A local's key is its least site's; a capture by a closure that may run later
+        # is {ALWAYS}.
         def key = @site ? @outer || AliasMutationFloor.handed_by(@site) : ALWAYS
 
         def note(table, name)

@@ -102,6 +102,15 @@ module Rigor
 
       module_function
 
+      # The no-op re-anchoring table (#722 residue 2): shared so the overwhelmingly common
+      # nothing-to-re-anchor walk allocates none.
+      EMPTY_RENAMES = {}.freeze
+
+      # No path whose contributions are all `possible` (issue #2021), the cross-file walks' default.
+      EMPTY_PATH_SET = Set.new.freeze
+      # The {IvarWriterCensus} entry kinds the project pre-pass tags with the file that records them.
+      PATH_TAGGED_KINDS = %i[own_write own_write_type].to_set.freeze
+
       # Build the scope index for a Prism program subtree.
       #
       # @param root — usually a `Prism::ProgramNode`, but any
@@ -120,15 +129,7 @@ module Rigor
       #   and sig-gen observe the clause's plain entry.
       # @return identity-comparing
       #   table whose default value is the seeded `default_scope`.
-      # The no-op re-anchoring table (#722 residue 2): shared so the overwhelmingly common
-      # nothing-to-re-anchor walk allocates none.
-      EMPTY_RENAMES = {}.freeze
-
-      # No path whose contributions are all `possible` (issue #2021), the cross-file walks' default.
-      EMPTY_PATH_SET = Set.new.freeze
-      # The {IvarWriterCensus} entry kinds the project pre-pass tags with the file that records them.
-      PATH_TAGGED_KINDS = %i[own_write own_write_type].to_set.freeze
-
+      #
       # `declared_ivar_types:` — whether an RBS-declared ivar type replaces the census's join of the writes (#1406).
       # `rigor sig-gen` passes false: it proposes what the code says, and reading a declaration back would make a row
       # count as generated only because it is declared.
@@ -1131,7 +1132,7 @@ module Rigor
           define_method_written_ivars(def_node.body, singleton_written)
         end
 
-        # B2.3 — collect per-method evidence for the read-before- write nil contribution. The accumulator-level decision
+        # B2.3 — collect per-method evidence for the read-before-write nil contribution. The accumulator-level decision
         # ("is this ivar truly read-before-write across the class lifetime?") is finalised at
         # `contribute_read_before_write_nil!` after the whole class body has been walked, using `init_writes` as the
         # soundness gate (an ivar written in `initialize` is initialised before any other method body runs).
@@ -1553,9 +1554,10 @@ module Rigor
         end
       end
 
-      # Records `@ivar.<method>(...)` calls whose method is in `MutationWidening::SHAPE_MUTATORS`.
+      # Records `@ivar.<method>(...)` calls whose method is in `MutationWidening::SHAPE_MUTATORS` or
+      # `SetMutation::MUTATORS` ({#ivar_census_mutator?}).
       # The class-ivar pre-pass uses the resulting set to widen the post-collected accumulator entries (see
-      # {.widen_mutated_ivar_entries!}). Always-safe to over- collect: any name that the widening primitive declines is
+      # {.widen_mutated_ivar_entries!}). Always-safe to over-collect: any name that the widening primitive declines is
       # ignored at finalization.
       def record_ivar_mutator_call(node, class_name, mutated_ivars)
         method_name, receiver = mutation_target(node)
@@ -1688,22 +1690,6 @@ module Rigor
         end
       end
 
-      # C2 — returns a Set of `object_id`s for transient `@x = nil` writes that a later statement in the same method
-      # body *definitely* overwrites with a non-nil value on every completing path. Such a nil can never be the ivar's
-      # value at method exit, so it must not contribute a `nil` constituent to the (flow-insensitive) class-ivar union.
-      #
-      # Scope is deliberately narrow and post-domination-sound:
-      #   - only the top-level statement sequence of the body is
-      #     considered (no writes hidden inside loops / rescue / nested
-      #     conditionals count as the "definite" overwrite, except the
-      #     one structured `if/else` form below);
-      #   - the killing statement is either an unconditional
-      #     statement-level `@x = <non-nil>`, OR an `if/else` (with a
-      #     real `else`) where BOTH branches' final top-level write to
-      #     `@x` is non-nil. Both shapes overwrite `@x` on every path;
-      #   - only `@x = nil` literal writes are ever marked dead — a
-      #     non-nil transient is left untouched (it is already
-      #     precision-additive in the union).
       # WD3 — ADR-41-style hard cap on how deep the same-class-call definite-assignment crediting recurses (the ctor
       # calls `mask!`, which could itself call another same-class helper). Cycle-guarded independently; the cap bounds
       # even acyclic chains.
@@ -1940,6 +1926,22 @@ module Rigor
         end
       end
 
+      # C2 — returns a Set of `object_id`s for transient `@x = nil` writes that a later statement in the same method
+      # body *definitely* overwrites with a non-nil value on every completing path. Such a nil can never be the ivar's
+      # value at method exit, so it must not contribute a `nil` constituent to the (flow-insensitive) class-ivar union.
+      #
+      # Scope is deliberately narrow and post-domination-sound:
+      #   - only the top-level statement sequence of the body is
+      #     considered (no writes hidden inside loops / rescue / nested
+      #     conditionals count as the "definite" overwrite, except the
+      #     one structured `if/else` form below);
+      #   - the killing statement is either an unconditional
+      #     statement-level `@x = <non-nil>`, OR an `if/else` (with a
+      #     real `else`) where BOTH branches' final top-level write to
+      #     `@x` is non-nil. Both shapes overwrite `@x` on every path;
+      #   - only `@x = nil` literal writes are ever marked dead — a
+      #     non-nil transient is left untouched (it is already
+      #     precision-additive in the union).
       def dead_transient_nil_writes(body, class_name = nil, method_assign_effects = nil)
         statements = top_level_statements(body)
         return nil if statements.length < 2
@@ -3143,9 +3145,7 @@ module Rigor
         end
       end
 
-      # Issue #352 — folds the project-wide `pre_eval:` constant seed under this file's own table. Returns the
-      # per-file table unchanged (same frozen object) when nothing was seeded, so a run without `pre_eval:`
-      # constants allocates and compares exactly what it did before.
+      # Issue #352 — folds the project-wide `pre_eval:` constant seed under this file's own table.
       # Issue #644 — merges the per-file constant table OVER the project seed and records, alongside it,
       # which of those names THIS FILE declares (as last segments). The second table is the other half of
       # `Scope#published_constant?`: a project-published constant the analysed file also assigns is one its
@@ -3351,6 +3351,8 @@ module Rigor
         (table[class_name] ||= Set.new) << node.name
       end
 
+      # Returns the per-file table unchanged (same frozen object) when nothing was seeded, so a run without `pre_eval:`
+      # constants allocates and compares exactly what it did before.
       def merge_seeded_constants(seeded, per_file)
         return per_file if seeded.nil? || seeded.empty?
 
@@ -3743,9 +3745,8 @@ module Rigor
       #     table; singleton defs and `define_method` are intentionally
       #     skipped — `record_def_node` filters them).
       #
-      # `walk_methods` and `walk_def_nodes` had byte-identical class / module / singleton / meta-block descents (both
-      # stop at `DefNode`), so a single combined walk records both accumulators at once instead of traversing every file
-      # twice.
+      # Both tables share the class / module / singleton / meta-block descent (it stops at `DefNode`), so one combined
+      # walk records both accumulators instead of traversing every file twice.
       #
       # Issue #992 — and a third, `envelopes`: `{class_name => {[kind, method] => envelope}}`, the
       # {Source::ParameterEnvelope} of every name the existence table records, plus the class-wide
@@ -3956,7 +3957,6 @@ module Rigor
         offsets.freeze
       end
 
-      # Is one of the ascending `offsets` in `[start, stop)`?
       # The `[start, end)` byte span of every block and lambda in `root`.
       def block_spans(root)
         spans = []
@@ -3971,6 +3971,7 @@ module Rigor
         spans
       end
 
+      # Is one of the ascending `offsets` in `[start, stop)`?
       def offset_in?(offsets, start, stop)
         index = offsets.bsearch_index { |offset| offset >= start }
         !index.nil? && offsets[index] < stop
@@ -4443,10 +4444,9 @@ module Rigor
       end
 
       # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength
-      # Combined `walk_methods` + `walk_def_nodes` descent. The two walks had identical class / module / singleton-class
-      # / meta-block traversals and both stopped at `DefNode`; the only divergences are leaf actions (recorded into the
-      # right accumulator) and the original `walk_methods` returning at `AliasMethodNode` (its symbol-only children
-      # carry no def / class node, so not descending them is byte-identical for `def_nodes` too). See
+      # Combined methods / def-nodes descent: both tables share one class / module / singleton-class / meta-block
+      # traversal that stops at `DefNode`; only the leaf actions differ (each recorded into its own accumulator). An
+      # `AliasMethodNode` is not descended (its symbol-only children carry no def / class node). See
       # {#build_methods_and_def_nodes}.
       # `def_owner_prefix` overrides the prefix def-ish leaves record under — inside a
       # `*_eval` / `*_exec` block body it is the receiver's prefix while `qualified_prefix`
@@ -4980,7 +4980,7 @@ module Rigor
       # carries a block, the block body holds method overrides whose canonical class is `Const`. Survey item (e)
       # extended the recognition to `Const = Module.new do ... end` and `Const = Class.new(?super) do ... end` — the
       # ADR-16 Tier A "block-as-method" idiom at constant-write position. Returns the block body node (a
-      # `Prism::StatementsNode`) when the rvalue matches; nil otherwise. Used by `walk_methods` / `walk_def_nodes` to
+      # `Prism::StatementsNode`) when the rvalue matches; nil otherwise. Used by `walk_methods_and_def_nodes` to
       # push `Const` onto the qualified prefix before recursing.
       #
       # Issue [#703](https://github.com/rigortype/rigor/issues/703) — a PATH write is the same idiom.
@@ -5265,15 +5265,15 @@ module Rigor
         record_method(accumulator, class_name, def_node.name, kind, Source::ParameterEnvelope.of(def_node))
       end
 
+      # The side a `def`'s body evidence is filed on: a `def self.x`'s singleton side, unless the caller files it as an
+      # instance method elsewhere (`receiver_side: false`, #3005's `Owner::<included>`).
+      def evidence_side(def_node, side, receiver_side) = receiver_side && def_node.receiver ? :singleton : side
+
       # Issue #992 — the rewriting calls a METHOD BODY makes, which the declaration walk never descends into:
       # `def self.inherited(sub) = sub.class_eval { … }`, `def self.wrap_all = define_method(…)`,
       # `def decorate(obj) = obj.extend(Decorator)`. A class-body macro records the same evidence in
       # {#record_surface_evidence}; `send` is left out here because inside a body it is an ordinary call far
       # more often than a definition.
-      # The side a `def`'s body evidence is filed on: a `def self.x`'s singleton side, unless the caller files it as an
-      # instance method elsewhere (`receiver_side: false`, #3005's `Owner::<included>`).
-      def evidence_side(def_node, side, receiver_side) = receiver_side && def_node.receiver ? :singleton : side
-
       def record_def_body_evidence(def_node, qualified_prefix, tables, side, receiver_side: true)
         return if def_node.body.nil?
 
@@ -5748,7 +5748,6 @@ module Rigor
         body.body.any? { |statement| concern_extend?(statement, child_prefix) }
       end
 
-      #
       # Issue #3005 — `self.extend ActiveSupport::Concern` and a receiverless or `self.` `send` / `public_send` /
       # `__send__(:extend, ActiveSupport::Concern)` run the same `extend` on the module ({#mixin_call_view}).
       def concern_extend?(statement, child_prefix)
@@ -6108,7 +6107,6 @@ module Rigor
       # same-named local method.
       TOP_LEVEL_DEF_KEY = "<toplevel>"
 
-      #
       # ADR-119 WD3 — the slot follows its writer (later-wins): a certain write clears the key from
       # `contested_discovered_def_nodes` and a possible one adds it ({MethodTables#certain}, set for `def_node`).
       def record_def_node(def_node, qualified_prefix, in_singleton_class, accumulator, tables = nil)
@@ -6212,14 +6210,14 @@ module Rigor
                            tables.nil? || tables.certain)
       end
 
-      # Module-singleton call resolution (ADR-57 follow-up) — the SINGLETON-side mirror of `build_discovered_def_nodes`.
-      # Records the `Prism::DefNode` for every singleton-side method (`def self.x`, `def Foo.x`, a `class << self` body,
-      # and a `module_function` method) keyed by qualified class/module name → method → node, so `ExpressionTyper` can
-      # re-type the body when a `Singleton[Foo]` receiver dispatches `Foo.x`. The instance-side table is kept
-      # singleton-free on purpose (its ancestor walk binds `self` as `Nominal`), so the two never overlap except for
-      # `module_function` defs, which are genuinely callable on both sides and so appear in both tables. Top-level
-      # singleton defs (`def self.x` outside any class — `self` is `main`) are not recorded; they have no constant
-      # receiver to dispatch through.
+      # Module-singleton call resolution (ADR-57 follow-up) — the SINGLETON-side mirror of the def-node table
+      # {#build_methods_and_def_nodes} builds. Records the `Prism::DefNode` for every singleton-side method
+      # (`def self.x`, `def Foo.x`, a `class << self` body, and a `module_function` method) keyed by qualified
+      # class/module name → method → node, so `ExpressionTyper` can re-type the body when a `Singleton[Foo]`
+      # receiver dispatches `Foo.x`. The instance-side table is kept singleton-free on purpose (its ancestor walk
+      # binds `self` as `Nominal`), so the two never overlap except for `module_function` defs, which are genuinely
+      # callable on both sides and so appear in both tables. Top-level singleton defs (`def self.x` outside any class
+      # — `self` is `main`) are not recorded; they have no constant receiver to dispatch through.
       def build_discovered_singleton_def_nodes(root)
         build_singleton_def_tables(root).first
       end
@@ -6278,16 +6276,6 @@ module Rigor
         end
       end
 
-      # Issue #1097 — `[[start_offset, end_offset, name, kind, owner], ...]` for every `def` / block /
-      # lambda body in the file. `Scope#*_def_shadows_call?` reads it to answer two execution-timing
-      # questions no `"path:line"` site can: whether a call sits INSIDE a deferred form (it runs at
-      # invocation time, after every class-body `def` installed) and, for an eager class-body call,
-      # where the earliest same-name def OF THE SAME OWNER starts. Def rows carry the method name,
-      # its `:instance` / `:singleton` / `:both` (`module_function`) kind, and the qualified owner —
-      # the owner filter keeps `class A; def self.sig` from ordering `class F`'s `sig` call, and the
-      # kind filter keeps `def sig` from ordering `def self.sig`'s shadow question. Block / lambda /
-      # `END` rows and defs nested inside another deferred range (they install at invocation time,
-      # not during the enclosing body's own eval) carry nil name / kind / owner — containment only.
       # The two position-keyed per-file indexes: the def / block / lambda body ranges issue #1097's
       # `*_def_shadows_call?` predicates order a same-name def against, and the class-declaration
       # sites `record_class_sources` accumulates.
@@ -6348,6 +6336,16 @@ module Rigor
         yield eval_constant_receiver_prefix(node, receiver, rendered, lexical_prefix).join("::") if rendered
       end
 
+      # Issue #1097 — `[[start_offset, end_offset, name, kind, owner], ...]` for every `def` / block /
+      # lambda body in the file. `Scope#*_def_shadows_call?` reads it to answer two execution-timing
+      # questions no `"path:line"` site can: whether a call sits INSIDE a deferred form (it runs at
+      # invocation time, after every class-body `def` installed) and, for an eager class-body call,
+      # where the earliest same-name def OF THE SAME OWNER starts. Def rows carry the method name,
+      # its `:instance` / `:singleton` / `:both` (`module_function`) kind, and the qualified owner —
+      # the owner filter keeps `class A; def self.sig` from ordering `class F`'s `sig` call, and the
+      # kind filter keeps `def sig` from ordering `def self.sig`'s shadow question. Block / lambda /
+      # `END` rows and defs nested inside another deferred range (they install at invocation time,
+      # not during the enclosing body's own eval) carry nil name / kind / owner — containment only.
       def build_deferred_ranges(root)
         ranges = []
         walk_deferred_ranges(root, [], false, false, [], ranges)
@@ -6912,10 +6910,6 @@ module Rigor
         !(node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
       end
 
-      # The `in_singleton_class` flag an eval-family block body inherits: a named receiver opens
-      # that class's OWN body (`false`), while a bare or `self` receiver stays in whatever context
-      # the enclosing body already is — `class << self; class_eval { … }` opens the singleton's
-      # body, so `include` inside is still a singleton-ancestor edge.
       # Whether `def`/`alias` leaves in an eval block body bind on the receiver's SINGLETON:
       # `instance_eval`/`instance_exec` always (self IS the receiver — `def` lands on
       # `#<Class:X>`); `class_eval` only inside an already-singleton body, where the receiver's
@@ -6927,7 +6921,9 @@ module Rigor
       end
 
       # The two flags an eval-family block body gives a def-owning walk: the
-      # `in_singleton_class` its calls on the receiver-as-module inherit, and the
+      # `in_singleton_class` its calls on the receiver-as-module inherit (a named receiver opens
+      # that class's OWN body, so `false`; a bare or `self` receiver keeps the enclosing context, so
+      # `class << self; class_eval { include M }` stays a singleton-ancestor edge), and the
       # `defs_singleton` its `def`/`alias` leaves record under — `true` when they
       # bind on the receiver's singleton, `:unnameable` when that singleton is one
       # nothing names. `instance_eval` splits the surfaces for a class receiver —
@@ -7106,7 +7102,7 @@ module Rigor
       EMPTY_NESTING = [].freeze
 
       # The empty qualified prefix. Distinct from {EMPTY_NESTING} only in what it MEANS: the two are handed
-      # to different parameters, and this cycle spent a blocker on a prefix and a nesting sharing a name.
+      # to different parameters.
       EMPTY_PREFIX = [].freeze
       private_constant :EMPTY_NESTING
 
@@ -7812,8 +7808,8 @@ module Rigor
 
       # ADR-48 — per qualified class name -> ordered `Data.define` member-name list, for both the named-subclass form
       # (`class Point < Data.define(:x, :y)`) and the constant-assigned form (`Point = Data.define(:x, :y)`). Only
-      # `Data.define` is recorded: `Struct.new` instances are mutable, so member-value folding would be unsound (the
-      # Struct follow-up is deferred — see ADR-48 § "Struct follow-up"). Consumed by
+      # `Data.define` is recorded: `Struct.new` instances are mutable, so member-value folding would be unsound
+      # (the Struct sibling table is {#build_struct_member_layouts}, ADR-48 § "Struct follow-up"). Consumed by
       # {Inference::MethodDispatcher::DataFolding} via {Scope#data_member_layout}.
       #
       # ADR-116 WD5 — built with its Struct sibling by {MemberLayoutsCollector}. Production builds both in
@@ -8275,17 +8271,14 @@ module Rigor
         true
       end
 
-      # Issue #728 — a block that REBINDS `self` owns the mixin calls written in it, and this walk used to
-      # hand them to the lexically enclosing declaration. `Thing = Class.new { include Taggable }` inside
-      # `class Outer` registered `Taggable` on `Outer`, so `Outer.new.tag` typed `:tagged` where MRI raises
-      # `NoMethodError` — a wrong answer, not a wider one. The classification is
+      # Issue #728 — a block that REBINDS `self` owns the mixin calls written in it, not the lexically enclosing
+      # declaration: `Thing = Class.new { include Taggable }` inside `class Outer` must not register `Taggable` on
+      # `Outer`, where `Outer.new.tag` raises `NoMethodError` in MRI. The classification is
       # {#rebound_block_self}, the same one #721 gave its own mixin scan.
       #
-      # `Recv.class_eval { include M }` resolves to `Recv` and now records there, which it never did before
-      # (the block's owner was the lexical enclosure, so at the top level the include was simply dropped).
-      # An OPAQUE rebinding — `Class.new` / `Module.new` / a non-constant `class_eval` receiver — records
-      # nothing: the class exists but this walk cannot name it, and naming the lexical enclosure instead is
-      # the one answer Ruby is guaranteed not to have written.
+      # `Recv.class_eval { include M }` resolves to `Recv` and records there. An OPAQUE rebinding — `Class.new` /
+      # `Module.new` / a non-constant `class_eval` receiver — records nothing: the class exists but this walk cannot
+      # name it, and naming the lexical enclosure instead is the one answer Ruby is guaranteed not to have written.
       def walk_mixin_call_children(node, qualified_prefix, current_class, accumulator, singleton_self,
                                    singleton_cref)
         # `self` is unnameable whenever the singleton marker is set OR the body is ownerless
@@ -8648,10 +8641,10 @@ module Rigor
       end
 
       # `[[owner, side], …]` — the ancestry sides a mixin call reshapes. `self` and the implicit receiver
-      # are the enclosing class (`:include` for `include` / `prepend`, `:extend` for `extend`, and both
-      # flip to `:extend` inside `class << self`); `singleton_class` is the singleton side; a constant is
-      # that class; any other receiver is unknown, so it may be the class that includes this one from a
-      # hook (`base.include M`) and taints both sides of the enclosing class.
+      # are the enclosing class (`:include` for `include` / `prepend`, `:extend` for `extend`; inside
+      # `class << self` `include` / `prepend` flip to `:extend` and `extend` names no owner); `singleton_class` is the
+      # singleton side; a constant is that class; any other receiver reshapes nothing, except a hook parameter
+      # (`base.include M` in `self.included(base)`), which taints both sides of the enclosing class.
       def mixin_effects(node, kind, qualified_prefix, current_class, accumulator, in_singleton:)
         receiver = node.receiver
         side = kind == :extend ? :extend : :include
@@ -9364,7 +9357,7 @@ module Rigor
       # class_eval { def x }`, `singleton_class.send(:define_method, :x)`, `Const.singleton_class.prepend(M)`,
       # `Const.singleton_class.send(:include, M)`) puts methods or modules on that singleton class that no edge
       # records, so its singleton side is unpositioned: the owner is the enclosing class for a bare or `self.`
-      # receiver, else the constant. True when it tainted.
+      # receiver, else the constant. True when the call was handled here (taint, or a recorded `include` / `prepend`).
       #
       # Issue #1906 — a naming call with literal names ({#singleton_class_named_call?}) marks only its names instead,
       # but only where it is a direct statement (a top-level statement, or one of a direct declaration body or of a
@@ -10388,10 +10381,6 @@ module Rigor
         singleton_class_of_receiver?(receiver) && (receiver.receiver.nil? || receiver.receiver.is_a?(Prism::SelfNode))
       end
 
-      # Issue #1911 — an `attr_reader` / `attr_writer` / `attr_accessor` call written on the body's self records
-      # each member it defines (`x`, `x=`) with `visibility`: the running default for a statement (`toggled`), the
-      # wrapping call's for `private attr_accessor :x`, which Ruby applies to the `[:x, :x=]` the macro returns.
-      # A non-literal name (`attr_reader(*FIELDS)`) records nothing; a call that is no such macro records nothing.
       # Issue #1989 — the names a `define_method(:x)` or an `alias_method :x, :y` call replaces. An `attr_*` call is
       # not among them: it writes its members' slots itself ({#record_attr_visibility}).
       def replaced_by_call(call_node)
@@ -10418,6 +10407,10 @@ module Rigor
         end
       end
 
+      # Issue #1911 — an `attr_reader` / `attr_writer` / `attr_accessor` call written on the body's self records
+      # each member it defines (`x`, `x=`) with `visibility`: the running default for a statement (`toggled`), the
+      # wrapping call's for `private attr_accessor :x`, which Ruby applies to the `[:x, :x=]` the macro returns.
+      # A non-literal name (`attr_reader(*FIELDS)`) records nothing; a call that is no such macro records nothing.
       def record_attr_visibility(call_node, qualified_prefix, visibility, accumulator, toggled:, side: :instance)
         macro = attr_macro(call_node)
         return if macro.nil? || qualified_prefix.empty?
@@ -11240,9 +11233,10 @@ module Rigor
       end
 
       # Walks every file in `paths` (each path is parsed once with `Prism.parse_file`) and returns the unioned
-      # project-wide `discovered_classes` Hash: `{qualified_name => Singleton[…]}`. Used by `Analysis::Runner` to seed
-      # each file's `default_scope.discovered_classes` so that lexical constant lookup in one file resolves a `class
-      # Foo` declared in a sibling file. Per-file collisions are last-write-wins (matches the existing in-file merge
+      # project-wide `discovered_classes` Hash: `{qualified_name => Singleton[…]}`, which seeds each file's
+      # `default_scope.discovered_classes` so that lexical constant lookup in one file resolves a `class Foo` declared
+      # in a sibling file. The runner's pre-pass now gets it from {#discovered_project_index_for_paths}; this is the
+      # classes-only walk. Per-file collisions are last-write-wins (matches the existing in-file merge
       # semantics). Parse failures fail-soft to an empty contribution. The `buffer` argument, when present, redirects
       # reads for the bound logical path to the buffer's physical path so editor-mode pre-passes see the in-flight
       # bytes.
@@ -11609,8 +11603,7 @@ module Rigor
       # iteration, so no more than one AST is held alive at a time (peak RSS stays flat on large projects).
       #
       # Error degradation is identical to the two independent loops it replaces: a read / parse failure (the
-      # rescue's real target) contributes nothing to either table. The subset-scoped callers
-      # ({IncrementalSession}, `coverage --protection`) keep calling the individual methods unchanged.
+      # rescue's real target) contributes nothing to either table.
       #
       # @param uncertain — issue #2021: the paths whose every method contribution is `possible`
       #   ({Certainty.every_contribution}).
@@ -12255,7 +12248,6 @@ module Rigor
         # {#subtract_sibling_methods!} applies the same drop to `possible_discovered_methods`. The extends fold copies
         # an extended module's instance defs onto the extender's singleton, and follows the siblings the same way (a
         # copy is possible or contested when its edge is listed in `unpositioned_mixins` or its source was).
-        # Until a producer fills a sibling and an edge is listed, there is nothing for either pass to follow.
         fold_project_extends(acc)
         # Cross-file method suppression is for the project's OWN accessors (attr_* / define_method / alias) — NOT for
         # plain `def`s. A cross-file `def` on a class is exactly the ADR-17 monkey-patch case the undefined-method rule
@@ -12488,7 +12480,7 @@ module Rigor
       # and publishes a value the program does not have. That is why the operator / multi-assign / chained /
       # `self::` forms below are censused as unpublishable rather than skipped.
       #
-      # **Why the publishable set is only Symbol / Integer / Float.** Publishing turns `Dynamic[top]` into a
+      # **Why only Symbol / Integer / Float / `true` / `false` publish.** Publishing turns `Dynamic[top]` into a
       # real type at every reader in the project, which is precisely where a wrong answer becomes a diagnostic
       # on correct code (AGENTS.md § "Implementation Guidelines"), so the recognised set is the one whose
       # precision is worth that risk.
@@ -13558,7 +13550,6 @@ module Rigor
         [self_decl, child_prefix, unnameable_decl?(node, self_decl, singleton_cref)]
       end
 
-      # Whether a meta-new constant write's TARGET still names its class below an unnameable
       # The qualified prefix a `self::`-anchored declaration or write target names when
       # `self_base` names the REBOUND self — a `def_owner` override, a mixin `current_class`,
       # or a meta-new class prefix. nil `self_base` means `self` is the lexical class — the
@@ -13572,6 +13563,7 @@ module Rigor
         self_base + tail
       end
 
+      # Whether a meta-new constant write's TARGET still names its class below an unnameable
       # singleton cref — the path-write twin of {#decl_nameable_under_cref?}. `::K`, `C::K`,
       # `Foo::F` resolve their base lexically; a bare `K =` / `K ||=` lands on the singleton's
       # own constant table, and a `self::` or dynamic base names nothing reachable — unless

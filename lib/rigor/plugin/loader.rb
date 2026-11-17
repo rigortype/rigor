@@ -19,9 +19,9 @@ module Rigor
     # 4. Validate the user's config against the manifest's `config_schema`.
     # 5. Instantiate the plugin and call `init(services)`.
     #
-    # Loading is deterministic: configuration order, with plugin id alphabetical as the tie-breaker for
-    # entries that resolve to the same gem. Failures do not abort the run; the loader collects them on the
-    # {Registry} so the runner can convert each one into a `:plugin_loader` diagnostic.
+    # Loading is deterministic: configuration order, reordered only by the `manifest(consumes:)` topological
+    # sort (ADR-9), which itself breaks ties by configuration order. Failures do not abort the run; the loader collects
+    # them on the {Registry} so the runner can convert each one into a `:plugin_loader` diagnostic.
     class Loader # rubocop:disable Metrics/ClassLength
       attr_reader :services, :requirer, :feature_resolver
 
@@ -344,7 +344,7 @@ module Rigor
 
       # ADR-9 slice 5 — topological sort of plugins by their `manifest(consumes:)` declarations. Returns
       # `[sorted_plugins, load_errors]`. Determinism: when no dependency relation forces an order, plugins
-      # are visited alphabetically by manifest id. A non-optional consume of a `(plugin_id, name)` whose
+      # keep their configuration order. A non-optional consume of a `(plugin_id, name)` whose
       # producer is missing emits a `:missing-producer` LoadError and drops the consumer; cycles emit a
       # `:dependency-cycle` LoadError naming the offending chain.
       def topo_sort_plugins(plugins)

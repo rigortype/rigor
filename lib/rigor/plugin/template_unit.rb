@@ -93,7 +93,8 @@ module Rigor
       end
 
       # The unit's cache identity — **source bytes + transform id + synthesis version**, the triple
-      # `docs/internal-spec/cache.md` § computed-value keys asks a synthesised input to carry. The
+      # `docs/internal-spec/cache.md` § computed-value keys asks a synthesised input to carry, plus the
+      # suppressed-rule prefixes because they change what the unit reports. The
       # template's own bytes are deliberately NOT in it: the engine analyses `ruby_source`, and two
       # templates that compile to the same Ruby have the same answer.
       #
@@ -112,7 +113,8 @@ module Rigor
 
       # The template line a `ruby_source` line reports at. Falls back to the nearest mapped line before it
       # — a synthesised prologue or a buffer-append the compiler emitted between two template lines still
-      # points into the template rather than past its end — and to line 1 when the map says nothing at all.
+      # points into the template rather than past its end — and to line 1 when no mapped line precedes it. An
+      # empty map is the identity.
       def template_line(ruby_line)
         return ruby_line if @line_map.empty?
         return @line_map[ruby_line] if @line_map.key?(ruby_line)

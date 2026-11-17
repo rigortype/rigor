@@ -75,9 +75,9 @@ module Rigor
 
       # ADR-119 WD1 — each member that may one day admit `possible` or `contested` facts, and the sibling that
       # holds them. Every copy path reads this one declaration, so a member never travels without its sibling:
-      # {#with} raises on a half pair and {.compact_pairs} drops a pair only when BOTH halves are empty. No
-      # producer fills a sibling yet (the lane-1 carriage), so every sibling is empty and each member keeps its
-      # meaning, the union of its certain and possible facts.
+      # {#with} raises on a half pair and {.compact_pairs} drops a pair only when BOTH halves are empty. A sibling
+      # holds only what a conditional definer contributes (ADR-119 WD3), and each member keeps its meaning, the union
+      # of its certain and possible facts.
       #
       # - `possible_*` has its member's shape and is a subset of it (a `discovered_methods` pair is a
       #   `{class => {name => kind}}` table).
@@ -105,7 +105,7 @@ module Rigor
       private_constant :PARTNERS
 
       # [#1507](https://github.com/rigortype/rigor/issues/1507) — the kind of fact each member holds, which decides
-      # what a reader may conclude from an entry and which gate covers the member (ADR-119 WD4, proposed). Each
+      # what a reader may conclude from an entry and which gate covers the member (ADR-119 WD4). Each
       # reason describes the table as the code builds it today. `spec/rigor/declaration_facts/member_classes_spec.rb`
       # fails on a member that is unclassified or classified twice, and checks each class's shape on an index built
       # from a fixture project; it pins the few misfilings those checks accept.
@@ -208,10 +208,10 @@ module Rigor
         entries.first.is_a?(Array)
       end
 
-      # Issue #992 — the two class-wide keys a `discovered_parameter_envelopes` bucket can carry beside its
+      # Issue #992 — the class-wide keys a `discovered_parameter_envelopes` bucket can carry beside its
       # `[kind, method_name]` entries. Their PRESENCE is the fact; the value is always
       # `Source::ParameterEnvelope::OPAQUE`, so a bucket folds under the one join every other entry does.
-      # Symbols, because every per-method key is an Array and neither can collide with the other.
+      # Symbols, because every per-method key is an Array and none can collide with another.
       #
       # The class marks below and {ENVELOPE_PROJECT_WIDE} are presence facts read only to decline a read; they are
       # never a contested path. Contested envelope paths are always `[class, [kind, name]]`.
@@ -355,8 +355,8 @@ module Rigor
         !bucket.nil? && bucket.any? { |key, _| declaring_key?(key) }
       end
 
-      # Issue #2901 — a per-method entry declares a member; the two macro entries ({ENVELOPE_BODY_CALL_KIND},
-      # {ENVELOPE_COMPUTED_DEFINER_KIND}) do not.
+      # Issue #2901 — a per-method entry declares a member; the macro entries (`MACRO_KINDS`, among them
+      # {ENVELOPE_BODY_CALL_KIND} and {ENVELOPE_COMPUTED_DEFINER_KIND}) do not.
       def self.declaring_key?(key)
         return DECLARING_MARKS.include?(key) if key.is_a?(Symbol)
 

@@ -29,8 +29,8 @@ module Rigor
     # - `rigor effects {update,check,diff,explain}` — the committed **effect snapshot** and its drift
     #   gate, in {EffectsSnapshotCommand}.
     #
-    # Neither emits a diagnostic nor enters `rigor check`'s stream; the report always exits 0, and only
-    # `check` ever exits non-zero (1 on drift, 64 on a usage error).
+    # Neither emits a diagnostic nor enters `rigor check`'s stream; a report that ran exits 0, and of the
+    # snapshot verbs only `check` exits 1 (on drift). A usage error exits 64 on either surface.
     #
     # The command turns collection on for its own run by loading the project's configuration and enabling
     # an implicit `effects: {}` when the file carries no `effects:` block — the ad-hoc mode ADR-103 WD14
@@ -185,10 +185,6 @@ module Rigor
         options
       end
 
-      # Sequential and cache-backed, through the same ADR-45 whole-run result cache `rigor check` uses:
-      # the diagnostics entry serves the run and the #382 effects sidecar serves the collections, leaving
-      # only the fixpoint. Sequential is not a cache decision — the run-result cache declines pool mode —
-      # but a collecting run is pinned to the fork backend anyway, so `workers: 0` costs nothing here.
       # #429 — the vocabulary, from the product rather than from a document the gem does not ship.
       #
       # Four configuration keys and two annotation forms all require typing an effect label, and until
@@ -240,6 +236,11 @@ module Rigor
       # configuration does not cover — which is what every `rigor effects PATH` invocation from outside a
       # project does — still analyses it. Inside a project the argument is already under `paths:` and the
       # union is the configured set unchanged.
+      #
+      # Sequential and cache-backed, through the same ADR-45 whole-run result cache `rigor check` uses:
+      # the diagnostics entry serves the run and the #382 effects sidecar serves the collections, leaving
+      # only the fixpoint. Sequential is not a cache decision — the run-result cache declines pool mode —
+      # but a collecting run is pinned to the fork backend anyway, so `workers: 0` costs nothing here.
       #
       # @return the table, and which
       #   file each unit was defined in — the map {EffectsReport} needs to answer a path argument.

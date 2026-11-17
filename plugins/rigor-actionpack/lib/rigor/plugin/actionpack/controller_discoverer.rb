@@ -9,9 +9,10 @@ require_relative "controller_index"
 module Rigor
   module Plugin
     class Actionpack < Rigor::Plugin::Base
-      # Walks `controller_search_paths` building a {ControllerIndex} of `(class_name, methods,
-      # parent_class_name)` triples. Used by Phase 2 (filter chains) to validate that `before_action
-      # :name` references a method defined on the controller or its ancestor chain.
+      # Walks `controller_search_paths` building a {ControllerIndex} of entries (class name, defined
+      # methods, parent class name, included modules, enclosing namespace). Used by Phase 2 (filter
+      # chains) to validate that `before_action :name` references a method defined on the controller or
+      # its ancestor chain.
       #
       # Two declaration shapes are recognised and qualified the same way:
       #

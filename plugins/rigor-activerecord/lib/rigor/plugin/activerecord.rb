@@ -52,10 +52,11 @@ module Rigor
     #       - gem: rigor-activerecord
     #         config:
     #           schema_file: "db/schema.rb"
+    #           structure_sql_file: "db/structure.sql"
     #           model_search_paths: ["app/models"]
     #           model_base_classes: ["ApplicationRecord", "ActiveRecord::Base"]
     #
-    # All three keys default to the values shown above. The class name `Rigor::Plugin::Activerecord` (single
+    # All four keys default to the values shown above. The class name `Rigor::Plugin::Activerecord` (single
     # capital R) is intentional — keeps the constant lookup distinct from `::ActiveRecord` even though the
     # gem name is hyphenated.
     #
@@ -940,7 +941,7 @@ module Rigor
         schema_table_or_nil
         # ADR-60 WD3 record-and-validate: the producer's own in-block `ModelDiscoverer` reads are
         # captured into the dependency descriptor after the block runs, and the producer's `watch:` covers
-        # model-file additions — so no priming walk is needed (it used to run the discover twice).
+        # model-file additions — so no priming walk is needed.
         @model_index = cache_for(:model_index, params: {}).call
       rescue StandardError => e
         @load_errors << { key: "2-model-index-failed",

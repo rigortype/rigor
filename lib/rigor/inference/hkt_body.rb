@@ -26,6 +26,8 @@ module Rigor
     # - {Union}       — N-ary union of arms.
     # - {NominalApp}  — parameterised nominal class (`Array[X]`, `Hash[K, V]`) whose type args are
     #   themselves body nodes.
+    # - {Conditional}, {TestSubtype}, {TestEquality}, {TestMembership} — the ADR-20 § D3 conditional form and
+    #   its three tests.
     #
     # Every node is a frozen `Data.define` value; structural equality is by-field.
     module HktBody

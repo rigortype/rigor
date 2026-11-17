@@ -27,8 +27,8 @@ module Rigor
       #   `.respond_to?`. These read like the user explicitly checking for a runtime condition that the type
       #   system already proves can't happen — Rigor's strict-on-returns RBS often disagrees with the user's
       #   defensive check (e.g. `Module#name` returns `String` per RBS but anonymous classes really do return
-      #   `nil`). Skipping
-      #   these forms keeps the rule useful for genuine logic errors without faulting defensive code.
+      #   `nil`). Skipping these forms keeps the rule useful for genuine logic errors without faulting defensive
+      #   code.
       #
       # Also skipped (so the literal-only `unreachable-branch` rule doesn't double-fire alongside this one):
       #

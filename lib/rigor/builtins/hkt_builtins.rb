@@ -11,7 +11,7 @@ module Rigor
     # authors register more URIs through their manifests; user `.rbs` overlays register through the
     # `%a{rigor:v1:hkt_register}` / `%a{rigor:v1:hkt_define}` annotations Slice 1 ships.
     #
-    # Today's contents:
+    # Today's contents (`csv::parsed[K]` and `csv::row[K]` are described at their bodies below):
     #
     # - `json::value[K]` — the recursive sum stdlib's `JSON.parse` returns. Body:
     #
@@ -137,22 +137,9 @@ module Rigor
         )
       end
 
-      # ADR-20 slice 3 — hardcoded `(class_name, method_name,
-      # kind) => HKT application` table consulted by the
-      # dispatcher's new HKT-builtin tier. Sits ABOVE
-      # `RbsDispatch.try_dispatch` so a known stdlib method
-      # (`JSON.parse`, `JSON.parse!`) gets the reduced HKT
-      # type instead of the upstream rbs gem's `untyped`
-      # return. The annotation-based `%a{rigor:v1:return:
-      # App[...]}` path (parsed by
-      # `RbsExtended.parse_return_type_override`) is the
-      # general extension surface for user-authored sigs;
-      # this table is the Rigor-bundled shortcut for the
-      # handful of stdlib methods whose RBS declarations
-      # cannot be cleanly overridden via RBS overlay merging.
-      #
-      # Each entry maps to a hash with `:uri` and `:args`
-      # (an array of Ruby class names). The dispatcher
+      # A table entry maps to a hash with `:uri`, `:args`
+      # (an array of Ruby class names), `:discriminator` and
+      # `:post_reduce`. The dispatcher
       # builds `Type::App.new(uri, args.map { Nominal })`,
       # then reduces via the env's `hkt_registry` so the
       # caller observes the unfolded form
@@ -196,6 +183,19 @@ module Rigor
       }.freeze
       private_constant :CSV_ROW_SPEC
 
+      # ADR-20 slice 3 — hardcoded `(class_name, method_name,
+      # kind) => HKT application` table consulted by the
+      # dispatcher's new HKT-builtin tier. Sits ABOVE
+      # `RbsDispatch.try_dispatch` so a known stdlib method
+      # (`JSON.parse`, `JSON.parse!`) gets the reduced HKT
+      # type instead of the upstream rbs gem's `untyped`
+      # return. The annotation-based `%a{rigor:v1:return:
+      # App[...]}` path (parsed by
+      # `RbsExtended.parse_return_type_override`) is the
+      # general extension surface for user-authored sigs;
+      # this table is the Rigor-bundled shortcut for the
+      # handful of stdlib methods whose RBS declarations
+      # cannot be cleanly overridden via RBS overlay merging.
       METHOD_RETURN_OVERRIDES = {
         # JSON — stdlib's `json` library. Upstream rbs declares
         # `(string, ?options) -> untyped`; the HKT-builtin tier

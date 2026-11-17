@@ -12,7 +12,7 @@ module Rigor
     # rigor-pundit — validates Pundit `authorize` / `policy` / `policy_scope` calls against the project's
     # `app/policies/` tree.
     #
-    # Tier 3B of the [Rails plugins roadmap](../../../../docs/design/20260508-rails-plugins-roadmap.md).
+    # Tier 3B of the [Rails plugins roadmap](../../../../../docs/design/20260508-rails-plugins-roadmap.md).
     # Statically discovers policy classes by walking `policy_search_paths` and parsing each file with
     # Prism — no `pundit` runtime dependency.
     #

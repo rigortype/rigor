@@ -20,9 +20,9 @@ module Rigor
       #
       # The collaborator holds the immutable per-run inputs (the configuration and the three mutable
       # reporter accumulators, which are shared instances the dispatcher records into). The per-run varying
-      # state produced by other passes (the plugin registry, the dependency-source index, and the four
-      # end-of-pass snapshots) is read through injected reader procs so this collaborator never calls back
-      # into the {Runner} and the read happens at the exact point in the run the original inline read did.
+      # state produced by other passes (the plugin registry, the dependency-source index) is read through
+      # injected reader procs so this collaborator never calls back into the {Runner} and the read happens at
+      # the exact point in the run the original inline read did.
       class DiagnosticAggregator # rubocop:disable Metrics/ClassLength
         # @param plugin_registry — reader returning the current {Plugin::Registry} (varies per run).
         # @param dependency_source_index — reader returning the current
@@ -206,12 +206,7 @@ module Rigor
           end
         end
 
-        # ADR-10 § "Budget interaction" / slice 4 — emits one `:warning` per gem whose Walker run hit the
-        # `dependencies.budget_per_gem` cap. The cap is a Walker- side guard rail (slice 4 picks the (α)
-        # semantics from ADR-10 WD4: harvesting stops, the dispatcher behaves exactly as before for
-        # unrecorded methods). The diagnostic names the gem and points the user at the three remediations:
-        # ship RBS, reduce `mode:` from `full` to `when_missing`, or de-list the gem.
-        # ADR-10 § "config-conflict diagnostic" / 5d — surfaces `Configuration::Dependencies` warnings
+        # ADR-10 § "Public-API drift surface" — surfaces `Configuration::Dependencies` warnings
         # accumulated during `from_h` deduplication of the `includes:`-chain source_inference array. Each
         # warning describes a per-gem mode conflict that the merge resolved right-wins; the user sees one
         # diagnostic per conflict. `:warning` matches the user's "warn but don't block" preference per the
@@ -230,6 +225,11 @@ module Rigor
           end
         end
 
+        # ADR-10 § "Budget interaction" / slice 4 — emits one `:warning` per gem whose Walker run hit the
+        # `dependencies.budget_per_gem` cap. The cap is a Walker-side guard rail (slice 4 picks the (α)
+        # semantics from ADR-10 WD4: harvesting stops, the dispatcher behaves exactly as before for
+        # unrecorded methods). The diagnostic names the gem and points the user at the three remediations:
+        # ship RBS, reduce `mode:` from `full` to `when_missing`, or de-list the gem.
         def dependency_source_budget_diagnostics
           budget = @configuration.dependencies.budget_per_gem
           dependency_source_index.budget_exceeded.map do |gem_name|
@@ -413,12 +413,6 @@ module Rigor
           )
         end
 
-        # Robustness uplift companion (ADR-5) — when the project's `signature_paths:` RBS declared
-        # qualified names without their enclosing namespace, `RbsLoader` synthesizes the missing `module`s
-        # so the otherwise-inert signatures resolve. Surface a single `:info` diagnostic naming them so the
-        # user knows their sig set is malformed (`rbs validate` rejects it) and can fix it at the source.
-        # Authored `:info`: the analysis already succeeded; this is advisory, never a gate. Empty for a
-        # well-formed sig set.
         # An unparseable or declaration-colliding `.rbs` under `signature_paths:` is QUARANTINED so the
         # rest of the env survives (PR #50; issue #777 extends this to class-vs-module / constant
         # collisions against bundled RBS), which means the types it declares are silently absent — calls
@@ -498,7 +492,7 @@ module Rigor
         # step further in and one step narrower — the plugin entries are dropped, the `.rbs` scan still
         # runs. Either way everything else this run reports is unaffected: no class loses its method
         # surface, no signature file is skipped, the environment builds. That is why this sits LAST on the
-        # ladder, after its two `rbs.coverage.*` siblings above.
+        # ladder, after its three `rbs.coverage.*` siblings above.
         def rbs_hkt_scan_failed_diagnostics
           failure = @snapshots[:hkt_scan_failure]
           return [] if failure.nil?
@@ -506,6 +500,12 @@ module Rigor
           [build_rbs_hkt_scan_failed_diagnostic(failure)]
         end
 
+        # Robustness uplift companion (ADR-5) — when the project's `signature_paths:` RBS declared
+        # qualified names without their enclosing namespace, `RbsLoader` synthesizes the missing `module`s
+        # so the otherwise-inert signatures resolve. Surface a single `:info` diagnostic naming them so the
+        # user knows their sig set is malformed (`rbs validate` rejects it) and can fix it at the source.
+        # Authored `:info`: the analysis already succeeded; this is advisory, never a gate. Empty for a
+        # well-formed sig set.
         def rbs_synthesized_namespace_diagnostics
           synthesized = @snapshots[:synthesized_namespaces]
           return [] if synthesized.nil? || synthesized.empty?
@@ -861,8 +861,8 @@ module Rigor
           "#{sample.join(', ')}#{suffix}"
         end
 
-        # Issue #784 — one `:error` row per run, unlike its two `:warning` `rbs.coverage.*` siblings above.
-        # Those two are typically a collision between the user's OWN `sig/` and Rigor's bundled RBS, so an
+        # Issue #784 — one `:error` row per run, unlike its three `:warning` `rbs.coverage.*` siblings above.
+        # Those three are typically a collision between the user's OWN `sig/` and Rigor's bundled RBS, so an
         # `:error` default would let a Rigor release turn a green project red with zero user change (ADR-5
         # / AGENTS.md § FP discipline) — the reason both stay `:warning` by default. This row has no such
         # neighbour: post-#783 the scan itself raising is an ANALYZER defect, never something a user's
@@ -1111,10 +1111,12 @@ module Rigor
         #   to a carrier that loses precision (anything other than `HashShape` / `Tuple`).
         # - `dynamic.rbs-extended.hkt-directive-invalid` for every malformed ADR-20 `rigor:v1:hkt_register` /
         #   `rigor:v1:hkt_define` the directive parser declined (issue #785).
+        # - `dynamic.rbs-extended.deprecated-form` for every annotation still written in a deprecated spelling
+        #   (ADR-109 WD3).
         #
-        # All three are authored `:info`; the severity profile re-stamps them per project taste. Every stream
+        # All four are authored `:info`; the severity profile re-stamps them per project taste. Every stream
         # carries its `(path, line, column)` already flattened off the annotation's `RBS::Location`, because
-        # all three cross the pool drain channel (see {RbsExtended::Reporter}); an entry with no position
+        # all four cross the pool drain channel (see {RbsExtended::Reporter}); an entry with no position
         # falls back to `.rigor.yml`-style file-level attribution.
         def rbs_extended_reporter_diagnostics
           unresolved_payload_diagnostics + lossy_projection_diagnostics + hkt_directive_diagnostics +
@@ -1311,7 +1313,7 @@ module Rigor
         # - `served_run_disclosures` (#2020), the rows an incremental recheck replays for the files it served
         #   from cache, since their per-file hooks did not run.
         #
-        # Both are keyed `[plugin id, key]` and the first registration of a pair wins, so a run emits one
+        # All are keyed `[plugin id, key]` and the first registration of a pair wins, so a run emits one
         # row per pair no matter how many plugin instances (workers) reached it — the #1051 bug, where a
         # per-instance `@emitted` flag produced one row per WORKER.
         #
@@ -1445,7 +1447,7 @@ module Rigor
           )
         end
 
-        # The {RbsExtended::Reporter} form of the builder above: its three streams carry the position as
+        # The {RbsExtended::Reporter} form of the builder above: its four streams carry the position as
         # `(path, line, column)` primitives rather than as the `RBS::Location` a conformance record holds,
         # because they cross the pool drain channel (#785, #805). A missing component falls back exactly as
         # {#location_fields} does for a missing location.

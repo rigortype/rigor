@@ -379,8 +379,8 @@ module Rigor
         @operand_types = operand_types
       end
 
-      # Runs `block` with a fresh return sink installed, then yields the collected explicit-`return` value types to the
-      # caller. The sink is an array of `Rigor::Type`. Nested invocations stack: the previous sink is restored on exit
+      # Runs `block` with a fresh return sink installed and answers `[block result, collected explicit-`return` value
+      # types]` (see {ReturnSink#types}). Nested invocations stack: the previous sink is restored on exit
       # so a `def` evaluated inside another method's body (which itself installed a sink) does not corrupt the outer
       # one. Used by `ExpressionTyper#infer_user_method_return` to join the explicit returns into the inferred
       # method-return type.
@@ -1431,8 +1431,8 @@ module Rigor
         end
       end
 
-      # The binding half of {#eval_local_write}: the three mutually exclusive provenance paths a local write
-      # can take, unchanged from when they were inline.
+      # The binding half of {#eval_local_write}: the provenance paths a local write can take (a declaration-sourced
+      # copy, an inferred-parameter root, or the plain binding with its Dynamic / optimistic origin).
       def bind_local_write(node, rhs_type, post_rhs)
         # ADR-58 WD1 — `r = @right` where `@right`'s optionality is purely declaration-sourced makes `r`
         # declaration-sourced too (the survey's exact rotation/traversal shape `r = @right; r.key`). The mark is
@@ -1856,8 +1856,8 @@ module Rigor
         end
       end
 
-      # `h[k] &&= v` / `h[k] += v`. Neither had a handler, so both fell to `evaluate`'s default — typed as a pure
-      # expression, scope untouched — and the receiver never widened. They store through `[]=` exactly as
+      # `h[k] &&= v` / `h[k] += v`. Left to `evaluate`'s default they would type as a pure expression with the scope
+      # untouched, and the receiver would never widen. They store through `[]=` exactly as
       # `eval_index_or_write` does, so they take the same widening; the stored value is the compound result —
       # `falsey(h[k]) | v` for `&&=`, the dispatched `h[k] + v` for `+=` — not the rvalue alone.
       #
@@ -2040,21 +2040,6 @@ module Rigor
         typer.implicit_index_read_type(node, receiver, index_types) || Type::Combinator.untyped
       end
 
-      # Argument types for a straight-line content mutator (`arr << x`, `h[k] = v`).
-      #
-      # **The two scopes are different on purpose.** `current_scope` is the post-call scope the widening will
-      # actually rewrite, so the receiver gate has to ask IT whether the binding is still a literal-shape
-      # carrier — asking the entry scope could green-light a join the widening then declines, or miss one it
-      # would make. The arguments, though, are evaluated BEFORE the call in Ruby's order, so their types come
-      # from the entry `scope`; that also matches how the block path types its own mutator arguments against
-      # the block-ENTRY scope. Between the two points the only edits to the scope are the block / escape /
-      # plugin-assertion helpers above, none of which can rebind a mutator call's argument expressions.
-      #
-      # Both gates are about cost, not correctness — the join declines on its own in either case.
-      # `Scope#type_of` builds a fresh `ExpressionTyper` per call and memoizes nothing, so typing arguments a
-      # join will not consume is pure overhead, and `<<` on a String buffer is one of the commonest calls
-      # there is. The content-adder table skips a non-adding mutator (`pop`, `sort!`); `joinable_receiver?`
-      # skips a receiver whose current binding is not a literal-shape carrier.
       # Both mutator-receiver widenings, against one typing of the call's arguments: the bindings the
       # receiver NAMES ({MutationWidening.widen_after_call}) and, when it names none because the
       # receiver is an element read into a local, that element's pin inside its container
@@ -2149,6 +2134,12 @@ module Rigor
       end
 
       # `tr!` / `tr_s!` are typed too: whether they can empty a `non-empty-string` turns on their replacement argument.
+      #
+      # The two gates (the content-adder tables, `joinable_receiver?` / `joinable_element_read?`) are about cost, not
+      # correctness: `Scope#type_of` memoizes nothing, so typing arguments a join will not consume is pure overhead, and
+      # the join declines on its own either way. `current_scope` is the post-call scope the widening rewrites, so the
+      # receiver gate asks it whether the binding is still a literal-shape carrier; the arguments are typed from the
+      # call's operand scope, as Ruby evaluates them before the call.
       def mutator_arg_types(call_node, current_scope)
         name = call_node.name
         unless ContentJoin::CONTENT_ADDERS.include?(name) || StringMutation::TRANSLATORS.include?(name) ||
@@ -2941,7 +2932,8 @@ module Rigor
         sub_eval(statements, widened, **UNRECORDED)
       end
 
-      # Runs `block` with no `return`, `next`, `break` or retry-frame sink installed.
+      # Runs `block` with none of {CLAUSE_SINKS} installed: no `return`, `next`, `break` (scope or value) or retry-frame
+      # sink.
       def without_jump_sinks(&)
         TypingState.current.without(CLAUSE_SINKS, &)
       end
@@ -3492,7 +3484,6 @@ module Rigor
       # ({#loop_body_ivar_writes}).
       def eval_repeating_for(node) = ReflectiveIvarWrite.in_repeating_body { eval_for(node) }
 
-      # A loop's evaluation, with its value recorded for `ExpressionTyper#type_of_loop` ({LoopValueRecord}).
       # A conditional's evaluation, recorded when it evaluated a loop ({LoopValueRecord.conditional}): the typer
       # types a conditional that holds a loop again from the scope it was evaluated from, and the loop in its branch
       # is evaluated from a branch scope no record matches.
@@ -3509,6 +3500,7 @@ module Rigor
         result
       end
 
+      # A loop's evaluation, with its value recorded for `ExpressionTyper#type_of_loop` ({LoopValueRecord}).
       def eval_recorded_loop(node) = record_loop_value(node, eval_loop(node))
 
       def eval_recorded_for(node) = record_loop_value(node, eval_repeating_for(node))
@@ -4072,7 +4064,7 @@ module Rigor
       # `for index in collection; body; end`. Unlike `each {}` blocks, `for` does NOT create a new variable scope: the
       # index variable AND every local written in the body leak to the surrounding scope. The collection is evaluated
       # once; the body runs zero or more times, so the post-loop scope is the join of the no-iteration scope (just
-      # `post_collection`) and the body scope, with half-bound names degraded to `T | nil` via nil-injection. The loop
+      # `post_coll`) and the body scope, with half-bound names degraded to `T | nil` via nil-injection. The loop
       # expression is the collection's `each` value joined with every `break` value ({#for_value}, issue #1216).
       def eval_for(node)
         coll_type, post_coll = sub_eval(node.collection, scope)
@@ -4346,9 +4338,9 @@ module Rigor
       end
 
       # Extracts the per-iteration element type from a collection carrier. `Tuple[T1..Tn]` yields the union of its
-      # elements; `Nominal[Array, [T]]` and `Nominal[Range, [T]]` yield `T`; `Nominal[Hash, [K, V]]` yields `Tuple[K,
-      # V]` (Hash#each yields `[key, value]` pairs); `IntegerRange` yields `Integer`; a `Range` constant reads the
-      # literal range's element class. Anything else falls back to `untyped`.
+      # elements; `Nominal[Array, [T]]` (likewise `Range`, `Set`, `Enumerator`) yields `T`; `Nominal[Hash, [K, V]]`
+      # yields `Tuple[K, V]` (Hash#each yields `[key, value]` pairs); `IntegerRange` yields `Integer`; a `Range`
+      # constant reads the literal range's element class. Anything else falls back to `untyped`.
       def collection_element_type(type)
         case type
         when Type::Tuple
@@ -5138,7 +5130,7 @@ module Rigor
         end
       end
 
-      # v0.0.3 — recognises a small catalogue of RSpec matcher patterns as assert-shaped narrows on the local passed to
+      # Recognises a small catalogue of RSpec matcher patterns as assert-shaped narrows on the local passed to
       # `expect(...)`. The pattern is matched purely on AST shape; no RBS for RSpec is required (and none is shipped
       # today).
       #
@@ -5151,8 +5143,9 @@ module Rigor
       #   expect(x).to(be_a(C))
       #   expect(x).to(be_kind_of(C))
       #   expect(x).to(be_an_instance_of(C))
-      #     → narrow `x` to `C` (exact for
-      #       `be_an_instance_of`, subtype-permitting
+      #   expect(x).to(be_instance_of(C))
+      #     → narrow `x` to `C` (exact for the two
+      #       `*instance_of` matchers, subtype-permitting
       #       otherwise).
       #
       # Anything else is silently passed through. Symmetric negative class assertions (`not_to be_a(C)`) and narrowing
@@ -5311,12 +5304,13 @@ module Rigor
         end
       end
 
-      # ADR-37 slice 2 / ADR-52 WD3 — gathers each plugin's post-return narrowing from the method-gated
-      # `narrowing_facts` DSL, wrapped as a facts-only `FlowContribution`, swallowing per-plugin exceptions so a buggy
-      # plugin can't abort the assertion path.
       EMPTY_CONTRIBUTIONS = [].freeze
       private_constant :EMPTY_CONTRIBUTIONS
 
+      # ADR-37 slice 2 / ADR-52 WD3 — gathers each plugin's post-return narrowing from the method-gated
+      # `narrowing_facts` DSL, wrapped as a facts-only `FlowContribution`, swallowing per-plugin exceptions so a buggy
+      # plugin can't abort the assertion path.
+      #
       # Fast-exit guard: skip if no plugin declares a `narrowing_facts` rule, or if no registered method-name gate
       # matches the call. See `collect_gated_statement_contributions` for the full consultation.
       def collect_plugin_contributions(registry, call_node, current_scope)
@@ -5375,8 +5369,8 @@ module Rigor
         end
       end
 
-      # Slice 4b-2 — applies a single post-return Fact to the scope. Mirrors `Narrowing#apply_fact_to_scope` (Fact
-      # variant of the v0.0.2 `apply_assert_effect`); shares the narrowing logic via `Narrowing.narrow_for_fact` so the
+      # Slice 4b-2 — applies a single post-return Fact to the scope. Mirrors `Narrowing#apply_fact_to_scope`;
+      # shares the narrowing logic via `Narrowing.narrow_for_fact` so the
       # predicate / assert / plugin paths all converge on the same hierarchy-aware narrowing rules.
       #
       # v0.1.8 Pillar 2 Slice 1 added the `:local` target_kind branch so plugins recognising bespoke call shapes
@@ -5974,8 +5968,8 @@ module Rigor
       # proof that the callee writes the argument it floors: the owner is {FLOOR_ALL} (an inherited def, a
       # `method_missing`) or {FLOOR_EVERY} (a top-level def that may not be the one called), or the callee hands a
       # parameter on, through any hop, to one of those, by name or to several candidates. A def read as written that
-      # writes the argument keeps the
-      # precise floor, which is what a later `Integer` parameter or `no_such_method` on the String needs to report.
+      # writes the argument keeps the precise floor, which is what a later `Integer` parameter or `no_such_method` on
+      # the String needs to report.
       # The walk is bounded by {CalleeMutationChain::MAX_NODES}; past it the answer is true.
       def over_approximating_callee?(def_node, owner)
         return true if OVER_APPROXIMATING.include?(owner)
@@ -6700,7 +6694,7 @@ module Rigor
 
       # The `[def, offset]` pairs a self-dispatch `node` resolves to in the enclosing class, `offset` being how many
       # leading arguments of `node` are not the def's. Issue #2521 — the instance def is looked up along the class's
-      # ancestors ({Scope#user_def_through_ancestors}), as Ruby dispatches the call: an inherited def is now walked
+      # ancestors ({Scope#user_def_through_ancestors}), as Ruby dispatches the call: an inherited def is walked
       # under the receiver's class, so a self-call inside it to another inherited def must still be found there.
       #
       # Issue #2297 — in a singleton-side body (`def self.x`, a `def` in `class << self`), whose `self` is the class
@@ -6708,9 +6702,8 @@ module Rigor
       # applies when either mutates. Ruby calls only the singleton side, but the hand-offs that reach an instance def
       # from there (`new.call(acc)`, `instance.helper(acc)`) and the singleton defs the index does not record
       # (`module_function :poke`, `define_singleton_method`, `alias_method` in `class << self`) are not followed, and
-      # dropping the instance def floored too little on correct code
-      # (`approval-queue.d/callee-floor-singleton-side.md`).
-      # An instance-side body resolves to instance defs only.
+      # dropping the instance def floored too little on correct code (decided in #2394, ratified in #2501). An
+      # instance-side body resolves to instance defs only.
       #
       # A `send(:name, ...)` / `public_send(:name, ...)` with a symbol literal resolves as the self-call `name(...)`,
       # offset 1, on each side that has no def of the `send` / `public_send` name itself; on a side that has one, it is
@@ -6866,7 +6859,7 @@ module Rigor
         node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)
       end
 
-      # The set of `[name, slot]` parameters of `def_node` whose content a block in the body escape-mutates.
+      # The `{ name => slot }` parameters of `def_node` whose content a block in the body escape-mutates.
       # Memoised per def node (the body walk is otherwise repeated at every call site). A parameter is "escape-mutated"
       # when a `param[k] = v` / `param << x` mutation on it appears inside a block whose receiving call is not proven
       # non-escaping.
@@ -6985,11 +6978,11 @@ module Rigor
         node.is_a?(Prism::ConstantPathNode) && node.parent.nil? && FRESH_CONSTRUCTED.include?(node.name)
       end
 
+      # The calls whose result {#callee_write_census} reads as a new object rather than an alias of the receiver.
       FRESH_DUPLICATORS = %i[dup clone].to_set.freeze
       FRESH_CONSTRUCTED = %i[Array Hash String Set].to_set.freeze
       FRESH_COPIERS = %i[map collect select reject merge + -].to_set.freeze
       FRESH_OPERATORS = %i[+ -].to_set.freeze
-      # The calls whose result {#callee_write_census} reads as a new object rather than an alias of the receiver.
       # The calls {#callee_write_census} reads as a new container of the receiver's elements, on an Array, a Hash and a
       # String alike: a write to the result misses the receiver, an element of it may be a part. `to_a`, `to_h`
       # (without a block; `to_h { }` is read as one in {CalleeWriteCensus}), `to_s`, `each_slice`, `each_cons` and
@@ -7105,15 +7098,15 @@ module Rigor
         slots
       end
 
-      # True when at least one argument of `node` is a bare local-variable read (positional or keyword value) bound in
-      # the current scope — a cheap pre-filter so the def resolution / body scan only runs for calls that could actually
-      # floor something.
       # A local bound in the current scope, or (issue #2335) one whose object another local may share, which the
       # alias floor reads a callee's write through ({AliasMutationFloor.reaches_other_locals?}).
       def passed_local?(read, node)
         scope.locals.key?(read.name) || AliasMutationFloor.reaches_other_locals?(scope, read, node)
       end
 
+      # True when at least one argument of `node` is a bare local-variable read (positional or keyword value) bound in
+      # the current scope — a cheap pre-filter so the def resolution / body scan only runs for calls that could actually
+      # floor something.
       def call_passes_local_argument?(node)
         args = node.arguments
         return false unless args.respond_to?(:arguments)
@@ -7736,9 +7729,9 @@ module Rigor
       end
 
       # The instance variables, class variables and globals the block body writes that {#capturable_non_local?}
-      # accepts; no instance variable for a block that runs on another object. Every self-rebinding call classifies
-      # `:unknown` today, so neither content seam that calls this meets one; the guard keeps the answer right should
-      # the escape analysis learn to call one non-escaping.
+      # accepts; no instance variable for a block that runs on another object. No self-rebinding call classifies
+      # `:non_escaping` today, so neither content seam that calls this meets one; the guard keeps the answer right
+      # should the escape analysis learn to call one non-escaping.
       def rebound_capturable_non_locals(block, call_node)
         return NO_REWRITES if block.body.nil?
 
@@ -7755,7 +7748,7 @@ module Rigor
       # The locals a store reads to build what it stores. An Array index write's index arguments are left out, and so
       # is any name they read: the join classifies the store as an element or a splice from the index's type, and a
       # `Dynamic` index reads as both, so `grid[i] = [x, x]` would join `x` itself as a member of `grid` beside the
-      # pair. Such an index keeps its block-entry binding, which is master's reading, and so does a stored value that
+      # pair. Such an index keeps its block-entry binding, and so does a stored value that
       # reads the same name: `ids[n] = n; n += 1` still stores `n`'s first-iteration value.
       def store_value_reads(site, array)
         return local_reads(site) unless array
@@ -7989,7 +7982,7 @@ module Rigor
       # resolves a class variable lexically, and a global is the same one whatever `self` is.
       def captured_content_mutations(block, shadows, call_node)
         mutations = Hash.new { |h, k| h[k] = [] }
-        # Every self-rebinding call classifies `:unknown` today, so this seam does not meet one; the guard keeps the
+        # No self-rebinding call classifies `:non_escaping` today, so this seam does not meet one; the guard keeps the
         # ivar arm right should the escape analysis learn to call one non-escaping.
         foreign = foreign_self_block?(call_node)
         Source::NodeWalker.each_with_ancestors(block.body) do |node, ancestors|
@@ -9689,7 +9682,7 @@ module Rigor
       #
       # The detection is intentionally conservative — it recognises only the most common patterns:
       # - A `Prism::ReturnNode`, `NextNode`, `BreakNode`.
-      # - A `Prism::CallNode` whose name is `:raise` or `:throw`.
+      # - A receiver-less `Prism::CallNode` named in {EXIT_CALL_NAMES} (`raise`, `throw`, `exit`, `abort`, `fail`).
       # - A `Prism::StatementsNode`, `Prism::ParenthesesNode`, or
       #   `Prism::IfNode`/`UnlessNode` whose final / both
       #   branches recursively exit.
@@ -10325,10 +10318,9 @@ module Rigor
         type.is_a?(Type::Singleton) ? singleton_to_nominal(type) : type
       end
 
-      # `in PatternA | PatternB` — Ruby requires both alternates to bind the same names, but the binder runs against
-      # the AST and cannot enforce that. We collect bindings from each side and merge by name, unioning types when both
-      # alternates contribute. Names that only one alternate contributes still surface (the parser would have rejected
-      # the case at compile time, so by the time we see it the user's intent is the merged set).
+      # `in PatternA | PatternB` — Ruby rejects a named capture inside an alternative pattern (only `_`-prefixed names
+      # compile), so the binder, which runs against the AST, simply collects bindings from each side and merges by
+      # name, unioning types when both alternates contribute. A name only one alternate contributes still surfaces.
       def collect_alternation_pattern_bindings(subject_type, pattern, scope)
         left = collect_in_pattern_bindings(subject_type, pattern.left, scope)
         right = collect_in_pattern_bindings(subject_type, pattern.right, scope)

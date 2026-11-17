@@ -237,6 +237,10 @@ module Rigor
     SCALAR_PATH_KEYS = %w[core_root].freeze
     private_constant :SCALAR_PATH_KEYS
 
+    # The isolation strategies a `.rigor.yml` may name (ADR-39 slice 5 / #911). `ruby_box` is
+    # deliberately absent: it is a boot-time decision the config file is read too late to make.
+    CONFIGURABLE_PLUGIN_ISOLATIONS = %w[none process].freeze
+
     # Top-level keys this implementation DECLARES but never reads — see `docs/internal-spec/config.md`
     # § "Reserved namespaces" and ADR-99.
     #
@@ -250,10 +254,6 @@ module Rigor
     # reservation FINDABLE by the next person adding config validation (#166 is exactly that), and to
     # give the schema-parity spec something to key on: a reserved namespace is by definition absent
     # from DEFAULTS, so the DEFAULTS-driven schema gate can never see it.
-    # The isolation strategies a `.rigor.yml` may name (ADR-39 slice 5 / #911). `ruby_box` is
-    # deliberately absent: it is a boot-time decision the config file is read too late to make.
-    CONFIGURABLE_PLUGIN_ISOLATIONS = %w[none process].freeze
-
     RESERVED_NAMESPACES = %w[rigor_rs].freeze
 
     # Every top-level key a conforming `.rigor.yml` may carry: the keys this implementation owns, plus
@@ -868,8 +868,8 @@ module Rigor
     # ADR-103 WD13 — the `effects:` block, or nil when the key is absent or explicitly `false`. A
     # present-but-empty key (`effects:` alone, which YAML parses as nil) and `effects: {}` are the same
     # thing: collection on, every sub-key defaulted. A non-Hash body is normalised to `{}` rather than
-    # rejected — the sub-keys have no reader yet, so there is nothing a malformed body could break, and
-    # tier 1 (the schema) is where its shape is answered.
+    # rejected here: tier 1 (the schema) is where the body's shape is answered, and each sub-key reader
+    # below validates its own value.
     #
     # ADR-103 WD15 — a loaded file that carries no `effects:` key AT ALL (`effects_key_present == false`,
     # so `value` can only be the `false` DEFAULTS fallback here, never a user's own explicit `false`) behaves
@@ -1151,9 +1151,6 @@ module Rigor
       raise ConfigurationError, "parallel.workers must be a non-negative Integer, got #{value.inspect} (#{e.message})"
     end
 
-    # ADR-22 WD2 (b) — `baseline: <path>` activates the file; `baseline: false` is the explicit-disable form
-    # (useful in `.rigor.yml` to override an upstream `.rigor.dist.yml` that names a baseline). `nil`
-    # (default / absent key) is also "no baseline".
     # Issue #2517 — the directory's existence and contents are checked where the environment is built
     # ({Environment::CoreRoot.validate!}), not here: `rigor init`, `rigor doctor` and the language server's reload
     # load a configuration without building an environment, and must still be able to read one naming a core that
@@ -1166,6 +1163,9 @@ module Rigor
       value.dup.freeze
     end
 
+    # ADR-22 WD2 (b) — `baseline: <path>` activates the file; `baseline: false` is the explicit-disable form
+    # (useful in `.rigor.yml` to override an upstream `.rigor.dist.yml` that names a baseline). `nil`
+    # (default / absent key) is also "no baseline".
     def coerce_baseline_path(value)
       return nil if value.nil? || value == false
 
@@ -1173,9 +1173,8 @@ module Rigor
     end
 
     # ADR-87 WD1 — `cache.validation` is `"auto"` (default), `"stat"`, or `"digest"`. An unrecognised value
-    # fails soft to the default rather than aborting a check over a typo — the strict `"digest"` behaviour is
-    # the safe fallback either way, and the always-available `RIGOR_STRICT_VALIDATION=1` env escape hatch does
-    # not depend on this value being valid.
+    # fails soft to `"auto"` rather than aborting a check over a typo, and the always-available
+    # `RIGOR_STRICT_VALIDATION=1` env escape hatch does not depend on this value being valid.
     VALID_CACHE_VALIDATIONS = %w[auto stat digest].freeze
     private_constant :VALID_CACHE_VALIDATIONS
 

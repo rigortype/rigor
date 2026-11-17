@@ -286,10 +286,6 @@ module Rigor
         real
       end
 
-      # A glob is matched against every analysed spelling of the declaration's file, and each of them and its
-      # realpath relative to the project root (#1760) and to the working directory:
-      # `configuration.paths` are expanded to absolute, so a user-written `--entry-point=lib/entry.rb` would
-      # otherwise never match anything and silently produce a root set of zero.
       # A constant named only from the project's own `sig/` is referenced — the #345 probe reported exactly this
       # as a false candidate until an RBS-side hook was added, because `Reflection.resolve_constant_type` is
       # source-side only. A signature also DECLARES, though, and {Analysis::Reachability::SignatureScan} is
@@ -349,6 +345,10 @@ module Rigor
         text.scan(CONSTANT_BEARING_RUN).uniq.join("\n")
       end
 
+      # A glob is matched against every analysed spelling of the declaration's file, and each of them and its
+      # realpath relative to the project root (#1760) and to the working directory:
+      # `configuration.paths` are expanded to absolute, so a user-written `--entry-point=lib/entry.rb` would
+      # otherwise never match anything and silently produce a root set of zero.
       def root_fqns(declarations, globs)
         return [] if globs.empty?
 

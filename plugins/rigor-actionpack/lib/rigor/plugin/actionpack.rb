@@ -22,7 +22,8 @@ module Rigor
     #
     # Tier 2 of the [Rails plugins roadmap](../../../../../docs/design/20260508-rails-plugins-roadmap.md).
     # Phase 1 (strong-parameters → AR column validation), Phase 2 (filter chains), and Phase 3 (render
-    # targets) ship as separate slices; each phase composes additively under the same plugin id.
+    # targets) are separate rules over the same walk; each phase composes additively under the same plugin
+    # id.
     #
     # ## Configuration
     #
@@ -47,9 +48,8 @@ module Rigor
     # - Implicit-self calls only. `Rails.application.routes.url_helpers.users_path` and other
     #   explicit-receiver shapes are passed through; they're rare in controller code and the helper
     #   table doesn't include any extra context to validate them.
-    # - Files outside `controller_search_paths` are skipped. The plugin doesn't try to detect "is this
-    #   a controller?" by class hierarchy — Phase 1's strong-parameters work needs that, so it lives
-    #   there. Phase 4's job is the single-purpose helper check.
+    # - Files outside `controller_search_paths` are skipped by every phase's rule. The plugin doesn't try
+    #   to detect "is this a controller?" by class hierarchy.
     # - When `rigor-rails-routes` is not installed (or its helper table is empty), Phase 4 silently
     #   degrades to a no-op. No load-error diagnostic is emitted; the user gets the "no checks
     #   happened" failure mode rather than a wall of "is this configured right?" warnings.
@@ -268,11 +268,11 @@ module Rigor
         ]
       end
 
-      # The compile the {RenderLocals} cache could not answer — an editor's in-flight bytes, or a template
-      # the index never globbed. Same four values the cache carries.
       # The one handler this plugin compiles; every other claimed template is declined for its name.
       ERB_SUFFIX = ".erb"
 
+      # The compile the {RenderLocals} cache could not answer — an editor's in-flight bytes, or a template
+      # the index never globbed. Same four values the cache carries.
       def compile_now(text)
         compiled, line_map, transform = ErbCompiler.compile(text)
         [compiled, line_map, transform, Prism.parse(compiled).errors.empty?]

@@ -12,9 +12,10 @@ module Rigor
       # traversed once for all of them instead of once per collector (the ADR-52 WD4 model applied to the
       # built-in rules; {Plugin::NodeRuleWalk} drives the same collectors, ADR-53 B4).
       #
-      # The walk is a single visit-before-descend DFS over `compact_child_nodes`. It threads the union of the
-      # context the hosted collectors need — the per-collector hand-rolled walks each tracked some subset of
-      # it — in one immutable {Context} object, recomputed once per node during the single descent:
+      # The walk is a single visit-before-descend DFS over `rigor_each_child` (the allocation-free
+      # `compact_child_nodes`). It threads the union of the context the hosted collectors need — the per-collector
+      # hand-rolled walks each tracked some subset of it — in one immutable {Context} object, recomputed once per node
+      # during the single descent:
       #
       # - `in_loop_or_block` — whether the node is inside a loop / block body (the two flow collectors
       #   suppress collection there because mutation tracking through those is incomplete).

@@ -40,7 +40,7 @@ module Rigor
         # ADR-102 WD4 — a site where a constant is reached by a mechanism the static reading cannot follow.
         # `name` is the exact constant when the argument is a literal (`"Foo".constantize`), in which case this
         # is as good as a reference. `prefix` is what a dynamic construction can reach, and `scope` says how
-        # far — the two kinds of weak evidence are not the same shape:
+        # far — the kinds of weak evidence are not the same shape:
         #
         # - `:namespace` — `"Foo::#{k}".constantize` can construct ANY name under `Foo`, so it taints `Foo`
         #   and every declaration beneath it. This is the default and the original meaning of `prefix`.

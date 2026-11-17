@@ -17,6 +17,8 @@ module Rigor
       # - **Classes with a dynamic `attr_*` accessor** — `attr_reader(*NAMES)` / `attr_accessor(:a, SOME_CONST)`
       #   synthesizes readers whose names are not statically decidable, so the class's method surface cannot be
       #   enumerated from source.
+      # - **Classes with a non-constant superclass** — `class X < DelegateClass(Array)` / `< Struct.new(...)`
+      #   inherits a surface the engine cannot enumerate from a constant name.
       #
       # The enclosing declaration of a self-call is always in the same file as the call (even a reopened class
       # restates `class Foo`), so a per-file AST scan suffices — no cross-file plumbing. Names are built to

@@ -13,8 +13,8 @@ module Rigor
     # its class nominal rather than an RBS record.
     #
     # `Data` instances are frozen, so the member map is sound for the instance's whole lifetime — the
-    # reason `Data` is the first target (a `Struct` instance can be mutated through a setter or `[]=`,
-    # which would invalidate the map; that follow-up is deferred — see ADR-48).
+    # reason `Data` was the first target (a `Struct` instance can be mutated through a setter or `[]=`,
+    # which would invalidate the map; {StructInstance} is the mutable sibling — see ADR-48).
     #
     # Member reads fold to the member's type (`Point.new(1, 2).x` -> `Constant[1]`); `[]`, `to_h`,
     # `deconstruct`, `deconstruct_keys`, `members`, and `with` project precisely. Methods this carrier

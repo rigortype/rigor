@@ -17,7 +17,7 @@ module Rigor
       #     attachments: [{ name: "avatar", kind: :singular },
       #                   { name: "photos", kind: :collection }] }
       #
-      # Limitations (intentional for v0.1.0 of the plugin):
+      # Limitations (intentional):
       #
       # - The walker matches any class declaration that contains a `has_*_attached` call. Whether the
       #   class IS an ActiveRecord model is not verified here — `rigor-activerecord` provides that check

@@ -23,16 +23,14 @@ module Rigor
     # Answers `textDocument/signatureHelp` requests. When the user types `(` inside a method call
     # (`obj.foo(|`) editors fire `signatureHelp` to show the method's parameter signature inline. The provider
     # parses the buffer, locates the enclosing `CallNode`, infers the receiver's type, and returns the
-    # method's first overload as a `SignatureInformation`.
+    # method's overloads as `SignatureInformation` entries (each carries the RBS comment as `documentation`
+    # when there is one).
     #
-    # Slice C1 ships:
     # - Sentinel patching for `obj.foo(|` so Prism's parse succeeds (mirrors `CompletionProvider`'s slice B4
     #   pattern).
-    # - First-overload signature only.
-    # - Active parameter = comma count before cursor.
-    #
-    # Multi-overload presentation + `documentation` field + active-parameter override per overload land in
-    # follow-up slices (queued in the design doc § "Out of scope for v2").
+    # - `activeSignature` is always the first overload; `activeParameter` is the comma count before the cursor
+    #   (the same index for every overload).
+    # - Calls without an explicit receiver (implicit `self`) get no signature help.
     class SignatureHelpProvider
       include BufferResolution
 
@@ -131,8 +129,8 @@ module Rigor
         end
         {
           signatures: signatures,
-          # `activeSignature` is the index editors highlight by default. Slice C2 picks the first overload
-          # uniformly; a future slice could choose the overload that best matches the current argument shape.
+          # `activeSignature` is the index editors highlight by default. It is the first overload uniformly;
+          # the argument shape is not matched against the overloads.
           activeSignature: 0,
           activeParameter: active_param
         }

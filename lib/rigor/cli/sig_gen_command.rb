@@ -22,7 +22,7 @@ module Rigor
     # `--write` follows the established Ruby community convention: `lib/foo/bar.rb` → `sig/foo/bar.rbs`. New methods are
     # inserted into the matching class declaration just before its closing `end`; new classes are appended to the file;
     # non-existent target files are created. User-authored declarations are NEVER replaced unless `--overwrite` is set
-    # AND the candidate is a `tighter-return`.
+    # AND the candidate is a `tighter-return` or an inline declaration that disagrees with the `sig/` copy.
     #
     # Parameter policy defaults to `untyped`. `--params=observed` (slice 3) opts in to caller-side observation
     # harvesting: the `ObservationCollector` walks `--observe=PATH...` (default: the project's test roots,

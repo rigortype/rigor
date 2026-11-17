@@ -5,9 +5,9 @@ require "prism"
 module Rigor
   module Plugin
     class Sidekiq < Rigor::Plugin::Base
-      # Walks a parsed file's AST looking for `<WorkerClass>.perform_async(...)` / `.perform_inline(...)` /
-      # `.perform_in(time, ...)` / `.perform_at(time, ...)` calls and validates each against the
-      # {WorkerIndex}.
+      # Validates a `<WorkerClass>.perform_async(...)` / `.perform_inline(...)` / `.perform_in(time, ...)` /
+      # `.perform_at(time, ...)` call against the {WorkerIndex}. The engine owns the walk (ADR-37); this sees
+      # one call node at a time.
       #
       # Argument-shape rules:
       #

@@ -509,9 +509,10 @@ module Rigor
       #   MUST be evaluated. The subject is narrowed by the conjunction of every condition's
       #   falsey edge.
       #
-      # The narrowing is best-effort: if the subject is not a `Prism::LocalVariableReadNode` or
-      # none of the condition shapes are recognised, both returned scopes equal the input
-      # scope. The catalogue mirrors {.case_equality_target_class}: static class/module
+      # The narrowing is best-effort: if the subject is not a slot a guard narrows
+      # ({.case_subject_slot}: a local, instance variable, global or constant read, or a write to a
+      # local or instance variable) or none of the condition shapes are recognised, both returned
+      # scopes equal the input scope. The catalogue mirrors {.case_equality_target_class}: static class/module
       # constants narrow as `is_a?`; integer/float-endpoint ranges narrow to `Numeric`;
       # string-endpoint ranges narrow to `String`; regexp literals narrow as
       # {.regexp_case_equality_type} says; a `nil`, `true` or `false` literal narrows as its
@@ -1304,13 +1305,13 @@ module Rigor
           [truthy, falsey]
         end
 
+        NAMED_CAPTURE_BODY_RE = /\(\?<([A-Za-z_][A-Za-z0-9_]*)>([^()|]*)\)/
+        private_constant :NAMED_CAPTURE_BODY_RE
+
         # Extracts `{ capture_name => Refinement }` for every named capture group in the
         # `MatchWriteNode`'s wrapped `=~` call whose body the recogniser table accepts. Bodies
         # that contain nested groups, anchors, alternation, or anything else outside the curated
         # forms drop out and the caller falls back to plain `String`.
-        NAMED_CAPTURE_BODY_RE = /\(\?<([A-Za-z_][A-Za-z0-9_]*)>([^()|]*)\)/
-        private_constant :NAMED_CAPTURE_BODY_RE
-
         def match_write_capture_refinements(node)
           regex = node.call.is_a?(Prism::CallNode) ? node.call.receiver : nil
           return {} unless regex.is_a?(Prism::RegularExpressionNode)
@@ -2267,7 +2268,7 @@ module Rigor
         # `x.between?(a, b)` truthy edge narrows to `narrow_integer_comparison(>=, a)` ∩
         # `narrow_integer_comparison(<=, b)`. The falsey edge is left unchanged because the
         # complement is a two-piece domain (`x < a || x > b`) that the lattice cannot express
-        # precisely. `a` and `b` MUST both be integer literals.
+        # precisely. `a` and `b` MUST both be integer or float literals.
         def analyse_between_predicate(node, scope)
           return nil unless node.receiver.is_a?(Prism::LocalVariableReadNode)
           return nil if node.arguments.nil?
@@ -2788,9 +2789,9 @@ module Rigor
         # A MULTI-SEGMENT spelling is relative too and gets the same walk (#635). `Type::Nominal`
         # written inside `module Rigor` is not "already qualified": Ruby anchors the path's FIRST
         # segment through `Module.nesting`, so the constant it names is `Rigor::Type::Nominal`.
-        # Treating any `::` as absolute left every such guard narrowing to a name no environment
-        # knows, and each subsequent reader call on the narrowed receiver degraded to
-        # `Dynamic[top]` — ~300 sites in Rigor's own `lib/` alone. Trying the whole path under
+        # Treating any `::` as absolute would narrow every such guard to a name no environment
+        # knows, degrading each subsequent reader call on the receiver to
+        # `Dynamic[top]`. Trying the whole path under
         # each prefix is the same rule the single-segment case already applies, and it adopts a
         # candidate only when the scope actually knows it, so a genuinely absolute spelling still
         # falls through to `bare_name` unchanged.
@@ -2799,11 +2800,9 @@ module Rigor
         # `class Admin::UsersController` contributes the single entry `["Admin::UsersController"]`, so a
         # bare `User` guard there narrows to the top-level `::User` exactly as Ruby resolves it, while
         # the nested `module Admin; class UsersController` spelling still reaches `Admin::User`. Peeling
-        # `scope.self_type.class_name` could not tell the two apart — the string is identical — and
-        # answered `Admin::User` for both, reporting `undefined method` on correct code across all four
-        # shapes at once. Because the repair lives in the shared derivation, `is_a?`, `case`/`when`, `===`
-        # and the constant typer were fixed together rather than one guard shape at a time. A scope no
+        # `scope.self_type.class_name` cannot tell the two apart (the string is identical), so a scope no
         # declaration walk built still falls back to the peel; see {Reflection.lexical_nesting_chain}.
+        # `is_a?`, `case`/`when`, `===` and the constant typer share this derivation.
         #
         # A path whose head and tail have DIFFERENT owners is the one shape no `<prefix>::<full path>`
         # candidate can name (#656), so the whole-path loop falls through to the segment-wise walk
@@ -2856,14 +2855,15 @@ module Rigor
         #   edge narrows down to `Foo` and the falsey edge subtracts `Foo` from a union.
         # - **Range literal receiver** (`(1..10) === x`): the default `Range#===` includes `x`
         #   iff the endpoints compare it. We conservatively narrow `x` to `Numeric` for
-        #   integer-endpoint ranges and to `String` for string-endpoint ranges; other endpoint
+        #   integer- or float-endpoint ranges and to `String` for string-endpoint ranges; other endpoint
         #   types fall through.
         # - **Regexp literal receiver** (`/foo/ === x`): the truthy edge narrows `x` as
         #   {#regexp_case_equality_type} says (its String and Symbol parts, #1955). The falsey edge
         #   keeps the entry type unchanged because `Regexp#===` returns false for non-Strings AND
         #   for Strings that simply do not match.
         #
-        # Anything else — non-local LHS argument, dynamic receiver, custom `===` method — falls
+        # Anything else — an argument that is not a local, a single-hop chain or an instance
+        # variable, global or constant read, a dynamic receiver, a custom `===` method — falls
         # through to the no-narrowing branch (nil), preserving the entry scope on both edges.
         def analyse_case_equality_predicate(node, scope)
           return nil if node.arguments.nil?
@@ -3040,15 +3040,14 @@ module Rigor
         end
 
         # Slice 4b-1 (ADR-7 § "Slice 4-A/4-B") — single-point RBS::Extended contribution
-        # analyser. Replaces the earlier sibling pair (`analyse_rbs_extended_predicate` +
-        # `analyse_rbs_extended_assert_if`) with one path that routes through
+        # analyser. One path routes through
         # `RbsExtended.read_flow_contribution` and `Rigor::FlowContribution::Merger.merge`. The
         # bundle's `truthy_facts` slot already includes both the `predicate-if-true` and
-        # `assert-if-true` Facts (slice 4a routing closed the v0.0.9 imperfection); the
+        # `assert-if-true` Facts; the
         # `falsey_facts` slot mirrors that. The merger composes any future plugin contribution
         # at the same site alongside the RBS::Extended bundle without changing this analyser.
         #
-        # Conservative envelope (carried over from the previous implementation):
+        # Conservative envelope:
         # - Receiver type must be `Type::Nominal`, `Type::Singleton`, or `Type::Constant`.
         # - The method must be present in the loader.
         # - For each fact, the corresponding positional argument (matched by parameter name in
@@ -3133,8 +3132,7 @@ module Rigor
           end
         end
 
-        # Resolves a Fact's target node. Mirrors the earlier `effect_target_node` helper but
-        # reads from the canonical Fact carrier; `:self` routes to the call receiver, otherwise
+        # Resolves a Fact's target node from the canonical Fact carrier; `:self` routes to the call receiver, otherwise
         # we look up the matching positional argument by parameter name.
         def fact_target_node(fact, call_node, method_def)
           if fact.target_kind == :self
@@ -3386,7 +3384,7 @@ module Rigor
         # same walk. A rooted `::Foo` names the top level and never a lexically nearer shadow, so
         # it keeps the un-walked spelling. nil for any non-constant shape, as before.
         #
-        # PUBLIC, alone among the helpers in this block (#655): `case`/`when`'s VALUE side lives in
+        # PUBLIC, unlike nearly every helper in this block (#655): `case`/`when`'s VALUE side lives in
         # `ExpressionTyper` and matched on the as-written spelling, so the two halves of one `case`
         # disagreed — the flow side narrowed through this walk while the value side resolved the
         # pattern against whatever the environment knew under that literal name.

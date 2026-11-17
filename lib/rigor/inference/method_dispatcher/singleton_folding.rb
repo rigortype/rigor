@@ -12,14 +12,14 @@ module Rigor
       # of them opens with the same two questions:
       #
       #   1. "Is the receiver the `Singleton[X]` I handle?" — a one-line
-      #      `is_a?(Type::Singleton) && class_name == "X"` that used to be copied verbatim into nine
-      #      modules.
+      #      `is_a?(Type::Singleton) && class_name == "X"` that used to be copied verbatim into each
+      #      of those modules.
       #   2. "Is this argument a foldable `Constant[String]`?" — the `is_a?(Type::Constant) &&
       #      value.is_a?(String)` unwrap the string-folding tiers (CGI / URI / Shellwords / Regexp) gate on
       #      before evaluating the literal.
       #
       # Centralising both here keeps the receiver-shape and constant-unwrap knowledge in one place: if
-      # `Type::Singleton` or `Type::Constant` ever changes shape, there is a single edit rather than nine.
+      # `Type::Singleton` or `Type::Constant` ever changes shape, there is a single edit rather than one per tier.
       module SingletonFolding
         module_function
 

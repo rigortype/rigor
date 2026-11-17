@@ -177,8 +177,9 @@ module Rigor
         # Issue #2541 — the signature a `prop` / `const` accessor contributes to `class_name#method_name`,
         # walking the lexical superclass chain the way Ruby's method lookup does. A class on the way that
         # `def`s the name itself (or declares it with `attr_*`) stops the walk with nil, leaving the user's
-        # method to the sig lookup and the engine's own tiers. Returns nil unless the declaring class descends from a {STRUCT_ROOTS} root, so a
-        # project DSL that happens to be named `prop` is never read as Sorbet's.
+        # method to the sig lookup and the engine's own tiers. Returns nil unless the declaring class
+        # descends from a {STRUCT_ROOTS} root, so a project DSL that happens to be named `prop` is never
+        # read as Sorbet's.
         def lookup_struct_prop(class_name:, method_name:)
           return nil if @struct_props.empty?
 

@@ -7,8 +7,8 @@ module Rigor
   module Plugin
     class Graphql < Rigor::Plugin::Base
       # Walks project source for `class T < GraphQL::Schema::Object` subclasses and emits a
-      # `{type_class_fqn => {field_name => {type:, nullable:}}}` table covering every `field :name, Type,
-      # null: ...` declaration inside the class body.
+      # `{type_class_fqn => {field_name => {type:, nullable:, list:}}}` table covering every
+      # `field :name, Type, null: ...` declaration inside the class body.
       module TypeScanner
         # The canonical GraphQL scalar type names accepted as `field`'s second positional argument. The
         # plugin maps each to the underlying Ruby class name so downstream consumers can cross-reference
@@ -31,7 +31,8 @@ module Rigor
         SCHEMA_MUTATION_TAIL = "Mutation"
         # Common path-segment for `Schema::Object` / `Schema::Enum` / `Schema::InputObject` /
         # `Schema::Mutation`; the second-to-last segment must be `Schema` (either fully-qualified
-        # `GraphQL::Schema::X` or lexically nested `Schema::X` inside `module GraphQL`).
+        # `GraphQL::Schema::X` or lexically nested `Schema::X` inside `module GraphQL`) or, as the list
+        # below also admits, `GraphQL`.
         SCHEMA_PARENT_SEGMENTS = %w[Schema GraphQL].freeze
         private_constant :SCHEMA_OBJECT_TAIL, :SCHEMA_ENUM_TAIL,
                          :SCHEMA_INPUT_OBJECT_TAIL, :SCHEMA_MUTATION_TAIL,

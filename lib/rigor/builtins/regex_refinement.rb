@@ -5,8 +5,8 @@ require_relative "../type"
 module Rigor
   module Builtins
     # Maps a curated table of canonical regex sub-patterns onto the imported refinement
-    # carriers Rigor already ships (`decimal-int-string`, `hex-int-string`,
-    # `octal-int-string`, `lowercase-string`, `uppercase-string`, `numeric-string`). See
+    # carriers Rigor already ships (`decimal-int-string`, `lowercase-string`,
+    # `uppercase-string`, `numeric-string`, and `non-empty-string`). See
     # `docs/type-specification/imported-built-in-types.md` for the registry the refinements
     # come from.
     #
@@ -31,7 +31,7 @@ module Rigor
     # conventional `0x` / `0o` prefix, but a bare digit class like `[0-9a-fA-F]+` matches "ff" —
     # a string with no prefix at all. Mapping a matched digit run to a refinement its own
     # predicate rejects is unsound (worse than the plain `String` it replaces), so these rows
-    # drop to `non-empty-string`: the `+` / `{n,}` (n >= 1) quantifier already guarantees the
+    # drop to `non-empty-string`: the `+` / `{n}` / `{n,m}` (n >= 1) quantifier already guarantees the
     # captured run is never empty, and that much is true regardless of prefix.
     #
     # Anything outside the table returns `nil` so the calling narrowing site falls back to

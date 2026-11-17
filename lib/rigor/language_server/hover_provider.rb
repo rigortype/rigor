@@ -18,8 +18,8 @@ module Rigor
     #
     # Per LSP spec § "Position":
     # - `line` and `character` are 0-based.
-    # - `character` counts UTF-16 code units; v1 emits byte counts for ASCII source (UTF-16 conversion is
-    #   queued, see design doc § "Open questions").
+    # - `character` counts UTF-16 code units; this provider reads it as a byte column, which is correct for
+    #   ASCII source (no UTF-16 conversion is done here).
     class HoverProvider
       include BufferResolution
 

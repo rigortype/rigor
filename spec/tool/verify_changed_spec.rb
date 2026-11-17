@@ -56,6 +56,56 @@ RSpec.describe "bin/verify-changed spec selection" do
     [specs, uncovered]
   end
 
+  # Issue #3298 — a script under bin/. The identifier rules match a basename WITH its extension, and a
+  # script has none, so `land-pr` could never reach `land_pr_spec.rb`: a change to any such script ran
+  # no spec locally and no uncovered line said so. The selection's own script was included in that, which
+  # is why this file could not have caught it before. The rule is the specs that NAME the script, not a
+  # mirror of its name — the mirror misses a script run only by another's spec, and on this tree it finds
+  # nothing the search does not.
+  #
+  # Every script name below is spelled APART, as the ghost fixture names further down are, because the
+  # arm also selects the specs that NAME the script and this file is part of the corpus it greps. Written
+  # whole, the `setup` script would select this very file and stop being the uncovered row it is here.
+  describe "a script under bin/" do
+    def bin(*parts) = "bin/#{parts.join}"
+
+    it "selects the spec of a script that has its own" do
+      specs, uncovered = selection_for(bin("land", "-", "pr"))
+      expect(uncovered).to be_empty
+      expect(specs).to eq(["spec/tool/land_pr_spec.rb", "spec/tool/land_when_green_spec.rb"])
+    end
+
+    it "selects this file for a change to the selection's own script" do
+      specs, = selection_for(bin("verify", "-", "changed"))
+      expect(specs).to include("spec/tool/verify_changed_spec.rb")
+    end
+
+    # The `rigor-worktree` script's spec is spec/tool/rigor_worktree_reference_clone_spec.rb, which no
+    # mirror of the script's own name reaches. The rule is the specs that name the script, so it does.
+    it "selects a spec whose name is not a mirror of the script's" do
+      specs, uncovered = selection_for(bin("rigor", "-", "worktree"))
+      expect(uncovered).to be_empty
+      expect(specs).to eq(["spec/tool/rigor_worktree_reference_clone_spec.rb"])
+    end
+
+    # The mirror misses a script that has no spec of its own but is RUN by another's: the `land-pr`
+    # script shells out to `ci-required`, and both land_pr_spec and land_when_green_spec drive it for
+    # real.
+    # Reporting it as uncovered would say CI is the only check where two specs would catch a break.
+    it "selects the specs that name a script with no mirror spec of its own" do
+      specs, uncovered = selection_for(bin("ci", "-", "required"))
+      expect(uncovered).to be_empty
+      expect(specs).to eq(["spec/tool/land_pr_spec.rb", "spec/tool/land_when_green_spec.rb"])
+    end
+
+    # The other half of the gate: a script no spec names at all is REPORTED, not silently covered.
+    it "reports a script no spec names on the uncovered line" do
+      specs, uncovered = selection_for(bin("set", "up"))
+      expect(specs).to be_empty
+      expect(uncovered).to eq([bin("set", "up")])
+    end
+  end
+
   it "selects few specs for one fixture's demo.rb, by its directory" do
     specs, uncovered = selection_for("spec/integration/fixtures/block_content_ivar_capture/demo.rb")
     expect(uncovered).to be_empty

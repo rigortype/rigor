@@ -8,7 +8,7 @@ include Rigor::Testing
 #
 # Constant<Range> receivers come from `(1..10)` literals where
 # both endpoints are static IntegerNodes (see
-# `ExpressionTyper#type_of_range`). Beginless / endless ranges
+# `ExpressionTyper::Composites.type_of_range`). Beginless / endless ranges
 # stay at `Nominal[Range]` and therefore route through the
 # size-returning nominal tier instead.
 

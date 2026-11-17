@@ -8,7 +8,7 @@ module Rigor
     #
     # A `Constant` normally carries a value and no generic instantiation, which is why acceptance
     # ignores a nominal's `type_args` against one. A Range value is the exception: the engine only
-    # builds `Constant<Range>` when both endpoints are static (`ExpressionTyper#type_of_range`), so
+    # builds `Constant<Range>` when both endpoints are static (`ExpressionTyper::Composites.type_of_range`), so
     # the element the range would yield IS known, and a `Range[T]` parameter can be judged against it.
     #
     # Two consumers share the reading so they cannot drift: `Acceptance` refutes a `Range[T]`
@@ -22,7 +22,7 @@ module Rigor
       # nil — meaning "no opinion, keep the answer you already had" — covers a carrier that is not a
       # `Constant<Range>`, a range with no endpoint at all (`nil..nil` constrains nothing), and a
       # range whose endpoints are not literals. The literal set is the one
-      # `ExpressionTyper#static_range_endpoint` pins; a value outside it reached the carrier by some
+      # `ExpressionTyper::Composites.static_range_endpoint` pins; a value outside it reached the carrier by some
       # other route and the caller has no lifting for it.
       def literal_endpoints(type)
         return nil unless type.is_a?(Type::Constant)
@@ -39,7 +39,7 @@ module Rigor
 
       # The endpoints lifted to their own classes and unioned — the element type the range would
       # yield. Lifting rather than pinning the values mirrors
-      # `ExpressionTyper#nominal_range_for_endpoints`: `1..9` yields Integers, not the two values 1
+      # `ExpressionTyper::Composites.nominal_range_for_endpoints`: `1..9` yields Integers, not the two values 1
       # and 9, so binding a `Range[A]` parameter's `A` to `Integer` states what the runtime can
       # honour. Nil when {#literal_endpoints} has nothing to read.
       def element_type(type)

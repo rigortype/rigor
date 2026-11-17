@@ -413,7 +413,7 @@ RSpec.describe Rigor::Analysis::IncrementalSession do
   # Issue #622 — the constant half of the structural tier. A receiver constant that resolves to NOTHING types
   # `Dynamic[top]` and short-circuits *before* the method lookup, so `read_missing(:method, …)` never fired and
   # the read left no edge at all: declaring the constant later never re-checked its readers, and a warm session
-  # kept serving the pre-declaration answer. `ExpressionTyper#unresolved_constant_fallback` now records the
+  # kept serving the pre-declaration answer. `ExpressionTyper::Constants.unresolved_constant_fallback` now records the
   # `class:Name` negative edge that `Incremental.appeared_classes` inverts.
   describe "negative (unresolved-constant) dependencies" do
     it "re-checks a reader of an unresolved constant when an edit declares it" do

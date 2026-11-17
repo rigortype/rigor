@@ -4,7 +4,7 @@
 # `Top`, or comparing with `untyped`) shows here as a structural difference. `spec/integration/interface_parity_spec.rb`
 # names which sites a raw spelling visibly breaks, and why the others cannot be told apart in `rigor check` output.
 class Sites
-  # `expression_typer.rb`, `nominal_range_for_endpoints`: an untyped endpoint contributes no element type.
+  # `expression_typer/composites.rb`, `nominal_range_for_endpoints`: an untyped endpoint contributes no element type.
   def range_endpoint(x)
     Rigor.dump_type(x..1)
   end

@@ -10,7 +10,7 @@ include Rigor::Testing
 #    `#options`, `#casefold?`, `#fixed_encoding?`, `#inspect`,
 #    `#to_s`, `#hash`). The receiver type already lifts to
 #    `Constant<Regexp>` for non-interpolated patterns
-#    (v0.0.7 — see `ExpressionTyper#type_of_regexp`), so the
+#    (v0.0.7 — see `ExpressionTyper::LeafNodes.type_of_regexp`), so the
 #    catalog tier sees a real `Regexp` instance and can run
 #    the method directly.
 # 2. `Regexp.new(...)` resolves to `Nominal[Regexp]` so

@@ -520,8 +520,10 @@ RSpec.describe Rigor::TypingState do
     # The typer's read-through miss sites: the loop record's two fetch fallbacks and the inject fold.
     it "wraps each read-through Table's miss in the typer with its own table exempt" do
       source = File.read(File.expand_path("../../lib/rigor/inference/expression_typer.rb", __dir__))
+      control_flow = File.read(File.expand_path("../../lib/rigor/inference/expression_typer/control_flow.rb", __dir__))
 
-      expect(source.scan("LoopValueRecord.fetch(node, scope) || LoopValueRecord.miss {").size).to eq(2)
+      # One in `type_of_loop` (here), one in `ControlFlow.type_of_conditional` (the module it moved to, ADR-116 C3).
+      expect((source + control_flow).scan("LoopValueRecord.fetch(node, scope) || LoopValueRecord.miss {").size).to eq(2)
       expect(source).to include("typing_state.memo_miss(INJECT_ACCUMULATOR) { try_block_inject_fold(")
       expect(File.read(File.expand_path("../../lib/rigor/inference/loop_value_record.rb", __dir__)))
         .to include("def miss(&) = TypingState.current.memo_miss(RECORD, &)")

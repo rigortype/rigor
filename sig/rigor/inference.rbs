@@ -18,6 +18,80 @@ module Rigor
       def call_receiver_type_for: (untyped node) -> Type::t?
       def call_arg_types: (untyped node) -> Array[Type::t]
       def block_return_type_for: (untyped call_node, Type::t? receiver_type, Array[Type::t] arg_types) -> Type::t?
+
+      # The entries of the node-typer modules under `expression_typer/` that sig-gen renders a return for. Undeclared
+      # (#3315): `LeafNodes.type_of_yield`, `ControlFlow.type_of_conditional` and
+      # `PerElementAssemblers.assemble_per_element_result` (sig-gen renders no return, so a row would be residue), and
+      # every private helper (they receive `typer` as a threaded parameter, which reads `Dynamic[top]` undeclared).
+      module LeafNodes
+        def self?.type_of_literal_value: (untyped node) -> Type::Constant
+        def self?.type_of_true: (untyped node) -> Type::Constant
+        def self?.type_of_false: (untyped node) -> Type::Constant
+        def self?.type_of_nil: (untyped node) -> Type::Constant
+        def self?.type_of_defined: (untyped node) -> Type::t
+        def self?.type_of_match_predicate: (untyped node) -> Type::t
+        def self?.type_of_match_required: (untyped node) -> Type::Constant
+        def self?.type_of_interpolated_symbol: (untyped node) -> Type::Nominal
+        def self?.type_of_def: (untyped node) -> Type::Constant
+        def self?.type_of_nil_value: (untyped node) -> Type::Constant
+        def self?.type_of_jump: (untyped node) -> Type::Bot
+        def self?.type_of_lambda: (untyped node) -> Type::Nominal
+        def self?.type_of_regexp: (untyped node) -> (Type::Constant | Type::Nominal)
+        def self?.symbol_type_for: (untyped node) -> (Type::Constant | Type::Nominal)
+        def self?.string_type_for: (untyped node) -> (Type::Constant | Type::Nominal)
+        def self?.type_of_xstring: (untyped node) -> Type::Nominal
+        def self?.type_of_source_file: (untyped node) -> Type::Difference
+        def self?.type_of_source_line: (untyped node) -> Type::IntegerRange
+        def self?.type_of_non_value: (untyped node, ExpressionTyper typer) -> Type::Dynamic
+        def self?.type_of_dynamic_top: (untyped node, ExpressionTyper typer) -> Type::Dynamic
+        def self?.type_of_numbered_reference: (untyped node, Scope scope) -> Type::t
+        def self?.type_of_back_reference: (untyped node, Scope scope) -> Type::t
+        def self?.type_of_instance_variable_read: (untyped node, Scope scope, ExpressionTyper typer) -> Type::t
+        def self?.type_of_class_variable_read: (untyped node, Scope scope, ExpressionTyper typer) -> Type::t
+        def self?.type_of_global_variable_read: (untyped node, Scope scope, ExpressionTyper typer) -> Type::t
+        def self?.type_of_self_node: (untyped node, Scope scope, ExpressionTyper typer) -> Type::t
+        def self?.local_read: (untyped node, Scope scope, ExpressionTyper typer) -> Type::t
+        def self?.it_read: (untyped node, Scope scope, ExpressionTyper typer) -> Type::t
+      end
+
+      module Composites
+        def self?.type_of_statements_node: (untyped node, ExpressionTyper typer) -> Type::t
+        def self?.type_of_program: (untyped node, ExpressionTyper typer) -> Type::t
+        def self?.type_of_hash: (untyped node, ExpressionTyper typer) -> (Type::HashShape | Type::Nominal)
+        def self?.type_of_interpolated_string: (untyped node, ExpressionTyper typer) -> (Type::Nominal | Type::Refined)
+        def self?.type_of_embedded_statements: (untyped node, ExpressionTyper typer) -> Type::t
+        def self?.type_of_class_or_module: (untyped node, ExpressionTyper typer) -> Type::t
+        def self?.type_of_else: (untyped node, ExpressionTyper typer) -> Type::t
+        def self?.type_of_when_or_in: (untyped node, ExpressionTyper typer) -> Type::t
+        def self?.type_of_ensure: (untyped node, ExpressionTyper typer) -> Type::t
+        def self?.type_of_range: (untyped node, ExpressionTyper typer) -> (Type::Constant | Type::Nominal)
+        def self?.type_of_shareable_constant: (untyped node, ExpressionTyper typer) -> Type::t
+        def self?.type_of_implicit: (untyped node, ExpressionTyper typer) -> Type::t
+        def self?.array_type_for: (untyped node, ExpressionTyper typer) -> (Type::Nominal | Type::Tuple)
+        def self?.parentheses_type_for: (untyped node, ExpressionTyper typer) -> Type::t
+        def self?.statements_or_nil: (untyped statements_node, ExpressionTyper typer) -> Type::t
+      end
+
+      module Constants
+        def self?.type_of_constant_read: (untyped node, Scope scope, ExpressionTyper typer) -> Type::t
+        def self?.type_of_constant_path: (untyped node, Scope scope, ExpressionTyper typer) -> Type::t
+        def self?.resolve_constant_name: (untyped name, Scope scope, ?rooted: untyped, ?caller_derived: untyped) -> Type::t?
+      end
+
+      module Writes
+        def self?.type_of_assignment_write: (untyped node, ExpressionTyper typer) -> Type::t
+        def self?.type_of_compound_variable_write: (untyped node, Scope scope, ExpressionTyper typer) -> Type::t
+        def self?.type_of_compound_constant_write: (untyped node, Scope scope, ExpressionTyper typer) -> Type::t
+        def self?.type_of_index_compound_write: (untyped node, Scope scope, FallbackTracer? tracer) -> Type::t
+      end
+
+      module ControlFlow
+        def self?.type_of_and_or: (untyped node, Scope scope, FallbackTracer? tracer) -> Type::t
+        def self?.type_of_case: (untyped node, Scope scope, FallbackTracer? tracer, ExpressionTyper typer) -> Type::t
+        def self?.type_of_begin: (untyped node, Scope scope, ExpressionTyper typer) -> Type::t
+        def self?.type_of_rescue: (untyped node, Scope scope, ExpressionTyper typer) -> Type::t
+        def self?.type_of_rescue_modifier: (untyped node, Scope scope, ExpressionTyper typer) -> Type::t
+      end
     end
 
     class StatementEvaluator

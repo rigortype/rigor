@@ -1292,7 +1292,7 @@ module Rigor
       # build(key)`, `(@memo ||= {})[[a, b]] ||= compute`, `@targets[name] ||= new(name)` on an ivar the method
       # never writes — where the value the idiom returns is the one it stores, and `Dynamic[top] | rhs` sent
       # every such method to `sig.skipped.untyped-return`. It is the variable form's optimism for an unbound `||=`
-      # target (`ExpressionTyper#type_of_compound_variable_write`) keyed on the slot, and no wider: `&&=` is no
+      # target (`ExpressionTyper::Writes.type_of_compound_variable_write`) keyed on the slot, and no wider: `&&=` is no
       # memo (`h[k] &&= v` on an absent slot is `nil`), an operator write has no such reading, and an rvalue
       # with no truthy part stores nothing truthy, so the slot's own value is the answer whenever it is set:
       # `opts[k] ||= raise KeyError` is a guard, never `bot`, and `@flags[n] ||= false` is `true` after an
@@ -4847,7 +4847,7 @@ module Rigor
       def invoke_call(node, call_type)
         evaluate_block_if_present(node)
         # `ruby2_keywords def foo(...)` (and similar wrappers like `private def`, `public def`, `module_function def`)
-        # parse the def as the call's positional argument; the ExpressionTyper#type_of_def handler types it as
+        # parse the def as the call's positional argument; the `LeafNodes.type_of_def` handler types it as
         # `Constant[:foo]` without walking the body. Without explicitly evaluating the argument-position def, the body's
         # scope-index entries inherit the outer class-body `self_type = singleton(C)` from `ScopeIndexer.propagate`, so
         # `self.helper` inside reports `undefined method 'helper' for singleton(C)`. Walking each argument-position def

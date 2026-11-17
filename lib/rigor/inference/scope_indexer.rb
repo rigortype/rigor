@@ -2143,7 +2143,7 @@ module Rigor
       # seed has to know the predicate does not fold.) An rvalue with no truthy part is skipped outright
       # — `@x ||= false` can only leave `@x` falsey, the same "no useful precision" call the guarded
       # `@x = nil unless @x` skip makes, and `@x ||= raise "unset"` stores nothing at all. Seeded as
-      # `nil`, the guard bound its own ivar, and `ExpressionTyper#compound_write_value` read
+      # `nil`, the guard bound its own ivar, and `ExpressionTyper::Writes.compound_write_value` read
       # `truthy(nil) | bot` — an instance method that sig-gen declared `-> bot`.
       def record_ivar_or_write(node, scope, class_name, accumulator)
         rvalue_type = EmptySeed.erase(node.value, scope.type_of(node.value))
@@ -2161,7 +2161,7 @@ module Rigor
       # For the same reason the contribution counts only beside a write that can give the ivar a value,
       # so it waits under {AND_WRITE_CONTRIBUTIONS} until {#merge_held_ivar_writes!} sees the whole class:
       # that write may come later in source order. An ivar only `&&=` writes stays unseeded, the unbound
-      # target `ExpressionTyper#compound_write_value` reads as `Dynamic[top]`. Seeded as the rvalue, the
+      # target `ExpressionTyper::Writes.compound_write_value` reads as `Dynamic[top]`. Seeded as the rvalue, the
       # `&&=` bound itself, and `if (@x &&= 1)` folded always-truthy on an ivar that is `nil` at runtime.
       def record_ivar_and_write(node, scope, class_name, accumulator)
         pending = (accumulator[AND_WRITE_CONTRIBUTIONS] ||= {})

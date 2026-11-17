@@ -98,7 +98,7 @@ module Rigor
         # element — or nil when neither may be trusted.
         #
         # Issue #991 — `discovered_method?` used to exempt the call outright before ever asking for a
-        # declaration. `trustworthy_signature` is the same lookup `argument_type_diagnostic` treats as
+        # declaration. `trustworthy_signature` is the same lookup `ArgumentType.diagnostic` treats as
         # authoritative over a source `def` (see its own comment beside that call), and the two rules must agree
         # on whose contract binds, so a declared method is checked against its declaration.
         def arity_envelope_for(facts, class_name, kind)

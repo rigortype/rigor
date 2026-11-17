@@ -1487,7 +1487,7 @@ module Rigor
       # StandardError` in `constant_constructor_lift` silently swallows — `meta_new` then falls
       # back to `Nominal[Pathname]` in pool mode while sequential builds the `Constant<Pathname>`
       # lift. The divergence surfaces downstream as a spurious `call.argument-type-mismatch`
-      # (sequential's `argument_type_diagnostic` short-circuits on Constant<Pathname> because
+      # (sequential's `CheckRules::ArgumentType.diagnostic` short-circuits on Constant<Pathname> because
       # Pathname is not in its CONSTANT_CLASSES table; pool's Nominal[Pathname] doesn't
       # short-circuit). Surfaced on GitLab FOSS via `lib/gitlab/mail_room.rb:17`.
       CONSTANT_CONSTRUCTORS = Ractor.make_shareable({

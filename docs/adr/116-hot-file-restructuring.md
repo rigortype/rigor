@@ -1,6 +1,6 @@
 # ADR-116 — Restructuring the engine's hot files: declare each growing kind once, walk each traversal once
 
-Status: **Accepted, 2026-09-23; WD5 amended 2026-09-27 (context-rule variants, below).** WD0 (#1192) has landed.
+Status: **Accepted, 2026-09-23; WD5 amended 2026-09-27 (context-rule variants, below).** WD0 (#1192) and WD1 (#1193) have landed.
 WD5 is in progress. Its first slice (#1517: the discovery-table shadow harness, the context model,
 `class_cvars`) and its second (#1522: the superclass tables, with the first variants) put two tables
 on the walk. Its third (#1527: the def-nesting and member-layout tables) makes the walk shared: it
@@ -104,6 +104,9 @@ never chooses the cut.
   Suppression parsing (~L447–660) becomes one more module, and the shared receiver predicates
   (`lookup_method`, `concrete_class_name`, `project_defines_method?`, …) one shared module. This is
   a pure move; the largest pieces are undefined-method (~L664–1507) and argument-type (~L2621–3230).
+  Landed 2026-11-17 in five slices (#3290, #3294, #3301, #3306 and #PRNUM): `check_rules.rb` now holds only
+  the orchestration (`diagnose`, the node-collector construction and driving, the per-node dispatch
+  and the suppression delegators); every rule is its own module under `check_rules/`.
 - **WD2 — Discovery-table declarations (C1; #1194).** Each `DiscoveryIndex` table declares:
   - its empty value;
   - its per-file-over-seed merge;

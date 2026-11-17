@@ -17,6 +17,9 @@ require "spec_helper"
 #   indexed snippet has a scope.
 # - `return nil if OverrideSupport.dynamic_top?(inferred)`: a `Dynamic` body (`def ret_int(x) = x`) is declined by the
 #   `compare_return` line after it, whose `accepts` is `maybe`, not `no`; `top?` is never defined (#3303).
+# - `return false unless DeclarationSourcedGuard.global_sources(...).empty?` in `declared_only_return?`: a body that
+#   reads a global directly (`$stdout`, `$PROGRAM_NAME`, `$VERBOSE`, bare and copied to a local, written or not) gives
+#   the same row with the guard blanked.
 # - the `refinement_def?` test of `diagnostic` (replacing `... ? nil : diagnostic` with `diagnostic` fails no example
 #   here, none in `spec/integration/refinement_using_scope_spec.rb`, and changes no CLI output on a `refine` body): a
 #   `refine String do def upcase = nil end` body is typed with no `self` class in a snippet indexed against an empty

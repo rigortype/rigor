@@ -11,13 +11,14 @@ require_relative "../narrowing"
 module Rigor
   module Inference
     class ExpressionTyper
-      # Typers of the control-flow nodes in value position: `if` / `unless`, `and` / `or`, `case` (with the three-valued
-      # `when` certainty), `begin` / `rescue` and `expr rescue fallback`. Reads `scope` and `tracer`; calls back
-      # {ExpressionTyper#type_of}, {ExpressionTyper#statements_or_nil} and {ExpressionTyper#typer_under}. The entries
-      # are `type_of_conditional`, `type_of_and_or`, `type_of_case`, `type_of_begin`, `type_of_rescue`,
-      # `type_of_rescue_modifier`; every other method is private to the module (ADR-116 C3). State is passed, not
-      # shared: each entry takes the values it reads from the typer as trailing positional parameters (`scope`,
-      # `tracer`) and the typer itself (`typer`) when it calls back.
+      # Typers of the control-flow nodes in value position: `if` / `unless`, `and` / `or`, `while` / `until` / `for`,
+      # `case` (with the three-valued `when` certainty), `begin` / `rescue` and `expr rescue fallback`. Reads `scope`
+      # and `tracer`; calls back {ExpressionTyper#type_of}, {ExpressionTyper#statements_or_nil},
+      # {ExpressionTyper#typer_under} and {ExpressionTyper#block_level_jump?}. The entries are `type_of_conditional`,
+      # `type_of_and_or`, `type_of_case`, `type_of_begin`, `type_of_rescue`, `type_of_rescue_modifier` and
+      # `type_of_loop`; every other method is private to the module (ADR-116 C3). State is passed, not shared: each
+      # entry takes the values it reads from the typer as trailing positional parameters (`scope`, `tracer`) and the
+      # typer itself (`typer`) when it calls back.
       module ControlFlow
         module_function
 
@@ -222,9 +223,27 @@ module Rigor
           Type::Combinator.union(typer.type_of(node.expression), fallback_type)
         end
 
+        # A `while` / `until` / `for` loop in value position. Like {.type_of_conditional}, it delegates to the
+        # statement evaluator, which owns the loop's value: `nil` or a `while` / `until` loop's `break` values
+        # (issue #2031), and a `for` loop's collection or its `break` values (issue #1216).
+        #
+        # A `while` / `until` loop no `break` leaves is `nil` without evaluating its body, as
+        # {StatementEvaluator#loop_value} answers it: a loop that is a call's receiver or argument is typed again by
+        # every narrowing and rule that types that operand, and evaluating it each time re-ran the passes of every loop
+        # nested in it.
+        def type_of_loop(node, scope, tracer, typer)
+          return Type::Combinator.constant_of(nil) if break_free_condition_loop?(node, typer)
+
+          LoopValueRecord.fetch(node, scope) || LoopValueRecord.miss { scope.evaluate(node, tracer: tracer).first }
+        end
+
+        def break_free_condition_loop?(node, typer)
+          !node.is_a?(Prism::ForNode) && !typer.block_level_jump?(node.statements, Prism::BreakNode)
+        end
+
         private_class_method :case_arm_type, :type_of_case_simple_union, :type_of_case_else,
                              :case_when_branch_certainty, :case_when_pattern_certainty, :literal_pattern_value,
-                             :rescue_chain_types, :rescue_arm_scope
+                             :rescue_chain_types, :rescue_arm_scope, :break_free_condition_loop?
       end
     end
   end

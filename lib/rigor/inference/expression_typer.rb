@@ -542,6 +542,11 @@ module Rigor
       # @api private — public only so {ControlFlow} can call it on the typer it is given.
       def statements_or_nil(statements_node) = Composites.statements_or_nil(statements_node, self)
 
+      # @api private — public only so {ControlFlow} can call it on the typer it is given.
+      # True when a `klass` jump is reachable from `node` without crossing a construct that retargets it
+      # ({JumpTargets.any?}, allocation-free and early-exiting: this is the scan every block body pays).
+      def block_level_jump?(node, klass) = JumpTargets.any?(node, klass)
+
       private
 
       attr_reader :scope, :tracer
@@ -604,24 +609,7 @@ module Rigor
       def type_of_begin(node) = ControlFlow.type_of_begin(node, scope, self)
       def type_of_rescue(node) = ControlFlow.type_of_rescue(node, scope, self)
       def type_of_rescue_modifier(node) = ControlFlow.type_of_rescue_modifier(node, scope, self)
-
-      # A `while` / `until` / `for` loop in value position. Like {ControlFlow.type_of_conditional}, it delegates to the
-      # statement evaluator, which owns the loop's value: `nil` or a `while` / `until` loop's `break` values
-      # (issue #2031), and a `for` loop's collection or its `break` values (issue #1216).
-      #
-      # A `while` / `until` loop no `break` leaves is `nil` without evaluating its body, as
-      # {StatementEvaluator#loop_value} answers it: a loop that is a call's receiver or argument is typed again by
-      # every narrowing and rule that types that operand, and evaluating it each time re-ran the passes of every loop
-      # nested in it.
-      def type_of_loop(node)
-        return Type::Combinator.constant_of(nil) if break_free_condition_loop?(node)
-
-        LoopValueRecord.fetch(node, scope) || LoopValueRecord.miss { scope.evaluate(node, tracer: tracer).first }
-      end
-
-      def break_free_condition_loop?(node)
-        !node.is_a?(Prism::ForNode) && !block_level_jump?(node.statements, Prism::BreakNode)
-      end
+      def type_of_loop(node) = ControlFlow.type_of_loop(node, scope, tracer, self)
 
       def type_of_virtual(node)
         case node
@@ -4893,10 +4881,6 @@ module Rigor
 
         block_level_jump_nodes(body, Prism::NextNode)
       end
-
-      # True when a `klass` jump is reachable from `node` without crossing a construct that retargets it
-      # ({JumpTargets.any?}, allocation-free and early-exiting: this is the scan every block body pays).
-      def block_level_jump?(node, klass) = JumpTargets.any?(node, klass)
 
       # The identity-keyed set of `klass` jumps that target THIS block ({JumpTargets.of}). The sinks in
       # `StatementEvaluator` also collect jumps from nested blocks / loops / defs evaluated under the same

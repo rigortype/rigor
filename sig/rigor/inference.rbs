@@ -20,7 +20,7 @@ module Rigor
       def block_return_type_for: (untyped call_node, Type::t? receiver_type, Array[Type::t] arg_types) -> Type::t?
 
       # The entries of the node-typer modules under `expression_typer/` that sig-gen renders a return for. Undeclared
-      # (#3315): `LeafNodes.type_of_yield`, `ControlFlow.type_of_conditional` and
+      # (#3315): `LeafNodes.type_of_yield`, `ControlFlow.type_of_conditional`, `ControlFlow.type_of_loop` and
       # `PerElementAssemblers.assemble_per_element_result` (sig-gen renders no return, so a row would be residue), and
       # every private helper (they receive `typer` as a threaded parameter, which reads `Dynamic[top]` undeclared).
       module LeafNodes

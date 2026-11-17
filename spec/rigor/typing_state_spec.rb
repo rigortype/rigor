@@ -522,7 +522,7 @@ RSpec.describe Rigor::TypingState do
       source = File.read(File.expand_path("../../lib/rigor/inference/expression_typer.rb", __dir__))
       control_flow = File.read(File.expand_path("../../lib/rigor/inference/expression_typer/control_flow.rb", __dir__))
 
-      # One in `type_of_loop` (here), one in `ControlFlow.type_of_conditional` (the module it moved to, ADR-116 C3).
+      # `ControlFlow.type_of_conditional` and `.type_of_loop`, the module they moved to (ADR-116 C3).
       expect((source + control_flow).scan("LoopValueRecord.fetch(node, scope) || LoopValueRecord.miss {").size).to eq(2)
       expect(source).to include("typing_state.memo_miss(INJECT_ACCUMULATOR) { try_block_inject_fold(")
       expect(File.read(File.expand_path("../../lib/rigor/inference/loop_value_record.rb", __dir__)))

@@ -11,9 +11,12 @@ require_relative "../analysis/fact_store"
 require_relative "../builtins/regex_refinement"
 require_relative "guard_rebinding"
 require_relative "intervening_ivar_reset"
-require_relative "key_presence_guard"
 require_relative "last_line"
 require_relative "match_rebinding"
+require_relative "narrowing/class_dispatch"
+require_relative "narrowing/complements"
+require_relative "narrowing/presence_predicates"
+require_relative "narrowing/regex_match"
 require_relative "operand_effects"
 require_relative "optimistic_origin"
 require_relative "project_method_ownership"
@@ -48,17 +51,10 @@ module Rigor
     # docs/type-specification/control-flow-analysis.md for the binding contract.
     # rubocop:disable-next Metrics/ModuleLength
     module Narrowing
-      TRUSTED_EQUALITY_LITERAL_CLASSES = [String, Symbol, Integer, TrueClass, FalseClass, NilClass].freeze
-      SINGLETON_LITERAL_CLASSES = [TrueClass, FalseClass, NilClass].freeze
       # `scope` is the analysed file's seeded scope where the caller has one, and nil otherwise (the
       # Fact-shaped and RSpec-matcher entries hold an environment but no scope). Only the #898 singleton
       # path reads it, and only to withhold a `Bot`, so a nil scope is the pre-#898 answer exactly.
       ClassNarrowingContext = Data.define(:exact, :polarity, :environment, :scope)
-      # A recognised `=~` regex pattern operand: the pattern `source` string and whether it was
-      # compiled in extended (`//x`) mode. Extraction from a literal `RegularExpressionNode` and from
-      # a value-pinned `Constant[Regexp]` share this carrier so the participation walk and the
-      # extended-mode bail read one shape.
-      RegexMatchPattern = Data.define(:source, :extended)
       # Issue #1429 — a predicate receiver whose binding an edge can narrow ({.receiver_slot}): a local, an instance
       # variable or a global (`name` its Symbol), or a constant reference (`name` its {.constant_key}). `current` is
       # the type the receiver reads before the predicate, a global's read type when the scope does not bind it.
@@ -72,8 +68,7 @@ module Rigor
       # program replaces with another class's instance, so it counts with the literal carriers
       # ({.disjoint_nominal_guard?}, `respond_to?`'s edge).
       VALUE_PINNED_CLASSES = %w[NilClass TrueClass FalseClass].freeze
-      private_constant :TRUSTED_EQUALITY_LITERAL_CLASSES, :SINGLETON_LITERAL_CLASSES, :ClassNarrowingContext,
-                       :RegexMatchPattern, :ReceiverSlot, :UNRECORDED_GUARD_GLOBALS, :VALUE_PINNED_CLASSES
+      private_constant :ClassNarrowingContext, :ReceiverSlot, :UNRECORDED_GUARD_GLOBALS, :VALUE_PINNED_CLASSES
 
       # Issue #1017 — the tallest stack of conditionals a condition may carry and still contribute facts. A
       # conditional guard analyses its predicate and both arms, so each level can triple the analysis; past this
@@ -93,9 +88,9 @@ module Rigor
       def narrow_truthy(type)
         case type
         when Type::Constant
-          falsey_value?(type.value) ? Type::Combinator.bot : type
+          Complements.falsey_value?(type.value) ? Type::Combinator.bot : type
         when Type::Nominal
-          falsey_nominal?(type) ? Type::Combinator.bot : type
+          Complements.falsey_nominal?(type) ? Type::Combinator.bot : type
         when Type::Union
           Type::Combinator.union(*type.members.map { |m| narrow_truthy(m) })
         else
@@ -107,10 +102,10 @@ module Rigor
       # that cannot inhabit a falsey value collapse to `Bot`.
       def narrow_falsey(type)
         case type
-        when Type::Constant then falsey_value?(type.value) ? type : Type::Combinator.bot
-        when Type::Nominal then falsey_nominal?(type) ? type : Type::Combinator.bot
+        when Type::Constant then Complements.falsey_value?(type.value) ? type : Type::Combinator.bot
+        when Type::Nominal then Complements.falsey_nominal?(type) ? type : Type::Combinator.bot
         when Type::Union then Type::Combinator.union(*type.members.map { |m| narrow_falsey(m) })
-        else narrow_falsey_other(type)
+        else Complements.narrow_falsey_other(type)
         end
       end
 
@@ -123,7 +118,7 @@ module Rigor
         when Type::Constant then type.value.nil? ? type : Type::Combinator.bot
         when Type::Nominal then type.class_name == "NilClass" ? type : Type::Combinator.bot
         when Type::Union then Type::Combinator.union(*type.members.map { |m| narrow_nil(m) })
-        else narrow_nil_other(type)
+        else Complements.narrow_nil_other(type)
         end
       end
 
@@ -205,12 +200,12 @@ module Rigor
       # extracted from a mixed union such as `Integer | nil` without manufacturing a new
       # positive domain from the comparison alone.
       def narrow_equal(type, literal)
-        return type unless trusted_equality_literal?(literal)
+        return type unless Complements.trusted_equality_literal?(literal)
 
-        if singleton_literal?(literal)
-          narrow_singleton_equal(type, literal)
-        elsif finite_trusted_literal_domain?(type)
-          narrow_finite_equal(type, literal)
+        if Complements.singleton_literal?(literal)
+          Complements.narrow_singleton_equal(type, literal)
+        elsif Complements.finite_trusted_literal_domain?(type)
+          Complements.narrow_finite_equal(type, literal)
         else
           type
         end
@@ -220,12 +215,12 @@ module Rigor
       # from an already-known domain but do not create an unbounded difference type when the
       # domain is broad or dynamic.
       def narrow_not_equal(type, literal)
-        return type unless trusted_equality_literal?(literal)
+        return type unless Complements.trusted_equality_literal?(literal)
 
-        if singleton_literal?(literal)
-          narrow_singleton_not_equal(type, literal)
-        elsif finite_trusted_literal_domain?(type)
-          narrow_finite_not_equal(type, literal)
+        if Complements.singleton_literal?(literal)
+          Complements.narrow_singleton_not_equal(type, literal)
+        elsif Complements.finite_trusted_literal_domain?(type)
+          Complements.narrow_finite_not_equal(type, literal)
         else
           type
         end
@@ -344,7 +339,7 @@ module Rigor
       def narrow_class(type, class_name, exact: false, environment: Environment.default, scope: nil)
         context = ClassNarrowingContext.new(exact: exact, polarity: :positive, environment: environment,
                                             scope: scope)
-        narrow_class_dispatch(type, class_name, context)
+        ClassDispatch.narrow_class_dispatch(type, class_name, context)
       end
 
       # Issue #1429 — true when `type` holds a member whose `Bot` under `is_a?(class_name)` rests only on Rigor's
@@ -370,7 +365,7 @@ module Rigor
       def narrow_not_class(type, class_name, exact: false, environment: Environment.default, scope: nil)
         context = ClassNarrowingContext.new(exact: exact, polarity: :negative, environment: environment,
                                             scope: scope)
-        narrow_class_dispatch(type, class_name, context)
+        ClassDispatch.narrow_class_dispatch(type, class_name, context)
       end
 
       # Negation pair for `assert_value is ~refinement` / `predicate-if-* … is ~refinement`
@@ -401,13 +396,13 @@ module Rigor
         when Type::Difference
           return current_type unless refinement_type.removed.is_a?(Type::Constant)
 
-          complement_difference(current_type, refinement_type)
+          Complements.complement_difference(current_type, refinement_type)
         when Type::IntegerRange
-          complement_integer_range(current_type, refinement_type)
+          Complements.complement_integer_range(current_type, refinement_type)
         when Type::Intersection
-          complement_intersection(current_type, refinement_type)
+          Complements.complement_intersection(current_type, refinement_type)
         when Type::Refined
-          complement_refined(current_type, refinement_type)
+          Complements.complement_refined(current_type, refinement_type)
         else
           current_type
         end
@@ -601,7 +596,7 @@ module Rigor
       end
 
       # When every condition is a `RegularExpressionNode` literal, the body edge narrows the
-      # match-data globals as `analyse_regex_match_predicate`'s truthy edge does. With multiple
+      # match-data globals as `RegexMatch.analyse_regex_match_predicate`'s truthy edge does. With multiple
       # regex conditions (`when /a/, /b/`) the body is reachable through any of them, so only
       # `$~`/`$&` are safely non-nil; numbered groups whose presence differs per alternative stay
       # `String | nil`. With no regex condition the entry scope passes through unchanged.
@@ -621,14 +616,14 @@ module Rigor
 
         unconditional =
           if regexes.size == 1
-            unconditional_capture_groups(regexes.first.unescaped)
+            RegexMatch.unconditional_capture_groups(regexes.first.unescaped)
           else
             Set.new
           end
-        truthy, falsey = regex_match_predicate_scopes(scope, unconditional)
+        truthy, falsey = RegexMatch.regex_match_predicate_scopes(scope, unconditional)
         return truthy if regexes.size == conditions.size
 
-        empty_truthy, empty_falsey = regex_match_predicate_scopes(scope, Set.new)
+        empty_truthy, empty_falsey = RegexMatch.regex_match_predicate_scopes(scope, Set.new)
         failed = scope
         paths = conditions.map do |condition|
           kind = when_regex_condition_kind(condition, scope)
@@ -677,13 +672,13 @@ module Rigor
       # and so is each numbered group {#yielded_capture_groups} vouches for; every other group is unbound, so it
       # reads the RBS `String?` whatever an earlier match in the method bound it to.
       def yielded_match_scope(scope, pattern)
-        regex_match_predicate_scopes(scope, yielded_capture_groups(pattern)).first
+        RegexMatch.regex_match_predicate_scopes(scope, yielded_capture_groups(pattern)).first
       end
 
       # The pattern sources {#yielded_capture_groups} reads groups from: literal characters, `.`, the anchors, the
       # quantifiers, `|`, plain and `(?:…)` groups, the class escapes, `\n`, `\r` and `\t`, an escaped punctuation
       # character, and a bracket class holding only those with no bracket inside it. The group walk
-      # ({#unconditional_capture_groups}) reads these right; it misreads sources outside them (#2472, #1476).
+      # ({RegexMatch.unconditional_capture_groups}) reads these right; it misreads sources outside them (#2472, #1476).
       PLAIN_PATTERN_ATOM = %r{[A-Za-z0-9 _\-.,:;=<>!@%&~'"`/^$+*?|(){}#]|\\[wWdDsShHnrt]|\\[^A-Za-z0-9\s]}
       PLAIN_PATTERN_CLASS =
         %r{\[\^?(?:[A-Za-z0-9 _\-.,:;=<>!@%~'"`/^$+*?|(){}#]|\\[wWdDsShHnrt]|\\[^A-Za-z0-9\s])+\]}
@@ -706,7 +701,7 @@ module Rigor
         return NO_GROUPS unless pattern.is_a?(Prism::RegularExpressionNode) && !pattern.extended?
         return NO_GROUPS unless pattern.opening == "/"
 
-        plain_pattern_source?(pattern.content) ? unconditional_capture_groups(pattern.content) : NO_GROUPS
+        plain_pattern_source?(pattern.content) ? RegexMatch.unconditional_capture_groups(pattern.content) : NO_GROUPS
       end
 
       def plain_pattern_source?(source)
@@ -716,10 +711,10 @@ module Rigor
       private_class_method :yielded_capture_groups, :plain_pattern_source?
 
       # Issue #2443 — true when every member of `type` is a String (a project subclass included) or a `Dynamic` that
-      # is untyped or may hold only Strings, Symbols and nil ({#match_member_kind}). A `nil` member never runs the
-      # block, so it counts neither way.
+      # is untyped or may hold only Strings, Symbols and nil ({RegexMatch.match_member_kind}). A `nil` member never runs
+      # the block, so it counts neither way.
       def string_match_receiver?(type, scope)
-        kinds = match_member_kinds(type, scope) - [:nil]
+        kinds = RegexMatch.match_member_kinds(type, scope) - [:nil]
         !kinds.empty? && kinds.all? { |kind| %i[string string_subclass dynamic].include?(kind) }
       end
 
@@ -799,294 +794,6 @@ module Rigor
       # rubocop:disable-next Metrics/ClassLength
       class << self
         private
-
-        # Complement of `Difference[base, Constant[v]]` within `current_type`. Walks the
-        # current type's union members, keeps each member disjoint from `base` (those values
-        # were never in the refinement to begin with), and adds the removed-value `Constant[v]`
-        # exactly once when any current member covers it. Members that are fully contained in
-        # the refinement (i.e. inside `base` and NOT equal to the removed value) are dropped —
-        # they are exactly the values the negation excludes.
-        def complement_difference(current_type, difference)
-          base = difference.base
-          removed = difference.removed
-          parts = current_type.is_a?(Type::Union) ? current_type.members : [current_type]
-
-          survivors = []
-          add_removed = false
-          parts.each do |part|
-            if base_disjoint?(base, part)
-              survivors << part
-            elsif part_covers_constant?(part, removed)
-              add_removed = true
-            end
-          end
-          survivors << removed if add_removed
-
-          return current_type if survivors.empty?
-
-          Type::Combinator.union(*survivors)
-        end
-
-        def base_disjoint?(base, part)
-          base.accepts(part, mode: :gradual).no?
-        end
-
-        def part_covers_constant?(part, constant)
-          result = part.accepts(constant, mode: :gradual)
-          result.yes? || result.maybe?
-        end
-
-        # Complement of an `IntegerRange[a, b]` within `current_type`. Splits the range
-        # complement into the two open halves `Integer[..a-1]` and `Integer[b+1..]` (skipping a
-        # half when its bound is infinity), then intersects each half with the integer-domain
-        # parts of `current_type`. Non-integer parts of a Union receiver (nil, String, …)
-        # survive unchanged.
-        def complement_integer_range(current_type, range)
-          halves = integer_range_complement_halves(range)
-          parts = current_type.is_a?(Type::Union) ? current_type.members : [current_type]
-
-          survivors = []
-          parts.each do |part|
-            if integer_member?(part)
-              halves.each do |half|
-                meet = intersect_integer_part(part, half)
-                survivors << meet unless meet.nil? || meet.is_a?(Type::Bot)
-              end
-            else
-              survivors << part
-            end
-          end
-
-          return current_type if survivors.empty?
-
-          Type::Combinator.union(*survivors)
-        end
-
-        # Returns the two open halves of an IntegerRange's complement: the left half
-        # `Integer[..a-1]` (when `a` is finite) and the right half `Integer[b+1..]` (when `b` is finite).
-        # Universal ranges (both bounds infinite) yield an empty array — the complement is
-        # empty.
-        def integer_range_complement_halves(range)
-          halves = []
-          left_max = range.min
-          right_min = range.max
-
-          if left_max.is_a?(Integer)
-            halves << Type::Combinator.integer_range(Type::IntegerRange::NEG_INFINITY, left_max - 1)
-          end
-          if right_min.is_a?(Integer)
-            halves << Type::Combinator.integer_range(right_min + 1, Type::IntegerRange::POS_INFINITY)
-          end
-          halves
-        end
-
-        def integer_member?(part)
-          case part
-          when Type::Constant then part.value.is_a?(Integer)
-          when Type::IntegerRange then true
-          when Type::Nominal then part.class_name == "Integer"
-          else false
-          end
-        end
-
-        # Intersect an integer-domain part with a complement half-range. For a
-        # Nominal[Integer] receiver the meet is the half itself; for an existing IntegerRange
-        # the meet narrows both bounds; for a Constant[Integer] the meet is the constant when
-        # the half covers it, otherwise nil.
-        def intersect_integer_part(part, half)
-          case part
-          when Type::Nominal
-            half
-          when Type::IntegerRange
-            integer_range_meet(part, half)
-          when Type::Constant
-            half.covers?(part.value) ? part : nil
-          end
-        end
-
-        def integer_range_meet(left, right)
-          low = numeric_to_bound([integer_bound_value(left.min), integer_bound_value(right.min)].max)
-          high = numeric_to_bound([integer_bound_value(left.max), integer_bound_value(right.max)].min)
-          return nil if integer_range_disjoint?(low, high)
-
-          Type::Combinator.integer_range(low, high)
-        end
-
-        def integer_bound_value(bound)
-          return -Float::INFINITY if bound == Type::IntegerRange::NEG_INFINITY
-          return Float::INFINITY if bound == Type::IntegerRange::POS_INFINITY
-
-          bound
-        end
-
-        def numeric_to_bound(value)
-          return Type::IntegerRange::NEG_INFINITY if value == -Float::INFINITY
-          return Type::IntegerRange::POS_INFINITY if value == Float::INFINITY
-
-          value.to_i
-        end
-
-        def integer_range_disjoint?(low, high)
-          return false if low == Type::IntegerRange::NEG_INFINITY
-          return false if high == Type::IntegerRange::POS_INFINITY
-
-          low > high
-        end
-
-        # De Morgan: `D \ (M1 ∩ M2 ∩ …) = (D \ M1) ∪ (D \ M2) ∪ …`. Each member's complement is
-        # computed independently within `current_type` and the results are unioned. Members the
-        # algebra cannot complement contribute `current_type` itself, so the union widens to
-        # `current_type` overall — sound but imprecise.
-        def complement_intersection(current_type, intersection)
-          per_member = intersection.members.map do |member|
-            Narrowing.narrow_not_refinement(current_type, member)
-          end
-          Type::Combinator.union(*per_member)
-        end
-
-        # v0.0.7 — complement of a `Refined[base, predicate]` refinement within `current_type`.
-        # Walks the current type's union members; parts that are disjoint from the refinement's
-        # base survive unchanged; parts equal to the refinement itself drop entirely (they were
-        # exactly the negated subset); parts that overlap the base contribute `Difference[part,
-        # refined]` so downstream narrowing knows the refinement subset is excluded.
-        #
-        # v0.0.9 — when the predicate has a registered complement (see
-        # {Type::Refined::COMPLEMENT_PAIRS}) and the part is exactly the refinement's base, the
-        # narrowing returns `Refined[base, complement_predicate]` instead of
-        # `Difference[base, refined]`. This is the `~T` symmetry the spec promises:
-        # `~lowercase-string` narrows `String` to `non-lowercase-string` rather than
-        # `Difference[String, lowercase-string]`.
-        #
-        # Predicates without a registered complement still fall back to the imprecise but sound
-        # `Difference[part, refined]` carrier so behaviour is unchanged for untouched call
-        # sites.
-        def complement_refined(current_type, refined)
-          complement = registered_complement_for(refined)
-          parts = current_type.is_a?(Type::Union) ? current_type.members : [current_type]
-          survivors = parts.filter_map { |part| complement_refined_part(part, refined, complement) }
-          return current_type if survivors.empty?
-
-          Type::Combinator.union(*survivors)
-        end
-
-        def complement_refined_part(part, refined, complement)
-          return nil if part == refined
-          return part if base_disjoint?(refined.base, part)
-          return complement if complement && part == refined.base
-
-          Type::Combinator.difference(part, refined)
-        end
-
-        def registered_complement_for(refined)
-          complement_id = refined.complement_predicate_id
-          return nil if complement_id.nil?
-
-          Type::Combinator.refined(refined.base, complement_id)
-        end
-
-        def falsey_value?(value)
-          value.nil? || value == false
-        end
-
-        def falsey_nominal?(nominal)
-          %w[NilClass FalseClass].include?(nominal.class_name)
-        end
-
-        # Carriers that the {.narrow_falsey} fast path does not handle by structural
-        # inspection. Singleton/Tuple/HashShape inhabit truthy values, so their falsey fragment
-        # is empty; everything else (Top, Dynamic, Bot, and any future carrier) stays
-        # conservative and is returned unchanged.
-        def narrow_falsey_other(type)
-          case type
-          when Type::Singleton, Type::Tuple, Type::HashShape then Type::Combinator.bot
-          else type
-          end
-        end
-
-        # Carriers that the {.narrow_nil} fast path does not handle by structural inspection.
-        # Top/Dynamic narrow to `Constant[nil]` so dispatch resolves through `NilClass`; Bot is
-        # its own nil fragment; the remaining carriers (Singleton, Tuple, HashShape, and any
-        # future carrier whose inhabitants exclude nil) collapse to `Bot`.
-        def narrow_nil_other(type)
-          case type
-          when Type::Dynamic, Type::Top then Type::Combinator.constant_of(nil)
-          when Type::Bot then type
-          else Type::Combinator.bot
-          end
-        end
-
-        def trusted_equality_literal?(literal)
-          literal.is_a?(Type::Constant) &&
-            TRUSTED_EQUALITY_LITERAL_CLASSES.include?(literal.value.class)
-        end
-
-        def singleton_literal?(literal)
-          SINGLETON_LITERAL_CLASSES.include?(literal.value.class)
-        end
-
-        def finite_trusted_literal_domain?(type)
-          case type
-          when Type::Bot then true
-          when Type::Constant then trusted_equality_literal?(type)
-          when Type::Union then type.members.all? { |member| finite_trusted_literal_domain?(member) }
-          else false
-          end
-        end
-
-        def narrow_finite_equal(type, literal)
-          case type
-          when Type::Bot then type
-          when Type::Constant then type == literal ? type : Type::Combinator.bot
-          when Type::Union
-            Type::Combinator.union(*type.members.map { |member| narrow_finite_equal(member, literal) })
-          else Type::Combinator.bot
-          end
-        end
-
-        def narrow_finite_not_equal(type, literal)
-          case type
-          when Type::Constant then type == literal ? Type::Combinator.bot : type
-          when Type::Union
-            Type::Combinator.union(*type.members.map { |member| narrow_finite_not_equal(member, literal) })
-          else type
-          end
-        end
-
-        def narrow_singleton_equal(type, literal)
-          case type
-          when Type::Constant then type == literal ? type : Type::Combinator.bot
-          when Type::Nominal then singleton_nominal_matches?(type, literal) ? type : Type::Combinator.bot
-          when Type::Union
-            Type::Combinator.union(*type.members.map { |member| narrow_singleton_equal(member, literal) })
-          else narrow_singleton_equal_other(type)
-          end
-        end
-
-        def narrow_singleton_equal_other(type)
-          case type
-          when Type::Singleton, Type::Tuple, Type::HashShape then Type::Combinator.bot
-          else type
-          end
-        end
-
-        def narrow_singleton_not_equal(type, literal)
-          case type
-          when Type::Constant then type == literal ? Type::Combinator.bot : type
-          when Type::Nominal then singleton_nominal_matches?(type, literal) ? Type::Combinator.bot : type
-          when Type::Union
-            Type::Combinator.union(*type.members.map { |member| narrow_singleton_not_equal(member, literal) })
-          else type
-          end
-        end
-
-        def singleton_nominal_matches?(nominal, literal)
-          case literal.value
-          when nil then nominal.class_name == "NilClass"
-          when true then nominal.class_name == "TrueClass"
-          when false then nominal.class_name == "FalseClass"
-          else false
-          end
-        end
 
         def analyse_parentheses(node, scope)
           return nil if node.body.nil?
@@ -1479,16 +1186,20 @@ module Rigor
           when :==, :!= then analyse_equality_predicate(node, scope, equality: name)
           when :=== then analyse_case_equality_predicate(node, scope)
           when :=~, :!~ then dispatch_regex_match_predicate(node, scope, name)
-          when :match? then analyse_whole_regex_match_predicate(node, scope)
-          when :key?, :has_key?, :include?, :member? then analyse_key_presence_predicate(node, scope)
-          when :empty?, :any?, :none? then analyse_array_emptiness_predicate(node, scope, name)
+          when :match? then RegexMatch.analyse_whole_regex_match_predicate(node, scope)
+          when :key?, :has_key?, :include?, :member? then PresencePredicates.analyse_key_presence_predicate(node, scope)
+          when :empty?, :any?, :none? then PresencePredicates.analyse_array_emptiness_predicate(node, scope, name)
           when :respond_to? then analyse_respond_to_predicate(node, scope)
           when :nan?, :finite? then analyse_float_class_predicate(node, scope, name)
           end
         end
 
         def dispatch_regex_match_predicate(node, scope, name)
-          name == :=~ ? analyse_regex_match_predicate(node, scope) : analyse_regex_not_match_predicate(node, scope)
+          if name == :=~
+            RegexMatch.analyse_regex_match_predicate(node, scope)
+          else
+            RegexMatch.analyse_regex_not_match_predicate(node, scope)
+          end
         end
 
         # T3 (template-corpora survey) — `recv.respond_to?(sym)` truthy edge narrows `recv`
@@ -1514,7 +1225,7 @@ module Rigor
           return nil if node.block
           return nil if node.arguments.nil? || node.arguments.arguments.size != 1
 
-          sym = static_hash_key(node.arguments.arguments.first)
+          sym = PresencePredicates.static_hash_key(node.arguments.arguments.first)
           return nil if sym.nil?
           return nil if nilclass_method?(sym, scope)
 
@@ -1591,634 +1302,6 @@ module Rigor
           ).nil?
         rescue StandardError
           true
-        end
-
-        # ADR-47 §4-4 (Elixir `tuple_size`/non-empty analogue) — a bare `arr.empty?` /
-        # `arr.any?` / `arr.none?` (no block, no args) narrows an Array-typed receiver to
-        # `non-empty-array[T]` on the edge that implies "at least one element":
-        #
-        #   - `empty?` → false edge   (the array is NOT empty)
-        #   - `any?`   → true  edge   (a truthy element exists ⇒ non-empty)
-        #   - `none?`  → false edge   (a truthy element exists ⇒ non-empty)
-        #
-        # The opposite edge is the conservative no-op (`any?`/`none?` falseness does not imply
-        # emptiness — the array may hold only falsey elements; `empty?` truth could narrow to an
-        # empty array but that carrier move is deferred). Only `Nominal[Array, [T]]` receivers
-        # narrow — `Tuple` is already known-length, `Dynamic` is left alone (gradual
-        # guarantee), and a non-Array receiver (`String#empty?`, `Range#any?`, …) bails so the
-        # existing string / predicate paths still run.
-        def analyse_array_emptiness_predicate(node, scope, name)
-          return nil if node.block
-          return nil unless node.arguments.nil? || node.arguments.arguments.empty?
-
-          reader, writer = emptiness_receiver_accessors(node.receiver)
-          return nil if reader.nil?
-
-          current = scope.public_send(reader, node.receiver.name)
-          return nil if current.nil?
-
-          non_empty = narrow_to_non_empty_array(current)
-          return nil if non_empty.equal?(current) # receiver is not an Array shape → opaque
-
-          non_empty_scope = scope.public_send(writer, node.receiver.name, non_empty)
-          name == :any? ? [non_empty_scope, scope] : [scope, non_empty_scope]
-        end
-
-        def emptiness_receiver_accessors(receiver)
-          case receiver
-          when Prism::LocalVariableReadNode then %i[local with_local]
-          when Prism::InstanceVariableReadNode then %i[ivar with_ivar]
-          else [nil, nil]
-          end
-        end
-
-        # Refines `Array[T]` (and every Array member of a Union) to `non-empty-array[T]`;
-        # returns the input unchanged when nothing applies, so the caller can detect "no
-        # narrowing".
-        def narrow_to_non_empty_array(type)
-          case type
-          when Type::Nominal
-            return type unless type.class_name == "Array"
-
-            Type::Combinator.non_empty_array(type.type_args.first || Type::Combinator.top)
-          when Type::Union
-            Type::Combinator.union(*type.members.map { |member| narrow_to_non_empty_array(member) })
-          else
-            type
-          end
-        end
-
-        # ADR-47 §4-3 (Elixir `is_map_key/2` analogue) — `h.key?(:foo)` narrows the receiver on
-        # the truthy edge: a `HashShape` whose `:foo` is an OPTIONAL key has it promoted to
-        # REQUIRED, so a subsequent `h[:foo]` reads the declared value type instead of `value |
-        # nil` (the optionality nil is gone). Sound because key presence removes only the
-        # optionality-injected nil, never the value's own intrinsic nil (`h = {foo: nil}` keeps
-        # `h[:foo]` nil-typed). The falsey edge is left unchanged — "key absent" is the
-        # conservative no-op. Only literal `Symbol`/`String` arguments and
-        # `LocalVariableReadNode`/`InstanceVariableReadNode` receivers narrow; everything else
-        # (Dynamic, `Nominal[Hash]`, method-chain receivers) bails to no narrowing. A non-literal
-        # key goes to {#analyse_computed_key_presence_predicate} (issue #1703).
-        def analyse_key_presence_predicate(node, scope)
-          return nil if node.arguments.nil?
-          return nil unless node.arguments.arguments.size == 1
-
-          # A literal key promotes a shape's optional key only for `key?` / `has_key?`; `include?` / `member?` reach
-          # the computed-key guard alone, so a String or Array receiver's `include?` keeps its own narrowings.
-          key = static_hash_key(node.arguments.arguments.first) if %i[key? has_key?].include?(node.name)
-          return analyse_computed_key_presence_predicate(node, scope) if key.nil?
-
-          case node.receiver
-          when Prism::LocalVariableReadNode
-            key_presence_scopes(node.receiver.name, key, scope, reader: :local, writer: :with_local)
-          when Prism::InstanceVariableReadNode
-            key_presence_scopes(node.receiver.name, key, scope, reader: :ivar, writer: :with_ivar)
-          end
-        end
-
-        # Issue #1703 — `H.key?(k)` / `has_key?` / `include?` / `member?` with a non-literal key (a local, an ivar,
-        # or a reader chain such as `prop.column_type`) on a closed hash shape held in a local, an ivar or a
-        # constant. The truthy edge records the guard, and a later `H[k]` of the same receiver and structurally the
-        # same key drops the miss `nil` ({KeyPresenceGuard}). The falsey edge is the no-op: an
-        # absent computed key says nothing a shape can record. Nil when the guard does not apply, so a collection's
-        # `include?` still reaches the membership and String predicates.
-        def analyse_computed_key_presence_predicate(node, scope)
-          truthy = KeyPresenceGuard.record(node, scope)
-          truthy && [truthy, scope]
-        end
-
-        def key_presence_scopes(name, key, scope, reader:, writer:)
-          current = scope.public_send(reader, name)
-          return nil if current.nil?
-
-          truthy = narrow_hash_key_present(current, key)
-          # §4-3 false edge — `h.key?(:foo)` being false proves `:foo` is absent, so on that
-          # edge `h[:foo]` reads `nil`. Remove the (optional) key from the shape; a required
-          # key makes the false edge dead and an unknown key is already nil, both no-ops.
-          falsey = narrow_hash_key_absent(current, key)
-          return nil if truthy.equal?(current) && falsey.equal?(current) # predicate is opaque
-
-          truthy_scope = truthy.equal?(current) ? scope : scope.public_send(writer, name, truthy)
-          falsey_scope = falsey.equal?(current) ? scope : scope.public_send(writer, name, falsey)
-          [truthy_scope, falsey_scope]
-        end
-
-        def static_hash_key(node)
-          case node
-          when Prism::SymbolNode then node.unescaped.to_sym
-          when Prism::StringNode then node.unescaped
-          end
-        end
-
-        # Promotes `key` from optional to required across a HashShape (or every HashShape
-        # member of a Union). Returns the input unchanged when nothing applies, so the caller
-        # can detect "no narrowing".
-        def narrow_hash_key_present(type, key)
-          case type
-          when Type::HashShape
-            promote_hash_key(type, key)
-          when Type::Union
-            Type::Combinator.union(*type.members.map { |member| narrow_hash_key_present(member, key) })
-          else
-            type
-          end
-        end
-
-        def promote_hash_key(shape, key)
-          return shape unless shape.pairs.key?(key) # unknown key → no value type to assert
-          return shape unless shape.optional_key?(key) # already required → nothing to promote
-
-          Type::HashShape.new(
-            shape.pairs,
-            required_keys: shape.required_keys + [key],
-            optional_keys: shape.optional_keys - [key],
-            read_only_keys: shape.read_only_keys,
-            extra_keys: shape.extra_keys
-          )
-        end
-
-        # §4-3 false edge — drops `key` from a HashShape (or every HashShape member of a Union)
-        # so the proven-absent key reads `nil`. Returns the input unchanged when nothing
-        # applies (caller detects "no narrowing"). Only an *optional* present key is removed: a
-        # required key makes `key?` always true (the false edge is dead, leave the shape opaque)
-        # and a key absent from `pairs` already reads `nil` on a closed shape. On an open shape an
-        # undeclared key keeps reading `untyped` on this edge — sound but imprecise, since the shape
-        # carries no per-key exclusion to record what the guard just proved absent.
-        def narrow_hash_key_absent(type, key)
-          case type
-          when Type::HashShape
-            remove_hash_key(type, key)
-          when Type::Union
-            Type::Combinator.union(*type.members.map { |member| narrow_hash_key_absent(member, key) })
-          else
-            type
-          end
-        end
-
-        def remove_hash_key(shape, key)
-          return shape unless shape.pairs.key?(key)
-          return shape unless shape.optional_key?(key)
-
-          Type::HashShape.new(
-            shape.pairs.except(key),
-            required_keys: shape.required_keys,
-            optional_keys: shape.optional_keys - [key],
-            read_only_keys: shape.read_only_keys - [key],
-            extra_keys: shape.extra_keys
-          )
-        end
-
-        # Survey item (b): `/regex/ =~ str` and `str =~ /regex/` bind the regex match-data
-        # globals on each edge ({#regex_match_edges}), gated on the subject (#1494): an edge is
-        # narrowed only when the receiver proves what the frame holds on it
-        # ({#match_receiver_edges}), and an edge it cannot vouch for keeps the match globals
-        # forgotten. A `String?` subject keeps the match edge only, since `NilClass#=~` answers
-        # nil with the previous match still bound; an untyped one is read the same way.
-        #
-        # Returns nil (no narrowing) when the receiver / argument pair does not resolve to exactly one
-        # regex pattern we can count (see {#regex_match_pattern}).
-        def analyse_regex_match_predicate(node, scope)
-          gated_regex_match_edges(node, scope)
-        end
-
-        # Issue #1379 — `subject !~ pattern` is `Kernel#!~`, which returns `!(subject =~ pattern)`. It runs the same
-        # match in the caller's frame, so its edges are {#analyse_regex_match_predicate}'s swapped: the falsey edge is
-        # the match edge (`$~` a `MatchData`, an unconditional `$N` a `String`, and the whole-receiver refinement), the
-        # truthy edge the no-match edge (`$~` and `$N` nil). The same patterns are recognised and the same ones
-        # declined (a non-regex operand, an ambiguous constant, `//x`), and the receiver gates the edges alike.
-        def analyse_regex_not_match_predicate(node, scope)
-          gated_regex_match_edges(node, scope)&.reverse
-        end
-
-        # `[match_edge, no_match_edge]` of a `=~` / `!~` predicate, each kept only where
-        # {#match_receiver_edges} lets it be; an edge it cannot vouch for is the entry scope with the
-        # match globals forgotten, since the call may still have rebound them. The whole-receiver
-        # refinement is kept only when the local it would narrow is known to be a String on the
-        # match edge ({#refinable_operand?}).
-        def gated_regex_match_edges(node, scope)
-          edges = regex_match_edges(node, scope, refine: refinable_operand?(node, scope))
-          return nil if edges.nil?
-
-          match, no_match = edges
-          forgotten = scope.forget_match_globals
-          case match_receiver_edges(node, scope)
-          when :both then [match, no_match]
-          when :match then [match, forgotten]
-          else [forgotten, forgotten]
-          end
-        end
-
-        # The ungated edges of a match:
-        #
-        # - Match edge (`=~` returned an Integer position — the match succeeded): `$~` to
-        #   `Nominal[MatchData]`; `$&` and `$1..$N` (where N is the number of capture groups in
-        #   the regex source) to `Nominal[String]`. This is the same optimistic-narrowing shape
-        #   the existing `analyse_match_write` uses for named captures inside `if /(?<x>...)/
-        #   =~ str` — optional groups in the regex source (`(\d+)?`) would bind `$N` to `nil`
-        #   at runtime, but the floor here matches the common idiom (required captures) and
-        #   lets `unless /(\d+)/ =~ s; raise; end; $1.to_i` resolve cleanly.
-        # - No-match edge (`=~` returned nil): `$~` and every numbered / back-reference
-        #   global bound to `Constant<nil>`.
-        #
-        # `refine: false` leaves out the whole-receiver refinement, which names a String.
-        def regex_match_edges(node, scope, refine:)
-          return nil if node.arguments.nil?
-          return nil unless node.arguments.arguments.size == 1
-
-          arg = node.arguments.arguments.first
-          pattern = regex_match_pattern(node.receiver, arg, scope)
-          return nil if pattern.nil?
-          # Extended mode (`//x`) lets the pattern carry free whitespace and `#` comments, and a
-          # comment may contain a literal `(` — which the light char-scan walker would miscount as a
-          # capturing group, shifting `$N` indices and narrowing the wrong global. That is a
-          # false-negative-class misnarrowing, so bail rather than risk it. The literal path shares
-          # this bail: `RegularExpressionNode` carries the same latent miscount.
-          return nil if pattern.extended
-
-          unconditional = unconditional_capture_groups(pattern.source)
-          truthy, falsey = regex_match_predicate_scopes(scope, unconditional)
-          # #164 — layer whole-receiver refinement onto the truthy edge without disturbing the
-          # match-global logic above. A successful `str =~ /\A\d+\z/` proves the WHOLE string
-          # matched, so the string operand narrows to the imported refinement the anchored pattern
-          # names. The falsey edge is untouched: a failed match proves nothing about the shape.
-          truthy = apply_whole_receiver_refinement(truthy, node.receiver, arg, pattern.source, scope) if refine
-          [truthy, falsey]
-        end
-
-        # Which edges of `recv =~ pattern` / `recv !~ pattern` the receiver lets {#gated_regex_match_edges} narrow:
-        # `:both`, `:match` (the match edge only) or nil. `Kernel#!~` dispatches `=~` on the receiver:
-        #
-        # - A Regexp receiver (the pattern on the left) runs `Regexp#=~`, which sets `$~` on both outcomes, a `nil`
-        #   argument included: `:both`.
-        # - `String#=~` and `Symbol#=~` do the same: `:both` when every member of the receiver's type is a String
-        #   (a project subclass of String included) or a Symbol.
-        # - `NilClass#=~` answers nil and leaves `$~` alone, so a nil receiver reaches the no-match edge with the
-        #   previous match still bound; it never reaches the match edge. A `Dynamic` receiver may be nil at run time
-        #   whatever its static facet says. So does a safe-navigation call, which answers nil without matching on a
-        #   nil receiver.
-        #
-        # The two operators part over a receiver that is none of those ({#match_operator_edges},
-        # {#not_match_operator_edges}).
-        def match_receiver_edges(node, scope)
-          return nil if node.receiver.nil?
-
-          edges =
-            if regex_operand_pattern(node.receiver, scope).is_a?(RegexMatchPattern)
-              :both
-            else
-              kinds = match_member_kinds(scope.type_of(node.receiver), scope)
-              node.name == :=~ ? match_operator_edges(kinds) : not_match_operator_edges(kinds)
-            end
-          return edges unless node.safe_navigation?
-
-          :match if edges && node.name == :=~
-        end
-
-        STRING_MATCH_KINDS = %i[string string_subclass symbol].freeze
-        private_constant :STRING_MATCH_KINDS
-
-        # `recv =~ pattern`'s match edge is the truthy one. Only a member known to define its own `=~` in the
-        # project keeps it out (#1494): that method binds `$~` in its own frame, not the caller's. Any other member
-        # either matches in the caller's frame, answers nil (`NilClass`), or has no `=~` at all (`Integer` since
-        # Ruby 3.2 drops `Object#=~`) and so never reaches the edge; a receiver the analyzer cannot classify keeps the
-        # edge, as every `=~` did before #1494.
-        def match_operator_edges(kinds)
-          return nil if kinds.include?(:custom)
-          return :both if kinds.all? { |kind| STRING_MATCH_KINDS.include?(kind) }
-
-          :match
-        end
-
-        # `recv !~ pattern`'s match edge is the falsey one, which a receiver whose `=~` is not the caller's match
-        # also reaches, so it is kept only when every member is a String, a Symbol, nil, or a `Dynamic` that is
-        # untyped or whose facet holds only those (#1379).
-        def not_match_operator_edges(kinds)
-          return :both if kinds.all? { |kind| STRING_MATCH_KINDS.include?(kind) }
-
-          :match if kinds.all? { |kind| (STRING_MATCH_KINDS + %i[nil dynamic]).include?(kind) }
-        end
-
-        # Whether the local operand {#apply_whole_receiver_refinement} would narrow holds only Strings and nil, which
-        # the match edge excludes. The refinement names a String, so a member that may be a Symbol — a Symbol, or an
-        # untyped `Dynamic` that may be one at run time — keeps it out: `return unless raw =~ /\A\d+\z/` on an untyped
-        # `raw` must not make `raw.to_proc` an undefined method (#1379, #1494).
-        def refinable_operand?(node, scope)
-          operand = [node.receiver, *node.arguments&.arguments].find { |o| o.is_a?(Prism::LocalVariableReadNode) }
-          type = operand && scope.local(operand.name)
-          return true if type.nil?
-
-          match_member_kinds(type, scope).all? { |kind| %i[string nil].include?(kind) }
-        end
-
-        def match_member_kinds(type, scope)
-          (type.is_a?(Type::Union) ? type.members : [type]).map { |member| match_member_kind(member, scope) }
-        end
-
-        # `:custom` for a member whose class the project gives a `=~` of its own (in its ancestry, a reopened
-        # `String` included); `:string` or `:symbol` for a member {.narrow_not_class} proves a String or a Symbol (a
-        # value or refinement of either, or a class the environment orders below it); `:string_subclass` for a
-        # project class whose superclass chain reaches `String`, which the environment cannot order; `:nil`;
-        # `:dynamic` for a `Dynamic` whose facet is untyped or holds only Strings, Symbols and nil; or nil for anything
-        # else.
-        def match_member_kind(member, scope)
-          return match_dynamic_kind(member, scope) if member.is_a?(Type::Dynamic)
-          return :nil if narrow_nil(member) == member && !member.is_a?(Type::Bot)
-          return :custom if custom_match_operator?(member, scope)
-
-          environment = scope.environment
-          { "String" => :string, "Symbol" => :symbol }.each do |class_name, kind|
-            return kind if narrow_not_class(member, class_name, environment: environment, scope: scope).is_a?(Type::Bot)
-          end
-          :string_subclass if project_string_subclass?(member, scope)
-        end
-
-        def match_dynamic_kind(member, scope)
-          facet = member.static_facet
-          return :dynamic if Type::Combinator.untyped?(member)
-
-          facet_kinds = match_member_kinds(facet, scope)
-          :dynamic if facet_kinds.all? { |kind| (STRING_MATCH_KINDS + [:nil]).include?(kind) }
-        end
-
-        def custom_match_operator?(member, scope)
-          targets = ProjectMethodOwnership.targets(member)
-          return false if targets.nil?
-
-          targets.any? { |class_name, kind| ProjectMethodOwnership.defines?(class_name, :=~, kind, scope) }
-        end
-
-        def project_string_subclass?(member, scope)
-          return false unless member.is_a?(Type::Nominal) && scope.known_user_class?(member.class_name)
-
-          scope.external_ancestor_name_candidates(member.class_name, mixins: false)
-               .flatten.any? { |name| name.to_s.delete_prefix("::") == "String" }
-        end
-
-        # `str.match?(/\A\d+\z/)` — `String#match?` is a pure boolean predicate whose truthy edge
-        # proves a property of the ENTIRE receiver. When the argument is a fully `\A…\z`-anchored
-        # single-char-class pattern recognised by {RegexRefinement.for_whole_pattern}, narrow the
-        # receiver local to the matching imported refinement on the truthy edge; the falsey edge
-        # passes through unchanged (failing one pattern proves nothing about the string's shape).
-        # A non-literal / unanchored / `\Z` / line-anchored / `//x` pattern falls through to no
-        # narrowing.
-        #
-        # The refinement names a String, so it shares `=~`'s gate (#1955): a receiver that may be a Symbol, or an
-        # untyped one, is left as it is ({#refinable_operand?}).
-        def analyse_whole_regex_match_predicate(node, scope)
-          return nil unless node.receiver.is_a?(Prism::LocalVariableReadNode)
-          return nil if node.arguments.nil? || node.arguments.arguments.size != 1
-          return nil unless refinable_operand?(node, scope)
-
-          pattern = regex_operand_pattern(node.arguments.arguments.first, scope)
-          return nil unless pattern.is_a?(RegexMatchPattern)
-          return nil if pattern.extended
-
-          refinement = ::Rigor::Builtins::RegexRefinement.for_whole_pattern(pattern.source)
-          return nil if refinement.nil?
-
-          local_name = node.receiver.name
-          return nil if scope.local(local_name).nil?
-
-          [scope.with_local(local_name, refinement), scope]
-        end
-
-        # Narrows the string operand of a `=~` predicate to a whole-receiver refinement when the
-        # regex source is a recognised `\A…\z`-anchored pattern. Returns the (possibly unchanged)
-        # truthy scope; the falsey edge is never touched by this layer.
-        def apply_whole_receiver_refinement(truthy, receiver, arg, source, scope)
-          refinement = ::Rigor::Builtins::RegexRefinement.for_whole_pattern(source)
-          return truthy if refinement.nil?
-
-          # `regex_match_pattern` already resolved the regex operand from a literal or a
-          # `Constant[Regexp]` constant read — never a bare local — so the string subject is
-          # unambiguously the local-read operand, if either operand is one.
-          subject = [receiver, arg].find { |operand| operand.is_a?(Prism::LocalVariableReadNode) }
-          return truthy if subject.nil? || scope.local(subject.name).nil?
-
-          truthy.with_local(subject.name, refinement)
-        end
-
-        # Recognises the regex pattern operand of a `=~` predicate. An operand resolves to a regex when
-        # it is either a syntactic `RegularExpressionNode` literal OR a constant read whose type is a
-        # value-pinned `Constant[Regexp]` (`RE = /.../` and `RE = Regexp.new(...)` both fold to the
-        # carrier in the whole-program constant pre-pass). Returns a single {RegexMatchPattern}, or nil
-        # (no narrowing) when NEITHER operand resolves to a regex, when BOTH do (`/a/ =~ /b/` — no
-        # string subject to bind), or when a constant operand is ambiguous — typed as a `Union` from a
-        # twice-assigned constant, where no single source can be pinned.
-        def regex_match_pattern(left, right, scope)
-          left_pattern = regex_operand_pattern(left, scope)
-          right_pattern = regex_operand_pattern(right, scope)
-          return nil if left_pattern == :ambiguous || right_pattern == :ambiguous
-
-          patterns = [left_pattern, right_pattern].grep(RegexMatchPattern)
-          patterns.size == 1 ? patterns.first : nil
-        end
-
-        # Classifies one `=~` operand: a {RegexMatchPattern} when it resolves to a regex (literal or
-        # `Constant[Regexp]`), `:ambiguous` when a constant operand types as a `Union` (a twice-assigned
-        # constant), or nil when the operand is not a regex at all.
-        def regex_operand_pattern(node, scope)
-          case node
-          when Prism::RegularExpressionNode
-            RegexMatchPattern.new(source: node.unescaped, extended: node.extended?)
-          when Prism::ConstantReadNode, Prism::ConstantPathNode
-            regex_operand_from_constant(node, scope)
-          end
-        end
-
-        # Resolves a constant-reference operand to a regex pattern via the shared lexical-constant
-        # resolution (`Reflection.resolve_constant_type`). `Regexp#options` gives the real
-        # extended-mode flag; `Regexp#source` the pattern. Returns `:ambiguous` for a `Union`-typed
-        # constant so the caller bails, and nil when the constant does not resolve to a `Constant[Regexp]`.
-        def regex_operand_from_constant(node, scope)
-          name = Source::ConstantPath.qualified_name_or_nil(node)
-          return nil if name.nil?
-
-          type = Reflection.resolve_constant_type(name, scope: scope,
-                                                        rooted: Source::ConstantPath.rooted?(node))
-          return :ambiguous if type.is_a?(Type::Union)
-          return nil unless type.is_a?(Type::Constant)
-
-          value = type.value
-          return nil unless value.is_a?(Regexp)
-
-          RegexMatchPattern.new(source: value.source, extended: value.options.anybits?(Regexp::EXTENDED))
-        end
-
-        # Curated set of match globals bound non-nil on every successful `=~` regardless of grouping:
-        # `$~` (the MatchData), `$&` (whole match), `` $` `` (pre-match), `$'` (post-match). Numbered
-        # references (`$1..$N`) and `$+` (the last matched group) are handled separately because they
-        # depend on the regex source — `$+` is gated on the same participation set as `$N` (#177).
-        REGEX_MATCH_GLOBALS = %i[$~ $& $` $'].freeze
-        private_constant :REGEX_MATCH_GLOBALS
-
-        # `unconditional` is the Set of 1-based numbered-capture indices whose group is
-        # guaranteed to participate in any successful match (no optional quantifier on the
-        # group or an ancestor, no alternation in the pattern). Those `$N` are bound to
-        # `String`; every other numbered group present in the pattern stays `String | nil` on
-        # both edges (a truthy match leaves an optional group nil at runtime), so we do not
-        # narrow it on the truthy edge.
-        #
-        # Both edges start from `scope` with the match globals forgotten (#1385): the match rebinds every one of them,
-        # so a `$N` an earlier match narrowed says nothing here. Without that, a `when /(x)/` arm, or the right operand
-        # of `s =~ /(a)(b)(c)/ && t =~ /(x)/`, kept `$2` and `$3` narrowed to `String` where Ruby reads nil.
-        def regex_match_predicate_scopes(scope, unconditional)
-          string_t = Type::Combinator.nominal_of("String")
-          match_data_t = Type::Combinator.nominal_of("MatchData")
-          nil_t = Type::Combinator.constant_of(nil)
-
-          truthy = scope.forget_match_globals
-          falsey = truthy
-          truthy = truthy.with_global(:$~, match_data_t)
-          falsey = falsey.with_global(:$~, nil_t)
-          REGEX_MATCH_GLOBALS.each do |name|
-            next if name == :$~
-
-            truthy = truthy.with_global(name, string_t)
-            falsey = falsey.with_global(name, nil_t)
-          end
-          unconditional.each do |index|
-            name = :"$#{index}"
-            truthy = truthy.with_global(name, string_t)
-            falsey = falsey.with_global(name, nil_t)
-          end
-          # `$+` is the LAST matched group, so it is nil on a successful match whose groups are all
-          # optional (`"b" =~ /(a)?b/` matches yet leaves `$+` nil) or absent (no capture group). It
-          # narrows to `String` only when some group is guaranteed to participate — the same
-          # participation gate `$N` uses (#177). With no unconditional group it is left unbound on both
-          # edges (fall through to the RBS `String?` default), exactly as an optional `$N` is.
-          unless unconditional.empty?
-            truthy = truthy.with_global(:$+, string_t)
-            falsey = falsey.with_global(:$+, nil_t)
-          end
-          [truthy, falsey]
-        end
-
-        # Returns the Set of 1-based numbered-capture indices that are UNCONDITIONAL in
-        # `source`: present on every successful match because no optional quantifier (`?`,
-        # `*`, `{0,…}`, `{,…}`) applies to the group or any ancestor group, and the pattern contains no
-        # alternation (`|`). Optional and alternation-reachable groups are excluded — at
-        # runtime `$N` is `nil` for them even when the overall match succeeds, so narrowing
-        # them to non-nil `String` would be unsound. The walker is intentionally light (char
-        # scan, not a regex-AST parse): backslash escapes are skipped; `(?:…)`, lookahead
-        # `(?=…)`/`(?!…)`, and lookbehind `(?<=…)`/`(?<!…)` do not capture; named groups
-        # `(?<name>…)` / `(?'name'…)` do. Once the pattern has a named group, Ruby numbers only
-        # the named groups and a plain `(…)` does not capture (#1471): `/(?<x>a)(b)/` has one
-        # group, so `$2` is nil. Conservatism is one-directional — when in doubt a group is
-        # treated as conditional (dropped from the Set), never the reverse.
-        def unconditional_capture_groups(source)
-          # `unconditional` collects every capturing index; a group is later removed (with its
-          # whole subtree) when it is optionally quantified, nested under an optional ancestor,
-          # or sits in an alternation branch. `stack` holds one frame per open group (plus a
-          # virtual root frame for the top level) as `[group_index_or_nil, descendant_indices,
-          # alternated?]`. A `|` marks the CURRENT group's frame alternated — its branches are
-          # mutually exclusive, so its descendant captures may be absent on a successful match;
-          # the group itself still participates. Closing a frame rolls its subtree up to the
-          # parent so an optional / alternated ancestor disqualifies it.
-          state = { unconditional: Set.new, stack: [[nil, [], false]], group_index: 0, named: named_groups?(source) }
-          each_structural_char(source) { |pos, chr| scan_group_char(source, pos, chr, state) }
-          # Drain the virtual root: a top-level `|` disqualifies all.
-          finalize_frame(state, state[:stack].pop, optional: false)
-          state[:unconditional]
-        end
-
-        # Yields each position of `source` outside a backslash escape and a character class, with its char.
-        def each_structural_char(source)
-          pos = 0
-          length = source.length
-          while pos < length
-            chr = source[pos]
-            if chr == "\\"
-              pos += 2
-              next
-            end
-            if chr == "["
-              pos = skip_char_class(source, pos) + 1
-              next
-            end
-            yield pos, chr
-            pos += 1
-          end
-        end
-
-        def named_groups?(source)
-          each_structural_char(source) { |pos, chr| break true if chr == "(" && named_group?(source, pos) } == true
-        end
-
-        # Updates the walk `state` at a group-relevant char during
-        # {#unconditional_capture_groups}: `(` pushes a frame, `)` pops and resolves it, `|`
-        # flags the current frame as alternated.
-        def scan_group_char(source, pos, chr, state)
-          case chr
-          when "("
-            idx = nil
-            if capturing_group?(source, pos, named: state[:named])
-              idx = (state[:group_index] += 1)
-              state[:unconditional] << idx
-            end
-            state[:stack].push([idx, [], false])
-          when ")"
-            finalize_frame(state, state[:stack].pop, optional: next_quantifier_optional?(source, pos + 1))
-          when "|"
-            state[:stack].last[2] = true
-          end
-        end
-
-        # Resolves a closed (or virtual-root) group frame: its subtree is its own index plus
-        # every descendant index. The subtree is disqualified when the group is optionally
-        # quantified or its branches are alternated (only the descendants in that case — but a
-        # self subtree always keeps its own index unless optional).
-        def finalize_frame(state, frame, optional:)
-          idx, descendants, alternated = frame
-          subtree = descendants.dup
-          subtree << idx if idx
-          state[:unconditional].subtract(subtree) if optional
-          # Alternation disqualifies the branch contents (descendants),
-          # never the enclosing group itself.
-          state[:unconditional].subtract(descendants) if alternated
-          state[:stack].last && state[:stack].last[1].concat(subtree)
-        end
-
-        # True when the group whose closing paren is at `source[pos]` is followed by a
-        # quantifier that permits zero repetitions (`?`, `*`, `{0…}`, `{,…}`). `+` and `{1,…}`
-        # do NOT make a group optional. A lazy/possessive suffix (`*?`, `*+`) is still
-        # zero-permitting on the base quantifier. `{,…}` counts only with a digit after the
-        # comma — `{,}`, `{,x}` and `{, }` are literal braces, not quantifiers.
-        def next_quantifier_optional?(source, pos)
-          case source[pos]
-          when "?", "*" then true
-          when "{" then source[pos + 1] == "0" ||
-            (source[pos + 1] == "," && source[pos + 2].to_s.match?(/\d/))
-          else false
-          end
-        end
-
-        # A plain `(…)` captures unless the pattern has a named group (`named:`); of the `(?…)` forms only a named
-        # group does.
-        def capturing_group?(source, pos, named:)
-          return !named unless source[pos + 1] == "?"
-
-          named_group?(source, pos)
-        end
-
-        # `(?<name>…)` and `(?'name'…)` are named groups; `(?<=…)`/`(?<!…)` (lookbehind) and
-        # `(?:…)`/`(?=…)`/`(?!…)` are not.
-        def named_group?(source, pos)
-          return false unless source[pos + 1] == "?"
-          return true if source[pos + 2] == "'"
-
-          source[pos + 2] == "<" && source[pos + 3] != "=" && source[pos + 3] != "!"
-        end
-
-        def skip_char_class(source, start)
-          pos = start + 1
-          pos += 1 if source[pos] == "^"
-          pos += 1 if source[pos] == "]" # literal ] as first member
-          while pos < source.length
-            return pos if source[pos] == "]"
-
-            pos += source[pos] == "\\" ? 2 : 1
-          end
-          pos
         end
 
         def dispatch_call_numeric(node, scope, name)
@@ -2552,13 +1635,13 @@ module Rigor
         def equality_local_literal(left, right, scope)
           if left.is_a?(Prism::LocalVariableReadNode)
             literal = static_literal_type(right, scope)
-            return [left.name, literal] if trusted_equality_literal?(literal)
+            return [left.name, literal] if Complements.trusted_equality_literal?(literal)
           end
 
           return nil unless right.is_a?(Prism::LocalVariableReadNode)
 
           literal = static_literal_type(left, scope)
-          return [right.name, literal] if trusted_equality_literal?(literal)
+          return [right.name, literal] if Complements.trusted_equality_literal?(literal)
 
           nil
         end
@@ -3396,280 +2479,6 @@ module Rigor
           resolve_class_name_lexically(bare_name, scope)
         end
         public :lexical_class_name
-
-        # ----- narrow_class / narrow_not_class helpers -----
-
-        # Polarity-aware dispatch table for {.narrow_class} / {.narrow_not_class}. Avoids
-        # duplicating the per-carrier case statement and keeps each public surface a thin
-        # delegate; the per-carrier helpers know which polarity to apply by looking at
-        # `polarity:`.
-        def narrow_class_dispatch(type, class_name, context)
-          case type
-          when Type::Constant then narrow_constant_class(type, class_name, context)
-          when Type::Nominal then narrow_nominal_class(type, class_name, context)
-          when Type::Union then narrow_union_class(type, class_name, context)
-          when Type::Tuple then narrow_shape_class(type, "Array", class_name, context)
-          when Type::HashShape then narrow_shape_class(type, "Hash", class_name, context)
-          when Type::Singleton then narrow_singleton_class(type, class_name, context)
-          else narrow_other_class(type, class_name, context)
-          end
-        end
-
-        def narrow_constant_class(constant, class_name, context)
-          if context.polarity == :positive
-            narrow_constant_to_class(constant, class_name, context)
-          else
-            narrow_constant_not_class(constant, class_name, context)
-          end
-        end
-
-        def narrow_nominal_class(nominal, class_name, context)
-          if context.polarity == :positive
-            narrow_nominal_to_class(nominal, class_name, context)
-          else
-            narrow_nominal_not_class(nominal, class_name, context)
-          end
-        end
-
-        def narrow_union_class(union, class_name, context)
-          Type::Combinator.union(
-            *union.members.map { |member| narrow_class_dispatch(member, class_name, context) }
-          )
-        end
-
-        def narrow_shape_class(shape, projected_class, class_name, context)
-          if context.polarity == :positive
-            narrow_shape_to_class(shape, projected_class, class_name, context)
-          else
-            narrow_shape_not_class(shape, projected_class, class_name, context)
-          end
-        end
-
-        def narrow_singleton_class(singleton, class_name, context)
-          if context.polarity == :positive
-            narrow_singleton_to_class(singleton, class_name, context)
-          else
-            narrow_singleton_not_class(singleton, class_name, context)
-          end
-        end
-
-        def narrow_other_class(type, class_name, context)
-          context.polarity == :positive ? narrow_class_other(type, class_name) : type
-        end
-
-        # Issue #657 — `Bot` is the assertion "this can never match", and only a KNOWN-disjoint ordering
-        # supports it (the reason {#declines_bot?} exists, and the repro it was written against):
-        #
-        #   module Taggable; def tag = "t"; end
-        #   class Integer; include Taggable; end
-        #   x = 1
-        #   case x
-        #   when Taggable then x.tag      # reported unreachable; `1.is_a?(Taggable)` is true
-        #   end
-        #
-        # The ordering is `:unknown` because an in-source `include` into a CORE class never reaches the
-        # environment's class ordering — the include is discovered in project source, `Integer`'s ancestry
-        # comes from RBS, and the two are not joined (the precision half, left in #657).
-        #
-        # `:unknown` joins to Dynamic, the same answer {#narrow_nominal_to_class} gives and for the same
-        # reason: keeping the old bound licenses `call.undefined-method` on the guard-proven branch. Keeping
-        # the literal was tried first and did exactly that — `s = "str"` under `when Unrelated` stayed
-        # `Constant["str"]` and reported `undefined method 'other'`, trading one false positive for
-        # another. The value is lost only on the guarded arm, which is where the guard just told us the
-        # environment's picture was incomplete.
-        def narrow_constant_to_class(constant, class_name, context)
-          rigor_class = constant.value.class.name
-          return constant if subclass_of?(rigor_class, class_name, context)
-          return Type::Combinator.untyped if declines_bot?(rigor_class, class_name, context)
-
-          Type::Combinator.bot
-        end
-
-        def narrow_constant_not_class(constant, class_name, context)
-          rigor_class = constant.value.class.name
-          subclass_of?(rigor_class, class_name, context) ? Type::Combinator.bot : constant
-        end
-
-        # Narrow a Nominal under `is_a?(class_name)`: when the nominal's class is already a
-        # subclass of `class_name` (or matches under `exact: true`) preserve it; when
-        # `class_name` is a subclass of the nominal's class (`Nominal[Numeric]` under
-        # `is_a?(Integer)`) narrow DOWN to `Nominal[class_name]`; otherwise (disjoint
-        # hierarchies under `is_a?`, mismatch under `instance_of?`) collapse to `Bot`.
-        # Conservative when the analyzer environment cannot resolve either class.
-        #
-        # A disjoint `Bot` narrows the edge but is not always a verdict that the code is dead: see
-        # {.disjoint_nominal_guard?} (issue #1429).
-        def narrow_nominal_to_class(nominal, class_name, context)
-          return nominal if nominal.class_name == class_name
-          return exact_nominal_to_class(nominal, class_name, context) if context.exact
-
-          case class_ordering(nominal.class_name, class_name, context)
-          when :superclass then Type::Combinator.nominal_of(class_name)
-          when :disjoint then Type::Combinator.bot
-          when :subclass then nominal
-          else
-            # :unknown — the guard proved membership in a class the environment cannot order against the
-            # bound (an RBS-less gem class, typically). Keeping the old bound licenses `undefined-method`
-            # on the guard-proven branch (concurrent-ruby's `done.is_a?(Concurrent::Maybe)` kept `Array`
-            # and fired on `.value`); the honest join is Dynamic — the guard destroyed the old knowledge.
-            Type::Combinator.untyped
-          end
-        end
-
-        # `instance_of?(class_name)` compares the exact class, so its truthy edge holds `class_name` itself. Issue
-        # #1429: when `class_name` is a class below the nominal's (`Numeric` under `instance_of?(Integer)`), that is
-        # the edge's type; the edge was `Bot` before, for every class but the nominal's own. A module is never an
-        # object's class, and any other ordering leaves no class the object can have, so those stay `Bot`.
-        def exact_nominal_to_class(nominal, class_name, context)
-          return Type::Combinator.bot if context.environment.rbs_module?(class_name)
-          return Type::Combinator.bot unless class_ordering(nominal.class_name, class_name, context) == :superclass
-
-          Type::Combinator.nominal_of(class_name)
-        end
-
-        def narrow_nominal_not_class(nominal, class_name, context)
-          return Type::Combinator.bot if nominal.class_name == class_name
-          return nominal if context.exact
-
-          ordering = class_ordering(nominal.class_name, class_name, context)
-          case ordering
-          when :subclass then Type::Combinator.bot
-          else nominal
-          end
-        end
-
-        # A shape projects to `Array` / `Hash`, and reopening either of those to include a project module
-        # leaves the ordering `:unknown` for the same reason #657's `Integer` does — so `[1, 2]` under `when
-        # Taggable` reached the same unsupported `Bot`. The carrier differs; the missing evidence does not.
-        def narrow_shape_to_class(shape, projected_class, class_name, context)
-          return shape if subclass_of?(projected_class, class_name, context)
-          return Type::Combinator.untyped if declines_bot?(projected_class, class_name, context)
-
-          Type::Combinator.bot
-        end
-
-        def narrow_shape_not_class(shape, projected_class, class_name, context)
-          subclass_of?(projected_class, class_name, context) ? Type::Combinator.bot : shape
-        end
-
-        # `Singleton[Foo]` is the *class object* `Foo`, an instance of `Class` (which is a
-        # subclass of `Module`). Asking `Foo.is_a?(Class)` returns true; `Foo.is_a?(Foo)`
-        # returns false unless `Foo` is `Class` itself. We approximate this by treating
-        # singletons uniformly as `Class` instances.
-        #
-        # The approximation answers through `Class`, so a target `Class` cannot be ordered against — a
-        # project module, typically — lands on the same `:unknown` #657 collapsed to `Bot`, and `case Widget
-        # when Meta` was reported unreachable where `Widget` had `extend Meta`.
-        #
-        # Issue #898 — that decline is silent about a target the environment DOES order against `Class`, and
-        # `extend Comparable` is one: both names are in RBS, neither includes the other, so the ordering says
-        # `:disjoint` and the collapse fired on an arm MRI takes (`Widget.is_a?(Comparable)` is true — the
-        # `extend` put `Comparable` in `Widget`'s SINGLETON ancestry, which asking about `Class` cannot see).
-        # {#singleton_extend_declines_bot?} supplies the missing half from the project's own `extend` record.
-        def narrow_singleton_to_class(singleton, class_name, context)
-          return singleton if subclass_of?("Class", class_name, context)
-          return Type::Combinator.untyped if declines_bot?("Class", class_name, context)
-          return Type::Combinator.untyped if singleton_extend_declines_bot?(singleton, class_name, context)
-
-          Type::Combinator.bot
-        end
-
-        # Whether the class object's own `extend` record forbids the `Bot` the `Class` approximation would
-        # otherwise authorise (#898). An extended `M` puts every ancestor of `M` in the singleton's
-        # ancestry, so the question per extended module is `M <= target`: `:equal` (`extend Comparable`
-        # under `when Comparable`) and `:subclass` support the arm, and `:unknown` (`extend Meta` under
-        # `when Comparable`, `Meta` being project source the environment never joined to RBS) cannot rule
-        # it out. `:superclass` and `:disjoint` support NOTHING and must keep the collapse — `Integer`
-        # under `when Integer` orders `:superclass` against an extended `Comparable`, and reading that as
-        # support would retract `case Widget when Integer` from every class that extends a core module.
-        #
-        # The answer is `Dynamic[top]`, never the preserved `Singleton[C]`, and the negative edge
-        # ({#narrow_singleton_not_class}) is untouched — so this record is read ONLY to withhold a claim,
-        # never to make one. That asymmetry is deliberate, and it is what keeps the fix honest against an
-        # extend record that is structurally incomplete: `Widget.extend(m)` at a call site and an `extend`
-        # written in a file outside the analysed set are both invisible to the walk behind
-        # {Scope#singleton_extends_of}, and the declaration-side record joined to it below is no more
-        # complete — RBS says nothing about a class it does not declare. A shape that turned this table
-        # into a positive `:subclass` verdict would have to be right about ABSENCE too, and it cannot be. Preserving
-        # `Singleton[C]` would also hand the arm a receiver whose singleton method table has no `clamp` on
-        # it, trading the unreachable-clause false positive for an undefined-method one — the same trap
-        # #657 recorded on the `Constant` carrier.
-        #
-        # Issue #915 — two sources, read as one. The source record above sees only what Ruby source spells;
-        # a project that declares `extend M` in its own `sig/` puts the same module in the same singleton
-        # ancestry, and the environment's declaration-side answer
-        # ({Environment#singleton_extended_modules}) is consulted alongside it. Neither is asked to be
-        # complete; each can only add a module that IS there, which is all the one-directional read needs.
-        def singleton_extend_declines_bot?(singleton, class_name, context)
-          return false if context.exact
-
-          extended = singleton_ancestor_modules(singleton, context)
-          return false if extended.empty?
-
-          extended.any? do |module_name|
-            %i[equal subclass unknown].include?(class_ordering(module_name, class_name, context))
-          end
-        end
-
-        def singleton_ancestor_modules(singleton, context)
-          scope = context.scope
-          from_source = scope.nil? ? [] : scope.singleton_extends_of(singleton.class_name)
-          from_rbs = context.environment&.singleton_extended_modules(singleton.class_name) || []
-          return from_source if from_rbs.empty?
-          return from_rbs if from_source.empty?
-
-          from_source | from_rbs
-        end
-
-        def narrow_singleton_not_class(singleton, class_name, context)
-          subclass_of?("Class", class_name, context) ? Type::Combinator.bot : singleton
-        end
-
-        # Top/Dynamic narrow to `Nominal[class_name]` so dispatch can resolve through the asked
-        # class; Bot stays Bot.
-        def narrow_class_other(type, class_name)
-          case type
-          when Type::Dynamic, Type::Top then Type::Combinator.nominal_of(class_name)
-          else type
-          end
-        end
-
-        # Whether the positive edge must decline the `Bot` that `subclass_of?` returning false would
-        # otherwise authorise (#657). `subclass_of?` folds `:disjoint` and `:unknown` into one `false`, and
-        # only the first is evidence that the guard can never match; the second is the environment saying it
-        # cannot tell, which any file reopening either side can make true.
-        #
-        # This only ever ADDS a decline: every caller keeps its own `subclass_of?` test first, so the
-        # preserving edge is untouched, and a `:disjoint`, `:equal`, `:subclass` or `:superclass` verdict
-        # never reaches here. There is no ordering it turns INTO a match — the honest answer for
-        # "cannot tell" is Dynamic, never the asked class.
-        #
-        # `instance_of?` is exempt because it compares the exact class: a module is never an object's class,
-        # so that edge's `Bot` rests on the guard's own semantics rather than on the ordering.
-        def declines_bot?(rigor_class_name, target_class_name, context)
-          !context.exact && class_ordering(rigor_class_name, target_class_name, context) == :unknown
-        end
-
-        # Returns `true` when an instance of `rigor_class_name` satisfies
-        # `is_a?(target_class_name)` (or `instance_of?(target_class_name)` when `exact: true`).
-        # Falls back to the safe `false` when either name does not resolve through the analyzer
-        # environment.
-        def subclass_of?(rigor_class_name, target_class_name, context)
-          return rigor_class_name == target_class_name if context.exact
-
-          %i[subclass equal].include?(
-            class_ordering(rigor_class_name, target_class_name, context)
-          )
-        end
-
-        # Compares two class names through the analyzer environment. Returns `:equal` when they
-        # resolve to the same class, `:subclass` when `lhs <= rhs`, `:superclass` when `rhs <=
-        # lhs`, `:disjoint` when neither, and `:unknown` when either name does not resolve.
-        def class_ordering(lhs, rhs, context)
-          return :equal if lhs == rhs
-
-          context.environment.class_ordering(lhs, rhs)
-        end
 
         # `x.nil?` on a local, instance variable, global or constant (#1429) read.
         def analyse_nil_predicate(receiver, scope)

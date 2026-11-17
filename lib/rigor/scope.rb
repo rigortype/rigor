@@ -1256,7 +1256,7 @@ module Rigor
     end
 
     # Regex match-data globals (`$~`, `$&`, `$1..$N`, the pre/post-match and last-paren back-references). Narrowed
-    # on a successful-`=~` / `case`-`when` match edge (see `Narrowing#regex_match_predicate_scopes`). They live in
+    # on a successful-`=~` / `case`-`when` match edge (see `RegexMatch.regex_match_predicate_scopes`). They live in
     # the method frame's special-variable slot, which the method's blocks and closures share (issue #1358), so a
     # later call that may run a match in this frame — a match-capable call, a block that may match, a call once
     # the frame has made a closure that may — rebinds every one of them, and `eval_call` forgets the narrowed

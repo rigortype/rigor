@@ -66,7 +66,7 @@ module Rigor
         # `Regexp.last_match` reads the same match-data slot the perlish `$~` global tracks. On a
         # proven-match edge — the truthy branch of `if str =~ /re/`, the surviving path of `unless /re/ =~
         # s; raise; end`, a `case`/`when` regex arm — the flow engine has already narrowed `$~` to a
-        # non-nil `MatchData` (see `Narrowing#regex_match_predicate_scopes`). Upstream RBS types
+        # non-nil `MatchData` (see `RegexMatch.regex_match_predicate_scopes`). Upstream RBS types
         # `Regexp.last_match` as `() -> MatchData?` / `(int) -> String?`, so without this consult the call
         # drops back to the nilable return even where the surrounding flow has *proven* the match
         # succeeded — re-introducing the `possible nil receiver` the `$~` narrowing exists to remove the

@@ -2409,7 +2409,7 @@ module Rigor
       # (see {Inference::OptimisticOrigin} and docs/internal-spec/inference-engine.md), so eliding an arm on
       # it deletes a branch the program really takes when the lookup misses.
       #
-      # The decline lives here and NOT in `Narrowing.falsey_nominal?` / `.narrow_falsey`: `&&=` / `||=` and
+      # The decline lives here and NOT in `Complements.falsey_nominal?` / `Narrowing.narrow_falsey`: `&&=` / `||=` and
       # the and/or surviving-left edge read those too, and widening the falsey fragment there would re-admit
       # `nil` into a bound local and buy `possible nil receiver` false positives — a soundness fix paid for
       # in FPs, which is the wrong trade.

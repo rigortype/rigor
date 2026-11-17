@@ -294,7 +294,11 @@ SIG_PROVENANCE_RESIDUE = {
   # which the elaborator spells `Set[untyped]`, so the row moved from `parameter_intent` to `declared_divergent`.
   # It is marked `# authored:` with its element type by contract, so the count is back at 83. The declared
   # parameter is unchanged.
-  "sig/rigor/inference.rbs" => 83,
+  # -4 (#3285, ADR-116 pure move): `Narrowing`'s `subclass_of?`, `class_ordering`, `trusted_equality_literal?`,
+  # `falsey_value?` and `falsey_nominal?` rows are deleted, since each leaves `Narrowing` for `Narrowing::ClassDispatch`
+  # or `Narrowing::Complements` (stale-declaration rule, #839); four of the five were residue. Nothing is declared for
+  # the new modules.
+  "sig/rigor/inference.rbs" => 79,
   "sig/rigor/inference/builtins/method_catalog.rbs" => 1,
   "sig/rigor/inference/void_origin.rbs" => 5,
   "sig/rigor/plugin.rbs" => 3,

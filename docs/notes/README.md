@@ -56,6 +56,7 @@ comparison) appears nowhere else in this index.
 | 2026-09-09 | [Where the 224 `no_source` declarations in `sig/` come from](20260909-sig-no-source-audit.md) |
 | 2026-09-19 | [Survey-corpus typing-hole census — per-node `Dynamic[top]` locations on 32 targets](20260919-survey-typing-holes.md) |
 | 2026-09-22 | [`untyped`, `void`, `top` as return contracts — what the `sig/` audit taught](20260922-untyped-void-top-return-contracts.md) |
+| 2026-10-17 | [Typing an `attr_reader` call — what it would take, and what it is worth](20261017-attr-reader-return-typing.md) |
 
 ## Regression sweeps & real-project triage
 

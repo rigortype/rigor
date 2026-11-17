@@ -345,7 +345,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#build_method_visibility_tables: the grandfathered visibility walk's entry point, moved from build_discovered_method_visibilities (now a projection of it) so the walk also returns ADR-119 WD3's contested visibility slots; it starts the walk at the top level with the same default and adds no context of its own
     Rigor::Inference::ScopeIndexer#census_scan: ADR-121 WD7's census over a def or refine body the method walk does not descend; a nested def, class, module or singleton class only moves the module a `refine` there is charged to to the wildcard, so it derives no declaration context
     Rigor::Inference::ScopeIndexer#class_method_visibility_parts: 'issue #1984, the private_class_method / public_class_method twin of visibility_call_parts; it maps the call name to its visibility in the walk''s own spellings (receiverless, self., send) and derives no context'
-    Rigor::Inference::ScopeIndexer#code_body_nodes: collects the nodes inside the code bodies of a construct the per-node scope walk evaluates unentered, which its recording leaves to the walk (#2196); it decides which nodes a recording skips, not what a declaration is
     Rigor::Inference::ScopeIndexer#collect_alias_map_block_call?: grandfathered
     Rigor::Inference::ScopeIndexer#collect_alias_map_declaration: grandfathered
     Rigor::Inference::ScopeIndexer#collect_alias_map_meta_new?: grandfathered
@@ -402,7 +401,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#each_hook_block_singleton_class: 'issue #3015, yields the class << self bodies of an included or prepended block body, with each_class_methods_def''s stops; it registers nothing and decides no owner'
     Rigor::Inference::ScopeIndexer#each_hook_definer: 'issue #2997, yields each call under a module body that may define the module''s included or prepended hook (define_singleton_method, send of it, singleton_class.define_method, and define_method in a class << self body), tracking only whether self there is the module''s singleton class (in a class << self body, and no longer in a def there) and skipping nested class, module and instance-def bodies; it registers nothing and decides no owner'
     Rigor::Inference::ScopeIndexer#each_refinement_def: grandfathered
-    Rigor::Inference::ScopeIndexer#each_class_body_def: yields the defs of a value-position class-body block so the per-node scope walk records the self each body runs on (#1696); it registers no method, the def index having keyed them already
     Rigor::Inference::ScopeIndexer#each_self_call: 'issue #2986, yields the calls on self an included or prepended block body of a concern makes, stopping at a nested def, class, module, singleton-class, block or lambda body; it registers nothing and decides no owner'
     Rigor::Inference::ScopeIndexer#each_singleton_body_prepend: 'issue #3010, yields the receiverless or self prepend calls of a class << Const body, stopping at a nested def, class, module or singleton-class body; it registers nothing and decides no owner'
     Rigor::Inference::ScopeIndexer#exempt_class_body_writes!: folds the class-body ivar writes into the read-before-write exemption per class name the census walk already keyed them under, minus the ivars a define_method block writes (#1768); it derives no declaration context
@@ -469,15 +467,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#own_sibling_table: copy on write for one sibling table of the extends fold; it adds no entry, it only makes the table the fold writes into private to that fold
     Rigor::Inference::ScopeIndexer#path_mutation_candidates: grandfathered
     Rigor::Inference::ScopeIndexer#per_file_siblings: ADR-119 WD3, the per-file merge of the slot siblings under the members' own merges (the file wins every slot it writes, envelope contests union); it combines walk products and decides no context
-    Rigor::Inference::ScopeIndexer#propagate: grandfathered
-    Rigor::Inference::ScopeIndexer#propagate_call: grandfathered
-    Rigor::Inference::ScopeIndexer#propagate_children: drops the opaque-block mark at a def, class or module body the per-node scope walk reaches inside an unentered block (#1717); it records which scope a child is typed under, not what a declaration is
-    Rigor::Inference::ScopeIndexer#propagate_code_body: gives a def, class or module body's parameters and body a scope where its own local table shadows the enclosing locals, and its receiver, name and superclass the enclosing scope (#1246); it records which scope a child is typed under, not what a declaration is
-    Rigor::Inference::ScopeIndexer#propagate_end_body: grandfathered
-    Rigor::Inference::ScopeIndexer#propagate_if_branches: grandfathered
-    Rigor::Inference::ScopeIndexer#propagate_subject_case: narrows the clauses of a `case` with a subject the per-node scope walk reaches unentered by the evaluator's clause edges (#1484); it records which scope a child is typed under, not what a declaration is
-    Rigor::Inference::ScopeIndexer#propagate_subjectless_case: narrows the clauses of a `case` without a subject the per-node scope walk reaches unentered by its `when` conditions' edges (#1495); it records which scope a child is typed under, not what a declaration is
-    Rigor::Inference::ScopeIndexer#propagate_unless_branches: grandfathered
     Rigor::Inference::ScopeIndexer#receiver_mixin_effects: names the ancestry sides a receiver-form mixin call reshapes; it computes no declaration context
     Rigor::Inference::ScopeIndexer#record_alias_call_entry: the alias_method call's alias-map write, split out of record_alias_leaf? so the AliasMap can note the writer's certainty (ADR-119 WD3); the owner is the caller's
     Rigor::Inference::ScopeIndexer#record_alias_leaf?: grandfathered
@@ -487,7 +476,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#record_anonymous_meta_superclass: grandfathered
     Rigor::Inference::ScopeIndexer#record_attr_visibility: 'issue #1911, records the attr_reader / attr_writer / attr_accessor members in the visibility table beside the grandfathered record_def_visibility; the owner is the visibility walk''s prefix and the names are each_attr_macro_name''s, so it derives no context'
     Rigor::Inference::ScopeIndexer#record_attr_writer_ivars: grandfathered
-    Rigor::Inference::ScopeIndexer#record_class_body_defs: records in the per-node scope table the self each def of a value-position class-body or refine block runs on (#1696); it records which scope a node is typed under, not what a declaration is
     Rigor::Inference::ScopeIndexer#record_class_new_constant_decl: grandfathered
     Rigor::Inference::ScopeIndexer#record_class_or_module?: grandfathered
     Rigor::Inference::ScopeIndexer#record_class_sources: grandfathered
@@ -548,8 +536,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#surface_mixin_call?: grandfathered
     Rigor::Inference::ScopeIndexer#taint_opaque_eval: taints the enclosing owner the walk passes in when an eval block on an opaque receiver mixes a module in; it computes no declaration context
     Rigor::Inference::ScopeIndexer#taint_skipped_singleton_rewrites: taints the singleton side a singleton_class surface call in a block the extends walk skips may rewrite (#1906), on the enclosing owner the walk passes in or every name a constant receiver can denote; it computes no declaration context
-    Rigor::Inference::ScopeIndexer#unentered_block_entry: the entry scope of a block the evaluator never entered; it passes the scope table to unentered_meta_class_body_entry, which records which scope a node is typed under, not what a declaration is
-    Rigor::Inference::ScopeIndexer#unentered_meta_class_body_entry: records the class-body self of a value-position Class.new / Module.new / Struct.new / Data.define block in the per-node scope table (#1696), under the name AnonymousMetaClass.name_for gives; it records which scope a node is typed under, not what a declaration is
     Rigor::Inference::ScopeIndexer#unnamed_singleton_include?: 'issue #2994, a consumer, not a declaration producer; it reads whether an `include` / `prepend` call on `singleton_class` has an argument that names no module, for the unnamed marker on the :extend side, and derives no declaration context'
     Rigor::Inference::ScopeIndexer#visibility_call_parts: 'ADR-119 WD3 and #1633, names the `private` / `protected` / `public` / `module_function` call the visibility walk applies (receiverless, on `self`, or sent with a literal name; a block ignored) and its arguments; it reads a call''s shape and decides no owner or side'
     Rigor::Inference::ScopeIndexer#walk_anonymous_meta_block: grandfathered
@@ -671,6 +657,24 @@ lib/rigor/inference/scope_indexer/mixin_accumulator.rb:
   producers:
     Rigor::Inference::ScopeIndexer::MixinAccumulator: holds the walks' per-owner mixin lists and the unpositioned edges; the owner is resolved by the walk that fills it
     Rigor::Inference::ScopeIndexer::MixinAccumulator#direct_body: marks the statements of a body the caller already judged direct; it resolves no declaration context
+lib/rigor/inference/scope_indexer/node_propagation.rb:
+  computes: the per-node scope table's entries for the nodes the evaluator did not visit; it records no declaration
+  producers:
+    Rigor::Inference::ScopeIndexer::NodePropagation: the node-class lists the per-node scope walk scopes or stops at (SELF_OPENING_BODIES, CLASS_BODY_DEF_BARRIERS), moved here from the ScopeIndexer body with the walk; they name a class or module body to scope it, and compute no declaration context
+    Rigor::Inference::ScopeIndexer::NodePropagation#code_body_nodes: collects the nodes inside the code bodies of a construct the per-node scope walk evaluates unentered, which its recording leaves to the walk (#2196); it decides which nodes a recording skips, not what a declaration is
+    Rigor::Inference::ScopeIndexer::NodePropagation#each_class_body_def: yields the defs of a value-position class-body block so the per-node scope walk records the self each body runs on (#1696); it registers no method, the def index having keyed them already
+    Rigor::Inference::ScopeIndexer::NodePropagation#propagate: grandfathered
+    Rigor::Inference::ScopeIndexer::NodePropagation#propagate_call: grandfathered
+    Rigor::Inference::ScopeIndexer::NodePropagation#propagate_children: drops the opaque-block mark at a def, class or module body the per-node scope walk reaches inside an unentered block (#1717); it records which scope a child is typed under, not what a declaration is
+    Rigor::Inference::ScopeIndexer::NodePropagation#propagate_code_body: gives a def, class or module body's parameters and body a scope where its own local table shadows the enclosing locals, and its receiver, name and superclass the enclosing scope (#1246); it records which scope a child is typed under, not what a declaration is
+    Rigor::Inference::ScopeIndexer::NodePropagation#propagate_end_body: grandfathered
+    Rigor::Inference::ScopeIndexer::NodePropagation#propagate_if_branches: grandfathered
+    Rigor::Inference::ScopeIndexer::NodePropagation#propagate_subject_case: narrows the clauses of a `case` with a subject the per-node scope walk reaches unentered by the evaluator's clause edges (#1484); it records which scope a child is typed under, not what a declaration is
+    Rigor::Inference::ScopeIndexer::NodePropagation#propagate_subjectless_case: narrows the clauses of a `case` without a subject the per-node scope walk reaches unentered by its `when` conditions' edges (#1495); it records which scope a child is typed under, not what a declaration is
+    Rigor::Inference::ScopeIndexer::NodePropagation#propagate_unless_branches: grandfathered
+    Rigor::Inference::ScopeIndexer::NodePropagation#record_class_body_defs: records in the per-node scope table the self each def of a value-position class-body or refine block runs on (#1696); it records which scope a node is typed under, not what a declaration is
+    Rigor::Inference::ScopeIndexer::NodePropagation#unentered_block_entry: the entry scope of a block the evaluator never entered; it passes the scope table to unentered_meta_class_body_entry, which records which scope a node is typed under, not what a declaration is
+    Rigor::Inference::ScopeIndexer::NodePropagation#unentered_meta_class_body_entry: records the class-body self of a value-position Class.new / Module.new / Struct.new / Data.define block in the per-node scope table (#1696), under the name AnonymousMetaClass.name_for gives; it records which scope a node is typed under, not what a declaration is
 lib/rigor/inference/scope_indexer/superclasses_collector.rb:
   computes: each class's superclass and header nesting, as a collector on the shared declaration walk
   producers:

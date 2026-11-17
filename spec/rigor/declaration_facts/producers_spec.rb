@@ -34,8 +34,12 @@ RSpec.describe "Declaration producers" do
   # `lib/rigor/analysis/check_rules.rb#Rigor::Analysis::CheckRules.visibility_reduced?` became
   # `lib/rigor/analysis/check_rules/override_visibility.rb#Rigor::Analysis::CheckRules::OverrideVisibility#visibility_reduced?`
   # when the method moved; the method itself was not renamed.
+  # Digest change, count still 366 (#3288): five grandfathered keys moved from `lib/rigor/inference/scope_indexer.rb#
+  # Rigor::Inference::ScopeIndexer#` to `lib/rigor/inference/scope_indexer/node_propagation.rb#
+  # Rigor::Inference::ScopeIndexer::NodePropagation#`: `propagate`, `propagate_call`, `propagate_end_body`,
+  # `propagate_if_branches` and `propagate_unless_branches`; none was renamed.
   let(:grandfathered_pin) do
-    { count: 366, digest: "5c96733b2bc7b4b865e5fa6971fe912b54aa972836e39a55052c17456b9920ea" }
+    { count: 366, digest: "b596f2681627bd2be74ac7e0ff8b1a4626264e00f30d0a653bdee25be8140e3a" }
   end
 
   define_method(:found) do |parsed = DeclarationFactSources.parsed_under|

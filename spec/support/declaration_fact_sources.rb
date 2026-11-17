@@ -163,10 +163,11 @@ end
 # - (iii) references a constant, in this file or another covered one, whose assignment contains (i), (ii) or (iv);
 # - (iv) names a visibility or mixin keyword as a symbol (`:private`, `:include`, …), except as a Hash key or among
 #   Array/String mutator names (`%i[<< push prepend unshift]` names methods, not the keyword);
-# - (v) in `scope_indexer.rb`, is reachable through same-file calls (in its body or default arguments) from one of
-#   `DeclarationWriterScan::ROOTS` or a method another covered file calls as `ScopeIndexer.x`, and writes into one
-#   of its parameters, a `*rest` or `**rest` included: an indexed assignment or a `<<` / `merge!` / `add?`-style
-#   call into it, or passing it (by position, keyword or splat) to a same-file method that does.
+# - (v) in `scope_indexer.rb` or `scope_indexer/node_propagation.rb`, is reachable through same-file calls (in its
+#   body or default arguments) from one of `DeclarationWriterScan::ROOTS` or a method another covered file calls as
+#   `ScopeIndexer.x`, and writes into one of its parameters, a `*rest` or `**rest` included: an indexed assignment
+#   or a `<<` / `merge!` / `add?`-style call into it, or passing it (by position, keyword or splat) to a same-file
+#   method that does.
 #
 # A class that includes `DeclarationWalk::Collector` is a producer as a whole, found from the `include` statement, and
 # so is a class in a covered file whose superclass is one (`class X < SuperclassesCollector`).
@@ -178,6 +179,9 @@ module DeclarationProducerScan
   # Names only an Array or String mutator catalogue lists; a keyword symbol beside one of them names a method.
   MUTATORS = %i[<< push append unshift insert concat pop shift replace clear fill delete_at slice! sub! gsub!].freeze
   RULE_V_FILE = "lib/rigor/inference/scope_indexer.rb"
+  # The per-node propagation moved out of `scope_indexer.rb` (ADR-116 WD10); its `table` writers stay rule (v)'s.
+  # Its entry points are called from `scope_indexer.rb`'s delegators as `NodePropagation.x`.
+  RULE_V_FILES = [RULE_V_FILE, "lib/rigor/inference/scope_indexer/node_propagation.rb"].freeze
   DEFINE_METHOD_CALLS = %i[define_method define_singleton_method].freeze
 
   module_function
@@ -191,9 +195,11 @@ module DeclarationProducerScan
       scan(root, [], nil, tainted, skipped) { |scope, reason| found["#{path}##{scope}"] << reason }
     end
     collectors(parsed) { |path, scope, why| found["#{path}##{scope}"] << why }
-    roots = DeclarationWriterScan.external_roots(parsed, RULE_V_FILE)
-    DeclarationWriterScan.rule_v(parsed.fetch(RULE_V_FILE, nil), roots) do |scope|
-      found["#{RULE_V_FILE}##{scope}"] << "writes a table (rule v)"
+    RULE_V_FILES.each do |file|
+      roots = DeclarationWriterScan.external_roots(parsed, file)
+      DeclarationWriterScan.rule_v(parsed.fetch(file, nil), roots) do |scope|
+        found["#{file}##{scope}"] << "writes a table (rule v)"
+      end
     end
     found.transform_values(&:uniq)
   end
@@ -389,12 +395,13 @@ module DeclarationWriterScan
 
   module_function
 
-  # The `ScopeIndexer` methods the covered files other than `rule_v_file` call (`ScopeIndexer.x(…)`).
+  # The `ScopeIndexer` (or `ScopeIndexer::NodePropagation`) methods the covered files other than `rule_v_file` call
+  # (`ScopeIndexer.x(…)`).
   def external_roots(parsed, rule_v_file)
     parsed.except(rule_v_file).flat_map do |_, root|
       DeclarationFactSources.each_node(root).select do |node|
         node.is_a?(Prism::CallNode) &&
-          DeclarationFactSources.constant_name(node.receiver).to_s.end_with?("ScopeIndexer")
+          DeclarationFactSources.constant_name(node.receiver).to_s.end_with?("ScopeIndexer", "NodePropagation")
       end.map(&:name)
     end.uniq
   end

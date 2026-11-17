@@ -294,7 +294,14 @@ SIG_PROVENANCE_RESIDUE = {
   # which the elaborator spells `Set[untyped]`, so the row moved from `parameter_intent` to `declared_divergent`.
   # It is marked `# authored:` with its element type by contract, so the count is back at 83. The declared
   # parameter is unchanged.
-  "sig/rigor/inference.rbs" => 83,
+  # -7 (#3285, ADR-116 pure move). `Narrowing`'s five declarations of methods that moved (`subclass_of?` and
+  # `class_ordering` to `Narrowing::ClassDispatch`; `trusted_equality_literal?`, `falsey_value?` and `falsey_nominal?`
+  # to `Narrowing::Complements`) are re-declared under their new owners with the same signatures, so the two
+  # `unrenderable` rows (`class_ordering`, `falsey_value?`) stay residue. Seven rows leave `unrenderable` for
+  # `parameter_intent` (return equivalent, parameters narrower): `narrow_class`, `narrow_not_class`, `narrow_equal`,
+  # `narrow_not_equal`, `narrow_falsey`, `narrow_nil` and `narrow_not_refinement`, since the helpers their bodies call
+  # are now typed module functions rather than private singleton methods sig-gen declines.
+  "sig/rigor/inference.rbs" => 76,
   "sig/rigor/inference/builtins/method_catalog.rbs" => 1,
   "sig/rigor/inference/void_origin.rbs" => 5,
   "sig/rigor/plugin.rbs" => 3,

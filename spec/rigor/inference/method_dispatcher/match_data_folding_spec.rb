@@ -10,7 +10,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::MatchDataFolding do
   def tuple(*elements) = Rigor::Type::Combinator.tuple_of(*elements)
 
   # The truthy edge of `line =~ /(a)(b)?(c)/`: `$~` narrowed to MatchData, and `$1` / `$3` to String because their
-  # groups are unconditional. `$2` stays unbound, as `Narrowing#regex_match_predicate_scopes` leaves an optional group.
+  # groups are unconditional. `$2` stays unbound, as `RegexMatch.regex_match_predicate_scopes` leaves an optional group.
   def proven_scope(globals = { :$1 => string_t, :$3 => string_t })
     { :$~ => match_data_t }.merge(globals).reduce(Rigor::Scope.empty) do |scope, (name, type)|
       scope.with_global(name, type)

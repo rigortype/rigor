@@ -7,7 +7,7 @@ module Rigor
   module Inference
     module MethodDispatcher
       # Issue #1381 — slice reads of the proven `$~`. On a proven-match edge the flow engine narrows `$~` to
-      # `MatchData` and each unconditional group's `$N` to `String` (see `Narrowing#regex_match_predicate_scopes`).
+      # `MatchData` and each unconditional group's `$N` to `String` (see `RegexMatch.regex_match_predicate_scopes`).
       # The Integer overload of RBS `MatchData#[]` already reads `String`, but the Range and `(start, length)`
       # overloads and `values_at` read `Array[String?]`, and destructuring that binds every slot `String?`.
       # This tier answers those reads with a Tuple, one slot per group, using the rule

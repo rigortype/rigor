@@ -271,8 +271,8 @@ members:
       - existence
   discovered_superclasses:
     reads:
-    - lib/rigor/analysis/check_rules.rb
     - lib/rigor/analysis/check_rules/rbs_receiver_surface.rb
+    - lib/rigor/analysis/check_rules/self_undefined_method.rb
     - lib/rigor/analysis/check_rules/shadowed_rescue_collector.rb
     - lib/rigor/analysis/check_rules/source_arity.rb
     - lib/rigor/analysis/incremental_session.rb
@@ -314,7 +314,7 @@ members:
     - lib/rigor/inference/project_seed_tables.rb
   discovered_global_write_census:
     reads:
-    - lib/rigor/analysis/check_rules.rb
+    - lib/rigor/analysis/check_rules/special_global_write.rb
     - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/global_writer_reach.rb

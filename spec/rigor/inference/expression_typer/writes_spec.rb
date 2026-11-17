@@ -6,7 +6,8 @@ require "prism"
 # ADR-116 C4 — `ExpressionTyper::Writes` types an assignment or compound write in value position: the rvalue for a
 # plain write, and the value a `+=` / `||=` / `&&=` STORES for a variable, constant or index target. The examples
 # call the entries with a scope that binds the target (or leaves it unbound, the memoisation idiom) and a real typer
-# over it; the module reads `scope` and `tracer` and calls back `typer.type_of` and `typer.dynamic_top`.
+# over it; the module reads `scope` and `tracer` and calls back `typer.type_of`, `typer.dynamic_top` and
+# `typer.resolve_constant_name`.
 RSpec.describe Rigor::Inference::ExpressionTyper::Writes do
   let(:combinator) { Rigor::Type::Combinator }
   let(:integer) { combinator.nominal_of("Integer") }

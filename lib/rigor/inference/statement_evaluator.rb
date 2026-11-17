@@ -4847,7 +4847,7 @@ module Rigor
       def invoke_call(node, call_type)
         evaluate_block_if_present(node)
         # `ruby2_keywords def foo(...)` (and similar wrappers like `private def`, `public def`, `module_function def`)
-        # parse the def as the call's positional argument; the `LeafNodes.type_of_def` handler types it as
+        # parse the def as the call's positional argument; the ExpressionTyper#type_of_def handler types it as
         # `Constant[:foo]` without walking the body. Without explicitly evaluating the argument-position def, the body's
         # scope-index entries inherit the outer class-body `self_type = singleton(C)` from `ScopeIndexer.propagate`, so
         # `self.helper` inside reports `undefined method 'helper' for singleton(C)`. Walking each argument-position def

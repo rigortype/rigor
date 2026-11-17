@@ -15,7 +15,8 @@ module Rigor
       # `type_of_shareable_constant`, `type_of_implicit`, `array_type_for`, `parentheses_type_for`, `type_of_range`;
       # every other method is private to the module (ADR-116 C3). State is passed, not shared: each entry takes the
       # values it reads from the typer as trailing positional parameters (`scope`, `tracer`) and the typer itself
-      # (`typer`) when it calls back.
+      # (`typer`) when it calls back. `NO_STATIC_HASH_KEY` is the class's private sentinel, read lexically: moving its
+      # initialiser would add a row to a gate file.
       module Composites
         module_function
 

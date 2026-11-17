@@ -272,7 +272,7 @@ module Rigor
     # Issue #1429 — the narrowing a guard leaves on a constant reference (`STDOUT.is_a?(StringIO)`, `if CONFIG`),
     # keyed by the reference's spelling ({Inference::Narrowing.constant_key}: `"STDOUT"`, `"::Foo::BAR"`). A constant
     # has no binding of its own in the scope, so the table is what a read in the guarded edge answers
-    # (`ExpressionTyper::Constants.type_of_constant_read`); a spelling it does not hold resolves as before.
+    # (`ExpressionTyper#type_of_constant_read`); a spelling it does not hold resolves as before.
     EMPTY_CONSTANT_NARROWINGS = {}.freeze
     # Issue #1429 — what each global and constant a guard narrowed was bound to before the guard, keyed
     # `[:global, :$name]` / `[:constant, key]`. Ruby may rebind a global (or `const_set` a constant) whenever code the

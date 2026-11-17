@@ -56,9 +56,6 @@ require_relative "unknown_store_widening"
 require_relative "unthreaded_rebinds"
 require_relative "version_guard"
 require_relative "expression_typer/composites"
-require_relative "expression_typer/constants"
-require_relative "expression_typer/control_flow"
-require_relative "expression_typer/leaf_nodes"
 require_relative "expression_typer/per_element_assemblers"
 require_relative "expression_typer/writes"
 
@@ -429,7 +426,7 @@ module Rigor
       def self.current_return_memo = TypingState.current[RETURN_MEMO]&.last
 
       # Issue #720 — the value the block passed by the call site currently being re-typed evaluates to, or
-      # `nil` outside such a frame. Read by {LeafNodes.type_of_yield}.
+      # `nil` outside such a frame. Read by {#type_of_yield}.
       #
       # A thread-local rather than a `Scope` field for the same reason the `return` / `next` / `break` sinks
       # are: `yield` names the frame's caller, not a binding, and the body is walked through scopes the
@@ -500,13 +497,483 @@ module Rigor
         end
       end
 
-      # @api private — public only so {LeafNodes}, {Constants} and {Writes} can call it on the typer they are given.
+      # @api private — public only so {Writes} can call it on the typer it is given.
       def dynamic_top
         Type::Combinator.untyped
       end
 
-      # @api private — public only so {ControlFlow} can call it on the typer they are given.
+      # @api private — public only so {Writes} can call it on the typer it is given.
       #
+      # Resolves a constant reference through Ruby's lexical constant lookup. Delegates to the shared
+      # `Reflection.resolve_constant_type` owner so the same walk (registry singleton, discovered class,
+      # in-source value, RBS constant, across the peeled `::` prefix candidates) is reused by
+      # `Inference::Narrowing`'s `Constant[Regexp]` match-operand recognition. Returns the matched
+      # `Rigor::Type` or nil; the caller decides whether to fall back.
+      def resolve_constant_name(name, rooted: false, caller_derived: true)
+        Reflection.resolve_constant_type(name, scope: scope, rooted: rooted, caller_derived: caller_derived)
+      end
+
+      private
+
+      attr_reader :scope, :tracer
+
+      # One-line delegators for the node typers `PRISM_DISPATCH` names (and `statements_or_nil`, which the rescue
+      # typers call) whose bodies live in the modules under `expression_typer/` (ADR-116 C3); each passes the values it
+      # reads from this typer (`scope`, `tracer`) and the typer itself, so the module reads no instance variable.
+      def type_of_statements_node(node) = Composites.type_of_statements_node(node, self)
+      def type_of_program(node) = Composites.type_of_program(node, self)
+      def type_of_hash(node) = Composites.type_of_hash(node, self)
+      def type_of_interpolated_string(node) = Composites.type_of_interpolated_string(node, self)
+      def type_of_embedded_statements(node) = Composites.type_of_embedded_statements(node, self)
+      def type_of_class_or_module(node) = Composites.type_of_class_or_module(node, self)
+      def type_of_else(node) = Composites.type_of_else(node, self)
+      def type_of_when_or_in(node) = Composites.type_of_when_or_in(node, self)
+      def type_of_ensure(node) = Composites.type_of_ensure(node, self)
+      def type_of_range(node) = Composites.type_of_range(node, self)
+      def statements_or_nil(node) = Composites.statements_or_nil(node, self)
+      def type_of_shareable_constant(node) = Composites.type_of_shareable_constant(node, self)
+      def type_of_implicit(node) = Composites.type_of_implicit(node, self)
+      def array_type_for(node) = Composites.array_type_for(node, self)
+      def parentheses_type_for(node) = Composites.parentheses_type_for(node, self)
+      def type_of_assignment_write(node) = Writes.type_of_assignment_write(node, self)
+      def type_of_compound_variable_write(node) = Writes.type_of_compound_variable_write(node, scope, self)
+      def type_of_compound_constant_write(node) = Writes.type_of_compound_constant_write(node, scope, self)
+      def type_of_index_compound_write(node) = Writes.type_of_index_compound_write(node, scope, tracer)
+
+      def type_of_literal_value(node)
+        Type::Combinator.constant_of(node.value)
+      end
+
+      def type_of_true(_node)
+        Type::Combinator.constant_of(true)
+      end
+
+      def type_of_false(_node)
+        Type::Combinator.constant_of(false)
+      end
+
+      def type_of_nil(_node)
+        Type::Combinator.constant_of(nil)
+      end
+
+      # Slice 7 phase 1 — instance/class/global variable reads. Each lookup returns the type currently bound
+      # in the surrounding scope's per-kind binding map (populated by `StatementEvaluator` write handlers
+      # within the same method body), falling through to `Dynamic[Top]` when no binding is recorded.
+      # Cross-method ivar/cvar inference is a follow-up slice; the read handlers MUST NOT raise on a missing
+      # binding and MUST NOT record a fallback event in either branch — the absence of a binding is a
+      # recognised semantic outcome, not a fail-soft compromise.
+      def type_of_instance_variable_read(node)
+        bound = scope.ivar(node.name)
+        return bound if bound
+
+        # ADR-82 — an unbound instance-variable read is dynamic because the engine does not track this
+        # field's type (it is assigned in another method, or never seen). Route it to ivar-field typing
+        # (ADR-58) rather than reporting no cause, and let WD6 carry it through a `@x.foo.bar` chain. This
+        # records provenance only (still `dynamic_top`), never a fallback / tracer event.
+        scope.record_dynamic_origin(node, DynamicOrigin::INFERRED_RETURN_UNTYPED)
+        dynamic_top
+      end
+
+      def type_of_class_variable_read(node)
+        scope.cvar(node.name) || dynamic_top
+      end
+
+      def type_of_global_variable_read(node)
+        scope.global(node.name) || dynamic_top
+      end
+
+      # Recognised position that does not produce a value: parameter lists and individual parameter
+      # declarations, splats inside argument lists, key-value pairs in hashes, and the implicit-rest token
+      # inside destructuring. Returning Dynamic[Top] silently keeps these off the unrecognised list without
+      # faking a value type.
+      def type_of_non_value(_node)
+        dynamic_top
+      end
+
+      # `Prism::SelfNode` resolves to the scope's `self_type` when one has been injected (by
+      # `StatementEvaluator` at class-body and method-body boundaries) or `Dynamic[Top]` at the top level.
+      # Class-body `self` is `Singleton[<class>]`; instance-method `self` is `Nominal[<class>]`;
+      # singleton-method `self` is `Singleton[<class>]`.
+      #
+      # Issue #1763 — directly in a `refine X` block body `self` is the refinement module, which Rigor does not
+      # model; its `Singleton[X]` stand-in serves implicit-self calls only, so a value read of `self` is untyped.
+      def type_of_self_node(_node)
+        return dynamic_top if scope.refinement_block_self?
+
+        scope.self_type || dynamic_top
+      end
+
+      def type_of_dynamic_top(_node)
+        dynamic_top
+      end
+
+      # Issue #720 — `yield` evaluates the block the CALLER passed, so its value is that block's value. The
+      # caller is only known when this body is being re-typed on behalf of one call site
+      # ({#infer_user_method_return} installs the frame); on the main walk over a `def` no caller exists and
+      # the answer stays `Dynamic[top]`.
+      #
+      # Nothing about the yield's arguments is checked here. The block's return type was computed at the call
+      # site under the parameter bindings the call implies, so it already answers "what does this block
+      # evaluate to for this caller"; a `yield` that passes different arguments than the block's parameters
+      # accept is a separate (arity) question this frame does not decide.
+      def type_of_yield(_node)
+        ExpressionTyper.current_yield_value_type || dynamic_top
+      end
+
+      # `defined?(expr)` returns `String | nil` per Ruby semantics — a description of the expression's
+      # category (`"local-variable"`, `"method"`, ...) when defined, or `nil` when not. The argument is not
+      # evaluated (it is statically inspected by the runtime), so the typer does not recurse into it.
+      def type_of_defined(_node)
+        Type::Combinator.union(
+          Type::Combinator.nominal_of("String"),
+          Type::Combinator.constant_of(nil)
+        )
+      end
+
+      # `$1`, `$&`, `$'`, `$+`, `$\`` — the regex back-reference and numbered-capture globals each carry
+      # `String | nil`. They share the typer because the typing rule is identical regardless of which
+      # back-reference shape Prism emitted.
+      def type_of_string_or_nil(_node)
+        Type::Combinator.union(
+          Type::Combinator.nominal_of("String"),
+          Type::Combinator.constant_of(nil)
+        )
+      end
+
+      # `$1` / `$2` / ... — numbered match-data globals. When the narrowing tier has bound a tighter type for
+      # this number (typically `String` after a `=~`-success guard like `unless /(\d+)/ =~ s; raise; end`),
+      # prefer the scope-bound type. Falls back to the default `String | nil`.
+      def type_of_numbered_reference(node)
+        scope.global(:"$#{node.number}") || type_of_string_or_nil(node)
+      end
+
+      # `$&` / `$'` / `$\`` / `$+` — symbolic back-references. Same narrowing model as numbered references.
+      def type_of_back_reference(node)
+        scope.global(node.name) || type_of_string_or_nil(node)
+      end
+
+      # `expr in pattern` — pattern-match predicate. Returns `true` when the pattern matches, `false`
+      # otherwise.
+      def type_of_match_predicate(_node)
+        Type::Combinator.union(
+          Type::Combinator.constant_of(true),
+          Type::Combinator.constant_of(false)
+        )
+      end
+
+      # `expr => pattern` — one-line pattern-match assertion. Raises `NoMatchingPatternError` on mismatch; on
+      # success the expression itself evaluates to `nil`.
+      def type_of_match_required(_node)
+        Type::Combinator.constant_of(nil)
+      end
+
+      # The expression `Foo` evaluates to the *class object* `Foo`, not an instance. From Slice 4 phase 2b on
+      # we therefore type a bare-constant reference as `Singleton[Foo]`; method dispatch on that receiver
+      # looks up class methods (`Foo.new`, `Foo.bar`, ...).
+      #
+      # Slice A constant-walk: when the literal name does not resolve, we try a lexical walk based on the
+      # surrounding class context exposed through `scope.self_type` so a reference like
+      # `Inference::FallbackTracer` from inside `Rigor::CLI::Foo` resolves to
+      # `Rigor::Inference::FallbackTracer`.
+      def type_of_constant_read(node)
+        guard_narrowed_constant(node) ||
+          resolve_constant_name(node.name.to_s) || unresolved_constant_fallback(node, node.name.to_s)
+      end
+
+      # Issue #1429 — the type a guard narrowed this constant reference to on the edge being typed
+      # (`STDOUT.is_a?(StringIO) ? STDOUT.string : nil`), or nil. Keyed by spelling ({Narrowing.constant_key}).
+      def guard_narrowed_constant(node)
+        return nil if scope.constant_narrowings.empty?
+
+        key = Narrowing.constant_key(node)
+        key && scope.constant_narrowing(key)
+      end
+
+      # A leading `::` (`::Rails`, `::Rails::Application`) is Ruby's escape hatch out of the lexical ladder:
+      # it names the top-level constant whatever the enclosing nesting defines. The rendered name is
+      # deliberately un-rooted (the discovery tables are keyed that way), so the marker rides alongside it
+      # into the resolver (#614).
+      def type_of_constant_path(node)
+        narrowed = guard_narrowed_constant(node)
+        return narrowed if narrowed
+
+        full_name = Source::ConstantPath.qualified_name_or_nil(node)
+        return fallback_for(node, family: :prism) if full_name.nil?
+
+        resolve_constant_name(full_name, rooted: Source::ConstantPath.rooted?(node)) ||
+          unresolved_constant_fallback(node, full_name)
+      end
+
+      # ADR-82 WD9 — an unresolved constant whose root name a locked, RBS-less gem declares carries the
+      # `external_gem_without_rbs` cause instead of the generic `unsupported_syntax`. The constant read is
+      # where the class name is last visible (a no-RBS gem's receiver never types Nominal, so the dispatch
+      # tiers that record this cause under ADR-10 / `pre_eval:` opt-ins can't see it); WD6 chain inheritance
+      # then carries the cause through `Faraday.new.get(...)`. Side-channel only — the type stays the same
+      # `Dynamic[top]`, and an unindexed constant (project typo, unanalyzed project path) keeps the generic
+      # cause: the fail-open direction is a missing label, never a wrong one.
+      def unresolved_constant_fallback(node, full_name)
+        record_missing_constant(full_name) if Analysis::DependencyRecorder.active?
+        root = full_name.delete_prefix("::").split("::").first
+        owner = root && scope.environment.missing_rbs_gem_owner(root)
+        return fallback_for(node, family: :prism) unless owner
+
+        inner = dynamic_top
+        record_fallback(node, family: :prism, inner_type: inner, origin: DynamicOrigin::EXTERNAL_GEM_WITHOUT_RBS)
+        scope.record_dynamic_origin(node, DynamicOrigin::EXTERNAL_GEM_WITHOUT_RBS)
+        inner
+      end
+
+      # ADR-46 slice 3 / issue #622 — a constant reference that resolved to NOTHING is a negative cross-file
+      # dependency: a file declaring that constant later must re-check every file that read it as missing.
+      # Without this edge the structural tier had no record of the read at all — `read_missing(:method, …)`
+      # fires only once the receiver constant has RESOLVED and the method lookup misses, so a missing
+      # constant short-circuited before any edge existed, and a warm `--incremental` run kept
+      # `Rails.logger`'s `Dynamic[top]` (and missed the `call.undefined-method` a full run fires) after a
+      # later edit added `module Rails`.
+      #
+      # Reuses the existing `class:Name` negative kind (`CheckRules`'s override-ancestor miss records the
+      # same one) rather than adding a `constant:` kind, because the producer that has to invert it already
+      # exists: `Incremental.appeared_classes` reports a newly declared class / module by its QUALIFIED name
+      # and `negative_affected` matches it by simple (last-segment) name. The snapshot row grammar is
+      # therefore unchanged — no `IncrementalSnapshot::SCHEMA` bump — and a snapshot recorded by an engine
+      # without this edge is already dropped by the fingerprint's engine-source part.
+      #
+      # The LAST segment is the whole key, and one row per reference is the whole cost: a qualified read
+      # resolves only once its final segment is declared, and every constant form that resolves cross-file —
+      # a `class` / `module`, and the constant-assigned `Data.define` / `Struct.new` forms — registers in the
+      # discovery pre-pass's class sources under its qualified name, so its final segment always appears.
+      # (A plain value constant, `FOO = 1` or a `VERSION` nested in a module, resolves in NO cross-file read
+      # today, so there is nothing for a root-segment or a `constant:` key to salvage; if that changes, the
+      # answer is a producer that reports appeared value constants, not a wider key here.) Simple-name
+      # matching over-invalidates — a nested `MyApp::Rails` also re-checks a reader of the top-level `Rails`
+      # — which is the sound direction and the grammar the class negatives already use. Consumers hold
+      # `missing` as a Set, so a name repeated across a file still costs one row.
+      def record_missing_constant(full_name)
+        segments = full_name.delete_prefix("::").split("::")
+        return if segments.empty?
+
+        Analysis::DependencyRecorder.read_missing(:class, segments.last)
+        # Issue #644's `constant:<last segment>` edge is NOT recorded here. It is recorded once per
+        # reference by `Reflection.resolve_constant_type`, before the resolver ladder runs, so it covers a
+        # reference that resolves through RBS or the class registry as well as one that misses — all three
+        # answers move when the project's constant write set moves. Recording it again on this path would be
+        # a second source of truth for the same key.
+      end
+
+      def type_of_interpolated_symbol(_node)
+        Type::Combinator.nominal_of(Symbol)
+      end
+
+      def type_of_def(node)
+        Type::Combinator.constant_of(node.name)
+      end
+
+      # `alias x y`, `alias $x $y`, and `undef foo` all evaluate to nil at runtime; the constant carrier
+      # captures that exactly.
+      def type_of_nil_value(_node)
+        Type::Combinator.constant_of(nil)
+      end
+
+      # `if` / `unless` in value position — the ternary `c ? a : b`, a modifier `(a unless c)`, or a
+      # conditional written as an argument, a receiver, or a literal element. Issue #1003: this handler used
+      # to type both arms in the receiver scope and union them, so the predicate's narrowing reached a
+      # statement-position conditional (through `StatementEvaluator#eval_if`) and never a value-position
+      # one: `f.finite? ? f : 0.0` read `0.0 | Float` while the `if` statement bound `0.0 | finite-float`.
+      # It delegates to the statement evaluator instead of re-deriving the edges, so the two positions share
+      # one narrowing application, one branch elision (ADR-47 WD5 version guards, the ADR-101
+      # optimistic-carrier decline) and one terminating-arm rule, and cannot drift apart again. Only the
+      # value is read; the post-scope belongs to whichever walk owns the statement.
+      def type_of_conditional(node)
+        LoopValueRecord.fetch(node, scope) || LoopValueRecord.miss { scope.evaluate(node, tracer: tracer).first }
+      end
+
+      # `a && b` / `a || b` in value position. Issue #1016: this handler used to type both operands in the
+      # receiver scope, so `x.finite? && x` read `Float | false` while the statement form bound
+      # `false | finite-float`. Like `type_of_conditional`, it delegates to the statement evaluator, which owns
+      # the RHS narrowing, the constant short-circuit and its issue #313 optimistic-carrier decline.
+      def type_of_and_or(node)
+        scope.evaluate(node, tracer: tracer).first
+      end
+
+      # Three-valued evaluation of `case predicate when pattern` dispatch. For each `when` clause we ask:
+      # under static types, does `pattern === predicate` definitely match (`:yes`), definitely not match
+      # (`:no`), or possibly match (`:maybe`)? Walking in source order:
+      #
+      # - `:yes` — this branch fires, subsequent branches are unreachable. Result = union(prior `:maybe`
+      #   branches, this `:yes` branch).
+      # - `:no`  — branch dropped.
+      # - `:maybe` — branch is a candidate, continue.
+      #
+      # If no `:yes` was reached, the else clause (or `Constant[nil]` when absent) is added to the candidate
+      # set.
+      #
+      # The `case ... in` pattern-matching form (`CaseMatchNode`) and the predicate-less form (`case; when
+      # c1; ...`) bypass the `===` analysis: pattern matching has richer semantics, and a predicate-less
+      # `case` reduces to a `if c1; ...; elsif c2` chain. Issue #1495 — like {#type_of_conditional}, that
+      # chain delegates to the statement evaluator, which narrows each arm by its conditions' edges, so
+      # `[case; when x.nil? then "n"; else x end]` reads `"n" | String` as the statement form does.
+      # Issue #1429 — each arm is typed under the subject's clause narrowing (`Narrowing.case_when_scopes`), the
+      # scope the statement evaluator runs the arm in: `when Symbol then n` on `n: Integer | Symbol` answers
+      # `Symbol`, and the `else` arm reads the subject every earlier clause has ruled out.
+      def type_of_case(node)
+        return type_of_case_simple_union(node) if node.is_a?(Prism::CaseMatchNode)
+        return scope.evaluate(node, tracer: tracer).first if node.predicate.nil?
+
+        subject_type = type_of(node.predicate)
+        candidates = []
+        reached_yes = false
+        clause_scope = scope
+
+        node.conditions.each do |when_node|
+          conditions = when_node.respond_to?(:conditions) ? when_node.conditions : []
+          body_scope, next_scope = Narrowing.case_when_scopes(node.predicate, conditions, clause_scope)
+          certainty = case_when_branch_certainty(subject_type, when_node)
+          candidates << case_arm_type(when_node, body_scope) unless certainty == :no
+          if certainty == :yes
+            reached_yes = true
+            break
+          end
+          clause_scope = next_scope
+        end
+
+        candidates << case_arm_type(node.else_clause, clause_scope) unless reached_yes
+        Type::Combinator.union(*candidates)
+      end
+
+      # The value of one `case` arm (`nil` for an absent `else`), typed under `arm_scope`.
+      def case_arm_type(arm, arm_scope)
+        return Type::Combinator.constant_of(nil) if arm.nil?
+
+        arm_scope.equal?(scope) ? type_of(arm) : arm_scope.type_of(arm, tracer: tracer)
+      end
+
+      def type_of_case_simple_union(node)
+        branch_types = node.conditions.map { |branch| type_of(branch) }
+        Type::Combinator.union(*branch_types, type_of_case_else(node))
+      end
+
+      def type_of_case_else(node)
+        return Type::Combinator.constant_of(nil) if node.else_clause.nil?
+
+        type_of(node.else_clause)
+      end
+
+      # Combines per-pattern certainty across a `when` clause's conditions (`when a, b, c` ≡ `a === s || b
+      # === s || c === s`). `:yes` if any pattern is `:yes`; `:no` if all are `:no`; `:maybe` otherwise.
+      def case_when_branch_certainty(subject_type, when_node)
+        return :maybe unless when_node.respond_to?(:conditions)
+
+        results = when_node.conditions.map { |c| case_when_pattern_certainty(subject_type, c) }
+        return :maybe if results.empty?
+        return :yes if results.include?(:yes)
+        return :no if results.all?(:no)
+
+        :maybe
+      end
+
+      # Static three-valued certainty for `pattern === subject`. Specialises two pattern shapes:
+      #
+      # - **Class / Module reference** (`Integer`, `Foo::Bar`): reduce to `subject.is_a?(class)` via
+      #   `Narrowing.narrow_class` / `narrow_not_class`. A Bot truthy fragment means no inhabitant matches
+      #   (`:no`); a Bot falsey fragment means every inhabitant matches (`:yes`).
+      # - **Value-equality literal** (numeric / String / Symbol / true / false / nil) against a
+      #   `Constant[c]` subject: the static comparison `pattern_value === c` is exact. Other subject
+      #   carriers stay `:maybe` because the runtime value isn't pinned.
+      #
+      # Other pattern shapes (Range, Regexp, custom `===`) stay `:maybe` — the existing union fallback
+      # handles them.
+      #
+      # The class reference is resolved through {Narrowing.lexical_class_name}, the walk the narrowing
+      # side of the same `case` already uses (#655). Matching on the as-written spelling instead made a
+      # SHADOWED name confidently wrong rather than merely unresolved: `when Random` inside
+      # `Bar::Nested` names `Bar::Nested::Random`, the environment answered the core `::Random` the
+      # spelling matches at top level, and a subject that is a core `Random` then made the arm certain
+      # — dropping the `else` Ruby actually takes and typing the expression as a branch that never
+      # runs. The documented argument that an unresolvable pattern can only lose certainty holds for an
+      # unresolvable name and not for a shadowed one.
+      def case_when_pattern_certainty(subject_type, pattern_node)
+        class_name = Narrowing.lexical_class_name(pattern_node, scope)
+        if class_name
+          return Narrowing.class_pattern_certainty(subject_type, class_name, environment: scope.environment,
+                                                                             scope: scope)
+        end
+
+        literal = literal_pattern_value(pattern_node)
+        return Narrowing.value_pattern_certainty(subject_type, literal[:value]) if literal
+
+        :maybe
+      end
+
+      # Returns `{ value: v }` when `pattern_node` types to a `Constant[v]` of a value-equality-safe class
+      # (so `===` reduces to `==`), else nil. Wrapped in a hash so a literal `nil` / `false` value doesn't
+      # collide with the "no literal" signal.
+      def literal_pattern_value(pattern_node)
+        type = type_of(pattern_node)
+        return nil unless type.is_a?(Type::Constant)
+        return nil unless Narrowing::VALUE_EQUALITY_CLASSES.any? { |klass| type.value.is_a?(klass) }
+
+        { value: type.value }
+      end
+
+      # `begin; body; rescue R => e; r1; rescue; r2; else; e; ensure; f; end`. The result is the union of
+      # every value-producing branch: the body (or the else-clause when present, since it replaces the body's
+      # value when no exception fires), plus each rescue body in the rescue chain. The ensure clause runs but
+      # does not contribute to the begin's value.
+      def type_of_begin(node)
+        rescue_clause = node.rescue_clause
+        else_clause = node.else_clause
+
+        primary_type =
+          if else_clause
+            type_of(else_clause)
+          elsif node.statements
+            statements_or_nil(node.statements)
+          else
+            Type::Combinator.constant_of(nil)
+          end
+
+        rescue_types = rescue_chain_types(rescue_clause, node.statements)
+        Type::Combinator.union(primary_type, *rescue_types)
+      end
+
+      # Issue #1360 — the evaluator binds `$!` in a rescue clause it enters; a clause typed here, such as one in a
+      # `begin` passed as an argument, reads `$!`, `$@` and `$?` unbound rather than an enclosing clause's.
+      #
+      # Issue #1839 — it also reads each name the `body` writes as `Dynamic[top]` ({ClauseWidening}), as the evaluator's
+      # rescue clause does: `[begin; conn = make; work; rescue; conn; end]` holds the connection, not the entry's `nil`.
+      def rescue_chain_types(rescue_node, body)
+        arm_scope = rescue_arm_scope
+        writes = ClauseWidening.writes([body])
+        types = []
+        current = rescue_node
+        while current
+          arm_typer = typer_under(ClauseWidening.widen(arm_scope, writes, current.statements) || arm_scope)
+          types << arm_typer.send(:statements_or_nil, current.statements)
+          current = current.subsequent
+        end
+        types
+      end
+
+      def type_of_rescue(node)
+        typer_under(rescue_arm_scope).send(:statements_or_nil, node.statements)
+      end
+
+      def rescue_arm_scope = scope.forget_error_info.forget_last_status
+
+      # `expr rescue fallback` is RescueModifierNode in Prism. The result is `expr`'s type when no exception
+      # is raised and `fallback`'s type otherwise; both paths are reachable, so the result is their union. Issue #1360
+      # — `fallback` runs with `$!` and `$@` bound to the `StandardError` it rescued ({ErrorInfo.modifier_entry}).
+      def type_of_rescue_modifier(node)
+        fallback = node.rescue_expression
+        fallback_type =
+          if ErrorInfo.read_in?(fallback)
+            typer_under(ErrorInfo.modifier_entry(scope, fallback)).type_of(fallback)
+          else
+            type_of(fallback)
+          end
+        Type::Combinator.union(type_of(node.expression), fallback_type)
+      end
+
       # A typer that shares this one's tracer and operand types but reads `other_scope`.
       def typer_under(other_scope)
         return self if other_scope.equal?(scope)
@@ -516,7 +983,56 @@ module Rigor
         )
       end
 
-      # @api private — public only so {Constants} can call it on the typer they are given.
+      # `return`, `break`, `next`, `retry`, and `redo` all transfer control instead of producing a value.
+      # Their type is Bot, the empty type that absorbs cleanly under union (e.g. `Constant[1] | Bot ==
+      # Constant[1]`), so the surrounding control-flow handlers collapse correctly when one branch jumps.
+      def type_of_jump(_node)
+        Type::Combinator.bot
+      end
+
+      # A `while` / `until` / `for` loop in value position. Like {#type_of_conditional}, it delegates to the
+      # statement evaluator, which owns the loop's value: `nil` or a `while` / `until` loop's `break` values
+      # (issue #2031), and a `for` loop's collection or its `break` values (issue #1216).
+      #
+      # A `while` / `until` loop no `break` leaves is `nil` without evaluating its body, as
+      # {StatementEvaluator#loop_value} answers it: a loop that is a call's receiver or argument is typed again by
+      # every narrowing and rule that types that operand, and evaluating it each time re-ran the passes of every loop
+      # nested in it.
+      def type_of_loop(node)
+        return Type::Combinator.constant_of(nil) if break_free_condition_loop?(node)
+
+        LoopValueRecord.fetch(node, scope) || LoopValueRecord.miss { scope.evaluate(node, tracer: tracer).first }
+      end
+
+      def break_free_condition_loop?(node)
+        !node.is_a?(Prism::ForNode) && !block_level_jump?(node.statements, Prism::BreakNode)
+      end
+
+      def type_of_lambda(_node)
+        Type::Combinator.nominal_of(Proc)
+      end
+
+      # v0.0.7 — non-interpolated regex literals lift to `Constant<Regexp>` so `Constant<String>#scan(/regex/)`
+      # / `#match(/regex/)` etc. can fold through the catalog tier. Interpolated regexes (`/foo#{x}/`) reach
+      # the early return for any node that is not a `Prism::RegularExpressionNode`, which keeps the conservative
+      # `Nominal[Regexp]` answer.
+      def type_of_regexp(node)
+        return Type::Combinator.nominal_of(Regexp) unless node.is_a?(Prism::RegularExpressionNode)
+
+        regex = Regexp.new(node.unescaped, node.options)
+        Type::Combinator.constant_of(regex)
+      rescue StandardError
+        Type::Combinator.nominal_of(Regexp)
+      end
+
+      def type_of_virtual(node)
+        case node
+        when AST::TypeNode then node.type
+        else
+          fallback_for(node, family: :virtual)
+        end
+      end
+
       def fallback_for(node, family:, origin: DynamicOrigin::UNSUPPORTED_SYNTAX)
         inner = dynamic_top
         record_fallback(node, family: family, inner_type: inner, origin: origin)
@@ -524,7 +1040,6 @@ module Rigor
         inner
       end
 
-      # @api private — public only so {Constants} can call it on the typer they are given.
       def record_fallback(node, family:, inner_type:, origin: nil)
         return unless tracer
 
@@ -539,84 +1054,49 @@ module Rigor
         tracer.record_fallback(event)
       end
 
-      # @api private — public only so {ControlFlow} can call it on the typer it is given.
-      def statements_or_nil(statements_node) = Composites.statements_or_nil(statements_node, self)
+      def symbol_type_for(node)
+        raw = node.value
+        return Type::Combinator.nominal_of(Symbol) if raw.nil?
 
-      # @api private — public only so {ControlFlow} can call it on the typer it is given.
-      # True when a `klass` jump is reachable from `node` without crossing a construct that retargets it
-      # ({JumpTargets.any?}, allocation-free and early-exiting: this is the scan every block body pays).
-      def block_level_jump?(node, klass) = JumpTargets.any?(node, klass)
+        Type::Combinator.constant_of(raw.to_sym)
+      end
 
-      private
+      def string_type_for(node)
+        unescaped = node.unescaped
+        return Type::Combinator.nominal_of(String) if unescaped.nil?
 
-      attr_reader :scope, :tracer
+        Type::Combinator.constant_of(unescaped)
+      end
 
-      # One-line delegators for the node typers `PRISM_DISPATCH` names. Their bodies live in the modules under
-      # `expression_typer/` (ADR-116 C3); each passes the values it reads from this typer (`scope`, `tracer`) and the
-      # typer itself, so the module reads no instance variable.
-      def type_of_literal_value(node) = LeafNodes.type_of_literal_value(node)
-      def type_of_true(node) = LeafNodes.type_of_true(node)
-      def type_of_false(node) = LeafNodes.type_of_false(node)
-      def type_of_nil(node) = LeafNodes.type_of_nil(node)
-      def type_of_instance_variable_read(node) = LeafNodes.type_of_instance_variable_read(node, scope, self)
-      def type_of_class_variable_read(node) = LeafNodes.type_of_class_variable_read(node, scope, self)
-      def type_of_global_variable_read(node) = LeafNodes.type_of_global_variable_read(node, scope, self)
-      def type_of_non_value(node) = LeafNodes.type_of_non_value(node, self)
-      def type_of_self_node(node) = LeafNodes.type_of_self_node(node, scope, self)
-      def type_of_dynamic_top(node) = LeafNodes.type_of_dynamic_top(node, self)
-      def type_of_yield(node) = LeafNodes.type_of_yield(node, self)
-      def type_of_defined(node) = LeafNodes.type_of_defined(node)
-      def type_of_numbered_reference(node) = LeafNodes.type_of_numbered_reference(node, scope)
-      def type_of_back_reference(node) = LeafNodes.type_of_back_reference(node, scope)
-      def type_of_match_predicate(node) = LeafNodes.type_of_match_predicate(node)
-      def type_of_match_required(node) = LeafNodes.type_of_match_required(node)
-      def type_of_interpolated_symbol(node) = LeafNodes.type_of_interpolated_symbol(node)
-      def type_of_def(node) = LeafNodes.type_of_def(node)
-      def type_of_nil_value(node) = LeafNodes.type_of_nil_value(node)
-      def type_of_jump(node) = LeafNodes.type_of_jump(node)
-      def type_of_lambda(node) = LeafNodes.type_of_lambda(node)
-      def type_of_regexp(node) = LeafNodes.type_of_regexp(node)
-      def symbol_type_for(node) = LeafNodes.symbol_type_for(node)
-      def string_type_for(node) = LeafNodes.string_type_for(node)
-      def type_of_xstring(node) = LeafNodes.type_of_xstring(node)
-      def type_of_source_file(node) = LeafNodes.type_of_source_file(node)
-      def type_of_source_line(node) = LeafNodes.type_of_source_line(node)
-      def local_read(node) = LeafNodes.local_read(node, scope, self)
-      def it_read(node) = LeafNodes.it_read(node, scope, self)
-      def type_of_statements_node(node) = Composites.type_of_statements_node(node, self)
-      def type_of_program(node) = Composites.type_of_program(node, self)
-      def type_of_hash(node) = Composites.type_of_hash(node, self)
-      def type_of_interpolated_string(node) = Composites.type_of_interpolated_string(node, self)
-      def type_of_embedded_statements(node) = Composites.type_of_embedded_statements(node, self)
-      def type_of_class_or_module(node) = Composites.type_of_class_or_module(node, self)
-      def type_of_else(node) = Composites.type_of_else(node, self)
-      def type_of_when_or_in(node) = Composites.type_of_when_or_in(node, self)
-      def type_of_ensure(node) = Composites.type_of_ensure(node, self)
-      def type_of_range(node) = Composites.type_of_range(node, self)
-      def type_of_shareable_constant(node) = Composites.type_of_shareable_constant(node, self)
-      def type_of_implicit(node) = Composites.type_of_implicit(node, self)
-      def array_type_for(node) = Composites.array_type_for(node, self)
-      def parentheses_type_for(node) = Composites.parentheses_type_for(node, self)
-      def type_of_constant_read(node) = Constants.type_of_constant_read(node, scope, self)
-      def type_of_constant_path(node) = Constants.type_of_constant_path(node, scope, self)
-      def type_of_assignment_write(node) = Writes.type_of_assignment_write(node, self)
-      def type_of_compound_variable_write(node) = Writes.type_of_compound_variable_write(node, scope, self)
-      def type_of_compound_constant_write(node) = Writes.type_of_compound_constant_write(node, scope, self)
-      def type_of_index_compound_write(node) = Writes.type_of_index_compound_write(node, scope, tracer)
-      def type_of_conditional(node) = ControlFlow.type_of_conditional(node, scope, tracer)
-      def type_of_and_or(node) = ControlFlow.type_of_and_or(node, scope, tracer)
-      def type_of_case(node) = ControlFlow.type_of_case(node, scope, tracer, self)
-      def type_of_begin(node) = ControlFlow.type_of_begin(node, scope, self)
-      def type_of_rescue(node) = ControlFlow.type_of_rescue(node, scope, self)
-      def type_of_rescue_modifier(node) = ControlFlow.type_of_rescue_modifier(node, scope, self)
-      def type_of_loop(node) = ControlFlow.type_of_loop(node, scope, tracer, self)
+      # Backtick (`cmd`) and `%x{cmd}` invoke Kernel#` and always return a String. Even when the content is
+      # statically known, we widen to Nominal[String] because the runtime value depends on the subprocess
+      # output, not the source text.
+      def type_of_xstring(_node)
+        Type::Combinator.nominal_of(String)
+      end
 
-      def type_of_virtual(node)
-        case node
-        when AST::TypeNode then node.type
-        else
-          fallback_for(node, family: :virtual)
-        end
+      # __FILE__ is the source file path. Always non-empty when parsing a real file (the path resolver gives
+      # the buffer name, which is at minimum `"(stdin)"` / `"-e"` / a real path — never the empty String).
+      # Widened to `non-empty-string` instead of `Nominal[String]` so downstream String-emptiness checks know
+      # the value cannot be `""`.
+      def type_of_source_file(_node)
+        Type::Combinator.non_empty_string
+      end
+
+      # __LINE__ is the line of the source literal. Ruby line numbers are 1-indexed, so `__LINE__` is always
+      # at least 1 — `positive-int` (Integer in `[1, +Inf)`) is the canonical refinement.
+      def type_of_source_line(_node)
+        Type::Combinator.positive_int
+      end
+
+      def local_read(node)
+        scope.local(node.name) || dynamic_top
+      end
+
+      # `it` (Ruby 3.4) — `ItLocalVariableReadNode` carries no `name` field; the implicit name is always
+      # `:it`, matching the binding `BlockParameterBinder` installs for `Prism::ItParametersNode`.
+      def it_read(_node)
+        scope.local(:it) || dynamic_top
       end
 
       # Indexed-collection narrowing — `receiver[key]` after a prior `receiver[key] ||= default` reads the
@@ -1541,7 +2021,7 @@ module Rigor
       # because a `Tuple` read there may be a stale fold of an array that has since grown or shrunk. A trailing
       # keyword hash must be a literal `**{}` (dropped) or a non-empty shape; an open, mixed or empty non-literal
       # one leaves the keywords unknown. A list holding `...` is not expanded: its argument types do not line up
-      # with its argument nodes. The splat's own entry in `arg_types` is `Dynamic[top]` ({LeafNodes.type_of_non_value}),
+      # with its argument nodes. The splat's own entry in `arg_types` is `Dynamic[top]` ({#type_of_non_value}),
       # so the literal's elements are typed here.
       #
       # Only a call outside every re-typed body frame expands (the main walk's call sites). Inside a frame a rest
@@ -1577,7 +2057,7 @@ module Rigor
 
       # The element types of `*[a, b]`, each typed on its own, or nil unless the operand is an array literal whose
       # every element is {#provably_not_hash?}. A splat element (`*[*t]`) types `Dynamic[top]`
-      # ({LeafNodes.type_of_non_value}), so it declines too.
+      # ({#type_of_non_value}), so it declines too.
       def literal_splat_elements(splat)
         literal = unparenthesized(splat.expression)
         return nil unless literal.is_a?(Prism::ArrayNode)
@@ -4881,6 +5361,10 @@ module Rigor
 
         block_level_jump_nodes(body, Prism::NextNode)
       end
+
+      # True when a `klass` jump is reachable from `node` without crossing a construct that retargets it
+      # ({JumpTargets.any?}, allocation-free and early-exiting: this is the scan every block body pays).
+      def block_level_jump?(node, klass) = JumpTargets.any?(node, klass)
 
       # The identity-keyed set of `klass` jumps that target THIS block ({JumpTargets.of}). The sinks in
       # `StatementEvaluator` also collect jumps from nested blocks / loops / defs evaluated under the same

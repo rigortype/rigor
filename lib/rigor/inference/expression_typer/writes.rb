@@ -6,19 +6,21 @@ require_relative "../../analysis/dependency_recorder"
 require_relative "../../reflection"
 require_relative "../../source/constant_path"
 require_relative "../../type"
+require_relative "../method_dispatcher"
 require_relative "../narrowing"
-require_relative "constants"
+require_relative "../statement_evaluator"
 
 module Rigor
   module Inference
     class ExpressionTyper
       # Typers of an assignment or compound write in value position: the rvalue for a plain write, and the value a `+=`
       # / `||=` / `&&=` stores for a variable, constant or index target. Reads `scope` and `tracer`; calls back
-      # {ExpressionTyper#type_of} and {ExpressionTyper#dynamic_top}. The entries are `type_of_assignment_write`,
-      # `type_of_compound_variable_write`, `type_of_compound_constant_write`, `type_of_index_compound_write`; every
-      # other method is private to the module (ADR-116 C3). State is passed, not shared: each entry takes the values it
-      # reads from the typer as trailing positional parameters (`scope`, `tracer`) and the typer itself (`typer`) when
-      # it calls back.
+      # {ExpressionTyper#type_of}, {ExpressionTyper#dynamic_top} and {ExpressionTyper#resolve_constant_name}. The
+      # entries are `type_of_assignment_write`, `type_of_compound_variable_write`, `type_of_compound_constant_write`,
+      # `type_of_index_compound_write`; every other method is private to the module (ADR-116 C3). State is passed, not
+      # shared: each entry takes the values it reads from the typer as trailing positional parameters (`scope`,
+      # `tracer`) and the typer itself (`typer`) when it calls back. `ScopeIndexer` (for `DYNAMIC_TARGET_PREFIX`) is not
+      # required here: it requires this class, and a direct require makes a cycle (`ruby -w`).
       module Writes
         module_function
 
@@ -150,7 +152,7 @@ module Rigor
 
             rooted = Source::ConstantPath.rooted?(node.target)
           end
-          Constants.resolve_constant_name(full_name, scope, rooted: rooted, caller_derived: false) ||
+          typer.resolve_constant_name(full_name, rooted: rooted, caller_derived: false) ||
             written_constant_binding(full_name, rooted, scope, typer)
         end
 

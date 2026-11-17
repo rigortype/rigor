@@ -11,7 +11,7 @@ module Rigor
     # Why this exists: `constant_for_name` is a pure function of its name for a given Environment (both the
     # predefined-constant refinement table and the RBS loader's constant table are fixed for the
     # Environment's lifetime), yet it is the hottest non-dispatch path on a large Rails app.
-    # {ExpressionTyper::Constants.resolve_constant_name} peels a lexical-candidate ladder per constant reference, so the
+    # {ExpressionTyper#resolve_constant_name} peels a lexical-candidate ladder per constant reference, so the
     # same qualified names recur thousands of times across files — and each miss runs a `const_get` walk
     # that raises + rescues `NameError` for every project-defined constant (the common case). Caching the
     # result collapses the repeats to a hash lookup.

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "fileutils"
 require "tmpdir"
 
 # Plain data in, key out: `RunCacheKey.descriptor` is a function of a configuration, a path set and two flags, and the
@@ -66,9 +67,107 @@ RSpec.describe Rigor::Analysis::RunCacheKey do
         expect(key(configuration: configuration)).not_to eq(present)
       end
     end
+
+    it "the bytes of the `rbs_collection` lockfile, and its appearing" do
+      Dir.mktmpdir("rigor-run-key") do |dir|
+        lock = File.join(dir, "rbs_collection.lock.yaml")
+        configuration = Rigor::Configuration.new({ "rbs_collection" => { "lockfile" => lock } })
+        absent = key(configuration: configuration)
+        File.write(lock, "gems: []\n")
+        present = key(configuration: configuration)
+        File.write(lock, "gems: [x]\n")
+
+        expect(present).not_to eq(absent)
+        expect(key(configuration: configuration)).not_to eq(present)
+      end
+    end
+
+    it "the setup hint read off the working directory (an `rbs_collection.yaml` with no lockfile)" do
+      Dir.mktmpdir("rigor-run-key") do |dir|
+        Dir.chdir(dir) do
+          without = key
+          File.write("rbs_collection.yaml", "sources: []\n")
+
+          expect(key).not_to eq(without)
+        end
+      end
+    end
+
+    it "an opted-in gem's `(name, version, mode)` row" do
+      entry = lambda { |version|
+        Rigor::Cache::Descriptor::DependencyEntry.new(gem_name: "g", gem_version: version, mode: :full)
+      }
+      resolver = Rigor::Analysis::DependencySourceInference::GemResolver
+      allow(resolver).to receive(:dependency_entries).and_return([entry.call("1")], [entry.call("2")])
+
+      expect(key).not_to eq(key)
+    end
+
+    it "the shadow harness being on, whatever the variable's value" do
+      old = ENV.fetch("RIGOR_SHADOW_RULE_WALK", nil)
+      without = key
+      ENV["RIGOR_SHADOW_RULE_WALK"] = "0"
+
+      expect(key).not_to eq(without)
+    ensure
+      old.nil? ? ENV.delete("RIGOR_SHADOW_RULE_WALK") : ENV["RIGOR_SHADOW_RULE_WALK"] = old
+    end
+
+    it "the engine source identity, and a version-pinned tree carrying none" do
+      entry = ->(identity) { Rigor::Cache::Descriptor::ConfigEntry.new(key: "engine-source", value_hash: identity) }
+      allow(Rigor::Cache::EngineSource).to receive(:key_config_entries)
+        .and_return([entry.call("a")], [entry.call("b")], [])
+
+      expect([key, key, key].uniq.size).to eq(3)
+    end
+
+    it "the `rbs` gem's version" do
+      gem = ->(version) { Rigor::Cache::Descriptor::GemEntry.new(name: "rbs", requirement: ">= 0", locked: version) }
+      allow(Rigor::Cache::RbsDescriptor).to receive(:rbs_gem_entry).and_return(gem.call("1.0.0"), gem.call("1.0.1"))
+
+      expect(key).not_to eq(key)
+    end
+
+    it "a configuration key other than `target_ruby:`" do
+      expect(key(configuration: Rigor::Configuration.new({ "disable" => ["call.undefined-method"] }))).not_to eq(base)
+      expect(key(configuration: Rigor::Configuration.new({ "libraries" => ["set"] }))).not_to eq(base)
+    end
   end
 
   describe "inputs that do not change the key" do
+    it "the directory an auto-detected lockfile lives in (content only, so a moved checkout still hits)" do
+      Dir.mktmpdir("rigor-run-key") do |dir|
+        keys = %w[one two].map do |name|
+          FileUtils.mkdir_p(File.join(dir, name))
+          File.write(File.join(dir, name, "Gemfile.lock"), "GEM\n")
+          Dir.chdir(File.join(dir, name)) { key }
+        end
+
+        expect(keys.uniq.size).to eq(1)
+      end
+    end
+
+    it "an absent lockfile having its own value, distinct from an empty one" do
+      Dir.mktmpdir("rigor-run-key") do |dir|
+        lock = File.join(dir, "Gemfile.lock")
+        configuration = Rigor::Configuration.new({ "bundler" => { "lockfile" => lock } })
+        absent = key(configuration: configuration)
+        File.write(lock, "")
+
+        expect(key(configuration: configuration)).not_to eq(absent)
+      end
+    end
+
+    it "no setup hint, no opted-in gem, no harness and a version-pinned tree each adding no slot" do
+      allow(Rigor::Cache::EngineSource).to receive(:key_config_entries).and_return([])
+      descriptor = described_class.descriptor(configuration: Rigor::Configuration.new, files: %w[a.rb],
+                                              explain: false, rbs_config_entries: [])
+
+      expect(descriptor.configs.map(&:key)).not_to include("rbs_collection.setup_hint", "shadow-harness",
+                                                           "engine-source")
+      expect(descriptor.dependencies).to eq([])
+    end
+
     it "the order the files are listed in" do
       expect(key(files: %w[b.rb a.rb])).to eq(base)
     end

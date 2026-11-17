@@ -96,7 +96,7 @@ module Rigor
 
       class << self
         # ADR-10 § "config-conflict diagnostic" — merges a potentially-duplicated entry list (the `includes:`
-        # chain produces concatenated arrays via `Configuration.deep_merge`'s special-case for
+        # chain produces concatenated arrays via `Configuration::Loader.deep_merge`'s special-case for
         # `dependencies.source_inference`) into a single canonical entry per gem name. The merge rules:
         #
         # - Same gem, same all fields → idempotent collapse (no warning).

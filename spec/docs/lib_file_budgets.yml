@@ -14,7 +14,6 @@ lib/rigor/analysis/runner.rb: 3100
 lib/rigor/analysis/runner/diagnostic_aggregator.rb: 1600
 lib/rigor/analysis/runner/pool_coordinator.rb: 1200
 lib/rigor/cli/check_command.rb: 1300
-lib/rigor/configuration.rb: 1400
 lib/rigor/environment/rbs_loader.rb: 4100
 lib/rigor/inference/acceptance.rb: 1400
 lib/rigor/inference/expression_typer.rb: 7300

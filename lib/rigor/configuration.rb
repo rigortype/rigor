@@ -1,270 +1,35 @@
 # frozen_string_literal: true
 
-require "yaml"
-
 require_relative "bleeding_edge"
 require_relative "ci_detector"
+require_relative "configuration/coercion"
+require_relative "configuration/defaults"
 require_relative "configuration/dependencies"
+require_relative "configuration/loader"
 require_relative "configuration/severity_profile"
-require_relative "config_path"
 require_relative "configuration_error"
-require_relative "rooted_glob"
-require_relative "effects/entry_points"
-require_relative "effects/label"
-require_relative "effects/method_key"
 
 module Rigor
   class Configuration # rubocop:disable Metrics/ClassLength
-    # File-discovery order for `Configuration.load(nil)`.
-    #
-    # The first file present is loaded; the others are NOT implicitly merged. To extend a base config
-    # explicitly the winning file MUST list the base via `includes:`.
-    #
-    # `.rigor.yml` is a developer-local override (typically gitignored); `.rigor.dist.yml` is the project
-    # default (committed to the repo). When both are present the developer's local override wins outright —
-    # there is no implicit auto-merge.
-    DISCOVERY_ORDER = %w[.rigor.yml .rigor.dist.yml].freeze
-    # Back-compat alias. Keep here so external callers that read `Configuration::DEFAULT_PATH` for help text /
-    # fixture paths still work; the discovery list is the canonical source.
-    DEFAULT_PATH = DISCOVERY_ORDER.first
-
-    # ADR-103 WD7 — where `rigor effects update` writes when `effects.snapshot.path:` is unset. Public
-    # because the schema pins its own `default` against it.
-    DEFAULT_EFFECTS_SNAPSHOT_PATH = ".rigor-effects.yml"
+    # The constants that describe the keys live in {Defaults}; each is the same object here, so
+    # `Configuration::DEFAULTS` and the rest keep resolving for every reader.
+    DISCOVERY_ORDER = Defaults::DISCOVERY_ORDER
+    DEFAULT_PATH = Defaults::DEFAULT_PATH
+    DEFAULT_EFFECTS_SNAPSHOT_PATH = Defaults::DEFAULT_EFFECTS_SNAPSHOT_PATH
+    BUILTIN_EXCLUDES = Defaults::BUILTIN_EXCLUDES
+    CONVENTIONAL_TEST_PATHS = Defaults::CONVENTIONAL_TEST_PATHS
+    DEFAULTS = Defaults::DEFAULTS
+    CONFIGURABLE_PLUGIN_ISOLATIONS = Defaults::CONFIGURABLE_PLUGIN_ISOLATIONS
+    RESERVED_NAMESPACES = Defaults::RESERVED_NAMESPACES
+    KNOWN_KEYS = Defaults::KNOWN_KEYS
+    # The `rigor-rbs-inline` auto-wiring names belong to {Loader}, which reads them.
+    AUTOWIRED_RBS_INLINE_GEM = Loader::AUTOWIRED_RBS_INLINE_GEM
+    AUTOWIRED_RBS_INLINE_ID = Loader::AUTOWIRED_RBS_INLINE_ID
 
     # ADR-103 WD15 — the {BleedingEdge::FEATURES} id that, when adopted, makes a loaded file with no
     # `effects:` key behave as `effects: {}`. See {#coerce_effects}.
     EFFECTS_ON_BY_DEFAULT_FEATURE_ID = "effects-on-by-default"
     private_constant :EFFECTS_ON_BY_DEFAULT_FEATURE_ID
-
-    # Built-in exclusion patterns appended to `exclude:` so vendored dependencies, Bundler artefacts, and
-    # JavaScript node_modules are never analysed by accident when a directory glob expands. Users cannot
-    # disable these defaults; the trade-off is that analysing any of these paths is essentially never what
-    # the user wants (they're build outputs / external dependencies, not source).
-    #
-    # We deliberately keep this list narrow. `tmp/` and similar directories vary across project layouts
-    # (Rails has `tmp/`, libraries usually don't); user-supplied `exclude:` entries in `.rigor.yml` cover the
-    # project-specific cases.
-    BUILTIN_EXCLUDES = %w[
-      **/vendor/bundle/**
-      **/.bundle/**
-      **/node_modules/**
-    ].freeze
-
-    # The conventional test roots `test_paths: nil` auto-detects, in this order.
-    CONVENTIONAL_TEST_PATHS = %w[spec test].freeze
-
-    DEFAULTS = {
-      "target_ruby" => "4.0",
-      "paths" => ["lib"],
-      "exclude" => [],
-      "plugins" => [],
-      "disable" => [],
-      "libraries" => [],
-      "signature_paths" => nil,
-      # Issue #2517 — a core signature directory loaded IN PLACE OF the `rbs` gem's `core/` (a provider such as
-      # rbs-shifter writes one for an older CRuby). `nil` (the default) loads the gem's core. Unlike
-      # `signature_paths:`, which only adds, this replaces: the default core is not loaded beside it.
-      "core_root" => nil,
-      # The project's test roots: the directories (or files) holding its tests. `nil` (the default) auto-detects
-      # whichever of `spec/` and `test/` exist, the same way `signature_paths: nil` auto-detects `sig/`; `[]`
-      # declares that the project has none. `rigor sig-gen --params=observed` harvests call-site observations
-      # from them when no `--observe=PATH` is given. See {#resolved_test_paths}.
-      "test_paths" => nil,
-      # ADR-112 WD4 — `rigor sig-gen` settings. `inline_declared:` decides what happens to a method the inline
-      # reader (`rigor-rbs-inline`) already declares from `# @rbs` / `#:`. `write` (the default) copies the
-      # inline declaration into `sig/`, so the generated signature is the complete contract a gem ships;
-      # `skip` leaves every member that reader declares out of `sig/`, for a project whose Steep reads the
-      # same annotations (`inline: true` beside `signature "sig"`), where the copy would be a second
-      # declaration of one method (`DuplicatedMethodDefinition`). See {#sig_gen_inline_declared}.
-      "sig_gen" => {
-        "inline_declared" => "write"
-      },
-      # ADR-17 — project-side monkey-patch pre-evaluation. Empty by default; users opt in by listing explicit
-      # files (or globs) that the analyzer walks before per-file inference so patched-method declarations are
-      # visible across the project (e.g. `lib/core_ext/string_extensions.rb`). A missing literal path surfaces
-      # as `pre-eval.file-not-found`.
-      "pre_eval" => [],
-      # ADR-22 — baseline file path. nil (default) means no baseline is loaded; the `false` literal is
-      # treated as the explicit-disable form for `.rigor.yml`-side override of an upstream `.rigor.dist.yml`
-      # `baseline:` declaration. The presence of `.rigor-baseline.yml` on disk alone does NOT activate
-      # filtering — the path must be named here (WD2 (b) of ADR-22).
-      "baseline" => nil,
-      "fold_platform_specific_paths" => false,
-      # ADR-67 WD6a — opt-in call-site parameter type inference on the `check` walk. When `true`, `rigor
-      # check` runs the {Inference::ParameterInferenceCollector} as a one-round pre-pass into the discovery
-      # seed, so an undeclared `def` / `initialize` / setter parameter is typed to the union of its resolved
-      # call-site argument types (precision-additive only — the in-body negative rules decline on the inferred
-      # lower bound, WD6b). `false` (the default, resolved off by every severity profile) keeps the table empty
-      # and the run byte-identical to today. Composes with `--incremental` (the WD6c mutual exclusion is
-      # lifted): the incremental session recomputes the table each run and diffs it against its snapshot,
-      # re-checking any callee whose seeds moved.
-      "parameter_inference" => false,
-      # ADR-103 WD13 — the effect-labels opt-in, and the ONLY thing that turns effect collection on
-      # besides running `rigor effects`. **Presence is the switch**: `effects: {}` — or the bare key, which
-      # YAML parses as nil — enables collection with every sub-key at its default, because an annotation in
-      # a project's RBS must never create a project-wide cost cliff (that case earns a `:info` residual
-      # instead, #384).
-      #
-      # The default is `false` rather than `nil` precisely because presence is the switch and
-      # `Configuration.load` merges these DEFAULTS UNDER the loaded file: a `nil` default would be
-      # indistinguishable from a user's bare `effects:` key and would turn collection on for every project
-      # in existence. `false` is also the explicit-disable form a `.rigor.yml` uses to override an upstream
-      # `.rigor.dist.yml`'s `effects:` block — the same shape `baseline:` uses.
-      #
-      # The sub-keys are declared in `schemas/rigor-config.schema.json`. `check` (#383,
-      # {#effects_check?}), `snapshot.{path,reach,gate}`, `tolerated` (#381) and the policy trio
-      # `labels` / `attribution` / `envelopes` (#385, {#coerce_effects_policy}) are read; `views` lands
-      # with the slice that implements it (#390). Reserving a sub-key's shape before a reader exists is
-      # the same discipline the schema applies to a sibling implementation's namespace (ADR-99).
-      "effects" => false,
-      "cache" => {
-        "path" => ".rigor/cache",
-        # LRU eviction cap in bytes (ADR-54 WD3). The least-recently-used entries are removed at the end of a
-        # run when the total exceeds this limit. The 256 MB default exists to reap orphans — entries whose
-        # content key nothing references any more (an rbs gem bump, a signature change) and that no run
-        # would otherwise ever delete; a full active per-project set is ~2 MB, so the cap never touches live
-        # entries. Set explicitly to `null` to disable eviction (pre-WD3 behaviour: the cache grows until
-        # `--clear-cache`).
-        "max_bytes" => 268_435_456,
-        # ADR-87 WD1 — file-freshness validation strategy. `"stat"` validates a recorded file
-        # dependency by stat-ing it first and re-hashing only when the `(size, mtime_ns, ctime_ns, inode)`
-        # tuple moved (or the racy window fires), so an unchanged monorepo hashes ~0 bytes on a warm run.
-        # `"digest"` restores the pre-ADR-87 behaviour of SHA-256'ing every recorded file on every run — the
-        # per-run escape hatch is the `RIGOR_STRICT_VALIDATION=1` env var, which wins over this setting.
-        # `"auto"` (default, #190) resolves per environment: `"digest"` when {CiDetector} recognises a CI
-        # provider — a fresh checkout regenerates every stat tuple, so the stat tier can never short-circuit
-        # there and stat-signature glob slots would recompute on every run — and `"stat"` everywhere else.
-        # A self-hosted runner with a persistent workspace opts back into the stat floor with an explicit
-        # `"stat"` (or `RIGOR_CI_DETECT=0`).
-        "validation" => "auto"
-      },
-      # ADR-39 slice 5 / #911 — the plugin-isolation strategy for target-library invocation. `nil` (the
-      # default) names nothing, leaving the choice to `RIGOR_PLUGIN_ISOLATION` and then to
-      # `Plugin::Isolation::DEFAULT`. The environment variable WINS over this key: it is the
-      # one-invocation operator override (`RIGOR_PLUGIN_ISOLATION=none rigor check` on a platform where
-      # the fork worker misbehaves), and an override a committed file can veto is not an override.
-      # Only `none` and `process` are selectable here — `ruby_box` needs `RUBY_BOX=1` set before Ruby
-      # boots, which is what `exe/rigor` re-execs for, and the launcher deliberately does not parse YAML
-      # before that re-exec (ADR-87 / ADR-104 boot-slim), so naming it here raises instead of silently
-      # resolving to a different strategy.
-      "plugins_isolation" => nil,
-      "plugins_io" => {
-        "network" => "disabled",
-        "allowed_paths" => [],
-        "allowed_url_hosts" => []
-      },
-      "severity_profile" => "balanced",
-      "severity_overrides" => {},
-      # ADR-50 § WD2 — bleeding-edge overlay opt-in. Selects which of the *next major's* queued changes
-      # ({Rigor::BleedingEdge}) this project adopts early. Orthogonal to `severity_profile:`. Accepts `false`
-      # (default — adopt none), `true` (adopt the whole overlay), a list of feature ids (adopt only those),
-      # or `{ all: true, except: [ids] }` (adopt all but the named). A queued change is either a severity
-      # promotion (composed by {SeverityProfile.resolve}) or a behaviour switch (read at its call site
-      # through {#bleeding_edge_active?}); `bleeding_edge:` selects both kinds the same way.
-      "bleeding_edge" => false,
-      "dependencies" => {
-        "source_inference" => [],
-        "budget_per_gem" => Configuration::Dependencies::DEFAULT_BUDGET_PER_GEM
-      },
-      "parallel" => {
-        # ADR-15 Phase 4c — when greater than zero, `rigor check` dispatches per-file analysis across N
-        # Ractor workers built around {Rigor::Analysis::WorkerSession}. `0` (default) keeps the sequential
-        # coordinator path bit-for-bit unchanged. The CLI's `--workers=N` flag and the `RIGOR_RACTOR_WORKERS`
-        # env var both override this setting; precedence is CLI > env > config > 0.
-        "workers" => 0
-      },
-      "bundler" => {
-        # Open item O4 — target-project Bundler awareness. When `bundle_path:` is set (or auto-detected),
-        # Rigor walks `<bundle_path>/ruby/*/gems/*/sig/` (RubyGems-sourced gems) and
-        # `<bundle_path>/ruby/*/bundler/gems/*/sig/` (`git:`-sourced gems) and adds each gem-shipped sig
-        # directory to `signature_paths:`. A `path:`-sourced gem is not under either — Bundler uses the
-        # `path:` directory in place rather than copying it into the bundle root — so add its `sig/` directly
-        # via `signature_paths:` instead. With O7's failure-memo in place, conflicts (a vendored sig already
-        # declares the same constant) degrade gracefully to "no RBS env" with a single-line warning naming
-        # the offending file, rather than hanging.
-        #
-        # `bundle_path:` (String, optional): explicit path to the bundler install root (e.g.,
-        # "vendor/bundle" or an absolute path). Resolved relative to the project root (`paths:`'s base) when
-        # relative.
-        #
-        # `auto_detect:` (Boolean, default true): when no explicit `bundle_path:` is set, try
-        # `.bundle/config`'s `BUNDLE_PATH:` first; fall back to `vendor/bundle/` under the project root if it
-        # exists. When neither is found, no extra sigs are added — the analyzer sees only rigor's vendored
-        # RBS and the user's `signature_paths:`.
-        #
-        # O4 Layer 3 keys:
-        #
-        # `lockfile:` (String, optional): explicit path to a `Gemfile.lock`. Resolved relative to the
-        # project root when relative. When set (or auto-detected via the `auto_detect:` flag below) Rigor
-        # parses the lockfile and uses it to FILTER the bundle-discovered `sig/` directories: only gems whose
-        # `(name, version, platform)` matches a lockfile entry are admitted to `signature_paths:`. Stale or
-        # out-of-band gems sitting in the bundle install tree are silently dropped.
-        #
-        # `auto_detect:` (Boolean, also gates the lockfile search): when true and `lockfile:` is nil, look
-        # for `<project_root>/Gemfile.lock`.
-        "bundle_path" => nil,
-        "auto_detect" => true,
-        "lockfile" => nil
-      },
-      "rbs_collection" => {
-        # Open item O4 Layer 3 slice 2 — `rbs collection install` awareness. When the target project has been
-        # set up with `rbs collection install`, the resulting `rbs_collection.lock.yaml` carries the resolved
-        # (gem, version, source) triples and `.gem_rbs_collection/` holds the downloaded `.rbs` files. Rigor
-        # parses the lockfile and auto-feeds each gem's `<collection_root>/<name>/<version>/` directory into
-        # `RbsLoader`'s `signature_paths:`. Sources of type `stdlib` install no directory; issue #2946 — they
-        # load as RBS libraries, appended to `DEFAULT_LIBRARIES + libraries:`, as the `rbs` CLI loads them.
-        #
-        # `lockfile:` (String, optional): explicit path to `rbs_collection.lock.yaml`. Resolved relative to
-        # the project root when relative.
-        #
-        # `auto_detect:` (Boolean, default true): when no explicit `lockfile:` is set, look for
-        # `<project_root>/rbs_collection.lock.yaml`.
-        "lockfile" => nil,
-        "auto_detect" => true
-      }
-    }.freeze
-    Ractor.make_shareable(DEFAULTS)
-
-    # Top-level keys whose values are file/directory paths that MUST be resolved relative to the config
-    # file's directory. `exclude:` is intentionally NOT in this list — its entries are glob patterns
-    # (`**/vendor/**`), not paths.
-    PATH_KEYS = %w[paths signature_paths test_paths pre_eval].freeze
-    private_constant :PATH_KEYS
-
-    # The single-path sibling of {PATH_KEYS}: resolved the same way, but kept a String rather than wrapped in an
-    # Array.
-    SCALAR_PATH_KEYS = %w[core_root].freeze
-    private_constant :SCALAR_PATH_KEYS
-
-    # The isolation strategies a `.rigor.yml` may name (ADR-39 slice 5 / #911). `ruby_box` is
-    # deliberately absent: it is a boot-time decision the config file is read too late to make.
-    CONFIGURABLE_PLUGIN_ISOLATIONS = %w[none process].freeze
-
-    # Top-level keys this implementation DECLARES but never reads — see `docs/internal-spec/config.md`
-    # § "Reserved namespaces" and ADR-99.
-    #
-    # A sibling implementation (`rigor-rs`, which vendors our schema rather than keeping its own)
-    # groups keys for concepts we do not have under its own namespace, so one `.rigor.yml` feeds both.
-    # Such a key answers to the SCHEMA TIER ONLY: it is type-checked where it is written, and here it
-    # is never read, never validated, never coerced, and never an error however invalid its value.
-    #
-    # That is already the emergent behaviour — `#initialize` fetches each key it owns and never
-    # enumerates the rest — so this constant does not gate the runtime. It exists to make the
-    # reservation FINDABLE by the next person adding config validation (#166 is exactly that), and to
-    # give the schema-parity spec something to key on: a reserved namespace is by definition absent
-    # from DEFAULTS, so the DEFAULTS-driven schema gate can never see it.
-    RESERVED_NAMESPACES = %w[rigor_rs].freeze
-
-    # Every top-level key a conforming `.rigor.yml` may carry: the keys this implementation owns, plus
-    # `includes:`, plus the namespaces reserved for another implementation. Anything else is recorded in
-    # {#unknown_keys} and warned about by {ConfigAudit}, and is also the did-you-mean dictionary for a
-    # near-miss.
-    #
-    # `includes:` is a load-time directive — {load_with_includes} `delete`s it while merging, so it never
-    # reaches `#initialize` and could not be seen as unknown regardless. It is listed because a user
-    # legitimately writes it, so a typo like `include:` must be able to suggest it.
-    KNOWN_KEYS = (DEFAULTS.keys + %w[includes] + RESERVED_NAMESPACES).freeze
 
     # Top-level keys the loaded config carried that this implementation does not own — neither a
     # {DEFAULTS} key, nor `includes:`, nor a reserved namespace. Recorded rather than acted on: an
@@ -348,39 +113,6 @@ module Rigor
       []
     end
 
-    # Loads a configuration file.
-    #
-    # `path == nil` triggers auto-discovery against {DISCOVERY_ORDER}. The first present file in that list is
-    # loaded; if none exist the built-in {DEFAULTS} are used.
-    #
-    # When a path is supplied (whether by auto-discovery or by the caller) the YAML body is processed for
-    # `includes:` recursively, and every relative path inside path-bearing keys (`paths:`,
-    # `signature_paths:`, `plugins_io.allowed_paths:`, `includes:`) is resolved against THAT file's
-    # directory. The resolution is per-file: an included file's relative paths resolve against the included
-    # file's directory, not the top-level file. Path resolution mirrors
-    # [PHPStan](https://phpstan.org/config-reference#paths).
-    def self.load(path = nil)
-      resolved = path || discover
-      loaded = resolved && File.exist?(resolved) ? resolved : nil
-      if loaded.nil?
-        data = DEFAULTS
-        effects_key_present = false
-        target_ruby_key_present = false
-      else
-        # ADR-103 WD15 — captured from the RAW, pre-`DEFAULTS.merge` file (+ its `includes:` chain) because
-        # `DEFAULTS` itself carries an `"effects" => false` entry: once merged, "the file never wrote
-        # `effects:`" and "the file wrote `effects: false`" collapse to the same value and become
-        # indistinguishable to {#initialize}. This is the only place that distinction still exists.
-        raw = load_with_includes(loaded)
-        effects_key_present = raw.key?("effects")
-        target_ruby_key_present = raw.key?("target_ruby")
-        data = DEFAULTS.merge(raw)
-      end
-      new(autowire_default_plugins(data), effects_key_present, target_ruby_key_present || false)
-        .with_exclude_base(loaded && File.dirname(loaded))
-        .with_config_path(loaded)
-    end
-
     # #1576 — the directory relative `exclude:` patterns are matched against: the directory of the config file in
     # use (the base `paths:` resolve against), or the working directory when no config file is used.
     def exclude_base
@@ -398,181 +130,31 @@ module Rigor
       @config_path
     end
 
-    # ADR-93 WD2 — the one bundled plugin default-wired without a `plugins:` entry. `rigor-rbs-inline` is the
-    # gem; `rbs-inline` is its manifest id (the loader raises on a duplicate id, so both forms count as
-    # "already listed").
-    AUTOWIRED_RBS_INLINE_GEM = "rigor-rbs-inline"
-    AUTOWIRED_RBS_INLINE_ID = "rbs-inline"
+    # The loader is {Loader}. Each of these keeps its place on `Configuration`, where the CLI, the language server
+    # and the specs call it.
+    def self.load(path = nil)
+      Loader.load(path)
+    end
 
-    # ADR-93 WD2 — default-wire the bundled `rigor-rbs-inline` plugin, in WD1's annotation-gated,
-    # magic-comment-free mode, when the upstream `rbs-inline` library is resolvable and the user has not
-    # already listed the plugin. Runs from {load} only — the real-project route — never from a bare
-    # {Configuration.new}, so the suite's unit constructions do not auto-wire. The gate is presence-based
-    # (ADR-72's shape): an annotation-free project pays only a comment scan and contributes nothing, so
-    # wiring it on cannot regress the run. This partially reverses the ADR-27/ADR-31 auto-load deferral for
-    # this one bundled plugin (the executed code is already vendored, not arbitrary third-party plugin code).
-    # Opt out with a `plugins:` entry disabling it (`enabled: false`), or per-file `# rbs_inline: disabled`.
     def self.autowire_default_plugins(data)
-      entries = Array(data["plugins"])
-      return data if entries.any? { |entry| rbs_inline_plugin_entry?(entry) }
-      return data unless rbs_inline_library_resolvable?
-
-      merged = data.dup
-      merged["plugins"] = entries + [{
-        "gem" => AUTOWIRED_RBS_INLINE_GEM,
-        "id" => AUTOWIRED_RBS_INLINE_ID,
-        "config" => { "require_magic_comment" => false }
-      }]
-      merged
+      Loader.autowire_default_plugins(data)
     end
 
-    # True when a `plugins:` entry (String or Hash, string- or symbol-keyed) already references the
-    # `rigor-rbs-inline` plugin by gem name or by manifest id. Single-homed here so the CLI's
-    # `--treat-all-as-inline-rbs` injection and the WD2 auto-wire gate agree on what "already listed" means.
     def self.rbs_inline_plugin_entry?(entry)
-      case entry
-      when String
-        entry == AUTOWIRED_RBS_INLINE_GEM
-      when Hash
-        string_keyed = entry.to_h { |k, v| [k.to_s, v] }
-        string_keyed["gem"] == AUTOWIRED_RBS_INLINE_GEM || string_keyed["id"] == AUTOWIRED_RBS_INLINE_ID
-      else
-        false
-      end
+      Loader.rbs_inline_plugin_entry?(entry)
     end
 
-    # A probe with no load side effect: it does not `require` the library, only asks whether RubyGems can
-    # resolve the name. `Gem::Specification.find_by_name` raises `Gem::MissingSpecError` (a `Gem::LoadError`)
-    # when the gem is absent — the standalone `gem install rigortype` case, WD3's residual. ADR-90's
-    # project-bundle fallback resolves the same name at the plugin's own `require` time.
     def self.rbs_inline_library_resolvable?
-      Gem::Specification.find_by_name("rbs-inline")
-      true
-    rescue Gem::LoadError
-      false
+      Loader.rbs_inline_library_resolvable?
     end
 
-    # Returns the path to the config file Rigor would load under auto-discovery, or `nil` when neither
-    # candidate exists. Public so the CLI / spec drift checks can introspect the resolved file.
     def self.discover
-      DISCOVERY_ORDER.find { |candidate| File.exist?(candidate) }
+      Loader.discover
     end
 
-    # Reads `path` (which MUST exist) plus every file listed in its `includes:` chain, merging them under the
-    # order: included files first (in declaration order), then the current file's own keys override.
-    # Relative paths inside each file are resolved against that file's directory. Public so the CLI can run
-    # the include-aware load before applying `--treat-all-as-inline-rbs`'s plugin injection (see
-    # {CLI::CheckCommand#load_check_configuration}).
     def self.load_with_includes(path, visited: Set.new)
-      absolute = File.absolute_path(path)
-      raise ConfigurationError, "circular include: #{absolute}" if visited.include?(absolute)
-
-      raw = read_yaml(absolute)
-      raise ConfigurationError, "config file must be a YAML mapping: #{absolute}" unless raw.is_a?(Hash)
-
-      base_dir = File.dirname(absolute)
-      includes = Array(raw.delete("includes") || [])
-      data = resolve_paths_in(raw, base_dir)
-      next_visited = visited + [absolute]
-      merge_includes(data, includes, base_dir, next_visited)
+      Loader.load_with_includes(path, visited: visited)
     end
-
-    # #433's sibling: a typo in the file the user is about to be told to fix is a configuration mistake
-    # like any other, and escaped as a `Psych::SyntaxError` backtrace naming a file inside Ruby's stdlib.
-    # Psych's own `#message` embeds the path in a parenthesised prefix that reads badly after `rigor: `,
-    # so the position is re-rendered in the `path:line:column` form the rest of Rigor's output uses.
-    def self.read_yaml(absolute)
-      YAML.safe_load_file(absolute, aliases: false) || {}
-    rescue Psych::SyntaxError => e
-      detail = [e.problem, e.context].compact.join(" ")
-      raise ConfigurationError, "#{absolute}:#{e.line}:#{e.column}: not valid YAML: #{detail}"
-    end
-
-    def self.merge_includes(data, includes, base_dir, visited)
-      return data if includes.empty?
-
-      accumulated = {}
-      includes.each do |inc|
-        inc_path = ConfigPath.absolute(inc.to_s, base_dir)
-        unless File.exist?(inc_path)
-          raise ConfigurationError, "include not found: #{inc.inspect} (referenced from #{base_dir})"
-        end
-
-        accumulated = deep_merge(accumulated, load_with_includes(inc_path, visited: visited))
-      end
-      deep_merge(accumulated, data)
-    end
-
-    # Per-file path resolution. Each path-bearing key listed in {PATH_KEYS} plus the nested
-    # `plugins_io.allowed_paths:` entries get their relative paths expanded against the config file's
-    # directory. `cache.path:` is intentionally left as-is so end-user messages (e.g. `--cache-stats` output)
-    # keep the project-relative form the user wrote.
-    def self.resolve_paths_in(data, base_dir)
-      return data unless data.is_a?(Hash)
-
-      out = data.dup
-      PATH_KEYS.each { |key| resolve_path_key!(out, key, base_dir) }
-      SCALAR_PATH_KEYS.each { |key| resolve_scalar_path_key!(out, key, base_dir) }
-      resolve_plugins_io_paths!(out, base_dir)
-      out
-    end
-
-    def self.resolve_path_key!(out, key, base_dir)
-      return unless out.key?(key) && !out[key].nil?
-
-      out[key] = Array(out[key]).map { |p| ConfigPath.absolute(p.to_s, base_dir) }
-    end
-
-    def self.resolve_scalar_path_key!(out, key, base_dir)
-      return unless out.key?(key) && out[key].is_a?(String)
-
-      out[key] = ConfigPath.absolute(out[key], base_dir)
-    end
-
-    def self.resolve_plugins_io_paths!(out, base_dir)
-      plugins_io = out["plugins_io"]
-      return unless plugins_io.is_a?(Hash) && plugins_io["allowed_paths"]
-
-      duped = plugins_io.dup
-      duped["allowed_paths"] = Array(plugins_io["allowed_paths"]).map { |p| ConfigPath.absolute(p.to_s, base_dir) }
-      out["plugins_io"] = duped
-    end
-
-    def self.deep_merge(left, right)
-      return right unless left.is_a?(Hash) && right.is_a?(Hash)
-
-      merged = left.dup
-      right.each do |key, value|
-        merged[key] = merge_value(key, merged, value)
-      end
-      merged
-    end
-
-    # Most keys are right-wins (override) or recursively merged hashes. ADR-10 § "config-conflict
-    # diagnostic" carves out `dependencies.source_inference[]`: the per-gem merge across `includes:` chains
-    # needs union behaviour with mode-conflict detection. The Hash itself still merges deeply; only the
-    # inner array gets concatenated so {Dependencies.from_h} sees every contributor's entries and can dedupe
-    # them.
-    def self.merge_value(key, merged, value)
-      if key == "dependencies" && merged[key].is_a?(Hash) && value.is_a?(Hash)
-        merge_dependencies_hash(merged[key], value)
-      elsif merged.key?(key) && merged[key].is_a?(Hash) && value.is_a?(Hash)
-        deep_merge(merged[key], value)
-      else
-        value
-      end
-    end
-
-    def self.merge_dependencies_hash(left, right)
-      out = deep_merge(left, right)
-      left_si = Array(left["source_inference"])
-      right_si = Array(right["source_inference"])
-      both_empty = left_si.empty? && right_si.empty?
-      out["source_inference"] = left_si + right_si unless both_empty # rigor:disable flow.always-truthy-condition
-      out
-    end
-    private_class_method :merge_includes, :resolve_paths_in, :deep_merge,
-                         :merge_value, :merge_dependencies_hash
 
     # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/MethodLength, Metrics/PerceivedComplexity
     #
@@ -599,26 +181,26 @@ module Rigor
       cache = DEFAULTS.fetch("cache").merge(data.fetch("cache", {}))
       plugins_io = DEFAULTS.fetch("plugins_io").merge(data.fetch("plugins_io", {}))
 
-      @target_ruby = coerce_target_ruby(data.fetch("target_ruby", DEFAULTS.fetch("target_ruby")))
+      @target_ruby = Coercion.coerce_target_ruby(data.fetch("target_ruby", DEFAULTS.fetch("target_ruby")))
       @target_ruby_explicit = target_ruby_key_present ? true : false
       @paths = Array(data.fetch("paths", DEFAULTS.fetch("paths"))).map(&:to_s).freeze
       user_excludes = Array(data.fetch("exclude", DEFAULTS.fetch("exclude"))).map(&:to_s)
       @exclude_patterns = (BUILTIN_EXCLUDES + user_excludes).uniq.freeze
       @plugins = Array(data.fetch("plugins", DEFAULTS.fetch("plugins"))).map do |entry|
-        coerce_plugin_entry(entry)
+        Coercion.coerce_plugin_entry(entry)
       end.freeze
       @disabled_rules = Array(data.fetch("disable", DEFAULTS.fetch("disable"))).map(&:to_s).freeze
       @libraries = Array(data.fetch("libraries", DEFAULTS.fetch("libraries"))).map(&:to_s).freeze
       sig_paths = data.fetch("signature_paths", DEFAULTS.fetch("signature_paths"))
       @signature_paths = sig_paths.nil? ? nil : Array(sig_paths).map(&:to_s).freeze
-      @core_root = coerce_core_root(data.fetch("core_root", DEFAULTS.fetch("core_root")))
+      @core_root = Coercion.coerce_core_root(data.fetch("core_root", DEFAULTS.fetch("core_root")))
       test_paths = data.fetch("test_paths", DEFAULTS.fetch("test_paths"))
       @test_paths = test_paths.nil? ? nil : Array(test_paths).map(&:to_s).freeze
-      @sig_gen_inline_declared = coerce_sig_gen_inline_declared(data.fetch("sig_gen", nil))
-      @pre_eval = expand_pre_eval_entries(
+      @sig_gen_inline_declared = Coercion.coerce_sig_gen_inline_declared(data.fetch("sig_gen", nil))
+      @pre_eval = Coercion.expand_pre_eval_entries(
         Array(data.fetch("pre_eval", DEFAULTS.fetch("pre_eval"))).map(&:to_s)
       )
-      @baseline_path = coerce_baseline_path(data.fetch("baseline", DEFAULTS.fetch("baseline")))
+      @baseline_path = Coercion.coerce_baseline_path(data.fetch("baseline", DEFAULTS.fetch("baseline")))
       @fold_platform_specific_paths = data.fetch(
         "fold_platform_specific_paths", DEFAULTS.fetch("fold_platform_specific_paths")
       )
@@ -635,24 +217,24 @@ module Rigor
       @cache_path = cache.fetch("path").to_s
       raw_max = cache.fetch("max_bytes")
       @cache_max_bytes = raw_max.nil? ? nil : Integer(raw_max)
-      @cache_validation = coerce_cache_validation(cache.fetch("validation", "auto"))
-      @plugins_isolation = coerce_plugins_isolation(
+      @cache_validation = Coercion.coerce_cache_validation(cache.fetch("validation", "auto"))
+      @plugins_isolation = Coercion.coerce_plugins_isolation(
         data.fetch("plugins_isolation", DEFAULTS.fetch("plugins_isolation"))
       )
-      @plugins_io_network = coerce_network_policy(plugins_io.fetch("network"))
+      @plugins_io_network = Coercion.coerce_network_policy(plugins_io.fetch("network"))
       @plugins_io_allowed_paths = Array(plugins_io.fetch("allowed_paths")).map(&:to_s).freeze
       @plugins_io_allowed_url_hosts = Array(plugins_io.fetch("allowed_url_hosts")).map(&:to_s).freeze
-      @severity_profile = coerce_severity_profile(
+      @severity_profile = Coercion.coerce_severity_profile(
         data.fetch("severity_profile", DEFAULTS.fetch("severity_profile"))
       )
-      @severity_overrides = coerce_severity_overrides(
+      @severity_overrides = Coercion.coerce_severity_overrides(
         data.fetch("severity_overrides", DEFAULTS.fetch("severity_overrides"))
       )
       @dependencies = Dependencies.from_h(
         data.fetch("dependencies", DEFAULTS.fetch("dependencies"))
       )
       parallel = DEFAULTS.fetch("parallel").merge(data.fetch("parallel", {}))
-      @parallel_workers = coerce_parallel_workers(parallel.fetch("workers"))
+      @parallel_workers = Coercion.coerce_parallel_workers(parallel.fetch("workers"))
       bundler = DEFAULTS.fetch("bundler").merge(data.fetch("bundler", {}))
       bp = bundler.fetch("bundle_path")
       @bundler_bundle_path = bp.nil? ? nil : bp.to_s.dup.freeze
@@ -753,7 +335,7 @@ module Rigor
     #   silently reverting, and the call-site cleanup can land whenever it is convenient.
     # - An id that is in neither {BleedingEdge::FEATURES} nor {BleedingEdge::GRADUATED} **raises**. An
     #   unknown id in a *config file* stays inert on purpose (it may come from a newer gem — see
-    #   {#coerce_bleeding_edge}), but an id here is written by a Rigor contributor against the registry in
+    #   {Coercion.coerce_bleeding_edge}), but an id here is written by a Rigor contributor against the registry in
     #   the same checkout: a typo is a bug, and reading it as `false` would ship the feature permanently off
     #   with no signal.
     #
@@ -774,7 +356,7 @@ module Rigor
     # `bleeding_edge_severity_overrides` the two {SeverityProfile.resolve} sites consult) is replaced by
     # `value`, leaving every other field shared with the receiver. `value` takes the same forms as the
     # `bleeding_edge:` config key — `false` / `true` / a feature-id Array / `{ "all" => true, "except" =>
-    # [...] }` — and is normalised through the same {#coerce_bleeding_edge} path, so an unknown id stays
+    # [...] }` — and is normalised through the same {Coercion.coerce_bleeding_edge} path, so an unknown id stays
     # inert.
     #
     # The CLI's `--bleeding-edge[=ids]` / `--no-bleeding-edge` flag uses this to override the configured
@@ -851,7 +433,7 @@ module Rigor
     # {#bleeding_edge_active?} predicate and the severity resolution read. `#initialize` and
     # {#with_bleeding_edge} both call this, so there is one derivation to keep in step.
     def derive_bleeding_edge(value)
-      @bleeding_edge = coerce_bleeding_edge(value)
+      @bleeding_edge = Coercion.coerce_bleeding_edge(value)
       @bleeding_edge_severity_overrides = BleedingEdge.severity_overrides_for(@bleeding_edge)
       @bleeding_edge_active_ids = BleedingEdge.active_ids_for(@bleeding_edge)
     end
@@ -906,67 +488,13 @@ module Rigor
     # A label that is well-formed but unknown to the *registry* is deliberately NOT rejected here — that is
     # `effect.unknown-label`'s job (#384), and it fails open.
     def coerce_effects_snapshot(effects)
-      @effects_check = coerce_effects_check?(effects)
+      @effects_check = Coercion.coerce_effects_check?(effects)
       snapshot = effects&.fetch("snapshot", nil)
       snapshot = {} unless snapshot.is_a?(Hash)
       @effects_snapshot_path = (snapshot.fetch("path", nil) || DEFAULT_EFFECTS_SNAPSHOT_PATH).to_s.freeze
-      @effects_snapshot_reach = coerce_effects_reach(snapshot.fetch("reach", nil))
-      @effects_snapshot_gate = coerce_effects_gate(snapshot.fetch("gate", nil))
-      @effects_tolerated = coerce_effects_tolerated(effects&.fetch("tolerated", nil))
-    end
-
-    # `effects.check:` — true by default under a present block, and never true without one. Only an
-    # explicit `false` turns it off; any other value is normalised to true rather than rejected, because a
-    # switch whose only two readings are "check" and "do not check" has nothing a tier-2 error would add.
-    def coerce_effects_check?(effects)
-      return false if effects.nil?
-
-      effects.fetch("check", true) != false
-    end
-
-    VALID_EFFECTS_GATES = %i[symmetric additions].freeze
-    private_constant :VALID_EFFECTS_GATES
-
-    def coerce_effects_gate(value)
-      return :symmetric if value.nil?
-
-      gate = value.to_s.to_sym
-      unless VALID_EFFECTS_GATES.include?(gate)
-        raise ConfigurationError,
-              "effects.snapshot.gate must be one of #{VALID_EFFECTS_GATES.inspect}, got #{value.inspect}"
-      end
-
-      gate
-    end
-
-    # Entry-point globs and preset names, kept as written.
-    #
-    # **Shape only.** A preset is *named by a plugin* (#387; ADR-103 WD14) and plugins load from this very
-    # configuration, so at this point no preset is registered yet and asking `EntryPoints.known?` would
-    # reject `reach: [rails]` for every project that uses one. The existence check therefore lives where
-    # the snapshot expands `reach:` ({Effects::Snapshot.expand_reach}), which runs after plugin load and
-    # raises there — the same error, at the first moment it can be right.
-    def coerce_effects_reach(value)
-      entries = Array(value).map(&:to_s)
-      entries.each do |entry|
-        next if Effects::EntryPoints.glob?(entry) || Effects::EntryPoints.name?(entry)
-
-        raise ConfigurationError,
-              "effects.snapshot.reach entry is neither a file glob nor a well-formed entry-point preset " \
-              "name: #{entry.inspect} (a preset name is #{Effects::EntryPoints::NAME_PATTERN.inspect}; " \
-              "anything carrying a path or glob character is treated as a file glob instead)"
-      end
-      entries.uniq.freeze
-    end
-
-    # Shape validation only: the label grammar of `docs/type-specification/effect-labels.md`.
-    def coerce_effects_tolerated(value)
-      labels = Array(value).map(&:to_s)
-      labels.each do |label|
-        raise ConfigurationError, "effects.tolerated is not a well-formed effect label: #{label.inspect}" unless
-          Effects::Label.valid?(label)
-      end
-      labels.uniq.sort.freeze
+      @effects_snapshot_reach = Coercion.coerce_effects_reach(snapshot.fetch("reach", nil))
+      @effects_snapshot_gate = Coercion.coerce_effects_gate(snapshot.fetch("gate", nil))
+      @effects_tolerated = Coercion.coerce_effects_tolerated(effects&.fetch("tolerated", nil))
     end
 
     # ADR-103 WD5 / WD6 / #385 — the three policy keys: the project's own vocabulary (`labels:`), its
@@ -979,345 +507,9 @@ module Rigor
     # well-formed but unknown to the *registry* is deliberately fine here: it fails open (⊤ for an
     # envelope, an unregistered meaning for an attribution) and surfaces as `effect.unknown-label`.
     def coerce_effects_policy(effects)
-      @effects_labels = coerce_effects_labels(effects&.fetch("labels", nil))
-      @effects_attribution = coerce_effects_attribution(effects&.fetch("attribution", nil))
-      @effects_envelopes = coerce_effects_envelopes(effects&.fetch("envelopes", nil))
-    end
-
-    NO_ATTRIBUTION = {}.freeze
-    private_constant :NO_ATTRIBUTION
-
-    def coerce_effects_labels(value)
-      labels = Array(value).map(&:to_s)
-      labels.each do |label|
-        raise ConfigurationError, "effects.labels is not a well-formed effect label: #{label.inspect}" unless
-          Effects::Label.valid?(label)
-      end
-      labels.uniq.sort.freeze
-    end
-
-    # `{ "Net::HTTP.get" => ["io.net.http"] }` — a method key exactly as the symbol tables spell one
-    # (`Owner#instance`, `Owner.singleton`), mapped to the labels a call to it contributes.
-    def coerce_effects_attribution(value)
-      return NO_ATTRIBUTION unless value.is_a?(Hash)
-
-      value.each_with_object({}) do |(key, labels), out|
-        name = key.to_s
-        unless Effects::MethodKey.valid?(name)
-          raise ConfigurationError,
-                "effects.attribution key is not a method key (`Owner#method` / `Owner.method`): #{name.inspect}"
-        end
-
-        out[name] = coerce_effect_label_list(Array(labels), "effects.attribution[#{name.inspect}]")
-      end.freeze
-    end
-
-    # `[{ match: | namespace:, effect: [...] }]`. Exactly one selector per entry: an entry naming both
-    # would need a precedence rule between two selectors of the same entry, and one naming neither selects
-    # every class in the project, which is never what an author meant to write.
-    def coerce_effects_envelopes(value)
-      Array(value).each_with_index.map { |entry, index| coerce_effects_envelope(entry, index) }.freeze
-    end
-
-    def coerce_effects_envelope(entry, index)
-      where = "effects.envelopes[#{index}]"
-      raise ConfigurationError, "#{where} is not a mapping: #{entry.inspect}" unless entry.is_a?(Hash)
-
-      match = coerce_effects_envelope_selector(entry["match"], "#{where}.match")
-      namespace = coerce_effects_envelope_selector(entry["namespace"], "#{where}.namespace")
-      if match.nil? == namespace.nil?
-        raise ConfigurationError, "#{where} must name exactly one of `match:` (a path glob) or `namespace:` " \
-                                  "(a constant glob), got #{match.nil? ? 'neither' : 'both'}"
-      end
-      unless entry.key?("effect")
-        raise ConfigurationError, "#{where} has no `effect:` bound (write `effect: []` for the empty envelope)"
-      end
-
-      {
-        "match" => match, "namespace" => namespace,
-        "effect" => coerce_effect_label_list(Array(entry["effect"]), "#{where}.effect")
-      }.freeze
-    end
-
-    def coerce_effects_envelope_selector(value, where)
-      return nil if value.nil?
-
-      selector = value.to_s
-      raise ConfigurationError, "#{where} is empty" if selector.strip.empty?
-
-      selector.freeze
-    end
-
-    def coerce_effect_label_list(labels, where)
-      labels.map(&:to_s).each do |label|
-        raise ConfigurationError, "#{where} is not a well-formed effect label: #{label.inspect}" unless
-          Effects::Label.valid?(label)
-      end.uniq.sort.freeze
-    end
-
-    # ADR-17 slice 4 — `pre_eval:` glob expansion. Each entry is accepted as either a literal path (slice 1
-    # contract) OR a `File.fnmatch?`-shaped glob pattern (`lib/core_ext/**/*.rb`). Glob meta characters (`*`,
-    # `?`, `[`) trigger `Dir.glob` expansion; the resulting file list is folded into the `pre_eval:` set with
-    # `uniq`. Literal entries that don't exist on disk continue to surface as `pre-eval.file-not-found`
-    # `:error` (slice 1 behaviour); glob entries that match nothing degrade silently to "no contribution from
-    # this entry" so a templated `**` pattern in a fresh project doesn't generate an error per match-less
-    # pattern.
-    def expand_pre_eval_entries(entries)
-      entries.flat_map { |entry| expand_pre_eval_entry(entry) }.uniq.freeze
-    end
-
-    # #1956 — a relative entry arrives joined onto the config file's directory, so the metacharacters the
-    # check above sees may be that directory's own (`ds [x]/`). The leading run of segments that name existing
-    # directories is read literally and only the rest is globbed under it: a literal entry under such a
-    # directory stays a literal path, and a pattern matches what it matches under a plain directory.
-    def expand_pre_eval_entry(entry)
-      return [entry] unless glob_pattern?(entry)
-
-      base, pattern = literal_directory_prefix(entry)
-      return [entry] unless glob_pattern?(pattern)
-
-      base ? RootedGlob.glob(base, pattern) : Dir.glob(entry, sort: true)
-    end
-
-    def literal_directory_prefix(entry)
-      segments = entry.split("/")
-      count = (1...segments.size).take_while { |n| File.directory?(join_segments(segments.take(n))) }.size
-      return [nil, entry] if count.zero?
-
-      [join_segments(segments.take(count)), segments.drop(count).join("/")]
-    end
-
-    # `"/a".split("/")` leads with an empty segment, which spells the filesystem root.
-    def join_segments(segments)
-      path = segments.join("/")
-      path.empty? ? "/" : path
-    end
-
-    def glob_pattern?(path)
-      path.include?("*") || path.include?("?") || path.include?("[")
-    end
-
-    # Accepts either `"rigor-foo"` (gem-name shorthand) or `{ "gem" => "rigor-foo", "id" => "foo", "config" =>
-    # {...} }` (full form). Returns the canonical hash form so the loader works against a single shape.
-    def coerce_plugin_entry(entry)
-      case entry
-      when String
-        entry.dup.freeze
-      when Hash
-        entry.to_h { |k, v| [k.to_s, v] }.freeze
-      else
-        raise ConfigurationError,
-              "plugin configuration entry must be a String or Hash, got #{entry.inspect}"
-      end
-    end
-
-    # `target_ruby` is passed as Prism's `version:` option at the analyser's parse sites
-    # (`Analysis::Runner`, `CLI::TypeOfCommand`, `CLI::TypeScanCommand`) so projects that target an older
-    # Ruby get parse errors for syntax their target doesn't support. Format validation here is loose —
-    # accepts any `<major>.<minor>` or `<major>.<minor>.<patch>` form, plus the literal `"latest"`. Prism
-    # itself enforces the supported set and raises `ArgumentError` for versions it does not recognise (e.g.
-    # `"1.0"`); the parse-time error message names the version, so the user can correct the setting.
-    TARGET_RUBY_FORMAT = /\A(?:\d+\.\d+(?:\.\d+)?|latest)\z/
-    private_constant :TARGET_RUBY_FORMAT
-
-    def coerce_target_ruby(value)
-      s = value.to_s
-      unless s.match?(TARGET_RUBY_FORMAT)
-        raise ConfigurationError,
-              "target_ruby must be a version (e.g. \"3.4\", \"4.0\", \"3.4.0\") or \"latest\", got #{value.inspect}"
-      end
-
-      s.dup.freeze
-    end
-
-    # YAML scalar may arrive as a String or already as a Symbol; coerce to the canonical Symbol shape so the
-    # downstream `TrustPolicy` constructor stays strict.
-    #
-    # The accepted set is duplicated from {Rigor::Plugin::TrustPolicy::VALID_NETWORK_POLICIES} so
-    # `Configuration` does not require the plugin namespace at load time (Configuration is loaded before
-    # Plugin in `lib/rigor.rb`); the two stay in lockstep via spec.
-    VALID_NETWORK_POLICIES = %i[disabled allowlist].freeze
-    private_constant :VALID_NETWORK_POLICIES
-
-    # ADR-15 Phase 4c — accepts a non-negative Integer (or a string-shaped one from YAML files that miss type
-    # annotations). Negative / non-integer values raise so typos / bad YAML fail loudly rather than silently
-    # disabling parallelism.
-    def coerce_parallel_workers(value)
-      integer = Integer(value)
-      raise ConfigurationError, "parallel.workers must be >= 0, got #{value.inspect}" if integer.negative?
-
-      integer
-    rescue TypeError, ArgumentError => e
-      raise ConfigurationError, "parallel.workers must be a non-negative Integer, got #{value.inspect} (#{e.message})"
-    end
-
-    # Issue #2517 — the directory's existence and contents are checked where the environment is built
-    # ({Environment::CoreRoot.validate!}), not here: `rigor init`, `rigor doctor` and the language server's reload
-    # load a configuration without building an environment, and must still be able to read one naming a core that
-    # is not generated yet.
-    def coerce_core_root(value)
-      return nil if value.nil?
-      raise ConfigurationError, "core_root must be a directory path, got #{value.inspect}" unless value.is_a?(String)
-      raise ConfigurationError, "core_root must not be empty" if value.strip.empty?
-
-      value.dup.freeze
-    end
-
-    # ADR-22 WD2 (b) — `baseline: <path>` activates the file; `baseline: false` is the explicit-disable form
-    # (useful in `.rigor.yml` to override an upstream `.rigor.dist.yml` that names a baseline). `nil`
-    # (default / absent key) is also "no baseline".
-    def coerce_baseline_path(value)
-      return nil if value.nil? || value == false
-
-      value.to_s
-    end
-
-    # ADR-87 WD1 — `cache.validation` is `"auto"` (default), `"stat"`, or `"digest"`. An unrecognised value
-    # fails soft to `"auto"` rather than aborting a check over a typo, and the always-available
-    # `RIGOR_STRICT_VALIDATION=1` env escape hatch does not depend on this value being valid.
-    VALID_CACHE_VALIDATIONS = %w[auto stat digest].freeze
-    private_constant :VALID_CACHE_VALIDATIONS
-
-    # The `sig_gen.inline_declared:` values, as the Symbols {#sig_gen_inline_declared} answers.
-    VALID_SIG_GEN_INLINE_DECLARED = %w[write skip].freeze
-    private_constant :VALID_SIG_GEN_INLINE_DECLARED
-
-    # Rejects rather than fails soft: an unrecognised value read as `write` would put a second declaration of
-    # every inline-annotated method into `sig/` for exactly the project that asked for none. A `sig_gen:`
-    # block that omits the key, or is written empty, keeps the default.
-    def coerce_sig_gen_inline_declared(section)
-      section = {} if section.nil?
-      raise ConfigurationError, "sig_gen must be a mapping, got #{section.inspect}" unless section.is_a?(Hash)
-
-      # The schema closes this object (`additionalProperties: false`); a misspelled key here would otherwise
-      # load as the default and write exactly what `inline_declare: skip` was meant to prevent.
-      unknown = section.keys.map(&:to_s) - DEFAULTS.fetch("sig_gen").keys
-      unless unknown.empty?
-        raise ConfigurationError,
-              "sig_gen has unknown key(s) #{unknown.inspect}; known keys: #{DEFAULTS.fetch('sig_gen').keys.inspect}"
-      end
-
-      value = section.fetch("inline_declared", DEFAULTS.dig("sig_gen", "inline_declared")).to_s
-      unless VALID_SIG_GEN_INLINE_DECLARED.include?(value)
-        raise ConfigurationError,
-              "sig_gen.inline_declared must be one of #{VALID_SIG_GEN_INLINE_DECLARED.inspect}, " \
-              "got #{section['inline_declared'].inspect}"
-      end
-
-      value.to_sym
-    end
-
-    def coerce_cache_validation(value)
-      str = value.to_s
-      VALID_CACHE_VALIDATIONS.include?(str) ? str : "auto"
-    end
-
-    # Rejects rather than fails soft — a strategy that silently resolves to a different one is exactly
-    # the failure #911 exists to close, and the run's isolation is not a detail the user can be assumed
-    # not to have meant.
-    def coerce_plugins_isolation(value)
-      return nil if value.nil?
-
-      str = value.to_s
-      return str if CONFIGURABLE_PLUGIN_ISOLATIONS.include?(str)
-
-      if str == "ruby_box"
-        raise ConfigurationError,
-              "plugins_isolation: ruby_box cannot be selected from the configuration file — `Ruby::Box` " \
-              "must be active before Ruby boots. Run rigor with RIGOR_PLUGIN_ISOLATION=ruby_box instead " \
-              "(the launcher re-execs itself with RUBY_BOX=1 set)."
-      end
-
-      raise ConfigurationError,
-            "plugins_isolation must be one of #{CONFIGURABLE_PLUGIN_ISOLATIONS.inspect} " \
-            "(`ruby_box` is environment-only), got #{value.inspect}"
-    end
-
-    def coerce_network_policy(value)
-      sym = value.to_sym
-      unless VALID_NETWORK_POLICIES.include?(sym)
-        raise ConfigurationError,
-              "plugins_io.network must be one of #{VALID_NETWORK_POLICIES.inspect}, got #{value.inspect}"
-      end
-
-      sym
-    end
-
-    # ADR-8 § "Severity profile" — accepts the canonical Symbol form or its String spelling; rejects unknown
-    # profile names so typos fail loudly.
-    def coerce_severity_profile(value)
-      sym = value.to_sym
-      unless SeverityProfile::VALID_PROFILES.include?(sym)
-        raise ConfigurationError,
-              "severity_profile must be one of " \
-              "#{SeverityProfile::VALID_PROFILES.inspect}, got #{value.inspect}"
-      end
-
-      sym
-    end
-
-    # ADR-8 § "Severity profile" — `severity_overrides:` is a `{ rule => severity }` map. Keys are canonical
-    # rule ids (`call.undefined-method`) or family wildcards (`call`). Values are
-    # {SeverityProfile::VALID_SEVERITIES} symbols (`:error` / `:warning` / `:info` / `:off`). Unknown
-    # severities raise; unknown rule ids are silently kept (the override is inert until the rule lands).
-    def coerce_severity_overrides(value)
-      raise ConfigurationError, "severity_overrides must be a Hash, got #{value.inspect}" unless value.is_a?(Hash)
-
-      value.to_h do |k, v|
-        # YAML 1.1 parses bare `off`/`on`/`no`/`yes`/`true`/`false` as booleans, so a user who wrote `off` (a
-        # valid severity) without quotes hands us `false`. Catch the non-Symbol / non-String case before
-        # `to_sym` blows up with a backtrace.
-        unless v.is_a?(String) || v.is_a?(Symbol)
-          hint = v == false ? %( — did you mean the string "off"?) : ""
-          raise ConfigurationError,
-                "severity_overrides[#{k.inspect}] is #{v.inspect}, a YAML boolean#{hint} " \
-                "Bare off/on/no/yes/true/false are parsed as booleans; quote the severity " \
-                "(e.g. \"off\")."
-        end
-
-        sym = v.to_sym
-        unless SeverityProfile::VALID_SEVERITIES.include?(sym)
-          raise ConfigurationError,
-                "severity_overrides[#{k.inspect}] must be one of " \
-                "#{SeverityProfile::VALID_SEVERITIES.inspect}, got #{v.inspect}"
-        end
-
-        [k.to_s, sym]
-      end.freeze
-    end
-
-    # ADR-50 § WD2 — normalizes the `bleeding_edge:` selector to a canonical `{ "mode" => … }` hash
-    # (interpreted by {Rigor::BleedingEdge}). Validates *shape* only; membership against the overlay is
-    # intentionally NOT checked here (an unknown id stays inert, like an unknown `severity_overrides:` rule).
-    # Deep-frozen so the Configuration stays `Ractor.shareable?`.
-    def coerce_bleeding_edge(value)
-      case value
-      when nil, false then { "mode" => "none" }
-      when true then { "mode" => "all" }
-      when Array then { "mode" => "list", "ids" => freeze_ids(value) }
-      when Hash then coerce_bleeding_edge_hash(value)
-      else
-        raise ConfigurationError,
-              "bleeding_edge must be true, false, a list of feature ids, " \
-              "or { all: true, except: [...] }, got #{value.inspect}"
-      end.freeze
-    end
-
-    def coerce_bleeding_edge_hash(value)
-      hash = value.to_h { |k, v| [k.to_s, v] }
-      if hash.fetch("all", false) == true
-        { "mode" => "all", "except" => freeze_ids(Array(hash["except"])) }
-      else
-        { "mode" => "none" }
-      end
-    end
-
-    # Feature ids reach `coerce_bleeding_edge` from YAML, a `to_h` round-trip, or the CLI's
-    # `--bleeding-edge=a,b` (all runtime-created, non-frozen Strings). Each id String is frozen so the
-    # normalized selector — and thus the whole Configuration — stays deeply frozen and `Ractor.shareable?`
-    # for the worker path (the same invariant `#initialize`'s final `freeze` upholds for every other field).
-    def freeze_ids(ids)
-      ids.map { |id| id.to_s.dup.freeze }.freeze
+      @effects_labels = Coercion.coerce_effects_labels(effects&.fetch("labels", nil))
+      @effects_attribution = Coercion.coerce_effects_attribution(effects&.fetch("attribution", nil))
+      @effects_envelopes = Coercion.coerce_effects_envelopes(effects&.fetch("envelopes", nil))
     end
 
     # Renders the normalized selector back into the user-facing `bleeding_edge:` form for `#to_h`

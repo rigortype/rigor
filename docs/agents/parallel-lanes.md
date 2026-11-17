@@ -78,10 +78,18 @@ number. The script's header has the design and its limits, including why claims 
 - **Confirm the claim is still `mine` before `gh pr ready` and `bin/land-pr`.** A `steal` tells the
   thief, not the holder: a session that was merely slow would otherwise land over whoever took the
   work over.
-- **Drop at the merge.** `bin/land-pr` drops the PR and its closing issues itself on a successful
-  merge, which is the one moment that needs no memory, since the claim outlives the turn that took
-  it. Drop by number when work moves to another session or the user stops the loop; `drop --mine`
-  only when nothing else is in flight, because in a batch it releases every lane at once.
+- **Take the number you will land, at `gh pr create`.** `bin/land-pr` drops the PR it landed and that
+  PR's closing issues, so a claim on any other number is not the one it releases. Usually they are the
+  same set and `take --pr <n>` covers it. They come apart when the work is ABOUT one number and lands
+  under another: a PR that corrects an earlier PR's changelog fragment or `approval-queue.d/` record, a
+  follow-up that fixes what a merged PR left, a split of one issue across two PRs. Take both, or the
+  landing leaves a claim behind — which reads as HELD to the next session and stops work that could
+  have started (2026-11-17: #3296 landed the record fixes for merged #3256, only #3256 was held, and
+  `land-pr` printed `free already`).
+- **Drop at the merge.** `bin/land-pr` drops on a successful merge, which is the one moment that needs
+  no memory, since the claim outlives the turn that took it. Drop by number when work moves to another
+  session or the user stops the loop; `drop --mine` only when nothing else is in flight, because in a
+  batch it releases every lane at once.
 - **A `HELD` number is a conversation, not a wall.** `check` prints the holder's session id, its pid
   and whether that pid is alive. Look the session up, and either send it what you found — a review
   report it has not seen is worth more there than re-run here — or, if it is gone, `steal` the claim

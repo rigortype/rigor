@@ -59,6 +59,7 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       lib/rigor/analysis/check_rules.rb
       lib/rigor/analysis/check_rules/always_raises.rb
       lib/rigor/analysis/check_rules/always_truthy_condition_collector.rb
+      lib/rigor/analysis/check_rules/argument_type.rb
       lib/rigor/analysis/check_rules/dead_assignment_collector.rb
       lib/rigor/analysis/check_rules/duplicate_hash_key_collector.rb
       lib/rigor/analysis/check_rules/ivar_write_collector.rb
@@ -70,12 +71,14 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       lib/rigor/analysis/check_rules/raise_non_exception.rb
       lib/rigor/analysis/check_rules/receiver_predicates.rb
       lib/rigor/analysis/check_rules/return_in_ensure_collector.rb
+      lib/rigor/analysis/check_rules/return_type.rb
       lib/rigor/analysis/check_rules/rigor_testing.rb
       lib/rigor/analysis/check_rules/self_undefined_method.rb
       lib/rigor/analysis/check_rules/shadowed_rescue_collector.rb
       lib/rigor/analysis/check_rules/special_global_write.rb
       lib/rigor/analysis/check_rules/suppression.rb
       lib/rigor/analysis/check_rules/undefined_method.rb
+      lib/rigor/analysis/check_rules/unreachable_branch.rb
       lib/rigor/analysis/check_rules/unreachable_clause_collector.rb
       lib/rigor/analysis/check_rules/unresolved_toplevel.rb
       lib/rigor/analysis/check_rules/visibility_mismatch.rb

@@ -9,16 +9,13 @@ require_relative "../../inference/rbs_type_translator"
 module Rigor
   module Analysis
     module CheckRules
-      # ADR-116 WD1 — the resolution the three Liskov override rules share, and two helpers `CheckRules`'
-      # return-type-mismatch rule still shares with them: the authored-override walk
-      # ({.resolve_authored_override}), the first ancestor an override reaches
-      # ({.overridden_ancestors_start}), the generic-instantiation map ({.ancestor_instantiation_type_vars}),
-      # {.defined_on?}, {.declared_return_union} and {.dynamic_top?}.
+      # ADR-116 WD1 — the resolution the three Liskov override rules share, and the helpers {ReturnType} shares
+      # with them: the authored-override walk ({.resolve_authored_override}), the first ancestor an override
+      # reaches ({.overridden_ancestors_start}), the generic-instantiation map
+      # ({.ancestor_instantiation_type_vars}), {.defined_on?}, {.declared_return_union} and {.dynamic_top?}.
       #
-      # Called by {OverrideVisibility}, {OverrideReturnWidened}, {OverrideParamNarrowed} and by
-      # `CheckRules.return_type_mismatch_diagnostic` / `declared_return_type`; it calls nothing in
-      # `CheckRules`. The last two helpers move to the return-type-mismatch module when that rule leaves
-      # `CheckRules`.
+      # Called by {OverrideVisibility}, {OverrideReturnWidened}, {OverrideParamNarrowed} and {ReturnType}; it
+      # calls nothing in `CheckRules`. The last three stay here: the override rules and the walk above call them too.
       module OverrideSupport
         module_function
 

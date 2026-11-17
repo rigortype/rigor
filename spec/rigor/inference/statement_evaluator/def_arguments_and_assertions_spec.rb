@@ -83,6 +83,10 @@ RSpec.describe Rigor::Inference::StatementEvaluator::DefArgumentsAndAssertions d
       expect(narrowed("expect(x).to be_an_instance_of(Integer)", start)).to eq(integer)
       expect(narrowed("expect(x).to be_instance_of(Integer)", start)).to eq(integer)
       expect(narrowed("expect(x).to be_a(Numeric)", start)).to eq(combinator.nominal_of("Numeric"))
+      # An Integer is a Numeric but not exactly one: only the subtype-permitting matcher keeps it.
+      expect(narrowed("expect(x).to be_a(Numeric)", scope.with_local(:x, integer))).to eq(integer)
+      expect(narrowed("expect(x).to be_an_instance_of(Numeric)", scope.with_local(:x, integer)))
+        .to eq(combinator.bot)
     end
 
     it "leaves the scope alone for a shape it does not recognise" do
@@ -98,10 +102,21 @@ RSpec.describe Rigor::Inference::StatementEvaluator::DefArgumentsAndAssertions d
         "self.expect(x).not_to be_nil",
         "expect(x).not_to be_nil(1)",
         "expect(unbound).not_to be_nil",
+        "expect(x).to eq(x)",
+        "expect(x).not_to be_empty",
+        "expect(x).to RSpec::Matchers.be_a(Integer)",
+        "expect(x).to self.be_a(Integer)",
         "expect(x).to"
       ].each do |source|
         expect(narrowed(source)).to eq(optional_integer), source
       end
+    end
+
+    it "narrows only a local the `expect` argument reads, not one a call on it names" do
+      start = scope.with_local(:y, optional_integer)
+      narrowed_scope = described_class.apply_rspec_matcher_narrowing(call_node("expect(x.y).not_to be_nil"), start)
+
+      expect([narrowed_scope.local(:x), narrowed_scope.local(:y)]).to eq([optional_integer, optional_integer])
     end
   end
 
@@ -123,26 +138,30 @@ RSpec.describe Rigor::Inference::StatementEvaluator::DefArgumentsAndAssertions d
       end
     end
 
+    # The registry's two gates, each a method name predicate: the global one (`statement_candidate?`) and the
+    # per-plugin one (`narrowing_facts_candidate_for?`). Each defaults to naming only `narrow_x`.
     def index_class
-      Struct.new(:plugins) do
+      Struct.new(:plugins, :statement_gate, :plugin_gate) do
         def for_statement = plugins
 
-        def statement_candidate?(name) = name == :narrow_x
+        def statement_candidate?(name) = statement_gate.call(name)
 
-        def narrowing_facts_candidate_for?(_plugin, name) = name == :narrow_x
+        def narrowing_facts_candidate_for?(_plugin, name) = plugin_gate.call(name)
       end
     end
 
     def environment_class = Struct.new(:plugin_registry)
 
-    def scope_with(plugins)
-      registry = registry_class.new(index_class.new(plugins))
+    def only_narrow_x = ->(name) { name == :narrow_x }
+
+    def scope_with(plugins, statement_gate: only_narrow_x, plugin_gate: only_narrow_x)
+      registry = registry_class.new(index_class.new(plugins, statement_gate, plugin_gate))
       Rigor::Scope.empty(environment: environment_class.new(registry))
                   .with_local(:x, Rigor::Type::Combinator.untyped)
     end
 
-    def apply(source, plugins, tracer = nil)
-      described_class.apply_plugin_assertions(call_node(source), scope_with(plugins), tracer)
+    def apply(source, plugins, tracer = nil, **gates)
+      described_class.apply_plugin_assertions(call_node(source), scope_with(plugins, **gates), tracer)
     end
 
     it "applies a :local fact a plugin contributes for a call its gate names" do
@@ -152,10 +171,19 @@ RSpec.describe Rigor::Inference::StatementEvaluator::DefArgumentsAndAssertions d
       expect(plugin.seen.size).to eq(1)
     end
 
-    it "never asks a plugin about a call its gate does not name" do
+    it "never asks a plugin about a call the registry-wide gate does not name" do
       plugin = plugin_class.new([fact_class.new(target_kind: :local, target_name: :x, type: string)], [])
 
-      result = apply("other_call(1)", [plugin])
+      result = apply("other_call(1)", [plugin], plugin_gate: ->(_name) { true })
+
+      expect(plugin.seen).to be_empty
+      expect(result.local(:x)).to eq(combinator.untyped)
+    end
+
+    it "never asks a plugin about a call its own gate does not name" do
+      plugin = plugin_class.new([fact_class.new(target_kind: :local, target_name: :x, type: string)], [])
+
+      result = apply("other_call(1)", [plugin], statement_gate: ->(_name) { true })
 
       expect(plugin.seen).to be_empty
       expect(result.local(:x)).to eq(combinator.untyped)
@@ -169,10 +197,13 @@ RSpec.describe Rigor::Inference::StatementEvaluator::DefArgumentsAndAssertions d
       expect(apply("narrow_x(1)", [raising, plugin]).local(:x)).to eq(string)
     end
 
-    it "narrows a local that is not bound in the scope to nothing" do
+    it "leaves the scope as it was for a :local fact that names a local the scope does not bind" do
       plugin = plugin_class.new([fact_class.new(target_kind: :local, target_name: :missing, type: string)], [])
+      start = scope_with([plugin])
 
-      expect(apply("narrow_x(1)", [plugin]).local(:missing)).to be_nil
+      result = described_class.apply_plugin_assertions(call_node("narrow_x(1)"), start, nil)
+
+      expect(result).to equal(start)
     end
 
     it "narrows `self` for a :self fact on a receiver-less call" do

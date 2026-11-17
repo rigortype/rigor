@@ -56,7 +56,7 @@ module Rigor
           # ADR-103 WD15 — captured from the RAW, pre-`DEFAULTS.merge` file (+ its `includes:` chain) because
           # `DEFAULTS` itself carries an `"effects" => false` entry: once merged, "the file never wrote
           # `effects:`" and "the file wrote `effects: false`" collapse to the same value and become
-          # indistinguishable to {#initialize}. This is the only place that distinction still exists.
+          # indistinguishable to {Configuration#initialize}. This is the only place that distinction still exists.
           raw = load_with_includes(loaded)
           effects_key_present = raw.key?("effects")
           target_ruby_key_present = raw.key?("target_ruby")

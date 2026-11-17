@@ -58,14 +58,14 @@ module Rigor
         # The project's test roots: the directories (or files) holding its tests. `nil` (the default) auto-detects
         # whichever of `spec/` and `test/` exist, the same way `signature_paths: nil` auto-detects `sig/`; `[]`
         # declares that the project has none. `rigor sig-gen --params=observed` harvests call-site observations
-        # from them when no `--observe=PATH` is given. See {#resolved_test_paths}.
+        # from them when no `--observe=PATH` is given. See {Configuration#resolved_test_paths}.
         "test_paths" => nil,
         # ADR-112 WD4 — `rigor sig-gen` settings. `inline_declared:` decides what happens to a method the inline
         # reader (`rigor-rbs-inline`) already declares from `# @rbs` / `#:`. `write` (the default) copies the
         # inline declaration into `sig/`, so the generated signature is the complete contract a gem ships;
         # `skip` leaves every member that reader declares out of `sig/`, for a project whose Steep reads the
         # same annotations (`inline: true` beside `signature "sig"`), where the copy would be a second
-        # declaration of one method (`DuplicatedMethodDefinition`). See {#sig_gen_inline_declared}.
+        # declaration of one method (`DuplicatedMethodDefinition`). See {Configuration#sig_gen_inline_declared}.
         "sig_gen" => {
           "inline_declared" => "write"
         },
@@ -102,8 +102,8 @@ module Rigor
         # `.rigor.dist.yml`'s `effects:` block — the same shape `baseline:` uses.
         #
         # The sub-keys are declared in `schemas/rigor-config.schema.json`. `check` (#383,
-        # {#effects_check?}), `snapshot.{path,reach,gate}`, `tolerated` (#381) and the policy trio
-        # `labels` / `attribution` / `envelopes` (#385, {#coerce_effects_policy}) are read; `views` lands
+        # {Configuration#effects_check?}), `snapshot.{path,reach,gate}`, `tolerated` (#381) and the policy trio
+        # `labels` / `attribution` / `envelopes` (#385, {Configuration#coerce_effects_policy}) are read; `views` lands
         # with the slice that implements it (#390). Reserving a sub-key's shape before a reader exists is
         # the same discipline the schema applies to a sibling implementation's namespace (ADR-99).
         "effects" => false,
@@ -150,7 +150,7 @@ module Rigor
         # (default — adopt none), `true` (adopt the whole overlay), a list of feature ids (adopt only those),
         # or `{ all: true, except: [ids] }` (adopt all but the named). A queued change is either a severity
         # promotion (composed by {SeverityProfile.resolve}) or a behaviour switch (read at its call site
-        # through {#bleeding_edge_active?}); `bleeding_edge:` selects both kinds the same way.
+        # through {Configuration#bleeding_edge_active?}); `bleeding_edge:` selects both kinds the same way.
         "bleeding_edge" => false,
         "dependencies" => {
           "source_inference" => [],
@@ -236,7 +236,7 @@ module Rigor
 
       # Every top-level key a conforming `.rigor.yml` may carry: the keys this implementation owns, plus
       # `includes:`, plus the namespaces reserved for another implementation. Anything else is recorded in
-      # {#unknown_keys} and warned about by {ConfigAudit}, and is also the did-you-mean dictionary for a
+      # {Configuration#unknown_keys} and warned about by {ConfigAudit}, and is also the did-you-mean dictionary for a
       # near-miss.
       #
       # `includes:` is a load-time directive — {load_with_includes} `delete`s it while merging, so it never

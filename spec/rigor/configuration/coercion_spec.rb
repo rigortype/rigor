@@ -319,6 +319,15 @@ RSpec.describe Rigor::Configuration::Coercion do
       end
     end
 
+    it "globs a relative pattern whose first segment is not a directory, in sorted order" do
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          %w[x3.rb x1.rb x2.rb].each { |name| File.write(name, "") }
+          expect(described_class.expand_pre_eval_entries(["x*.rb"])).to eq(%w[x1.rb x2.rb x3.rb])
+        end
+      end
+    end
+
     it "expands a glob in sorted order and folds the results together" do
       Dir.mktmpdir do |dir|
         %w[b.rb a.rb].each { |name| File.write(File.join(dir, name), "") }

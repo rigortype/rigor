@@ -268,7 +268,7 @@ module Rigor
       VALID_CACHE_VALIDATIONS = %w[auto stat digest].freeze
       private_constant :VALID_CACHE_VALIDATIONS
 
-      # The `sig_gen.inline_declared:` values, as the Symbols {#sig_gen_inline_declared} answers.
+      # The `sig_gen.inline_declared:` values, as the Symbols {Configuration#sig_gen_inline_declared} answers.
       VALID_SIG_GEN_INLINE_DECLARED = %w[write skip].freeze
       private_constant :VALID_SIG_GEN_INLINE_DECLARED
 

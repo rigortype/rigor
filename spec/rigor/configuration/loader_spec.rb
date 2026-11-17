@@ -55,6 +55,18 @@ RSpec.describe Rigor::Configuration::Loader do
       end
     end
 
+    it "applies sibling includes in declaration order, then the including file's own keys over both" do
+      Dir.mktmpdir do |dir|
+        write(dir, "a.yml", "paths: [from-a]\ntarget_ruby: '3.1'\ncore_root: core-a\n")
+        write(dir, "b.yml", "paths: [from-b]\ntarget_ruby: '3.2'\n")
+        path = write(dir, "top.yml", "includes: [a.yml, b.yml]\ncore_root: core-top\n")
+        base = File.absolute_path(dir)
+        expect(described_class.load_with_includes(path))
+          .to eq({ "paths" => [File.join(base, "from-b")], "target_ruby" => "3.2",
+                   "core_root" => File.join(base, "core-top") })
+      end
+    end
+
     it "lets the including file's scalar win and merges nested hashes key by key" do
       Dir.mktmpdir do |dir|
         write(dir, "base.yml", "cache: {path: base-cache, max_bytes: 10}\ntarget_ruby: '3.3'\n")

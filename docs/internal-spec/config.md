@@ -16,7 +16,7 @@ without the other:
 
 | Artifact | Owns |
 | --- | --- |
-| [`lib/rigor/configuration/defaults.rb`](../../lib/rigor/configuration/defaults.rb), [`lib/rigor/configuration/coercion.rb`](../../lib/rigor/configuration/coercion.rb) | `DEFAULTS` — which keys exist, their defaults — and the coercers that give each value its runtime meaning. |
+| [`lib/rigor/configuration/defaults.rb`](../../lib/rigor/configuration/defaults.rb), [`lib/rigor/configuration/coercion.rb`](../../lib/rigor/configuration/coercion.rb) | `DEFAULTS` — which keys exist, their defaults — and the coercers that give each value its runtime meaning (`coerce_effects`, `coerce_effects_snapshot` and `coerce_effects_policy` stay in `lib/rigor/configuration.rb`). |
 | [`schemas/rigor-config.schema.json`](../../schemas/rigor-config.schema.json) | The declared shape of every key, including keys this implementation never reads (§ Reserved namespaces). |
 
 The schema is **not documentation of the loader** — it is authoritative in its own right, and it is

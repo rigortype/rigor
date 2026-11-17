@@ -17,7 +17,7 @@ Four artifacts describe `.rigor.yml`, and nothing said how they relate:
 | Artifact | Job |
 | --- | --- |
 | `schemas/rigor-config.schema.json` | JSON Schema; reaches editors via the `# yaml-language-server: $schema=` comment that `.rigor.dist.yml` carries and `rigor init` writes |
-| `lib/rigor/configuration.rb` | `DEFAULTS` + the coercers |
+| `lib/rigor/configuration/defaults.rb` + `coercion.rb` (in `configuration.rb` until #3287) | `DEFAULTS` + the coercers |
 | `lib/rigor/config_audit.rb` | the resolves-to-nothing warnings |
 | `docs/manual/03-configuration.md` | the user-facing key reference |
 

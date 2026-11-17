@@ -430,7 +430,7 @@ module Rigor
 
       # Issue #1246 — enters only `call`'s block, from the receiver scope, as the statement form enters it
       # ({#evaluate_block_if_present}): the per-node scope index's evaluation of a block a value-position call holds
-      # ({ScopeIndexer#evaluate_unentered_block}). The call's receiver and arguments are left to the index walk.
+      # ({ScopeIndexer::NodePropagation#evaluate_unentered_block}). The receiver and arguments stay with the walk.
       #
       # Such a block enters with the unknown-`self` mark only ({Scope#with_block_self_unknown}), as the walk entered
       # it, not with the statement form's opaque-`self` mark ({Scope#entering_opaque_block}): issue #1717 keeps the
@@ -2643,8 +2643,8 @@ module Rigor
       # Issue #2211 — a global subject from a `when` test that may rebind it on ({#when_test_rebinds_subject?}): a
       # method may assign a global, and the statement walk keeps a global's binding past a call, so the clause
       # bodies and the later clauses read it as `Dynamic[top]`, as the scope index's walk of a value-position `case`
-      # reads it
-      # (`ScopeIndexer#forget_called_subject`). `$g = nil; case $g when String then 1 when reset! then 2 else $g + 1
+      # reads it (`ScopeIndexer::NodePropagation#forget_called_subject`).
+      # `$g = nil; case $g when String then 1 when reset! then 2 else $g + 1
       # end`, with `reset!` assigning `$g`, is `6` in Ruby. An instance variable a test's call may write is widened by
       # {#run_when_test} instead; any other subject is left as is.
       def forget_called_global_subject(subject, scope)

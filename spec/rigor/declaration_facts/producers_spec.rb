@@ -21,10 +21,11 @@ require "yaml"
 # evasion. It does not see dispatch on `node.class.name` or other strings, on `Prism::Node#type` through a variable,
 # `Prism.const_get(:ClassNode)`, duck typing (`respond_to?(:superclass)`), a keyword spelled as a String, a constant
 # reached through a variable or `const_get`, a collector subclassed through a variable or `Class.new`, or rule (v)'s
-# writes outside `scope_indexer.rb`, through a local alias of a parameter, through `...` forwarding, or from a method
-# reached only through `send`, a block handed to another file, or an entry point neither in
-# `DeclarationWriterScan::ROOTS` nor called as `ScopeIndexer.x` from another covered file. Plugin specs and demo apps
-# are not scanned. The list freezes the set and certifies nothing about how an entry computes its context.
+# writes outside `scope_indexer.rb` and `scope_indexer/node_propagation.rb`, through a local alias of a parameter,
+# through `...` forwarding, or from a method reached only through `send`, a block handed to another file, or an
+# entry point neither in `DeclarationWriterScan::ROOTS` nor called as `ScopeIndexer.x` (or `NodePropagation.x`) from
+# another covered file. Plugin specs and demo apps are not scanned. The list freezes the set and certifies nothing
+# about how an entry computes its context.
 RSpec.describe "Declaration producers" do
   let(:snapshot) { File.join(__dir__, "producers.yml") }
   # The closed grandfathered list. Lower it when an entry goes; never raise it for a new producer.
@@ -34,8 +35,12 @@ RSpec.describe "Declaration producers" do
   # `lib/rigor/analysis/check_rules.rb#Rigor::Analysis::CheckRules.visibility_reduced?` became
   # `lib/rigor/analysis/check_rules/override_visibility.rb#Rigor::Analysis::CheckRules::OverrideVisibility#visibility_reduced?`
   # when the method moved; the method itself was not renamed.
+  # Digest change, count still 366 (#3288): five grandfathered keys moved from `lib/rigor/inference/scope_indexer.rb#
+  # Rigor::Inference::ScopeIndexer#` to `lib/rigor/inference/scope_indexer/node_propagation.rb#
+  # Rigor::Inference::ScopeIndexer::NodePropagation#`: `propagate`, `propagate_call`, `propagate_end_body`,
+  # `propagate_if_branches` and `propagate_unless_branches`; none was renamed.
   let(:grandfathered_pin) do
-    { count: 366, digest: "5c96733b2bc7b4b865e5fa6971fe912b54aa972836e39a55052c17456b9920ea" }
+    { count: 366, digest: "b596f2681627bd2be74ac7e0ff8b1a4626264e00f30d0a653bdee25be8140e3a" }
   end
 
   define_method(:found) do |parsed = DeclarationFactSources.parsed_under|

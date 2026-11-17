@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "prism"
+require_relative "../../source/constant_path"
 require_relative "../diagnostic"
 
 module Rigor

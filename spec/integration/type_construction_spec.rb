@@ -3612,6 +3612,17 @@ RSpec.describe "Rigor type construction (integration)" do
       end
     end
 
+    # Issue #3337, review round 4 — a frame holding a `binding`, `eval` or `local_variable_set` call can rebind a
+    # local with no write node, so every loop store there is joined; a frame with none still replaces.
+    describe "fixtures/loop_store_reflective_write.rb — a frame that can write locals by name joins every store" do
+      let(:harness) { harness_for("loop_store_reflective_write") }
+
+      it "produces no assert_type mismatches" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches.map { |d| [d.line, d.message] }).to be_empty
+      end
+    end
+
     # Issue #631 — ADR-56 WD2.11. The seam rederives ONE carrier and writes it over the whole
     # binding, which is only the right answer for the pre-state members the mutation applied to as a
     # collection of that class. A `Union` seed's non-carrier members (a whole-variable `Dynamic`, a

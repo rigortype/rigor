@@ -167,7 +167,8 @@ module Rigor
       # follows it (`pr = proc { s = nil }; s = "a"; pr.call; out << s` stores `nil`), and the walk does not model
       # the write at the call, so no assignment of such a local is one a store is known to follow. Where the closure
       # sits does not matter: one made after the loop is counted too, which only costs precision. Nil when the scope
-      # carries no frame, where the frame's other closures cannot be seen.
+      # carries no frame, where the frame's other closures cannot be seen, and when the frame holds a call that can
+      # write any local by name ({.reflective_write?}).
       def closure_written(scope)
         frame = scope.match_frame
         return nil if frame.nil?
@@ -175,12 +176,27 @@ module Rigor
         names = nil
         [frame.body, frame.parameters].each do |root|
           Source::NodeWalker.each(root) do |node|
+            return nil if reflective_write?(node)
             next unless CapturedLocals::LOCAL_WRITE_NODES.include?(node.class) && node.depth.positive?
 
             (names ||= []) << node.name
           end
         end
         names || NO_NAMES
+      end
+
+      # Calls that reach a frame's locals by name, whatever the receiver: `binding` and `local_variable_set`, and
+      # `eval`; the `*_eval` forms count when given an argument, which may be source text.
+      BINDING_CALLS = %i[binding eval local_variable_set].freeze
+      STRING_EVAL_CALLS = %i[instance_eval class_eval module_eval].freeze
+      private_constant :BINDING_CALLS, :STRING_EVAL_CALLS
+
+      # True for a call through which a local may be rebound without a write node: `s = "a";
+      # binding.local_variable_set(:s, nil); out << s` stores `nil`.
+      def reflective_write?(node)
+        return false unless node.is_a?(Prism::CallNode)
+
+        BINDING_CALLS.include?(node.name) || (STRING_EVAL_CALLS.include?(node.name) && !node.arguments.nil?)
       end
 
       # The type a store's arguments read the rebound local `name` at, given `reached`, the scope the fixpoint's

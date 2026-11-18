@@ -434,8 +434,8 @@ Nothing else narrows: `pop`, `shift`, `slice!`, `subtract`, `clear` and `delete`
 What a binding says about the contents of its object, a literal's shape or the `non-empty-array[T]` an emptiness guard leaves, holds only until code that may mutate the object runs ([#3340](https://github.com/rigortype/rigor/issues/3340)). Besides a mutator called on the variable, on an alias of it or inside a block, the fact MUST be dropped:
 
 - at a lambda literal whose body calls a mutator on the variable (`f = -> { xs.clear }`), as at a `proc` or `lambda` block;
-- on entry to a `Kernel#loop` body that mutates the variable, since a later run reads what an earlier one left;
-- on entry to a `rescue` clause when the `begin` body mutates the variable, since the clause runs after any prefix of the body;
+- on entry to a `Kernel#loop` body that mutates the variable, since a later run reads what an earlier one left. A `loop` block that can empty a local also counts as a closure that may run later, below, so the guard does not narrow that local in the first place;
+- on entry to a `rescue` clause when the `begin` body mutates the variable or hands it on in one of the forms below, since the clause runs after any prefix of the body. A closed hash shape the body does nothing to but remove keys from keeps its shape with every key optional, so a deleted key reads back its `nil`;
 - for an instance variable of a class's instance, after a call on `self` whose method is proven to mutate it in place (`reset!` running `@xs.clear`), where the guard had narrowed the variable below the type the class's other methods give it. The binding keeps the rest of its narrowing, so a `nil` the guard ruled out stays out;
 - for a local passed to `yield`, positionally or as a keyword's value;
 - for the receiver of `send`, `public_send` or `__send__` with a computed name, of `instance_eval` or `instance_exec` whose block calls a mutator on `self` or is not written at the call, and of a `Method` object called at once (`xs.method(name).call`). A literal name is read as the call it makes (`xs.method(:clear).call` is `xs.clear`);
@@ -443,7 +443,7 @@ What a binding says about the contents of its object, a literal's shape or the `
 
 So after `return if xs.empty?`, each of these leaves `xs.size` a `non-negative-int` and `xs.size == 0` unfolded. Code that only reads the collection in the same positions (`-> { xs.size }`, `xs.send(:size)`, `xs.instance_eval { size }`, `yield ys`) leaves the fact in place. The forms that hand the object to unread code drop only what a mutation can falsify: a literal shape or an emptiness witness widens to its nominal with a gradual element, and a binding already typed as a nominal (`Array[String]`) is unchanged.
 
-A closure that may run later is a standing way to mutate the object, so an emptiness guard MUST NOT narrow a local that such a closure in the same method, class or file body can empty: `f = -> { xs.clear }; return if xs.empty?; f.call; xs.size` reads a `non-negative-int`, wherever the closure is made relative to the guard. The closures are a lambda literal and a block that may run after its call returns (`proc`, `lambda`, `define_method`, `define_singleton_method`, a callback); the ways to empty are a mutator that can leave a non-empty Array empty (`clear`, `pop`, `shift`, `delete`, `replace`, `reject!`, …) called on the local, and the forms above that hand it to unread code. A closure that only reads the local or only appends to it (`<<`, `push`), a block a catalogued iterator or `Kernel#loop` runs before its call returns, and the closure the guard itself sits in leave the guard's narrowing in place. The last assumes that closure does not call itself.
+A closure that may run later is a standing way to mutate the object, so an emptiness guard MUST NOT narrow a local that such a closure in the same method, class or file body can empty: `f = -> { xs.clear }; return if xs.empty?; f.call; xs.size` reads a `non-negative-int`, wherever the closure is made relative to the guard. The closures are a lambda literal and a block that may run after its call returns (`proc`, `lambda`, `define_method`, `define_singleton_method`, a callback); the ways to empty are a mutator that can leave a non-empty Array empty (`clear`, `pop`, `shift`, `delete`, `replace`, `reject!`, …) called on the local, and the forms above that hand it to unread code. A closure that only reads the local or only appends to it (`<<`, `push`), a block a catalogued iterator ran and finished, and the closure the guard itself sits in leave the guard's narrowing in place. The last assumes that closure does not call itself.
 
 The emptiness fact, and a literal's shape, are dropped where the engine sees the mutation or the escape; a mutation through an alias the engine does not link can leave them stale. Not covered:
 
@@ -454,7 +454,8 @@ The emptiness fact, and a literal's shape, are dropped where the engine sees the
 - a `yield` of a literal holding the local (`yield [xs]`, `yield(*[xs])`, `yield({ a: xs })`);
 - a `Method` object kept in a variable and called later (`m = xs.method(:clear); m.call`), and a block passed as a value over a literal Array of locals (`[xs].each(&blk)`);
 - any of the opaque forms written as an operand of another call (`puts(yield(xs))`, `log(xs.send(name))`);
-- a literal assigned to the local after an emptying closure is made, and a capture a `Kernel#loop` body rebinds.
+- a literal assigned to the local after an emptying closure is made, and a capture a `Kernel#loop` body rebinds;
+- a String literal passed to `yield` in a file under `# frozen_string_literal: true`, which the block cannot mutate and which still widens to `String` (a precision limit, not a stale fact).
 
 ### Closure captures
 

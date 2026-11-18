@@ -297,7 +297,8 @@ RSpec.describe "content facts past a mutation the call site does not spell", typ
   end
 
   # The optional-keys shape stands only where removing is all the body does with the local. A store through a
-  # literal `send`, a `yield`, a remover's own block, an argument of another call or an element read leaves no value pin to trust.
+  # literal `send`, a `yield`, a remover's own block, an argument of another call or an element read leaves no value
+  # pin to trust.
   def reached_hash_bodies
     bodies = ["h.delete(:a); h.send(:store, :a, 1)", "h.delete(:a); yield h",
               'h.select! { |_k, v| v.replace("q") || true }', "h.delete(:a); Util.fill(h)", "h[:a].delete(:x)"]

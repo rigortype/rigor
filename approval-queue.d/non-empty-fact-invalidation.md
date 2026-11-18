@@ -35,4 +35,5 @@ What the PR leaves stale, the same list its specs and body carry. The emptiness 
 - a `yield` of a literal holding the local (`yield [xs]`, `yield(*[xs])`, `yield({ a: xs })`);
 - a `Method` object kept in a variable and called later (`m = xs.method(:clear); m.call`), and a block passed as a value over a literal Array of locals (`[xs].each(&blk)`);
 - any of the opaque forms written as an operand of another call (`puts(yield(xs))`, `log(xs.send(name))`);
-- a literal assigned to the local after an emptying closure is made, and a capture a `Kernel#loop` body rebinds.
+- a literal assigned to the local after an emptying closure is made, and a capture a `Kernel#loop` body rebinds;
+- a String literal passed to `yield` in a file under `# frozen_string_literal: true`, which the block cannot mutate and which still widens to `String` (a precision limit, not a stale fact).

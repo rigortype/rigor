@@ -11,6 +11,9 @@ require "spec_helper"
 #
 # Every example below was checked against Ruby 4.0.5: `["a"].pop` is `"a"`, a second `pop` is `nil`, and
 # `["a", "b"].pop(1)` is `["b"]`.
+#
+# The unrefined, union, `&.pop`, tuple and unguarded examples are guards: controls that must not move, which no
+# removal of the fix's lines breaks.
 RSpec.describe "Array#pop on non-empty-array", type: :runner do
   def dumps(source)
     result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))

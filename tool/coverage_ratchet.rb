@@ -13,7 +13,6 @@
 # docs/agents/measurement.md § "The self-typing ratchet" says how to read and refresh the figures.
 
 require "json"
-require "pathname"
 require "stringio"
 require "yaml"
 
@@ -146,15 +145,19 @@ module CoverageRatchet
 
     require_relative "../lib/rigor"
     require_relative "../lib/rigor/cli"
+    pins = YAML.safe_load_file(pins_path)
     configuration = Rigor::Configuration.load(config_path)
+    config = { "path" => repo_relative(config_path), "parameter_inference" => configuration.parameter_inference }
+    # Refused before the scan: under the wrong config its figures prove nothing, and the key-on scan takes minutes.
+    refused = config_failures(config, pins)
+    unless refused.empty?
+      ["rigor: coverage ratchet FAILED", *refused.map { |failure| "  - #{failure}" }].each { |line| out.puts(line) }
+      return 1
+    end
+
     json = StringIO.new
     status = Rigor::CLI.start(["coverage", "--config", config_path, "--format", "json", *paths], out: json)
-    summary = JSON.parse(json.string).fetch("summary", {})
-    ok, lines = judge(
-      summary: summary,
-      config: { "path" => repo_relative(config_path), "parameter_inference" => configuration.parameter_inference },
-      pins: YAML.safe_load_file(pins_path)
-    )
+    ok, lines = judge(summary: JSON.parse(json.string).fetch("summary", {}), config: config, pins: pins)
     lines.each { |line| out.puts(line) }
     ok && status.zero? ? 0 : 1
   end

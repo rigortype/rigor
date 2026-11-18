@@ -166,6 +166,11 @@ RSpec.describe Rigor::Builtins::StaticReturnRefinements do
       w = ARGV.first ? ARGV : []
       n = ARGV.empty? ? nil : ARGV
       ne = ARGV.empty? ? ["x"] : ARGV
+      ah = ENV["Q"] ? ARGV : { (0..) => [1] }
+      ra = ENV["Q"] ? ARGV : Array.new
+      b = ARGV.dup
+      raise if b.empty?
+      nb = ENV["Q"] ? b : ARGV.map(&:size)
     RUBY
 
     define_method(:type_after_seed) do |expression, environment: Rigor::Environment.default, prelude: ""|
@@ -229,7 +234,13 @@ RSpec.describe Rigor::Builtins::StaticReturnRefinements do
       "t[1..i]" => "Array[1 | non-negative-int]?",
       "u[1..]" => "Array[String] | Array[non-negative-int] | nil",
       "w[1..]" => "Array[Dynamic[top]] | Array[String] | nil",
-      "n&.[](0..)" => "Array[String]?"
+      "n&.[](0..)" => "Array[String]?",
+      # A union is answered by the table only when every member is: a member with no owner (a `Hash`, whose
+      # `{}[0..]` is nil; a `non-empty-array` refinement carrier) or an owned member that declines (a raw
+      # `Array`) leaves the whole call to RBS, nil included.
+      "ah[0..]" => "Array[String] | [1] | nil",
+      "nb[0..]" => "Array[String] | Array[non-negative-int] | nil",
+      "ra[0..]" => "Array[Dynamic[top]] | Array[String] | nil"
     }.each do |expression, expected|
       it "keeps the declared answer of #{expression}" do
         expect(type_after_seed(expression)).to eq(expected), "#{expression} moved off its declared answer"

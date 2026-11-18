@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "alias_mutation_floor"
+require_relative "block_call_timing"
 require_relative "deep_erasure"
 require_relative "mutation_widening"
 require_relative "opaque_mutation"
@@ -67,9 +68,12 @@ module Rigor
         found
       end
 
-      # A lambda literal, or a block that may run after its call returns, that does not hold the guard.
+      # A lambda literal, or a block that may run after its call returns, that does not hold the guard. A
+      # `Kernel#loop` block runs before its call returns, like a catalogued iterator's, and its own entry and
+      # continuation read what it mutates.
       def later_closure?(node, parent, guard_offset)
         return false unless node.is_a?(Prism::LambdaNode) || RemoverHolderScan.deferred_block?(parent)
+        return false if parent.is_a?(Prism::CallNode) && BlockCallTiming.kernel_loop?(parent)
 
         location = node.location
         guard_offset < location.start_offset || guard_offset >= location.end_offset

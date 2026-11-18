@@ -1114,6 +1114,14 @@ as [`rigor check`](#rigor-check).
 exits `1` when the precision ratio falls below `RATIO`
 (`0.0`–`1.0`), making it a CI gate.
 
+The precision report also counts **call sites**: every method call,
+and of those the ones whose result is `Dynamic`, either the whole
+type or the worst member of a union. Text output prints both counts
+in the summary. `--format=json` carries `call_sites`,
+`dynamic_call_count` and `dynamic_call_ratio` in `summary`, and
+`call_sites` and `dynamic_call_count` in each `by_file` row.
+`--threshold` does not read them.
+
 `--protection` switches to **type-protection coverage**: it
 reports "if I introduce a bug, would Rigor catch it" rather than
 "how precise are my types". Each dispatch site (a call with an

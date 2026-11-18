@@ -12,8 +12,11 @@ module SigDeclarationReader
   # its own marker rather than a gap pointer with an issue number on the allow-list (#1011).
   AUTHORED_PATTERN = /\bauthored:\s*(?<reason>.*)$/
 
+  # `overloads` is a `def` member's own overload list, which the parameter-shape check reads (#3335); nil for every
+  # other member, an `attr_*` included.
   Declaration = Struct.new(:path, :line, :class_name, :method_name, :kind, :typed_params, :return_rbs,
-                           :marker, :authored_reason, :untyped_return, :types_something, keyword_init: true) do
+                           :marker, :authored_reason, :untyped_return, :types_something, :overloads,
+                           keyword_init: true) do
     def to_s
       "#{path}:#{line}: #{class_name}##{method_name}"
     end
@@ -44,7 +47,7 @@ module SigDeclarationReader
         when RBS::AST::Members::MethodDefinition
           [declaration(member, path, namespace.join("::"), member.name.to_s, member.kind,
                        typed_params: typed_params?(member.overloads),
-                       return_rbs: return_rbs(member.overloads))]
+                       return_rbs: return_rbs(member.overloads)).tap { |decl| decl.overloads = member.overloads }]
         when RBS::AST::Members::AttrReader, RBS::AST::Members::AttrWriter,
              RBS::AST::Members::AttrAccessor
           attribute_declarations(member, path, namespace.join("::"))

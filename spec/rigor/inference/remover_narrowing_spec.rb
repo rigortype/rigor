@@ -204,7 +204,10 @@ RSpec.describe "collection remover narrowing", type: :runner do
                           "super(l)\n    l.select! { |x| x.is_a?(Integer) }\n    dump_type(l.dup)\n  end\nend\n"
   }.each do |holder, body|
     it "keeps the ordinary reading under #{holder}" do
-      expect(dumped_types("#{maybe_one}#{body}")).to eq(["Array[Integer?]"])
+      # Issue #3340 — the block a `yield` runs may store into the literal it is handed, so its ordinary reading
+      # carries one unknown store. Either way the remover does not narrow: the `nil` stays.
+      ordinary = holder == "a yield argument" ? "Array[Dynamic[Integer]?]" : "Array[Integer?]"
+      expect(dumped_types("#{maybe_one}#{body}")).to eq([ordinary])
     end
   end
 

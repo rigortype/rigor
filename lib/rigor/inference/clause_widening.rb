@@ -4,7 +4,10 @@ require "prism"
 
 require_relative "../source/node_children"
 require_relative "../type"
+require_relative "alias_mutation_floor"
 require_relative "captured_locals"
+require_relative "element_read_widening"
+require_relative "unknown_store_widening"
 
 module Rigor
   module Inference
@@ -64,6 +67,36 @@ module Rigor
         widened.equal?(scope) ? nil : widened
       end
 
+      # Issue #3340 — `scope`, a rescue clause's entry, with each local of `stores` (`{ name => [site, ...] }`, the
+      # in-place mutation sites of the `begin` body, `CapturedLocals.loop_content_mutations`) at what it can hold
+      # after any prefix of the body ran ({.past_any_prefix}).
+      def content_entry(scope, stores)
+        stores.reduce(scope) do |acc, (name, sites)|
+          type = acc.local(name)
+          type.nil? ? acc : acc.with_mutated_local(name, past_any_prefix(type, sites))
+        end
+      end
+
+      # A closed hash shape every site only removes from keeps its shape with every key optional
+      # ({AliasMutationFloor.removed_keys_shape}): nothing was stored, and a read of a key the body may have deleted
+      # still answers its `nil`, so `h.delete(k); raise` then `h[k].x` in the clause reports. Any other binding
+      # takes the unknown store of every site, with the gradual arm where its contents stay value-pinned, as a loop
+      # body's later pass enters (`StatementEvaluator#unknown_store_binding`).
+      def past_any_prefix(type, sites)
+        if type.is_a?(Type::HashShape) && sites.all? { |site| own_remover?(site) }
+          shape = AliasMutationFloor.removed_keys_shape(type, sites.first.name)
+          return shape if shape
+        end
+        widened = UnknownStoreWidening.widen(type, sites)
+        UnknownStoreWidening.value_pinned_collection?(widened) ? UnknownStoreWidening.gradual_content(widened) : widened
+      end
+
+      # A remover or reorderer called on the binding itself, not on an element of it or through a callee.
+      def own_remover?(site)
+        site.is_a?(Prism::CallNode) && UnknownStoreWidening::VALUE_PRESERVING.include?(site.name) &&
+          ElementReadWidening.element_read_path(site.receiver).nil?
+      end
+
       # `counts` with each write under `node` counted.
       def count_writes(node, counts)
         return counts if SCOPE_BODY_NODES.any? { |klass| node.is_a?(klass) }
@@ -84,7 +117,7 @@ module Rigor
         node.rigor_each_child { |child| found = mentions(child, among, found) }
         found
       end
-      private_class_method :count_writes, :mentions
+      private_class_method :count_writes, :mentions, :past_any_prefix, :own_remover?
     end
   end
 end

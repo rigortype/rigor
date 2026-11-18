@@ -210,6 +210,34 @@ RSpec.describe "content facts past a mutation the call site does not spell", typ
     RUBY
   end
 
+  # A body that only removes from a closed hash shape leaves the shape with every key optional, so a read of a key
+  # it may have deleted still answers its `nil` (`computed_key_presence_guard_spec.rb` holds the report); a body
+  # that also stores takes the unknown store.
+  it "enters a rescue clause with a hash shape's keys optional past a remover, and widened past a store" do
+    expect(dumped_types(<<~RUBY)).to eq(["{ ?a: 1, ?b: 2 }", "Hash[Dynamic[top] | Symbol, Dynamic[top] | Integer]"])
+      def removed
+        h = { a: 1, b: 2 }
+        begin
+          h.delete(:a)
+          raise "x"
+        rescue StandardError
+          Rigor.dump_type(h)
+        end
+      end
+
+      def stored
+        h = { a: 1 }
+        begin
+          h[:c] = 3
+          h.delete(:a)
+          raise "x"
+        rescue StandardError
+          Rigor.dump_type(h)
+        end
+      end
+    RUBY
+  end
+
   # A guard, not a pin of this change: a `begin` a `retry` targets re-enters its chain from the retry-widened entry,
   # which already joined the scope after the body's `pop`.
   it "enters a rescue clause that retries with the fact the `begin` body falsified dropped" do

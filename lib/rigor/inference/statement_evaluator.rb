@@ -2962,14 +2962,14 @@ module Rigor
       # The scope a rescue clause of `node` enters with: it runs after any prefix of the body, so neither a `$_`
       # (issue #1359) nor a guard's narrowing of a global or constant (issue #1429) the body may rebind holds there.
       # Issue #3340 — nor does what the entry says about the contents of a local the body mutates in place: each
-      # enters at its unknown-store widening, as in a loop body's later pass ({#loop_content_entry}). A body that can
+      # enters as after any prefix of the body ({ClauseWidening.content_entry}). A body that can
       # mutate nothing the entry binds ({CapturedLocals.may_touch_capture?}, allocation-free) skips the site scan.
       def rescue_entry_scope(node, entry)
         body = node.statements
         entry = forget_guard_if_rebinds(LastLine.forget_if_set(entry, body), body)
         return entry unless node.rescue_clause && body && CapturedLocals.may_touch_capture?(body, entry)
 
-        loop_content_entry(body, entry, entry)
+        ClauseWidening.content_entry(entry, loop_content_mutations(body, entry))
       end
 
       # Issue #2691 — a rescue clause runs after any prefix of the `begin` body raised, so a fact the clause's

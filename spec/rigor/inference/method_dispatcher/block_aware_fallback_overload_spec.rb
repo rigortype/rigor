@@ -89,8 +89,9 @@ RSpec.describe "Block-aware no-match overload fallback (#2429)", type: :runner d
     # `1.5` against the RBS arms is the argument mismatch the RBS reports anyway.
     expect(result.diagnostics.map(&:qualified_rule))
       .to eq(%w[dump.type call.undefined-method dump.type call.argument-type-mismatch])
+    # Issue #3340 — `yield x` hands the String to the block, which may mutate it, so `x.to_s` reads `String`.
     expect(result.diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message))
-      .to eq([%(dump_type: "a"), %(dump_type: "1.5")])
+      .to eq([%(dump_type: String), %(dump_type: "1.5")])
   end
 
   # #2379's per-value selection still answers before the decline: `"s"` takes the String arm and `1` the Integer arm.

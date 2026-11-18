@@ -60,7 +60,7 @@ require "rigor/sig_gen"
 require_relative "sig_provenance_report"
 require_relative "sig_source_index"
 
-class SigProvenanceAuditor
+class SigProvenanceAuditor # rubocop:disable Metrics/ClassLength -- one reader and one classifier, kept together
   # A declaration whose return is what `sig-gen` proves. Earned.
   GENERATED = :generated
   # Return equivalent, at least one parameter (or block) typed narrower than `untyped`. Earned —
@@ -83,6 +83,15 @@ class SigProvenanceAuditor
   UNTRANSLATABLE = :untranslatable_declared
   # `sig-gen` declined the `def` (`sig.skipped.*` — overwhelmingly `untyped-return`).
   UNRENDERABLE = :unrenderable
+  # `sig-gen` declined the `def` as `sig.skipped.untyped-return`, the declaration types at least one parameter
+  # (or the block), and EVERY overload's return is the bare `untyped`. The declaration claims nothing about the
+  # return, so there is nothing for the gate to doubt; it states the parameters, which are authored intent
+  # (ADR-107, ADR-5 clause 2). Typing a method's parameters is what lets sig-gen render its return, and its
+  # callers' returns, so the gate must not count the first step against the file's pin (#3323). Watched, not
+  # waived: it is neither earned nor residue, the report prints its count per file and in total, and the row
+  # leaves the class the moment sig-gen can render the return, because the declared `untyped` is then looser
+  # than the generated return and reads `tighter_return` (a marker is required) or `generated`.
+  PARAMETER_ONLY = :parameter_only
   # `sig-gen` found the `def` but the RBS environment did not resolve it to this declaration.
   UNMATCHED = :unmatched_declaration
   # No `def`, but Rigor's own recognition finds the method on the declaring class: an `attr_*`, a
@@ -100,6 +109,8 @@ class SigProvenanceAuditor
   # return type to generate, so the provenance rule has nothing to say about them.
   NON_METHOD = :non_method
 
+  # Neither earned nor residue; counted on its own so the number can be watched fall.
+  WATCHED = [PARAMETER_ONLY].freeze
   EARNED = [GENERATED, PARAMETER_INTENT, RETURN_INTENT].freeze
   # The three #839 states are residue, not earned: knowing that a declared method EXISTS says nothing
   # about where its type came from, and the type is what ADR-107 § Decision asks about. Splitting them
@@ -113,7 +124,7 @@ class SigProvenanceAuditor
   AUTHORED_PATTERN = /\bauthored:\s*(?<reason>.*)$/
 
   Declaration = Struct.new(:path, :line, :class_name, :method_name, :kind, :typed_params, :return_rbs,
-                           :marker, :authored_reason, keyword_init: true) do
+                           :marker, :authored_reason, :untyped_return, keyword_init: true) do
     def to_s
       "#{path}:#{line}: #{class_name}##{method_name}"
     end
@@ -121,6 +132,9 @@ class SigProvenanceAuditor
 
   Row = Struct.new(:declaration, :classification, :detail, keyword_init: true) do
     def marked? = !declaration.marker.nil? || !declaration.authored_reason.nil?
+
+    # A marker records a row without changing that it is watched: `marked?` rows still count here.
+    def watched? = WATCHED.include?(classification)
 
     def residue? = RESIDUE.include?(classification) && !marked?
 
@@ -243,11 +257,21 @@ class SigProvenanceAuditor
         Row.new(declaration: decl, classification: TIGHTER_RETURN,
                 detail: "declared #{candidate.declared_return_rbs}, " \
                         "sig-gen proposes #{candidate.inferred_return&.erase_to_rbs}")
-      when Rigor::SigGen::Classification::SKIPPED
-        Row.new(declaration: decl, classification: UNRENDERABLE,
-                detail: Rigor::SigGen::Classification::SKIP_DIAGNOSTIC_IDS[candidate.skip_reason])
+      when Rigor::SigGen::Classification::SKIPPED then classify_skipped(decl, candidate)
       else classify_new_method(decl, candidate)
       end
+    end
+
+    # `parameter_only` needs all three: sig-gen skipped the def for `untyped-return` specifically (any other skip
+    # reason says nothing about the return), a typed parameter or block, and a declared return that is the bare
+    # `untyped` in every overload. A block's own return type is not the method's return and is not read.
+    def classify_skipped(decl, candidate)
+      detail = Rigor::SigGen::Classification::SKIP_DIAGNOSTIC_IDS[candidate.skip_reason]
+      if candidate.skip_reason == :untyped_return && decl.typed_params && decl.untyped_return
+        return Row.new(declaration: decl, classification: PARAMETER_ONLY, detail: detail)
+      end
+
+      Row.new(declaration: decl, classification: UNRENDERABLE, detail: detail)
     end
 
     # Issue #839 — `sig-gen` attributed no `def` to this declaration. Ask the project index, then the
@@ -343,7 +367,7 @@ class SigProvenanceAuditor
     def declaration(member, path, class_name, method_name, kind, typed_params: false, return_rbs: nil)
       Declaration.new(path: path, line: member.location&.start_line, class_name: class_name,
                       method_name: method_name, kind: kind, typed_params: typed_params,
-                      return_rbs: return_rbs, marker: marker_for(member),
+                      return_rbs: return_rbs, untyped_return: untyped_return?(member), marker: marker_for(member),
                       authored_reason: authored_for(member))
     end
 
@@ -380,6 +404,16 @@ class SigProvenanceAuditor
     # comparison made against it is the exact `"void"` of a constructor, which has one overload.
     def return_rbs(overloads)
       overloads.map { |overload| overload.method_type.type.return_type.to_s }.uniq.join(" | ")
+    end
+
+    # Every overload's own return is the bare `untyped` (the same test as `Generator#declared_untyped?`): not
+    # `[untyped, untyped]`, `Array[untyped]`, `untyped?`, a union with `untyped`, nor an interface return.
+    # An attribute's return is its declared type.
+    def untyped_return?(member)
+      return untyped?(member.type) if member.respond_to?(:type)
+      return false unless member.respond_to?(:overloads) && member.overloads.any?
+
+      member.overloads.all? { |overload| untyped?(overload.method_type.type.return_type) }
     end
 
     def function_parameters(function)

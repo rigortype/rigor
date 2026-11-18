@@ -18,6 +18,7 @@ class SigProvenanceReport
       rows.group_by(&:classification).sort_by { |_, group| -group.size }
           .each { |state, group| out.puts("| `#{state}` | #{group.size} |") }
       per_file(rows, out)
+      watched(rows, out)
       out.puts("\n### tighter-return (a marker is required on every one)\n")
       rows.select { |row| row.classification == SigProvenanceAuditor::TIGHTER_RETURN }
           .each { |row| out.puts("- #{row}") }
@@ -26,7 +27,17 @@ class SigProvenanceReport
 
     private
 
-    def columns = [SigProvenanceAuditor::TIGHTER_RETURN] + SigProvenanceAuditor::RESIDUE
+    def columns = [SigProvenanceAuditor::TIGHTER_RETURN] + SigProvenanceAuditor::RESIDUE + SigProvenanceAuditor::WATCHED
+
+    # The rows that are neither earned nor residue, counted so the number can be watched fall as typed
+    # parameters make returns renderable (#3323). Printed even at zero.
+    def watched(rows, out)
+      SigProvenanceAuditor::WATCHED.each do |state|
+        found = rows.select { |row| row.classification == state }
+        out.puts("\n### #{state} (watched, not residue): #{found.size} total, #{found.count(&:marked?)} marked\n")
+        found.group_by { |row| row.declaration.path }.sort.each { |path, group| out.puts("- `#{path}`: #{group.size}") }
+      end
+    end
 
     # Issue #839's own table: for every declaration `sig-gen` could attribute no `def` to, WHY the
     # static scan found none. A `no_source` row here is a stale declaration, and is listed in full

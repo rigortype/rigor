@@ -572,6 +572,111 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
       expect(rows).to eq([SigProvenanceAuditor::UNRENDERABLE])
     end
 
+    # #3323 — a declaration whose return is the bare `untyped`, on a method sig-gen skips as `untyped-return`, with
+    # a typed parameter. `y` is returned untyped, so no declared type of `x` can make the return renderable.
+    describe "`parameter_only` (#3323)" do
+      let(:unrenderable_ruby) { "class Widget\n  def n(x, y, &blk)\n    x\n    y\n  end\nend\n" }
+
+      def only_row(rbs, ruby: unrenderable_ruby)
+        audit_fixture(ruby: ruby, rbs: rbs).find { |r| r.declaration.method_name == "n" }
+      end
+
+      def widget(signature) = "class Widget\n  def n: #{signature}\nend\n"
+
+      it "classes a typed-parameter, bare-`untyped` return on an unrenderable method `parameter_only`, not residue" do
+        row = only_row(widget("(Integer x, untyped y) -> untyped"))
+        expect(row.classification).to eq(SigProvenanceAuditor::PARAMETER_ONLY)
+        expect(row.detail).to eq("sig.skipped.untyped-return")
+        expect(row).not_to be_residue
+        expect(SigProvenanceAuditor::EARNED).not_to include(row.classification)
+        expect(SigProvenanceAuditor.residue_counts([row])).to be_empty
+      end
+
+      it "still counts a TYPED return on the same unrenderable method as residue" do
+        row = only_row(widget("(Integer x, untyped y) -> Integer"))
+        expect(row.classification).to eq(SigProvenanceAuditor::UNRENDERABLE)
+        expect(row).to be_residue
+      end
+
+      it "still counts an all-`untyped` declaration as residue: no parameter is stated" do
+        row = only_row(widget("(untyped x, untyped y) -> untyped"))
+        expect(row.classification).to eq(SigProvenanceAuditor::UNRENDERABLE)
+        expect(row).to be_residue
+      end
+
+      it "gives no exemption to any return other than the bare `untyped`" do
+        returns = ["void", "boolish", "bool", "top", "bot", "nil", "self", "instance", "class", "Integer",
+                   "[untyped, untyped]", "Array[untyped]", "untyped?", "(untyped | Integer)", "_ToS"]
+        classes = returns.to_h { |ret| [ret, only_row(widget("(Integer x, untyped y) -> #{ret}")).classification] }
+        expect(classes.values.uniq).to eq([SigProvenanceAuditor::UNRENDERABLE])
+      end
+
+      it "needs every overload's return to be the bare `untyped`" do
+        both = only_row(widget("(Integer x, untyped y) -> untyped | (String x, untyped y) -> untyped"))
+        mixed = only_row(widget("(Integer x, untyped y) -> untyped | (String x, untyped y) -> Integer"))
+        expect(both.classification).to eq(SigProvenanceAuditor::PARAMETER_ONLY)
+        expect(mixed.classification).to eq(SigProvenanceAuditor::UNRENDERABLE)
+      end
+
+      it "reads the method's return, not the block's: a typed block over an untyped return qualifies" do
+        typed_block = only_row(widget("(Integer x, untyped y) { (untyped) -> Integer } -> untyped"))
+        untyped_block = only_row(widget("(untyped x, untyped y) { (untyped) -> untyped } -> Integer"))
+        expect(typed_block.classification).to eq(SigProvenanceAuditor::PARAMETER_ONLY)
+        expect(untyped_block.classification).to eq(SigProvenanceAuditor::UNRENDERABLE)
+      end
+
+      it "does not apply to a skip for any other reason" do
+        declaration = SigProvenanceAuditor::Declaration.new(
+          path: "sig/widget.rbs", line: 2, class_name: "Widget", method_name: "n", kind: :instance,
+          typed_params: true, return_rbs: "untyped", untyped_return: true, marker: nil
+        )
+        classes = %i[untyped_return complex_shape unrenderable_rbs].to_h do |reason|
+          skipped = Rigor::SigGen::MethodCandidate.new(
+            path: "lib/widget.rb", class_name: "Widget", method_name: :n, kind: :instance,
+            classification: Rigor::SigGen::Classification::SKIPPED, skip_reason: reason
+          )
+          [reason, SigProvenanceAuditor.classify([declaration], [skipped], environment: nil).first.classification]
+        end
+        expect(classes).to eq(untyped_return: SigProvenanceAuditor::PARAMETER_ONLY,
+                              complex_shape: SigProvenanceAuditor::UNRENDERABLE,
+                              unrenderable_rbs: SigProvenanceAuditor::UNRENDERABLE)
+      end
+
+      it "keeps the marker meaning: a marked row is recorded, and still counted as watched" do
+        rbs = "class Widget\n  # authored: parameters only until sig-gen can render the return.\n  " \
+              "def n: (Integer x, untyped y) -> untyped\nend\n"
+        row = only_row(rbs)
+        expect(row.classification).to eq(SigProvenanceAuditor::PARAMETER_ONLY)
+        expect(row).to be_marked
+        expect(row).to be_watched
+        expect(row).not_to be_residue
+      end
+
+      it "leaves a declared `untyped` return on a RENDERABLE method flagged as before (tighter-return)" do
+        row = only_row(widget("(Integer x) -> untyped"), ruby: "class Widget\n  def n(x)\n    x\n  end\nend\n")
+        expect(row.classification).to eq(SigProvenanceAuditor::TIGHTER_RETURN)
+        expect(row).not_to be_marked
+      end
+
+      it "returns to scrutiny the moment typing a parameter makes the return renderable (the ratchet)" do
+        before = only_row(widget("(Integer x, untyped y) -> untyped"))
+        after = only_row(widget("(Integer x, String y) -> untyped"))
+        expect(before.classification).to eq(SigProvenanceAuditor::PARAMETER_ONLY)
+        expect(after.classification).to eq(SigProvenanceAuditor::TIGHTER_RETURN)
+        expect(after.detail).to include("sig-gen proposes String")
+        expect(after).not_to be_marked
+      end
+
+      it "prints the count per file and in total in the report, marked rows included" do
+        rows = audit_fixture(ruby: unrenderable_ruby, rbs: widget("(Integer x, untyped y) -> untyped"))
+        out = StringIO.new
+        SigProvenanceReport.render(rows, out: out)
+        expect(out.string).to include("### parameter_only (watched, not residue): 1 total, 0 marked")
+        expect(out.string).to include("- `sig/fixture.rbs`: 1")
+        expect(out.string).to match(%r{\| `sig/fixture.rbs` \|(?: \d+ \|)+ 1 \| \d+ \| 0 \|$})
+      end
+    end
+
     it "calls a declaration with no matching def `no_source`" do
       rows = classifications_for(ruby: "class Widget\n  def n\n    42\n  end\nend\n",
                                  rbs: "class Widget\n  def gone: () -> Integer\nend\n",

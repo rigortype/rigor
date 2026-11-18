@@ -86,6 +86,19 @@ silent, so a marker would turn the watched class into a permanent exemption. The
 `parameter_only` row except the two that were marked `unrenderable` rows before the class existed
 (`SIG_PROVENANCE_PARAMETER_ONLY_MARKED`, which can only shrink).
 
+**A `tighter_return` over a declared `untyped` takes the proposal.** A bare `untyped` return states nothing for
+a marker to record, so the failure message offers no marker for it, only sig-gen's proposed return.
+
+**Each overload's parameter list must fit its `def`** (#3335). For every declaration the gate pairs with a
+`def`, every call an overload admits must be one the `def` accepts. Its positional count must fall within the
+def's (`*rest` lifts the upper bound). Every keyword it names must be one the def takes, unless the def has
+`**rest`. Every keyword the def requires must be required in the overload, and an overload `**rest` needs one in
+the def. A declared block needs a def that takes one, yields, asks `block_given?` or calls `super`. An overload
+may omit optional positionals, optional keywords or the block, and may make an optional required. `...`
+accepts anything past the positionals before it, and `(?)` is exempt. Declarations with no ordinary `def` are
+counted as exempt by reason, not compared: `attr_*`, `alias`, `define_method`, a `Data`/`Struct` member, an
+inherited or runtime-defined method. The parameter types stay the author's.
+
 Print the report with
 `nix develop --command bundle exec ruby -Ilib -Ispec/support -e 'require "sig_provenance_auditor"; SigProvenanceAuditor.report'`.
 

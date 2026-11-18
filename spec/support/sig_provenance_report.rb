@@ -13,7 +13,7 @@
 # constant read below resolves at call time.
 class SigProvenanceReport
   class << self
-    def render(rows, out: $stdout)
+    def render(rows, out: $stdout, shapes: nil)
       out.puts("| classification | n |\n| --- | --- |")
       rows.group_by(&:classification).sort_by { |_, group| -group.size }
           .each { |state, group| out.puts("| `#{state}` | #{group.size} |") }
@@ -23,9 +23,16 @@ class SigProvenanceReport
       rows.select { |row| row.classification == SigProvenanceAuditor::TIGHTER_RETURN }
           .each { |row| out.puts("- #{row}") }
       unattributed(rows, out)
+      parameter_shapes(shapes, out) if shapes
     end
 
     private
+
+    # #3335 — every method declaration compared with its `def`'s parameter list, or counted as exempt by reason.
+    def parameter_shapes(shapes, out)
+      out.puts("\n### parameter lists against the def: #{shapes.summary}\n")
+      shapes.mismatches.each { |mismatch| out.puts("- #{mismatch}") }
+    end
 
     def columns = [SigProvenanceAuditor::TIGHTER_RETURN] + SigProvenanceAuditor::RESIDUE + SigProvenanceAuditor::WATCHED
 

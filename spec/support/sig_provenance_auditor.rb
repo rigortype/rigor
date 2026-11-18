@@ -58,6 +58,7 @@ require "rbs"
 require "rigor"
 require "rigor/sig_gen"
 require_relative "sig_declaration_reader"
+require_relative "sig_parameter_shape"
 require_relative "sig_provenance_report"
 require_relative "sig_source_index"
 
@@ -121,7 +122,10 @@ class SigProvenanceAuditor
 
   Declaration = SigDeclarationReader::Declaration
 
-  Row = Struct.new(:declaration, :classification, :detail, keyword_init: true) do
+  # `paired` — sig-gen produced a candidate for the declaration; `source_def` — the `Prism::DefNode` that candidate
+  # was built from, nil for a candidate with no `def` (a `Data`/`Struct` member, an `attr_*`). Both feed only the
+  # parameter-shape check ({SigParameterShape}, #3335); the classification never reads them.
+  Row = Struct.new(:declaration, :classification, :detail, :paired, :source_def, keyword_init: true) do
     def marked? = !declaration.marker.nil? || !declaration.authored_reason.nil?
 
     # A marker records a row without changing that it is watched: `marked?` rows still count here.
@@ -134,13 +138,23 @@ class SigProvenanceAuditor
     end
   end
 
-  # One `sig-gen` run's candidates, and the project environment that run built (the elaborator reads
-  # generic arity from it).
-  Generated = Struct.new(:candidates, :environment, keyword_init: true)
+  # One `sig-gen` run's candidates, the project environment that run built (the elaborator reads
+  # generic arity from it), and the `def` node behind each candidate built from one.
+  Generated = Struct.new(:candidates, :environment, :def_nodes, keyword_init: true)
 
-  # `Generator#run` keeps the environment it built in `@environment`; this subclass only exposes it.
+  # `Generator#run` keeps the environment it built in `@environment`; this subclass only exposes it, and records the
+  # `def` each candidate is classified from, keyed as a candidate is: `[path, class, method, kind]` (#3335).
   class EnvironmentKeepingGenerator < Rigor::SigGen::Generator
     def elaboration_environment = @environment
+
+    def def_nodes = @def_nodes || {}
+
+    private
+
+    def classify_collected_def(path, def_node, class_name, kind, scope_index)
+      (@def_nodes ||= {})[[path, class_name, def_node.name.to_s, kind]] = def_node if class_name
+      super
+    end
   end
   private_constant :Generated, :EnvironmentKeepingGenerator
 
@@ -156,7 +170,9 @@ class SigProvenanceAuditor
     #   default: requiring a tree runs its code, and a fixture tree's `lib/` is written by the
     #   example auditing it.
     # @param environment — required with `candidates:`: sig-gen's project environment for that run.
-    def audit(root:, candidates: nil, environment: nil, configuration: nil, runtime: false)
+    # @param def_nodes — with `candidates:`, the `def` behind each (see {Generated}); omitted, no row is compared
+    #   by {SigParameterShape} and every paired row counts as `candidate_without_def`.
+    def audit(root:, candidates: nil, environment: nil, def_nodes: {}, configuration: nil, runtime: false)
       if candidates && environment.nil?
         raise ArgumentError, "audit: candidates need environment: (sig-gen's project environment)"
       end
@@ -164,7 +180,8 @@ class SigProvenanceAuditor
       generated = candidates ? nil : generate(root: root, configuration: configuration)
       classify(declarations(root: root), candidates || generated.candidates,
                sources: SigSourceIndex.build(root: root, runtime: runtime),
-               environment: candidates ? environment : generated.environment)
+               environment: candidates ? environment : generated.environment,
+               def_nodes: candidates ? def_nodes : generated.def_nodes)
     end
 
     # Every member of every `.rbs` under `sig/`, in file then source order.
@@ -179,7 +196,9 @@ class SigProvenanceAuditor
       Dir.chdir(root) do
         generator = EnvironmentKeepingGenerator.new(configuration: configuration || Rigor::Configuration.load(nil),
                                                     paths: paths, observations: {}, include_private: true)
-        Generated.new(candidates: generator.run, environment: generator.elaboration_environment)
+        candidates = generator.run
+        Generated.new(candidates: candidates, environment: generator.elaboration_environment,
+                      def_nodes: generator.def_nodes)
       end
     end
 
@@ -188,9 +207,17 @@ class SigProvenanceAuditor
     # spelling `rigor sig-gen` writes, not the raw carrier (a bare generic carries no `untyped` parameter
     # until the elaborator fills it in). `environment: nil` compares the raw spelling, spelled out so no caller
     # reaches it by omission; only the unit examples with no sig-gen run pass it.
-    def classify(declarations, candidates, environment:, sources: SigSourceIndex::NONE)
+    def classify(declarations, candidates, environment:, sources: SigSourceIndex::NONE, def_nodes: {})
       index = index_candidates(candidates)
-      declarations.map { |decl| classify_one(decl, index, sources, environment) }
+      declarations.map do |decl|
+        row = classify_one(decl, index, sources, environment)
+        candidate = decl.kind && candidate_for(decl, index)
+        if candidate
+          row.paired = true
+          row.source_def = def_nodes[[candidate.path, candidate.class_name, candidate.method_name.to_s, candidate.kind]]
+        end
+        row
+      end
     end
 
     # `{ "sig/rigor/type.rbs" => 187 }` — unmarked residue per file, the number ADR-107 G3 keeps
@@ -203,7 +230,8 @@ class SigProvenanceAuditor
     # `docs/notes/20260909-sig-no-source-audit.md` cite. `runtime: true` — a report of the repository's
     # own `sig/` wants the #839 tiers, and the audit is what the two notes are made of.
     def report(root: Dir.pwd, out: $stdout, runtime: true)
-      SigProvenanceReport.render(audit(root: root, runtime: runtime), out: out)
+      rows = audit(root: root, runtime: runtime)
+      SigProvenanceReport.render(rows, out: out, shapes: SigParameterShape.check(rows))
     end
 
     private

@@ -85,8 +85,8 @@ module Rigor
           stack.concat(node.compact_child_nodes)
         end
         # The suppression covers a false positive under `parameter_inference: true`: `stack.pop` on the non-empty
-        # stack reads nilable (#3338), and `calls` keeps a nilable element type after the loop (#3337). Remove it
-        # when both have landed; spec/rigor/self_check_suppressions_spec.rb fails once the row is gone.
+        # stack reads nilable (#3338). Remove it with the fix, #3339; spec/rigor/self_check_suppressions_spec.rb
+        # fails once the finding is gone.
         calls.sort_by { |call| call.location.start_offset } # rigor:disable call.possible-nil-receiver
              .filter_map { |call| literal_feature(call) }
       end

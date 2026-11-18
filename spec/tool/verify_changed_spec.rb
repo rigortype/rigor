@@ -542,7 +542,8 @@ RSpec.describe "bin/verify-changed spec selection" do
     let(:engine_path) { "lib/rigor/inference/statement_evaluator.rb" }
     let(:drift) do
       %w[spec/integration/precision_snapshot_spec.rb spec/rigor/public_api_drift_spec.rb
-         spec/rigor/sig_gen/provenance_spec.rb spec/rigor/scope/ancestry_walker_detection_spec.rb]
+         spec/rigor/sig_gen/provenance_spec.rb spec/rigor/scope/ancestry_walker_detection_spec.rb
+         spec/rigor/self_check_suppressions_spec.rb]
     end
 
     it "selects only the mirror spec for an engine path, where the default adds the drift set" do

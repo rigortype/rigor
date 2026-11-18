@@ -388,8 +388,12 @@ dependency_edit=""
 # rule below can reach them and both are named by path.
 snapshot_gate_spec=spec/integration/precision_snapshot_spec.rb
 flat_fixture_audit_spec=spec/rigor/typing_state_reachability_spec.rb
+# The inline-suppression gate reads every `# rigor:disable` under `lib/` and analyses under `.rigor.dist.yml`, so
+# an edit to either can make it fail.
+self_check_suppressions_spec=spec/rigor/self_check_suppressions_spec.rb
 engine_drift_specs=(
   "$snapshot_gate_spec"
+  "$self_check_suppressions_spec"
   spec/integration/type_construction_spec.rb
   spec/rigor/public_api_drift_spec.rb
   spec/rigor/ractor_readiness_spec.rb

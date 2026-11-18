@@ -122,7 +122,6 @@ module Rigor
         return [] if plugin_registry.nil? || plugin_registry.empty?
 
         plugin_registry.plugins.flat_map do |plugin|
-          # rigor:disable undefined-method
           plugin.manifest.heredoc_templates.map do |template|
             [plugin.manifest.id, template]
           end
@@ -135,7 +134,6 @@ module Rigor
         return [] if plugin_registry.nil? || plugin_registry.empty?
 
         plugin_registry.plugins.flat_map do |plugin|
-          # rigor:disable undefined-method
           plugin.manifest.trait_registries.map do |registry|
             [plugin.manifest.id, registry]
           end
@@ -148,7 +146,6 @@ module Rigor
         return [] if plugin_registry.nil? || plugin_registry.empty?
 
         plugin_registry.plugins.flat_map do |plugin|
-          # rigor:disable undefined-method
           plugin.manifest.nested_class_templates.map do |template|
             [plugin.manifest.id, template]
           end

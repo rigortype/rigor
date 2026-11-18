@@ -231,7 +231,7 @@ module Rigor
         left_si = Array(left["source_inference"])
         right_si = Array(right["source_inference"])
         both_empty = left_si.empty? && right_si.empty?
-        out["source_inference"] = left_si + right_si unless both_empty # rigor:disable flow.always-truthy-condition
+        out["source_inference"] = left_si + right_si unless both_empty
         out
       end
 

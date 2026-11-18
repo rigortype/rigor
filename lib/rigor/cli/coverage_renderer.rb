@@ -55,9 +55,16 @@ module Rigor
         @out.puts("  precise:              #{p}#{pct(p, g)}")
         @out.puts("  dynamic (opaque):     #{o}#{pct(o, g)}")
         @out.puts("  precision ratio:      #{(report.precision_ratio * 100).round(2)}%")
-        @out.puts("  call sites:           #{report.call_sites}")
-        @out.puts("  dynamic call sites:   #{report.dynamic_call_sites}#{pct(report.dynamic_call_sites, report.call_sites)}")
+        render_text_call_sites(report)
         @out.puts
+      end
+
+      # #3315 — the call-site tally `make coverage` ratchets.
+      def render_text_call_sites(report)
+        calls = report.call_sites
+        dynamic = report.dynamic_call_sites
+        @out.puts("  call sites:           #{calls}")
+        @out.puts("  dynamic call sites:   #{dynamic}#{pct(dynamic, calls)}")
       end
 
       def render_text_tier_table(report)

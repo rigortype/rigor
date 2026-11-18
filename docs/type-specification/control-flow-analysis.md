@@ -436,16 +436,25 @@ What a binding says about the contents of its object, a literal's shape or the `
 - at a lambda literal whose body calls a mutator on the variable (`f = -> { xs.clear }`), as at a `proc` or `lambda` block;
 - on entry to a `Kernel#loop` body that mutates the variable, since a later run reads what an earlier one left;
 - on entry to a `rescue` clause when the `begin` body mutates the variable, since the clause runs after any prefix of the body;
-- for an instance variable, after a call on `self` whose method is proven to mutate it in place (`reset!` running `@xs.clear`). The binding keeps the rest of its narrowing, so a `nil` the guard ruled out stays out;
+- for an instance variable of a class's instance, after a call on `self` whose method is proven to mutate it in place (`reset!` running `@xs.clear`), where the guard had narrowed the variable below the type the class's other methods give it. The binding keeps the rest of its narrowing, so a `nil` the guard ruled out stays out;
 - for a local passed to `yield`, positionally or as a keyword's value;
 - for the receiver of `send`, `public_send` or `__send__` with a computed name, of `instance_eval` or `instance_exec` whose block calls a mutator on `self` or is not written at the call, and of a `Method` object called at once (`xs.method(name).call`). A literal name is read as the call it makes (`xs.method(:clear).call` is `xs.clear`);
 - for each variable in a literal Array a symbol block mutates (`[xs, ys].each(&:clear)`).
 
 So after `return if xs.empty?`, each of these leaves `xs.size` a `non-negative-int` and `xs.size == 0` unfolded. Code that only reads the collection in the same positions (`-> { xs.size }`, `xs.send(:size)`, `xs.instance_eval { size }`, `yield ys`) leaves the fact in place. The forms that hand the object to unread code drop only what a mutation can falsify: a literal shape or an emptiness witness widens to its nominal with a gradual element, and a binding already typed as a nominal (`Array[String]`) is unchanged.
 
-A closure that may run later is a standing way to mutate the object, so an emptiness guard MUST NOT narrow a local that such a closure in the same method, class or file body can empty: `f = -> { xs.clear }; return if xs.empty?; f.call; xs.size` reads a `non-negative-int`, wherever the closure is made relative to the guard. The closures are a lambda literal and a block that may run after its call returns (`proc`, `lambda`, `define_method`, `define_singleton_method`, a callback); the ways to empty are a mutator that can leave a non-empty Array empty (`clear`, `pop`, `shift`, `delete`, `replace`, `reject!`, …) called on the local, and the forms above that hand it to unread code. A closure that only reads the local or only appends to it (`<<`, `push`), a block a catalogued iterator ran and finished, and the closure the guard itself sits in leave the guard's narrowing in place.
+A closure that may run later is a standing way to mutate the object, so an emptiness guard MUST NOT narrow a local that such a closure in the same method, class or file body can empty: `f = -> { xs.clear }; return if xs.empty?; f.call; xs.size` reads a `non-negative-int`, wherever the closure is made relative to the guard. The closures are a lambda literal and a block that may run after its call returns (`proc`, `lambda`, `define_method`, `define_singleton_method`, a callback); the ways to empty are a mutator that can leave a non-empty Array empty (`clear`, `pop`, `shift`, `delete`, `replace`, `reject!`, …) called on the local, and the forms above that hand it to unread code. A closure that only reads the local or only appends to it (`<<`, `push`), a block a catalogued iterator ran and finished, and the closure the guard itself sits in leave the guard's narrowing in place. The last assumes that closure does not call itself.
 
-Not covered: an alias of the local made inside such a closure, a `Method` object kept in a variable and called later, and any of the opaque forms written as an operand of another call (`puts(yield(xs))`).
+The emptiness fact, and a literal's shape, are dropped where the engine sees the mutation or the escape; a mutation through an alias the engine does not link can leave them stale. Not covered:
+
+- a closure that empties the object through a holder made outside it (`ys = xs; f = -> { ys.clear }`, an element of a container holding it, an instance variable holding it), through an alias made inside it, or through a callee it passes the local to;
+- a closure that holds the guard and calls itself, so re-enters past the guard: the exemption for the guard's own closure assumes it does not;
+- an instance variable in a method outside a class (`self` is `main`, which has no class seed for the reset to read), one mutated through a local alias (`q = @xs; q.clear`) or by a callee on another receiver (`Util.drain(@xs)`), and one mutated in place in a loop body or in a `begin` body before its `rescue`; the later-running-closure rule covers locals only;
+- an emptier behind a call that hands the receiver back (`-> { xs.tap(&:clear) }`, `xs.instance_eval { tap(&:clear) }`);
+- a `yield` of a literal holding the local (`yield [xs]`, `yield(*[xs])`, `yield({ a: xs })`);
+- a `Method` object kept in a variable and called later (`m = xs.method(:clear); m.call`), and a block passed as a value over a literal Array of locals (`[xs].each(&blk)`);
+- any of the opaque forms written as an operand of another call (`puts(yield(xs))`, `log(xs.send(name))`);
+- a literal assigned to the local after an emptying closure is made, and a capture a `Kernel#loop` body rebinds.
 
 ### Closure captures
 

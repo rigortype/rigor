@@ -395,6 +395,8 @@ RSpec.describe "content facts past a mutation the call site does not spell", typ
 
   # The seven shapes the review of #3339 listed, and the closure made before the guard, in one file: `pop` on a
   # non-empty array answers `T` only where none of them leaves `positive-int` behind.
+  # The instance-variable row is the spelling the change covers: a class whose `initialize` assigns `@xs`. In a
+  # top-level method, where `self` is `main`, the same lines still read `positive-int`.
   def shapes_waited_on
     <<~RUBY
       class Holder

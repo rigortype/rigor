@@ -24,7 +24,8 @@ module Rigor
     # ({RemoverHolderScan.deferred_block?}: `proc`, `lambda`, `define_method`, `define_singleton_method`, any block
     # but a catalogued iterator's or `tap` / `then` / `yield_self`'s), anywhere in the frame body the guard runs in,
     # so one made in a scope enclosing the guard counts. A closure the guard itself sits in does not: its own
-    # statements run in order, and the straight-line rules read them.
+    # statements run in order, and the straight-line rules read them. That assumes the closure does not call itself,
+    # which would re-enter it past the guard.
     #
     # It can empty the local when its body, a nested block included, runs on a read of it that resolves outside the
     # closure: a mutator that can leave a non-empty receiver empty (every {MUTATORS} name but the ones
@@ -32,8 +33,9 @@ module Rigor
     # literal `send` or a literal-named `Method` object, or by a symbol block over a literal Array holding it; or an
     # opaque hand-off ({OpaqueMutation}: a computed `send`, `instance_eval`, a `yield` passing it). A closure that
     # only reads the local, or only appends to it, leaves the guard's narrowing alone, and so does a block that ran
-    # and finished before the guard. Not read: an alias made inside the closure, and a callee the closure passes the
-    # local to.
+    # and finished before the guard. Not read: a holder of the object made outside the closure (`ys = xs; f = -> {
+    # ys.clear }`), an alias made inside it, a callee the closure passes the local to, and an emptier behind a call
+    # that hands the receiver back (`xs.tap(&:clear)`).
     module DeferredMutation
       MUTATORS = (MutationWidening::SHAPE_MUTATORS | SetMutation::MUTATORS).freeze
       SCOPE_NODES = Set[Prism::BlockNode, Prism::LambdaNode].freeze

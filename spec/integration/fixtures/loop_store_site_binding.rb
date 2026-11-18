@@ -243,6 +243,31 @@ until stack.empty?
 end
 assert_type("Array[1 | Dynamic[top]]", taken)
 
+# --- A closure that only READS the local, and a block that writes its own
+# block-local of the same name, leave the store alone: `["a", "a"]`. ---
+read_only = []
+i = 0
+s = nil
+while i < 2
+  show = proc { s.to_s }
+  s = "a"
+  show.call
+  read_only << s
+  i += 1
+end
+assert_type("Array[String]", read_only)
+
+shadowed = []
+i = 0
+z = nil
+while i < 2
+  [1].each { |x; z| z = :sym }
+  z = "a"
+  shadowed << z
+  i += 1
+end
+assert_type("Array[String]", shadowed)
+
 # --- A store in a nested loop is typed for both loops. ---
 nested = []
 i = 0

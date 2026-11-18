@@ -280,10 +280,11 @@ while i < 2
 end
 assert_type("Array[Dynamic[top] | Integer | Symbol | nil]", retried)
 
-# === A closure made before the loop captures the local and writes it:
-# `[:sym, :sym]`. The local's continuation binding carries a `Dynamic[top]`
-# arm for that write, which the binding at the store lacks, so the two are
-# joined.
+# === A block or lambda that writes the local, anywhere in the frame. The
+# walk does not model that write at the call, so no assignment of such a
+# local is one the store is known to follow.
+
+# made before the loop, writing a Symbol: `[:sym, :sym]`
 via_arrow = []
 i = 0
 s = nil
@@ -333,33 +334,171 @@ while i < 2
 end
 assert_type("Array[Dynamic[top] | String]", via_method)
 
+# made in the loop body ahead of the assignment, writing `nil`: `[nil, nil]`
+cleared_proc = []
+i = 0
+s = nil
+while i < 2
+  w = proc { s = nil }
+  s = "a"
+  w.call
+  cleared_proc << s
+  i += 1
+end
+assert_type("Array[String?]", cleared_proc)
+
+cleared_arrow = []
+i = 0
+s = nil
+while i < 2
+  w = -> { s = nil }
+  s = "a"
+  w.call
+  cleared_arrow << s
+  i += 1
+end
+assert_type("Array[String?]", cleared_arrow)
+
+cleared_lambda = []
+i = 0
+s = nil
+while i < 2
+  w = lambda { s = nil }
+  s = "a"
+  w.call
+  cleared_lambda << s
+  i += 1
+end
+assert_type("Array[String?]", cleared_lambda)
+
+cleared_new = []
+i = 0
+s = nil
+while i < 2
+  w = Proc.new { s = nil }
+  s = "a"
+  w.call
+  cleared_new << s
+  i += 1
+end
+assert_type("Array[String?]", cleared_new)
+
+cleared_singleton = []
+i = 0
+s = nil
+target = Object.new
+while i < 2
+  target.define_singleton_method(:clear) { s = nil }
+  s = "a"
+  target.clear
+  cleared_singleton << s
+  i += 1
+end
+assert_type("Array[String?]", cleared_singleton)
+
+cleared_method = []
+i = 0
+s = nil
+holder = Class.new
+while i < 2
+  holder.send(:define_method, :clear) { s = nil }
+  s = "a"
+  holder.new.clear
+  cleared_method << s
+  i += 1
+end
+assert_type("Array[String?]", cleared_method)
+
+# writing another class: `[7, 7]`
+renumbered = []
+i = 0
+s = 1
+while i < 2
+  w = proc { s = 7 }
+  s = "a"
+  w.call
+  renumbered << s
+  i += 1
+end
+assert_type("Array[Integer | String]", renumbered)
+
+# the other write forms; none changes what is stored here except the last
+# two, which store `nil`: `["a", "a"]`, `["ab", "ab"]`, `[nil, nil]` twice
+or_written = []
+i = 0
+s = nil
+while i < 2
+  w = proc { s ||= 3 }
+  s = "a"
+  w.call
+  or_written << s
+  i += 1
+end
+assert_type("Array[String?]", or_written)
+
+appended = []
+i = 0
+s = nil
+while i < 2
+  w = proc { s += "b" }
+  s = "a"
+  w.call
+  appended << s
+  i += 1
+end
+assert_type("Array[String?]", appended)
+
+and_written = []
+i = 0
+s = nil
+while i < 2
+  w = proc { s &&= nil }
+  s = "a"
+  w.call
+  and_written << s
+  i += 1
+end
+assert_type("Array[String?]", and_written)
+
+spread = []
+i = 0
+s = nil
+while i < 2
+  w = proc { s, t = nil, 4 }
+  s = "a"
+  w.call
+  spread << s
+  i += 1
+end
+assert_type("Array[String?]", spread)
+
 # === A store in a class or method body inside the loop is on that body's
 # own locals: the loop's `own` and `mine` hold `["a", "a"]`, and the inner
-# `5` reaches neither.
+# `5` reaches neither. The `nil` is the join's own reading of the inner store.
 own = []
 i = 0
 while i < 2
-  s = "a"
+  u = "a"
   class LoopStoreScope
-    s = 5
+    u = 5
     own = []
-    own << s
+    own << u
   end
-  own << s
+  own << u
   i += 1
 end
-assert_type("Array[Dynamic[top] | String]", own)
+assert_type("Array[Dynamic[top] | String | nil]", own)
 
 mine = []
 i = 0
 while i < 2
-  s = "a"
+  u = "a"
   def loop_store_scope
-    s = 5
+    u = 5
     mine = []
-    mine << s
+    mine << u
   end
-  mine << s
+  mine << u
   i += 1
 end
-assert_type("Array[Dynamic[top] | String]", mine)
+assert_type("Array[Dynamic[top] | String | nil]", mine)

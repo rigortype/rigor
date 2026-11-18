@@ -1,52 +1,56 @@
 ---
 locals:
-  b: Array[String]
-  branched: Array[String]
-  by_index: Hash[Integer, String]
-  by_key: Hash[String, Integer]
+  b: Array[String?]
+  branched: Array[String?]
+  by_index: Hash[Integer, String?]
+  by_key: Hash[String?, Integer]
   c: String?
   carried: Array[Integer | String | nil]
-  counted: Array[Integer]
+  counted: Array[Integer?]
   e: Integer?
-  either: Array[Dynamic[top]] | Hash[String, Integer]
+  either: Array[Dynamic[top]] | Hash[String?, Integer]
   first: String?
   g: String?
-  guarded: Array[String]
+  guarded: Array[String?]
   i: Integer[2..]
   inner: String?
   j: Integer | Integer[2..] | nil
   k: String?
-  keyed: Hash[String, Dynamic[top]]
+  keyed: Hash[String?, Dynamic[top]]
   late: Array[Dynamic[top]]
-  later_nil: Array[String]
+  later_nil: Array[String?]
   lit: '"a"?'
   m: Integer?
   "n": Integer?
-  nested: Array[String]
+  nested: Array[String?]
   node: 1 | Dynamic[top] | nil
-  out: Array[String]
-  pinned: Array["a"]
+  out: Array[String?]
+  pinned: Array["a"?]
   pre: String?
-  pushed: Array[String]
+  pushed: Array[String?]
   q: String?
+  read_only: Array[String?]
   real_nil: Array[String?]
-  reassigned: Array[String]
+  reassigned: Array[String?]
   row: Array[1 | 2 | Dynamic[top] | Integer]
-  rows: Array[Array[1 | Dynamic[top] | Integer] | [1]]
+  rows: Array[Array[1 | Dynamic[top] | Integer] | [1] | nil]
   s: String?
-  settled: Array[Integer]
-  slots: Array[String]
+  settled: Array[Integer?]
+  shadowed: Array[String?]
+  show: Proc?
+  slots: Array[String?]
   some: Array[String?]
   stack: Array[1]
   stored_first: Array[String?]
   t: String?
-  taken: Array[1 | Dynamic[top]]
-  text_or_list: Array[String] | String
-  u: Array[String]
+  taken: Array[1 | Dynamic[top] | nil]
+  text_or_list: Array[String?] | String
+  u: Array[String?]
   unbound: Array[Integer?]
-  unshifted: Array[String]
+  unshifted: Array[String?]
   v: Dynamic[top]
   w: String?
+  z: String?
 assertions:
   '1': Array[String]
   '2': Array[String]
@@ -71,7 +75,9 @@ assertions:
   '21': Array[String]
   '22': Array[1 | Dynamic[top]]
   '23': Array[String]
-  '24': Array[Integer]
-  '25': Array[Dynamic[top]] | Hash[String, Integer]
-  '26': Array[String] | String
-  '27': Array[Array[1 | Dynamic[top] | Integer] | [1]]
+  '24': Array[String]
+  '25': Array[String]
+  '26': Array[Integer]
+  '27': Array[Dynamic[top]] | Hash[String, Integer]
+  '28': Array[String] | String
+  '29': Array[Array[1 | Dynamic[top] | Integer] | [1]]

@@ -2,6 +2,7 @@
 
 require_relative "../type"
 require_relative "../source/node_walker"
+require_relative "captured_locals"
 require_relative "jump_targets"
 require_relative "narrowing"
 
@@ -138,18 +139,48 @@ module Rigor
 
         capped = pass.entry != converged
         table = pass.scopes
+        closures = closure_written(post_loop) if sites.assigned.each_value.any? { |names| !names.empty? }
         sites.assigned.each_with_object({}.compare_by_identity) do |(site, assigned), scopes|
           reached = table[site]
           next if reached.nil?
 
-          argument_scope = converged.each_key.reduce(post_loop) do |acc, name|
-            type = binding(name, reached, post_loop, capped: capped, assigned: assigned.include?(name),
-                                                     mutated: sites.stores.key?(name))
-            type.nil? ? acc : acc.with_local(name, type)
-          end
+          follows = closures.nil? ? NO_NAMES : assigned - closures
+          argument_scope = argument_scope(reached, post_loop, converged, sites.stores, capped, follows)
           table[site] = argument_scope
           scopes[site] = argument_scope unless argument_scope.equal?(post_loop)
         end
+      end
+
+      # `post_loop` with each of `converged`'s names at its {.binding} for a store reached with the scope `reached`.
+      # `follows` holds the locals the store is known to follow an assignment of.
+      def argument_scope(reached, post_loop, converged, stores, capped, follows) # rubocop:disable Metrics/ParameterLists
+        converged.each_key.reduce(post_loop) do |acc, name|
+          type = binding(name, reached, post_loop, capped: capped, assigned: follows.include?(name),
+                                                   mutated: stores.key?(name))
+          type.nil? ? acc : acc.with_local(name, type)
+        end
+      end
+
+      # The locals a block or lambda writes anywhere in the frame `scope` runs in — a method body with its
+      # parameters, or a class, module or file body: every local write whose `depth` is positive, which is one that
+      # reaches a variable of an enclosing scope. Such a closure may run between an assignment and a store that
+      # follows it (`pr = proc { s = nil }; s = "a"; pr.call; out << s` stores `nil`), and the walk does not model
+      # the write at the call, so no assignment of such a local is one a store is known to follow. Where the closure
+      # sits does not matter: one made after the loop is counted too, which only costs precision. Nil when the scope
+      # carries no frame, where the frame's other closures cannot be seen.
+      def closure_written(scope)
+        frame = scope.match_frame
+        return nil if frame.nil?
+
+        names = nil
+        [frame.body, frame.parameters].each do |root|
+          Source::NodeWalker.each(root) do |node|
+            next unless CapturedLocals::LOCAL_WRITE_NODES.include?(node.class) && node.depth.positive?
+
+            (names ||= []) << node.name
+          end
+        end
+        names || NO_NAMES
       end
 
       # The type a store's arguments read the rebound local `name` at, given `reached`, the scope the fixpoint's
@@ -161,12 +192,9 @@ module Rigor
       #   first moves on the capped pass).
       # - A capped fixpoint's last pass ran from an assumption the cap then widened, so the binding it reached the
       #   store with is widened the same way (`n = i; out << n` is `Integer`, not the `0 | 1 | 2` of the pass).
-      # - A local the store does not follow an assignment of (`assigned` false) may hold what an earlier iteration
-      #   left, whatever the pass narrowed it to: `c = "x" if a; out << c if c; c = 5 if b` stores `5`. The
-      #   continuation binding joins in whole.
-      # - So does a continuation binding with a gradual arm the binding at the store lacks. That arm says a write
-      #   the walk cannot see may have run — a closure made before the loop that captures the local (`f = -> { s =
-      #   :sym }`, then `s = "a"; f.call; out << s` stores `:sym`) — and the pass did not see it either.
+      # - A local the store does not follow an assignment of (`assigned` false; so is one a closure writes,
+      #   {.closure_written}) may hold what an earlier iteration left, whatever the pass narrowed it to: `c = "x" if
+      #   a; out << c if c; c = 5 if b` stores `5`. The continuation binding joins in whole.
       # - A local the body also mutates in place is stored as an object the body may go on mutating (`rows << row;
       #   row << 2`), so the non-nil part of its continuation binding joins in.
       def binding(name, reached, post_loop, capped:, assigned:, mutated:)
@@ -175,14 +203,8 @@ module Rigor
         return nil if at_store.nil? || settled.nil? || Type::Combinator.untyped?(settled)
 
         at_store = Type::Combinator.widen_value_pinned(at_store) if capped
-        assigned &&= gradual?(at_store) || !gradual?(settled)
         joined = join(at_store, settled, assigned, mutated)
         joined == settled ? nil : joined
-      end
-
-      # True for `Dynamic` and for a union with a `Dynamic` member.
-      def gradual?(type)
-        type.is_a?(Type::Dynamic) || (type.is_a?(Type::Union) && type.members.any?(Type::Dynamic))
       end
 
       # `at_store` with the part of the continuation binding `settled` a store may also hold ({.binding}'s last two

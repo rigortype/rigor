@@ -4065,8 +4065,9 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       recorder = ->(_node, _scope) {}
       [{}, { on_enter: recorder, converged_loop_recording: true }, { on_enter: recorder, widen_clauses: true }]
         .map do |options|
-          evaluator = Rigor::Inference::StatementEvaluator.new(scope: scope, **options)
-          evaluator.evaluate(parse_program(source)).last.local(:out).describe
+          program = parse_program(source)
+          evaluator = Rigor::Inference::StatementEvaluator.new(scope: scope.with_match_frame(program), **options)
+          evaluator.evaluate(program).last.local(:out).describe
         end
     end
 

@@ -26,6 +26,11 @@ module Rigor
     # The summary exposes `precision_ratio` (constant+nominal+shaped+refined+bot over total) and
     # `opaque_ratio` (dynamic_top+top over total).
     #
+    # It also tallies *call sites*: every `Prism::CallNode` (a counted expression, so the tally is a subset of
+    # `total`), and of those the *Dynamic call sites*, whose result classifies as `:dynamic_top` or
+    # `:dynamic_specific` — a whole `Dynamic`, or a union whose worst member is one. A `Top` result is not a Dynamic
+    # call site, and neither is a union holding both `Dynamic` and `Top` (its worst tier is `:top`).
+    #
     # For Union types the *worst* member tier is used, since the union is only as precise as its
     # least-precise constituent. Intersection uses the *best* member (the most specific side wins).
     # Difference follows its base type.
@@ -87,8 +92,21 @@ module Rigor
       PRECISE_TIERS = %i[constant nominal shaped refined bot].to_set.freeze
       private_constant :PRECISE_TIERS
 
+      DYNAMIC_TIERS = %i[dynamic_top dynamic_specific].to_set.freeze
+      private_constant :DYNAMIC_TIERS
+
       # Per-file result. Immutable value object.
-      class FileResult < Data.define(:total, :tier_counts)
+      class FileResult < Data.define(:total, :tier_counts, :call_sites, :dynamic_call_sites)
+        def initialize(total:, tier_counts:, call_sites: 0, dynamic_call_sites: 0)
+          super
+        end
+
+        def dynamic_call_ratio
+          return 0.0 if call_sites.zero?
+
+          dynamic_call_sites.fdiv(call_sites)
+        end
+
         def precise_count
           PRECISE_TIERS.sum { |t| tier_counts.fetch(t, 0) }
         end
@@ -132,6 +150,8 @@ module Rigor
         scope_index = ScopeIndexer.index(root, default_scope: @scope)
         tier_counts = TIERS.to_h { |t| [t, 0] }
         total = 0
+        call_sites = 0
+        dynamic_call_sites = 0
 
         Source::NodeWalker.each(root) do |node|
           next if NON_EXPRESSION_NODE_TYPES.include?(node.class.name)
@@ -140,9 +160,14 @@ module Rigor
           tier = classify(type)
           tier_counts[tier] += 1
           total += 1
+          next unless node.is_a?(Prism::CallNode)
+
+          call_sites += 1
+          dynamic_call_sites += 1 if DYNAMIC_TIERS.include?(tier)
         end
 
-        FileResult.new(total: total, tier_counts: tier_counts)
+        FileResult.new(total: total, tier_counts: tier_counts, call_sites: call_sites,
+                       dynamic_call_sites: dynamic_call_sites)
       end
 
       private

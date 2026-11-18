@@ -162,40 +162,34 @@ docs-check:
 check-json:
 	bundle exec exe/rigor check --format=json lib
 
-# Report type-precision coverage for `lib/`.
-# Exits non-zero when the precision ratio drops below 58 %.
+# The self-typing ratchet (#3315): one `rigor coverage --format json lib` scan,
+# run in-process by tool/coverage_ratchet.rb, holds two figures to the pins in
+# tool/coverage_ratchet.yml — the precision ratio and the share of call sites
+# whose result is Dynamic. It is one-sided: a figure WORSE than its pin by more
+# than the slack fails (declare what the change left untyped in sig/, or move
+# the pin through an approval-queue gate-row entry); a figure BETTER than its
+# pin by more than the slack passes with a notice that prints the tighter pin
+# lines. `make coverage-tighten` writes every gain into the pins file and never
+# loosens one; a typing batch's PR runs it, and so does release prep. The tool
+# refuses a run under another config, a summary without the call-site fields,
+# a scan under the floors, and a move past `max_step` either way.
 #
-# Recalibrated 2026-08-31. The original 43 % was measured on 2026-05-26 and
-# never moved; by v0.3.6 `lib` read 58.96 %, so the gate carried ~16 points
-# of slack and could not fail on any regression a person would ship. The new
-# number is calibrated on the DRIFT, measured by running the current analyzer
-# against every 0.3.x tag's `lib` tree (a fixed analyzer, a moving codebase —
-# the volatility the threshold has to tolerate):
+# This replaced a one-sided `--threshold 0.58`, calibrated in 2026-08 with ~2
+# points of slack against release-to-release drift; the #3290–#3319 series
+# moved the ratio by 0.12 points, so it could not have caught a real loss.
 #
-#   v0.2.9 59.88 · v0.3.0 59.62 · v0.3.1 59.55 · v0.3.2 59.39 · v0.3.3 59.37
-#   v0.3.4 59.02 · v0.3.5 58.94 · v0.3.6 58.96 · master 58.98
+# `.rigor.gates.yml` is the self-check configuration with `parameter_inference:`
+# off: the key would triple the run (#3324: 101 s -> 307 s), and the pins are
+# measured without it, so the ratchet does not see a regression in parameter
+# inference itself. docs/agents/measurement.md § "The self-typing ratchet" says
+# how to read and refresh the pins.
 #
-# A 0.94-point band over three months and +108 files, drifting down roughly
-# 0.1 points per release as the codebase grows. The margin leaves ~2 points,
-# about two years of that drift, so ordinary development cannot trip it — a gate
-# that fires on correct input teaches people to route around it (AGENTS.md
-# § "Implementation Guidelines"). An engine change that legitimately LOWERS
-# precision (a soundness fix that widens a type) re-baselines this line
-# deliberately, which is the point of the gate.
-#
-# Re-pinned 2026-09-01 for #513 + #523: the lens now seeds the full
-# check-walk discovery bundle, runs plugin-aware, and classifies the
-# Data / Struct / BoundMethod carriers, moving `lib` 58.98 % → 59.81 %.
-# The threshold shifts by the same ~0.8 points to keep the calibrated
-# margin unchanged.
-#
-# `.rigor.gates.yml` is the self-check configuration with `parameter_inference:` off. The
-# threshold above is calibrated on the key-off engine, and the key would add ~5 points of slack
-# and triple the run (#3324: 101 s -> 307 s, 59.45 % -> 64.45 %).
-#
-# Use `rigor coverage lib/` without --threshold for a non-gating report.
+# Use `rigor coverage lib/` for a non-gating report.
 coverage:
-	bundle exec exe/rigor coverage --config .rigor.gates.yml --threshold 0.58 lib
+	bundle exec ruby tool/coverage_ratchet.rb --config .rigor.gates.yml lib
+
+coverage-tighten:
+	bundle exec ruby tool/coverage_ratchet.rb --config .rigor.gates.yml --tighten lib
 
 # ADR-50 WD4 perf-regression gate. Runs this checkout's `rigor check
 # --no-cache` in-process over `lib` of the frozen corpus bench/baseline.json

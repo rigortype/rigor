@@ -55,7 +55,16 @@ module Rigor
         @out.puts("  precise:              #{p}#{pct(p, g)}")
         @out.puts("  dynamic (opaque):     #{o}#{pct(o, g)}")
         @out.puts("  precision ratio:      #{(report.precision_ratio * 100).round(2)}%")
+        render_text_call_sites(report)
         @out.puts
+      end
+
+      # #3315 — the call-site tally `make coverage` ratchets.
+      def render_text_call_sites(report)
+        calls = report.call_sites
+        dynamic = report.dynamic_call_sites
+        @out.puts("  call sites:           #{calls}")
+        @out.puts("  dynamic call sites:   #{dynamic}#{pct(dynamic, calls)}")
       end
 
       def render_text_tier_table(report)
@@ -119,7 +128,10 @@ module Rigor
           dynamic_opaque_count: report.opaque_count,
           dynamic_opaque_ratio: ratio_f(report.opaque_ratio),
           dynamic_specific_count: dsc,
-          dynamic_specific_ratio: ratio_f(dsc.fdiv(g.nonzero? || 1))
+          dynamic_specific_ratio: ratio_f(dsc.fdiv(g.nonzero? || 1)),
+          call_sites: report.call_sites,
+          dynamic_call_count: report.dynamic_call_sites,
+          dynamic_call_ratio: ratio_f(report.dynamic_call_ratio)
         }
       end
 
@@ -140,6 +152,8 @@ module Rigor
           precise_ratio: ratio_f(r.precision_ratio),
           dynamic_opaque_count: r.opaque_count,
           dynamic_opaque_ratio: ratio_f(r.opaque_ratio),
+          call_sites: r.call_sites,
+          dynamic_call_count: r.dynamic_call_sites,
           by_tier: tier_payload(r.total) { |tier| r.tier_counts.fetch(tier, 0) }
         }
       end

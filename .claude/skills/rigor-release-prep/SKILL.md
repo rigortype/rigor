@@ -687,6 +687,7 @@ The development-loop post-mortem recurs after every release ([#2333](https://git
   cycle-stable prose left intact unless a leading-digit bump makes it stale).
 - `[Unreleased]` / `[x.y.z]` compare links resolve.
 - `make verify` passed.
+- `make coverage-tighten` was run on the release branch and any tightened pins in `tool/coverage_ratchet.yml` committed.
 - `gem build rigortype.gemspec` succeeded and the produced `.gem` is not
   committed.
 - The final commit message follows `Bump up version to x.y.z`.

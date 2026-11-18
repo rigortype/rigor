@@ -353,6 +353,64 @@ output looks right, but it acted on the wrong input or measured the wrong thing.
   per arm instead of `check` diagnostics. The host Ruby defaults to US-ASCII, so read sweep JSON with
   `encoding: "UTF-8"`.
 
+### The self-typing ratchet
+
+`make coverage` runs `tool/coverage_ratchet.rb --config .rigor.gates.yml lib` (#3315). That is one in-process
+`rigor coverage --format json` scan, and it holds two of the summary's figures to the pins in
+`tool/coverage_ratchet.yml`:
+
+- **precision**: `precise_count / expressions_typed`.
+- **Dynamic call share**: `dynamic_call_count / call_sites`. A call site is a `Prism::CallNode`. It is Dynamic when
+  `PrecisionScanner` classifies its result as `dynamic_top` or `dynamic_specific`: a whole `Dynamic`, or a union
+  whose worst member is one. A `Top` result does not count, and neither does a union of `Dynamic` and `Top`.
+
+The ratchet is one-sided. A figure worse than its pin by more than `slack` fails. A figure better than its pin by
+more than `slack` passes and prints a notice with the tighter pin lines. Nobody is failed for a gain. The counts are
+integers and the edge comparison carries an epsilon, so a figure exactly at the slack passes. Five runs on one tree
+gave identical counts, and so did `RIGOR_RACTOR_WORKERS=4`: the key-off scan forks nothing (`parameter_inference:` is
+the only part of the precision lens that forks). The slack is therefore the drift ordinary changes may carry against
+the pin, not noise margin. Ordinary refactors moved a figure by 0.02 to 0.047 points each, measured over 17 merged
+PRs, and the pins file records the rest. The tool also fails a run under any config other than the pinned one, a
+summary without the call-site fields, a parse error, a scan under the floors, and a move from the pin larger than
+`max_step` in either direction, which only an instrument change produces.
+
+**A failure is measured against the pin, not against the change's base.** Part of the distance can be earlier
+changes' drift. To see the change's own delta, run the same scan at the merge base, with that commit's own engine,
+and at `HEAD`. Then compare the two `summary` objects, and the `by_file` rows to find where the delta is:
+
+```sh
+base=$(git merge-base HEAD origin/master) && rm -rf tmp/ratchet-base && mkdir -p tmp/ratchet-base &&
+  git archive "$base" exe lib sig data plugins .rigor.dist.yml .rigor.gates.yml | tar -x -C tmp/ratchet-base &&
+  (cd tmp/ratchet-base && BUNDLE_GEMFILE="$OLDPWD/Gemfile" bundle exec exe/rigor coverage --config \
+    .rigor.gates.yml --format json lib) > tmp/ratchet-base.json &&
+  bundle exec exe/rigor coverage --config .rigor.gates.yml --format json lib > tmp/ratchet-head.json
+```
+
+The failure message prints the same command. Run it inside the Flake: two scans, each as long as `make coverage`. A merge base older than #3356 has no call-site fields, so only precision compares there. Then:
+
+1. If the delta is the change's own, declare in `sig/` what it left untyped. `rigor sig-gen --print PATH` proposes
+   it.
+2. Otherwise, or if the loss is deliberate (a soundness fix that widens a type), the pin moves the worse way. That is
+   a gate-row decision, not a commit-message reason, and needs an `approval-queue.d/` entry of class `gate-row`.
+   [`contribution-flow.md`](contribution-flow.md) § "Decisions and the approval queue" lists "a residue pin moving
+   up where no precedent of the same kind exists (the same gate file, for the same kind of reason)" among the
+   serious decisions. So the first such move in `tool/coverage_ratchet.yml` waits for the maintainer, and a later
+   one for the same kind of reason cites it as precedent.
+
+**Tightening has two owners.** A gain stays unclaimed until someone writes it in, and `make coverage-tighten` does
+that. It is the same scan and writes every figure that is better than its pin into the pins file, rounded toward the
+worse side; it never loosens a pin. The PR that lands a typing batch may run it and should, and release prep runs
+it (`rigor-release-prep`'s checklist).
+
+What it does not see: the scan runs with `parameter_inference:` off, as the gates config sets it. A regression in
+declarations or in the engine moves it; a regression in parameter inference itself does not. To measure with the
+key on, run `rigor coverage --format json lib` under `.rigor.dist.yml` by hand; it takes about three times as long.
+
+The call-site tally reconciles with #3315's scratch instrument. That instrument was an in-process `rigor check` that
+recorded `type_of` from the check's own scopes. On `8ef9d1e3a` it counted 51,004 Dynamic of 101,807 call sites;
+the lens counts 50,996 of 101,806. #3354's three `sig/` files moved the instrument by −265 and the lens by −265
+too (to 50,731). The 8-site gap comes from the two scope sources, not from the definition.
+
 ### Refreshing verify-changed's spec cost table
 
 `tool/spec_costs.tsv` prices each spec under or beside a mirror directory for `bin/verify-changed`'s

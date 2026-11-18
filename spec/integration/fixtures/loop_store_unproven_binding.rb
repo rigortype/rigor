@@ -472,7 +472,8 @@ while i < 2
 end
 assert_type("Array[String?]", spread)
 
-# a closure in a parameter default writes the parameter: `[nil, nil]`
+# a closure in a parameter default writes the parameter: `[nil, nil]`, which
+# the untyped parameter's `Dynamic[top]` arm stands for
 def loop_store_default_closure(held = nil, clear = proc { held = nil })
   cleared = []
   i = 0
@@ -482,7 +483,7 @@ def loop_store_default_closure(held = nil, clear = proc { held = nil })
     cleared << held
     i += 1
   end
-  assert_type("Array[String?]", cleared)
+  assert_type("Array[Dynamic[top] | String]", cleared)
   cleared
 end
 

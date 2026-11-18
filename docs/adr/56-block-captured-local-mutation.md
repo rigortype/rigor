@@ -1307,13 +1307,16 @@ drops a class Ruby stores, each of which the rule now closes:
   and one in the guarded body only joins, since `retry` runs that body
   again.
 
-A second review round added two:
+Two more review rounds added two:
 
-- **A gradual arm is a write nobody saw.** `s = nil; f = -> { s = :sym }`
-  before the loop, then `s = "a"; f.call; out << s`, stores `:sym`. The
-  continuation binding of `s` is `Dynamic[top] | String`; the pass reads
-  `String` at the store. A continuation binding with a `Dynamic` arm the
-  binding at the store lacks is joined, not replaced.
+- **A closure's write is not modelled at its call.** `s = nil` before
+  the loop, then `pr = proc { s = nil }; s = "a"; pr.call; out << s`,
+  stores `nil`: the assignment the store follows is not the last write.
+  A first answer to this keyed on the continuation binding's `Dynamic`
+  arm, which a closure made before the loop leaves and one made in the
+  body does not. The rule is now syntactic and covers both: a local
+  that any block or lambda in the frame writes (a local write with a
+  positive `depth`) is joined, never replaced.
 - **A scope body's locals are its own.** A store in a method, class or
   module body inside the loop gets no overlay: a same-named local there
   is not the loop's.

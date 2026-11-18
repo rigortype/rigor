@@ -429,6 +429,22 @@ A remover or filter called on a local variable narrows that binding's element ty
 
 Nothing else narrows: `pop`, `shift`, `slice!`, `subtract`, `clear` and `delete` of a non-literal cannot say which members remain, and a block with more than one expression, a jump or a local write, numbered or `it` parameters, or a predicate that says nothing about its parameter gives no narrowing. A receiver that selects among bindings (`(f ? a : b).compact!`) narrows none of them. The narrowing is a fact about the object, so it applies only to a local no other holder in its method, class or file body may write. An instance variable never narrows, since any method or any object holding it can write it. A local does not narrow when it is referenced inside a lambda or a block that may run later (any block but a catalogued iterator's or `tap` / `then` / `yield_self`'s); read anywhere inside the value of any write (variable, constant, index, attribute or operator write, multiple assignment) or the subject of a `case`/`in`, `=>` or `in` pattern, which also covers the local that write or pattern binds unless the value is a fresh literal or a `new` / `[]` on `Array`, `Hash` or `Set`; a parameter of a method that calls `super` with no arguments; read inside an Array element, a Hash key or value, a splat, or an argument of any call, `yield` or `super`, unless as the receiver of a reader that returns another value and keeps no reference (`size`, `dup`, `first`, …); the receiver of `send`, `instance_eval`, `tap` or a similar reflective call; or in a body that calls `binding` or `eval`. Each keeps its earlier reading. A receiver position, a `return` and a body's last expression do not count. A declared parameter's binding narrows in its body, and the caller's argument does not.
 
+### Mutations a call site does not spell
+
+What a binding says about the contents of its object, a literal's shape or the `non-empty-array[T]` an emptiness guard leaves, holds only until code that may mutate the object runs ([#3340](https://github.com/rigortype/rigor/issues/3340)). Besides a mutator called on the variable, on an alias of it or inside a block, the fact MUST be dropped:
+
+- at a lambda literal whose body calls a mutator on the variable (`f = -> { xs.clear }`), as at a `proc` or `lambda` block;
+- on entry to a `Kernel#loop` body that mutates the variable, since a later run reads what an earlier one left;
+- on entry to a `rescue` clause when the `begin` body mutates the variable, since the clause runs after any prefix of the body;
+- for an instance variable, after a call on `self` whose method is proven to mutate it in place (`reset!` running `@xs.clear`). The binding keeps the rest of its narrowing, so a `nil` the guard ruled out stays out;
+- for a local passed to `yield`, positionally or as a keyword's value;
+- for the receiver of `send`, `public_send` or `__send__` with a computed name, of `instance_eval` or `instance_exec` whose block calls a mutator on `self` or is not written at the call, and of a `Method` object called at once (`xs.method(name).call`). A literal name is read as the call it makes (`xs.method(:clear).call` is `xs.clear`);
+- for each variable in a literal Array a symbol block mutates (`[xs, ys].each(&:clear)`).
+
+So after `return if xs.empty?`, each of these leaves `xs.size` a `non-negative-int` and `xs.size == 0` unfolded. Code that only reads the collection in the same positions (`-> { xs.size }`, `xs.send(:size)`, `xs.instance_eval { size }`, `yield ys`) leaves the fact in place. The forms that hand the object to unread code drop only what a mutation can falsify: a literal shape or an emptiness witness widens to its nominal with a gradual element, and a binding already typed as a nominal (`Array[String]`) is unchanged.
+
+Not covered: a closure created before the fact is established and called after it (`f = -> { xs.clear }; return if xs.empty?; f.call`), a `Method` object kept in a variable and called later, and any of the opaque forms written as an operand of another call (`puts(yield(xs))`).
+
 ### Closure captures
 
 Closure-captured locals need explicit handling. When a block, proc, or lambda writes an outer local, Rigor MUST record a captured-local write effect. If the closure is invoked immediately and its body is available, Rigor applies the write at the call edge. If the closure escapes or may be invoked later, facts about locals it can write become unstable after the escape point and before any unknown invocation of that closure.

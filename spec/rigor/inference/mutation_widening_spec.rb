@@ -711,6 +711,28 @@ RSpec.describe Rigor::Inference::MutationWidening do
       expect(result.local(:arr).class_name).to eq("Array")
     end
 
+    # Issue #3340 — a literal Array's elements are the objects a symbol block's mutator runs on.
+    it "widens each variable a literal Array hands a symbol block's mutator" do
+      call = parse_each_call(<<~RUBY)
+        arr = [1]
+        other = [1]
+        [arr, other.dup].each(&:clear)
+      RUBY
+      seeded = Rigor::Scope.empty.with_local(:arr, tuple).with_local(:other, tuple)
+      result = described_class.widen_after_block(call_node: call, outer_scope: seeded)
+      expect(result.local(:arr).class_name).to eq("Array")
+      expect(result.local(:other)).to equal(tuple)
+    end
+
+    it "leaves a literal Array's elements alone under a symbol block that mutates nothing" do
+      call = parse_each_call(<<~RUBY)
+        arr = [1]
+        [arr].each(&:size)
+      RUBY
+      seeded = Rigor::Scope.empty.with_local(:arr, tuple)
+      expect(described_class.widen_after_block(call_node: call, outer_scope: seeded).local(:arr)).to equal(tuple)
+    end
+
     it "leaves the outer scope unchanged when the block body has no mutators on it" do
       call = parse_each_call(<<~RUBY)
         arr = [1]

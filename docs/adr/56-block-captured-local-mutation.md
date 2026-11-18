@@ -1359,6 +1359,31 @@ text is in
 [`inference-engine.md`](../internal-spec/inference-engine.md) (the
 "loop seam's argument scope" bullet).
 
+||||||| parent of b20a59179 (Drop a content fact past a mutation the call site does not spell)
+### WD2.15 — A `Kernel#loop` body enters as a repeating block's does, for the captures it mutates (2026-11-18, issue #3340)
+
+WD2.13 left open that "`Kernel#loop` is not a catalogued iterator, so a
+`loop do … end` body keeps its entry". That entry kept a fact the loop's
+own back edge falsifies: after `return if xs.empty?`, the body of
+`loop { break if xs.size == 0; xs.pop }` read `xs.size` as
+`positive-int` on every pass, and the `break` condition was reported as
+always falsey although it ends the loop.
+
+`StatementEvaluator#repeating_block_entry` now enters a `Kernel#loop`
+body with every captured local it mutates in place at its unknown-store
+widening, the entry a catalogued iterator's body takes. The escape
+classification of `loop` is unchanged (`:unknown`), and so is the entry
+of a capture the body rebinds, which keeps its call-site binding: no
+write-back runs for an `:unknown` call, and binding the rebound names
+gradually is a wider change than the stale fact needed.
+
+The same issue gives a lambda literal's body the walk a block's body
+takes (`MutationWidening.walk_for_outer_mutations`), so a mutator that
+stores nothing (`-> { xs.clear }`) widens the capture as
+`proc { xs.clear }` already did, and gives a rescue clause's entry the
+content widening a loop body's later pass takes. The binding text is in
+[`inference-engine.md`](../internal-spec/inference-engine.md).
+
 ### WD3 — One mechanism, shared
 
 Slices A and B implement **one** fixpoint helper (body-evaluator +

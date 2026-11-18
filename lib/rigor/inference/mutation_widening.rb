@@ -272,7 +272,7 @@ module Rigor
       # g(y)`, `arr.push(x) if cond`) are all caught.
       def widen_after_block(call_node:, outer_scope:)
         block = call_node.block
-        return DeepErasure.widen_symbol_proc(call_node, outer_scope) if DeepErasure.symbol_proc_mutation?(block)
+        return widen_after_symbol_proc(call_node, outer_scope) if DeepErasure.symbol_proc_mutation?(block)
         return outer_scope unless block.is_a?(Prism::BlockNode)
 
         body = block.body
@@ -281,6 +281,18 @@ module Rigor
         scope = walk_for_outer_mutations(body, outer_scope)
         names = DeepErasure.parameter_names(block.parameters)
         DeepErasure.widen_element_aliases(call_node.receiver, block.body, names, scope)
+      end
+
+      # `a.each(&:strip!)` mutates every element `a` hands the block ({DeepErasure.widen_symbol_proc}). Issue #3340 —
+      # and where the receiver is a literal Array (`[xs, ys].each(&:clear)`), each element that is a variable read is
+      # itself the object the mutator runs on, so it widens as the direct call `xs.clear` widens it.
+      def widen_after_symbol_proc(call_node, outer_scope)
+        scope = DeepErasure.widen_symbol_proc(call_node, outer_scope)
+        receiver = call_node.receiver
+        return scope unless receiver.is_a?(Prism::ArrayNode)
+
+        method_name = call_node.block.expression.unescaped.to_sym
+        receiver.elements.reduce(scope) { |acc, element| widen_receiver_aliases(element, method_name, acc) }
       end
 
       def walk_for_outer_mutations(node, scope)

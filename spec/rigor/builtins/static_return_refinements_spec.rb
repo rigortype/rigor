@@ -171,6 +171,7 @@ RSpec.describe Rigor::Builtins::StaticReturnRefinements do
       b = ARGV.dup
       raise if b.empty?
       nb = ENV["Q"] ? b : ARGV.map(&:size)
+      ts = ENV["Q"] ? [1] : s
     RUBY
 
     define_method(:type_after_seed) do |expression, environment: Rigor::Environment.default, prelude: ""|
@@ -278,8 +279,12 @@ RSpec.describe Rigor::Builtins::StaticReturnRefinements do
       environment = Rigor::Environment.for_project(
         project_patched_methods: Rigor::Inference::ProjectPatchedMethods.new(entries: entries)
       )
-      answers = %w[a[0..] a.slice(0..) s[0..] s.slice(0..)].map { |e| type_after_seed(e, environment: environment) }
-      expect(answers).to eq(["Array[String]?", "Array[String]", "String", "String?"])
+      # `ts` is `[1] | String`: the patched tuple member declines, so the union keeps its nil rather than letting
+      # ShapeDispatch answer the tuple past the guard.
+      answers = %w[a[0..] a.slice(0..) s[0..] s.slice(0..) ts[0..]].map do |e|
+        type_after_seed(e, environment: environment)
+      end
+      expect(answers).to eq(["Array[String]?", "Array[String]", "String", "String?", "String | [1] | nil"])
     end
   end
 end

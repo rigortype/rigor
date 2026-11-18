@@ -145,4 +145,149 @@ RSpec.describe Rigor::Builtins::StaticReturnRefinements do
       ).to be_nil
     end
   end
+
+  # Issue #3326 — a slice whose start is statically 0 (a literal `0`, or a beginless range) is never past the end,
+  # so `Array#[]` / `#slice` and `String#[]` / `#slice` answer the receiver's type without the RBS-declared `nil`.
+  # Ruby 4.0.5: `[][0...-1]` => [], `[][..2]` => [], `[1][0, -1]` => nil, `[][1..]` => nil, `[][-1..]` => nil,
+  # `""[0..]` => "", `""[1..]` => nil. The rule reads the argument NODE (a `0..i` range types as `Range[Integer]`
+  # and has lost its start), so every example types a parsed snippet through `ScopeIndexer`, which is what sees a
+  # `using` and a class body's `def`.
+  describe "zero-start slices (issue #3326)" do
+    seed = <<~RUBY
+      a = ARGV
+      s = ENV.fetch("X")
+      i = ARGV.size
+      j = Integer(ARGV[0])
+      z = 0
+      t = [1, ARGV.size]
+      e = []
+      u = ARGV.empty? ? ARGV : ARGV.map(&:size)
+      m = ARGV.empty? ? ARGV : ARGV.first.to_s
+      w = ARGV.first ? ARGV : []
+      n = ARGV.empty? ? nil : ARGV
+      ne = ARGV.empty? ? ["x"] : ARGV
+      ah = ENV["Q"] ? ARGV : { (0..) => [1] }
+      ra = ENV["Q"] ? ARGV : Array.new
+      b = ARGV.dup
+      raise if b.empty?
+      nb = ENV["Q"] ? b : ARGV.map(&:size)
+      ts = ENV["Q"] ? [1] : s
+    RUBY
+
+    define_method(:type_after_seed) do |expression, environment: Rigor::Environment.default, prelude: ""|
+      program = Prism.parse("#{prelude}#{seed}#{expression}\n").value
+      index = Rigor::Inference::ScopeIndexer.index(program, default_scope: Rigor::Scope.empty(environment: environment))
+      last = program.statements.body.last
+      index[last].type_of(last).describe(:short)
+    end
+
+    {
+      "a[0...-1]" => "Array[String]",
+      "a[0..]" => "Array[String]",
+      "a[0...]" => "Array[String]",
+      "a[0..-5]" => "Array[String]",
+      "a[0..i]" => "Array[String]",
+      "a[0...j]" => "Array[String]",
+      "a[-0..]" => "Array[String]",
+      "a[..2]" => "Array[String]",
+      "a[...0]" => "Array[String]",
+      "a[..j]" => "Array[String]",
+      "a.slice(0..)" => "Array[String]",
+      "a.slice(..j)" => "Array[String]",
+      "a[0, 2]" => "Array[String]",
+      "a[0, i]" => "Array[String]",
+      "a[z..]" => "Array[String]",
+      "s[0..]" => "String",
+      "s[0...-1]" => "String",
+      "s[..j]" => "String",
+      "s.slice(0..i)" => "String",
+      "s[0, 2]" => "String",
+      "t[0..i]" => "Array[1 | non-negative-int]",
+      "e[0..i]" => "Array[Dynamic[top]]",
+      "u[0..]" => "Array[String] | Array[non-negative-int]",
+      "m[0...-1]" => "Array[String] | String",
+      # A Tuple member answers as it does alone: exactly where ShapeDispatch reads the range, and as the `Array[E]`
+      # RBS projects it to where it does not (a range with a non-constant end).
+      "w[0...-1]" => "Array[String] | []",
+      "ne[0..]" => "Array[String] | [\"x\"]",
+      "w[0..i]" => "Array[Dynamic[top]] | Array[String]",
+      # The RBS union path offers a Tuple member to ShapeDispatch only for `[]` (#3320), so for `slice` the arm also
+      # becomes exact, where base answered `Array[Dynamic[top]] | Array[String] | nil`.
+      "w.slice(0..)" => "Array[String] | []",
+      "ne[0..i]" => "Array[\"x\"] | Array[String]"
+    }.each do |expression, expected|
+      it "drops the nil of #{expression}" do
+        expect(type_after_seed(expression)).to eq(expected), "#{expression} still reads as nilable"
+      end
+    end
+
+    # Every other start keeps today's (declared) answer; so does a length that may be negative, a single index,
+    # and an argument the node check cannot see through.
+    {
+      "a[1..]" => "Array[String]?",
+      "a[3..]" => "Array[String]?",
+      "a[-1..]" => "Array[String]?",
+      "a[i..]" => "Array[String]?",
+      "a[j..i]" => "Array[String]?",
+      "a[1, 2]" => "Array[String]?",
+      "a[0, j]" => "Array[String]?",
+      "a[0, -1]" => "Array[String]?",
+      "a[0]" => "String",
+      "a[i]" => "String",
+      "a[(0..i)]" => "Array[String]?",
+      "a.public_send(:slice, 0..i)" => "Array[String]?",
+      "s[1..]" => "String?",
+      "s[-1..]" => "String?",
+      "s[1, 2]" => "String?",
+      "t[1..i]" => "Array[1 | non-negative-int]?",
+      "u[1..]" => "Array[String] | Array[non-negative-int] | nil",
+      "w[1..]" => "Array[String]?",
+      "n&.[](0..)" => "Array[String]?",
+      # A union is answered by the table only when every member is: a member with no owner (a `Hash`, whose
+      # `{}[0..]` is nil; a `non-empty-array` refinement carrier) or an owned member that declines (a raw
+      # `Array`) leaves the whole call to RBS, nil included.
+      "ah[0..]" => "Array[String] | [1] | nil",
+      "nb[0..]" => "Array[String] | Array[non-negative-int] | nil",
+      "ra[0..]" => "Array[Dynamic[top]] | Array[String] | nil"
+    }.each do |expression, expected|
+      it "keeps the declared answer of #{expression}" do
+        expect(type_after_seed(expression)).to eq(expected), "#{expression} moved off its declared answer"
+      end
+    end
+
+    it "leaves a Tuple read ShapeDispatch answers exactly as it was" do
+      expect([type_after_seed("t[0..]"), type_after_seed("t[1..]"), type_after_seed("e[0...-1]")])
+        .to eq(["[1, non-negative-int]", "[non-negative-int]", "[]"])
+    end
+
+    # The table is keyed on the exact class name, so a subclass that overrides the read answers from its own `def`.
+    it "leaves a subclass of Array that overrides [] to its own method" do
+      prelude = "class NilArr < Array\n  def [](*) = nil\nend\n"
+      expect(type_after_seed("NilArr.new[0..]", prelude: prelude)).to eq("nil")
+    end
+
+    it "answers a refined [] from the refine body, ahead of the table" do
+      prelude = "module NilSlice\n  refine Array do\n    def [](*) = nil\n  end\nend\nusing NilSlice\n"
+      expect([type_after_seed("a[0..]", prelude: prelude), type_after_seed("a.slice(0..)", prelude: prelude)])
+        .to eq(["nil", "Array[String]"])
+    end
+
+    it "keeps the declared answer when a pre_eval patch redefines the read (ADR-17)" do
+      entries = [["Array", :[]], ["String", :slice]].map do |class_name, method_name|
+        Rigor::Inference::ProjectPatchedMethods::Entry.new(
+          class_name: class_name, method_name: method_name, kind: :instance,
+          source_path: "ext/core_ext.rb", source_line: 1
+        )
+      end
+      environment = Rigor::Environment.for_project(
+        project_patched_methods: Rigor::Inference::ProjectPatchedMethods.new(entries: entries)
+      )
+      # `ts` is `[1] | String`: the patched tuple member declines, so the union keeps its nil rather than letting
+      # ShapeDispatch answer the tuple past the guard.
+      answers = %w[a[0..] a.slice(0..) s[0..] s.slice(0..) ts[0..]].map do |e|
+        type_after_seed(e, environment: environment)
+      end
+      expect(answers).to eq(["Array[String]?", "Array[String]", "String", "String?", "String | [1] | nil"])
+    end
+  end
 end

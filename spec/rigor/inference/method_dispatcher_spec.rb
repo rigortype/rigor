@@ -779,6 +779,16 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
         expect(result).to eq(expected_dir_type)
       end
 
+      # Issue #3326 maps a Tuple to the `Array` owner for the zero-start slice rows, so a Tuple receiver reaches the
+      # Kernel row too and answers what `ARGV.__dir__` answers.
+      it "tightens __dir__ on a Tuple receiver as on an Array one" do
+        tuple = Rigor::Type::Combinator.tuple_of(
+          Rigor::Type::Combinator.constant_of(1), Rigor::Type::Combinator.non_negative_int
+        )
+        result = described_class.dispatch(receiver_type: tuple, method_name: :__dir__, arg_types: [], environment: env)
+        expect(result).to eq(expected_dir_type)
+      end
+
       it "does NOT fire for a BasicObject receiver (Kernel not mixed in)" do
         # BasicObject is the one class that explicitly excludes Kernel, so the tightened return would be wrong.
         result = described_class.dispatch(

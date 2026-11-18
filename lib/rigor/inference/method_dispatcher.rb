@@ -185,7 +185,7 @@ module Rigor
         # `() -> String?` when the documented return is `non-empty-string | nil`) get the
         # tightened type without modifying the vendored `ruby/rbs` submodule. The override table
         # lives in `Rigor::Builtins::StaticReturnRefinements::OVERRIDES`.
-        static_refinement = try_static_refinement(receiver_type, method_name, arg_types)
+        static_refinement = try_static_refinement(receiver_type, method_name, arg_types, context)
         return static_refinement if static_refinement
 
         # `Foo.instance` for a class that includes the stdlib `Singleton` mixin. Ruby grows that method through
@@ -471,9 +471,16 @@ module Rigor
       # is therefore rejected. The narrow risk of a user-defined `def __dir__` shadowing Kernel's
       # method would also alter the runtime answer; users with that configuration opt out via a
       # `signature_paths` overlay declaring their own return type.
-      def try_static_refinement(receiver_type, method_name, arg_types)
+      #
+      # A union receiver is answered member by member, and only when every member is: each member
+      # answers as it would alone (`(Array[String] | String)[0..]` drops the nil of both), and one
+      # member no entry refines leaves the whole call to RBS.
+      def try_static_refinement(receiver_type, method_name, arg_types, context)
         candidates = Rigor::Builtins::StaticReturnRefinements.owners_for(method_name)
         return nil if candidates.empty?
+        if receiver_type.is_a?(Type::Union)
+          return try_static_refinement_members(receiver_type, method_name, arg_types, context, candidates)
+        end
 
         owner = static_refinement_owner_for(receiver_type, candidates)
         return nil unless owner
@@ -483,8 +490,33 @@ module Rigor
           owner_class_name: owner,
           method_name: method_name,
           kind: kind,
-          arg_types: arg_types
+          arg_types: arg_types,
+          context: context
         )
+      end
+
+      def try_static_refinement_members(receiver_type, method_name, arg_types, context, candidates)
+        members = receiver_type.members
+        return nil unless members.all? { |member| static_refinement_owner_for(member, candidates) }
+
+        results = members.map do |member|
+          static_member_answer(member, method_name, arg_types, context)
+        end
+        return nil if results.any?(&:nil?)
+
+        Type::Combinator.union(*results)
+      end
+
+      # A `Tuple` member the table answers is offered to {ShapeDispatch} first, as it is when it is the lone receiver
+      # (the precise tiers run ahead of this one) and as `RbsDispatch`'s union path offers it (#3320): `[][0...-1]` is
+      # the exact `[]` there, not the `Array[untyped]` projection.
+      def static_member_answer(member, method_name, arg_types, context)
+        answer = try_static_refinement(member, method_name, arg_types, context.with(receiver: member))
+        return answer unless answer && member.is_a?(Type::Tuple)
+
+        ShapeDispatch.try_dispatch(
+          CallContext.build(receiver: member, method_name: method_name, args: arg_types, block_type: context.block_type)
+        ) || answer
       end
 
       # Picks the most specific override owner the receiver honours. For Kernel-owned overrides
@@ -504,6 +536,8 @@ module Rigor
         case receiver_type
         when Type::Singleton, Type::Nominal
           receiver_type.class_name
+        when Type::Tuple
+          "Array"
         end
       end
 

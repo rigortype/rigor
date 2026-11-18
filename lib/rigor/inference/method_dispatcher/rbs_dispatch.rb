@@ -377,15 +377,57 @@ module Rigor
             end
           end
 
+          # Issue #3320 — on a literal key read, each `HashShape` / `Tuple` member is first offered to
+          # {ShapeDispatch}, which is what answers that member when it is the lone receiver. Without it every shape
+          # member projected to `Hash[K, V]` / `Array[E]` in {#dispatch_one}, so
+          # `({ a: 1, b: "s" } | { a: 2, b: :t })[:a]` answered every value of every key. A member the shape tier
+          # declines, and every other member, keeps its `dispatch_one` answer, so the result is the lone answers
+          # joined and no member is dispatched twice.
           def dispatch_union(receiver, method_name, args, environment, block_type, self_type_override = nil, # rubocop:disable Metrics/ParameterLists
                              public_only: false, scope: nil, call_node: nil)
+            shape_read = block_type.nil? && shape_key_read?(method_name, args)
             results = receiver.members.map do |member|
-              dispatch_one(member, method_name, args, environment, block_type, self_type_override,
-                           public_only: public_only, scope: scope, call_node: call_node)
+              (shape_read && shape_member_read(member, method_name, args)) ||
+                dispatch_one(member, method_name, args, environment, block_type, self_type_override,
+                             public_only: public_only, scope: scope, call_node: call_node)
             end
             return nil if results.any?(&:nil?)
 
             Type::Combinator.union(*results)
+          end
+
+          # The key positions — every argument of `dig`, the first of `[]` / `fetch` — are each a value-pinned
+          # `Constant` or a union of them. A computed key (`Symbol`) keeps the projection's answer: a lone shape
+          # answers it with every value plus `nil`, which would widen today's answer for the union.
+          def shape_key_read?(method_name, args)
+            case method_name
+            when :dig then !args.empty? && args.all? { |arg| literal_key?(arg) }
+            when :[], :fetch then !args.empty? && literal_key?(args.first)
+            when :first, :last then true
+            else false
+            end
+          end
+
+          def literal_key?(arg)
+            case arg
+            when Type::Constant then true
+            when Type::Union then arg.members.all?(Type::Constant)
+            else false
+            end
+          end
+
+          # `first` / `last` are `[0]` / `[-1]` on a Tuple; on a HashShape they are not key reads and keep the
+          # projection.
+          def shape_member_read(member, method_name, args)
+            unless member.is_a?(Type::Tuple) || (member.is_a?(Type::HashShape) && hash_key_read?(method_name))
+              return nil
+            end
+
+            ShapeDispatch.try_dispatch(CallContext.build(receiver: member, method_name: method_name, args: args))
+          end
+
+          def hash_key_read?(method_name)
+            method_name != :first && method_name != :last
           end
 
           def dispatch_one(receiver, method_name, args, environment, block_type, self_type_override = nil, # rubocop:disable Metrics/ParameterLists

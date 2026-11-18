@@ -228,8 +228,8 @@ RSpec.describe "content facts past a mutation the call site does not spell", typ
       def stored
         h = { a: 1 }
         begin
-          h[:c] = 3
           h.delete(:a)
+          h[:c] = 3
           raise "x"
         rescue StandardError
           Rigor.dump_type(h)

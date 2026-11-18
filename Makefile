@@ -165,11 +165,14 @@ check-json:
 # The self-typing ratchet (#3315): one `rigor coverage --format json lib` scan,
 # run in-process by tool/coverage_ratchet.rb, holds two figures to the pins in
 # tool/coverage_ratchet.yml — the precision ratio and the share of call sites
-# whose result is Dynamic. Each fails when it moves past its slack in EITHER
-# direction: worse means declare what the change left untyped in sig/ (or raise
-# the pin with the reason in the commit); better means lock the gain in by
-# moving the pin. The tool refuses a run under another config, a summary
-# without the call-site fields, and a scan under the floors.
+# whose result is Dynamic. It is one-sided: a figure WORSE than its pin by more
+# than the slack fails (declare what the change left untyped in sig/, or move
+# the pin through an approval-queue gate-row entry); a figure BETTER than its
+# pin by more than the slack passes with a notice that prints the tighter pin
+# lines. `make coverage-tighten` writes every gain into the pins file and never
+# loosens one; a typing batch's PR runs it, and so does release prep. The tool
+# refuses a run under another config, a summary without the call-site fields,
+# a scan under the floors, and a move past `max_step` either way.
 #
 # This replaced a one-sided `--threshold 0.58`, calibrated in 2026-08 with ~2
 # points of slack against release-to-release drift; the #3290–#3319 series
@@ -184,6 +187,9 @@ check-json:
 # Use `rigor coverage lib/` for a non-gating report.
 coverage:
 	bundle exec ruby tool/coverage_ratchet.rb --config .rigor.gates.yml lib
+
+coverage-tighten:
+	bundle exec ruby tool/coverage_ratchet.rb --config .rigor.gates.yml --tighten lib
 
 # ADR-50 WD4 perf-regression gate. Runs this checkout's `rigor check
 # --no-cache` in-process over `lib` of the frozen corpus bench/baseline.json

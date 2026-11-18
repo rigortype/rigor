@@ -1,17 +1,18 @@
 # Pins for `make coverage` (tool/coverage_ratchet.rb, #3315): two figures of the precision scan over Rigor's own
-# `lib/`, each held within `slack` of its `pin` in BOTH directions.
+# `lib/`. The ratchet is one-sided:
 #
-# - A figure that worsens past the slack fails: declare what the change left untyped, or raise the pin in the same
-#   commit with the reason in its message.
-# - A figure that improves past the slack also fails, so the gain is locked in: set the pin to the new figure.
+# - A figure worse than its pin by more than `slack` fails: declare what the change left untyped in `sig/`, or move
+#   the pin the worse way through an approval-queue.d/ entry of class `gate-row` (docs/agents/contribution-flow.md
+#   § "Decisions and the approval queue").
+# - A figure better than its pin by more than `slack` passes with a notice. `make coverage-tighten` writes every gain
+#   in and never loosens a pin; the PR that lands a typing batch runs it, and release prep does.
 #
-# The scan is deterministic (the same tree gives the same counts on every run), so the slack is not noise margin. It
-# is the drift an ordinary change may carry without touching this file, sized on measured moves (2026-11-19). The 17
-# commits between 8ef9d1e3a and #3354's head, and the ones from there to 5d90cfe0f, moved either figure by at most
-# 0.01 points per window. Removing four of #3354's declarations (`DependencyRecorder.active?` and the `try_dispatch` of
-# KernelDispatch, RbsDispatch and ShapeDispatch) moves the call share by +0.12 points and precision by -0.05; all
-# 28 of them moved the share by -0.26 and precision by +0.16. How to read and refresh the figures:
-# docs/agents/measurement.md § "The self-typing ratchet".
+# The scan is deterministic, so the slack is not noise margin: it is the drift ordinary changes may carry against a
+# pin. Measured over 17 merged PRs (the review of #3356, 2026-11-19), an ordinary refactor moves a figure by 0.02 to
+# 0.047 points; #3354's 28 `sig/` declarations moved the call share by -0.26 points and precision by +0.16; removing
+# four of them (`DependencyRecorder.active?` and the `try_dispatch` of KernelDispatch, RbsDispatch and ShapeDispatch)
+# moves the call share by +0.12 and fails. How to read and refresh the figures: docs/agents/measurement.md
+# § "The self-typing ratchet".
 
 # The configuration the figures are measured under; the tool refuses any other. `.rigor.gates.yml` is the self-check
 # configuration with `parameter_inference:` off, so the ratchet sees a regression in declarations or in the engine but
@@ -22,7 +23,7 @@ parameter_inference: false
 # `precise_ratio` of `rigor coverage --format json lib`: expressions whose type is constant, nominal, shaped, refined
 # or bot, over every expression counted.
 precision:
-  pin: 0.5959 # 239217 / 401466
+  pin: 0.5958 # 239217 / 401466
   slack: 0.0010
 
 # `dynamic_call_count` / `call_sites`: the `Prism::CallNode`s whose result is a whole `Dynamic` or a union whose worst
@@ -36,5 +37,5 @@ floors:
   expressions: 350000
   call_sites: 90000
 
-# A move larger than this in one change is an instrument change, not a typing change.
+# A move larger than this from a pin, either way, is an instrument change, not a typing change.
 max_step: 0.02

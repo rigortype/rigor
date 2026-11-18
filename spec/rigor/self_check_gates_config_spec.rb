@@ -14,7 +14,7 @@ require "yaml"
 #   naming `exe/rigor`, `make check*`, `make coverage`, or a `tool/*.rb` that drives the CLI or the runner) must be
 #   in `ci_steps`. A NEW heavy step fails here, naming itself, until it is added on the side it belongs on.
 RSpec.describe "The self-check's gates configuration" do
-  def self.makefile_key_off = { "coverage" => 1, "check-incremental" => 2 }
+  def self.makefile_key_off = { "coverage" => 1, "coverage-tighten" => 1, "check-incremental" => 2 }
   def self.makefile_key_on = %w[check check-json check-plugins check-mutation-cache]
 
   # Each acceptance-gates step that runs rigor: the Makefile target it delegates to (whose side the lists above

@@ -29,11 +29,12 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
   sites from growing back. Measured before it started: 40.4% of `lib/` expressions and 50.2% of call
   sites are Dynamic, 57% of that rooted in untyped parameters.
   - Landed: #3328 (keyed reads on a union of shapes), #3329 (the provenance gate counts a
-    parameter-only declaration apart from residue), #3330 (zero-start range reads).
+    parameter-only declaration apart from residue), #3330 (zero-start range reads), #3341 (#3337,
+    body-first locals in a post-loop collection).
   - #3324 turns the key on now (maintainer, 2026-11-19), with one inline suppression in
-    `require_relative_closure.rb` for the row that needs both #3337 (PR #3341) and #3338 (PR #3339,
-    which waits for #3340); `spec/rigor/self_check_suppressions_spec.rb` fails once the row is gone,
-    and the suppression is deleted then. `make coverage` keeps the key off (`.rigor.coverage.yml`).
+    `require_relative_closure.rb` for the row that waits on #3338 alone. Its fix, PR #3339 (which
+    waits for #3340), deletes the suppression: `spec/rigor/self_check_suppressions_spec.rb` fails
+    once the finding is gone. `make coverage` keeps the key off (`.rigor.coverage.yml`).
   - **The brake, ruled by the maintainer on 2026-11-18:** if another engine defect turns up behind
     those, stop chasing: turn the key on with an inline suppression that names the issue, and leave
     the defect to the backlog.
@@ -46,7 +47,7 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 
 ## Next
 
-1. Land #3324; then #3340, #3339, #3341 (deleting the suppression) and #3335; then the `sig/`
+1. Land #3324; then #3340, #3339 (deleting the suppression) and #3335; then the `sig/`
    declarations and the ratchet.
 2. Triage the current milestone (`gh issue list --milestone <name>`). Read
    `docs/agents/parallel-lanes.md` before fanning out.

@@ -1,0 +1,3 @@
+- **[inference]** A literal key read on a union of hash shapes or tuples now answers each member's own value for that key, instead of every value of every key. ([#3328](https://github.com/rigortype/rigor/pull/3328))
+  - `(flag ? { local: :x, exact: false } : { local: :y, exact: true }).fetch(:local)` is `:x | :y`, where it was `bool | :x | :y`, so passing it to a `Symbol` parameter no longer reports `call.argument-type-mismatch`.
+  - `[]`, `fetch` and `dig` with value-pinned keys are covered, as are a tuple's `first` and `last`. A member that lacks the key contributes what a lone shape contributes (`nil` for `[]`), and a computed key, a plain `Hash` member, a `nil` member or an untyped member reads as before.

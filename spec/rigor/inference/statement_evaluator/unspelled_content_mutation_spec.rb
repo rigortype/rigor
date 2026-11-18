@@ -297,12 +297,12 @@ RSpec.describe "content facts past a mutation the call site does not spell", typ
   end
 
   # The optional-keys shape stands only where removing is all the body does with the local. A store through a
-  # literal `send`, a `yield`, a remover's own block or an element read leaves no value pin to trust.
+  # literal `send`, a `yield`, a remover's own block, an argument of another call or an element read leaves no value pin to trust.
   def reached_hash_bodies
     bodies = ["h.delete(:a); h.send(:store, :a, 1)", "h.delete(:a); yield h",
-              'h.select! { |_k, v| v.replace("q") || true }', "h[:a].delete(:x)"]
+              'h.select! { |_k, v| v.replace("q") || true }', "h.delete(:a); Util.fill(h)", "h[:a].delete(:x)"]
     bodies.each_with_index.map do |body, index|
-      seed = index == 3 ? "{ a: { x: 1 } }" : '{ a: +"x" }'
+      seed = index == 4 ? "{ a: { x: 1 } }" : '{ a: +"x" }'
       "def reached_#{index}\n  h = #{seed}\n  begin\n    #{body}\n    raise \"x\"\n  rescue StandardError\n    " \
         "Rigor.dump_type(h)\n  end\nend\n"
     end.join("\n")
@@ -310,7 +310,8 @@ RSpec.describe "content facts past a mutation the call site does not spell", typ
 
   it "does not keep a hash shape at a rescue entry where the body reaches the hash another way" do
     types = dumped_types(reached_hash_bodies)
-    expect(types.first(3).grep(/\A\{/)).to be_empty
+    expect(types.size).to eq(5)
+    expect(types.first(4).grep(/\A\{/)).to be_empty
     # The remover runs on an element, so `h` keeps its key and the element loses its shape.
     expect(types.last).to eq("{ a: Hash[Dynamic[top] | Symbol, 1 | Dynamic[top]] }")
   end

@@ -1,0 +1,2 @@
+- **[inference]** An argument-free `Array#pop` on an array proven non-empty (after `return if xs.empty?`, inside `if xs.any?` or `until xs.empty?`) now answers the element type instead of a nilable one, so the worklist loop `node = stack.pop; node.foo` no longer reports `call.possible-nil-receiver`. ([#3339](https://github.com/rigortype/rigor/pull/3339))
+  - The `pop` itself drops the non-empty fact, so a second `pop` in the same code stays nilable; `pop(n)` is unchanged.

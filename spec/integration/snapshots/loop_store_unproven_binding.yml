@@ -1,0 +1,101 @@
+---
+locals:
+  and_written: Array[String?]
+  appended: Array[String?]
+  by_arrow: Array[Integer?]
+  by_lambda: Array[Integer?]
+  by_new: Array[Integer?]
+  by_proc: Array[Integer?]
+  c: Integer | String | nil
+  cleanup: Array[Dynamic[top] | Symbol | nil]
+  cleared_arrow: Array[String?]
+  cleared_lambda: Array[String?]
+  cleared_method: Array[String?]
+  cleared_new: Array[String?]
+  cleared_proc: Array[String?]
+  cleared_singleton: Array[String?]
+  d: Integer?
+  defaults: Hash[Integer | String | nil, Dynamic[top]]
+  ensured: Array[Dynamic[top] | Symbol | nil]
+  f: Proc
+  front: Array[Integer | String | nil]
+  guarded: Array[Integer | String | nil]
+  holder: singleton(Object)
+  i: Integer[2..]
+  in_each: Array[Integer | String | nil]
+  in_for: Array[Integer | String | nil]
+  inner: Array[Integer | String | nil]
+  j: Integer?
+  kept: Array[Integer | String | nil]
+  keys: Hash[Integer | String | nil, Integer]
+  matched: Array[Integer | String | nil]
+  mine: Array[Dynamic[top] | String | nil]
+  multi: Array[Integer | String | nil]
+  "n": Dynamic[top] | Symbol | nil
+  negated: Array[Integer | String | nil]
+  obj: Object
+  or_written: Array[String?]
+  own: Array[Dynamic[top] | String | nil]
+  post_test: Array[Integer | String | nil]
+  renumbered: Array[Integer | String]
+  retried: Array[Dynamic[top] | Integer | Symbol | nil]
+  s: Integer | String
+  s1: String?
+  s2: String?
+  s3: String?
+  s4: String?
+  saved: Proc?
+  slotted: Array[Integer | String | nil]
+  spread: Array[String?]
+  t: nil
+  target: Object
+  twice: Array[Integer | String | nil]
+  u: String?
+  unless_nil: Array[Integer | String | nil]
+  via_arrow: Array[Dynamic[top] | String]
+  via_lambda: Array[Dynamic[top] | String]
+  via_method: Array[Dynamic[top] | String]
+  via_proc: Array[Dynamic[top] | String]
+  w: Proc?
+  x: Integer?
+assertions:
+  '1': Array[Integer | String | nil]
+  '2': Array[Integer | String | nil]
+  '3': Array[Integer | String | nil]
+  '4': Array[Integer | String | nil]
+  '5': Array[Integer | String | nil]
+  '6': Array[Integer | String | nil]
+  '7': Array[Integer | String | nil]
+  '8': Array[Integer | String | nil]
+  '9': Hash[Integer | String | nil, Integer]
+  '10': Hash[Integer | String | nil, Dynamic[top]]
+  '11': Array[Integer | String | nil]
+  '12': Array[Integer | String | nil]
+  '13': Array[Integer | String | nil]
+  '14': Array[Integer?]
+  '15': Array[Integer?]
+  '16': Array[Integer?]
+  '17': Array[Integer?]
+  '18': Array[Integer | String | nil]
+  '19': Array[Integer | String | nil]
+  '20': Array[Dynamic[top] | Symbol | nil]
+  '21': Array[Dynamic[top] | Symbol | nil]
+  '22': Array[Dynamic[top] | Integer | Symbol | nil]
+  '23': Array[Dynamic[top] | String]
+  '24': Array[Dynamic[top] | String]
+  '25': Array[Dynamic[top] | String]
+  '26': Array[Dynamic[top] | String]
+  '27': Array[String?]
+  '28': Array[String?]
+  '29': Array[String?]
+  '30': Array[String?]
+  '31': Array[String?]
+  '32': Array[String?]
+  '33': Array[Integer | String]
+  '34': Array[String?]
+  '35': Array[String?]
+  '36': Array[String?]
+  '37': Array[String?]
+  '38': Array[Dynamic[top] | String]
+  '39': Array[Dynamic[top] | String | nil]
+  '40': Array[Dynamic[top] | String | nil]

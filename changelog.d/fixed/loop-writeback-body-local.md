@@ -1,0 +1,4 @@
+- **[inference]** A value a `while` or `until` body stores into a collection is now typed as it stands at the store, so a local first assigned in the body no longer makes the collection's elements nilable. ([#3341](https://github.com/rigortype/rigor/pull/3341))
+  - `out = []; while cond; s = ENV.fetch("X", "a"); out << s; end` reads `out` as `Array[String]`, where it was `Array[String?]`, so `out.each { |o| o.upcase }` no longer reports `call.possible-nil-receiver`.
+  - A rebind after the store no longer changes what was stored: `out << s; s = nil` read `Array[nil]`. A local that is `nil` before the loop and assigned in the body ahead of the store reads as the assigned value too.
+  - A value that can be `nil` at the store keeps it (`s = ENV["X"]; out << s`, `s = "a" if c; out << s`). `<<`, `push`, `unshift`, `[]=` and `store` are covered; a block accumulator and `for` read as before.

@@ -188,6 +188,22 @@ RSpec.describe "content facts past a mutation the call site does not spell", typ
     RUBY
   end
 
+  # Unchanged, and a known limit: a `Kernel#loop` body reads a capture it rebinds at its call-site binding on every
+  # pass, where a later pass holds the rebound value. Pinned so the content entry does not move it by accident.
+  it "leaves a capture a `Kernel#loop` body rebinds at its call-site binding" do
+    expect(dumped_types(<<~RUBY)).to eq(%w[nil])
+      def rebound
+        xs = gets.to_s.chars
+        seen = nil
+        loop do
+          Rigor.dump_type(seen)
+          break if xs.empty?
+          seen = xs.pop
+        end
+      end
+    RUBY
+  end
+
   it "enters a rescue clause with the fact the `begin` body falsified dropped" do
     expect_no_stale_size(<<~RUBY, reads: 2)
       def rescued

@@ -47,7 +47,8 @@ RSpec.describe Rigor::Inference::DeferredMutation do
   end
 
   it "answers nothing for a block that runs at once, a shadowing parameter, or a nested def" do
-    ["[1].each { xs.clear }", "xs.tap { xs.clear }", "loop { xs.pop }", "Kernel.loop { xs.pop }", "f = ->(xs) { xs.clear }", "f = proc { |;xs| xs.clear }",
+    ["[1].each { xs.clear }", "xs.tap { xs.clear }", "loop { xs.pop }", "Kernel.loop { xs.pop }",
+     "f = ->(xs) { xs.clear }", "f = proc { |;xs| xs.clear }",
      "f = -> { def wipe(xs) = xs.clear }", "f = ->(xs) { [1].each { xs.clear } }"].each do |closure|
       expect(empties?(closure)).to be(false), closure
     end

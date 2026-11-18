@@ -95,6 +95,17 @@ while i < 4
 end
 assert_type("Array[Integer | String | nil]", carried)
 
+# --- Stored on a path the body pass reaches with the local unbound:
+# `[1, 1]`. There is no binding at the store to read, so the store keeps
+# the continuation binding and its `nil`. ---
+unbound = []
+i = 0
+while i < 3
+  if i == 0 then e = 1 else unbound << e end
+  i += 1
+end
+assert_type("Array[Integer?]", unbound)
+
 # --- Assigned before the loop and again in it: `["a", "a"]`; the pre-loop
 # `nil` was never stored. ---
 pre = nil
@@ -218,6 +229,40 @@ while i < 3
   i += 1
 end
 assert_type("Array[String]", nested)
+
+# --- The inner loop's counter caps its fixpoint and the outer loop's
+# settles: `[0, 1, 0, 1]`. The outer join reads `m` as the inner loop
+# settled it, not at the `0 | 1 | 2` of the inner loop's last pass. ---
+settled = []
+while rand > 0.5
+  j = 0
+  while j < 2
+    m = j
+    settled << m
+    j += 1
+  end
+end
+assert_type("Array[Integer]", settled)
+
+# --- A seed that is an Array or a Hash, and one that is an Array or a
+# String: each member's join reads the store the same way. ---
+either = rand > 0.5 ? [] : {}
+i = 0
+while i < 3
+  s = ENV.fetch("X", "a")
+  either.store(s, i) if either.is_a?(Hash)
+  i += 1
+end
+assert_type("Array[Dynamic[top]] | Hash[String, Integer]", either)
+
+text_or_list = rand > 0.5 ? [] : +"ab"
+i = 0
+while i < 3
+  s = ENV.fetch("X", "a")
+  text_or_list << s
+  i += 1
+end
+assert_type("Array[String] | String", text_or_list)
 
 # --- A collection built in the body and stored: `[[1, 2], [1, 2]]`. The
 # store keeps the local's later contents beside what it held at the store,

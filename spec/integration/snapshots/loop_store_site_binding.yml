@@ -6,17 +6,20 @@ locals:
   c: String?
   carried: Array[Integer | String | nil]
   counted: Array[Integer]
+  e: Integer?
+  either: Array[Dynamic[top]] | Hash[String, Integer]
   first: String?
   g: String?
   guarded: Array[String]
   i: Integer[2..]
   inner: String?
-  j: Integer?
+  j: Integer | Integer[2..] | nil
   k: String?
   keyed: Hash[String, Dynamic[top]]
   late: Array[Dynamic[top]]
   later_nil: Array[String]
   lit: '"a"?'
+  m: Integer?
   "n": Integer?
   nested: Array[String]
   out: Array[String]
@@ -28,11 +31,14 @@ locals:
   row: Array[1 | 2 | Dynamic[top] | Integer]
   rows: Array[Array[1 | Dynamic[top] | Integer] | [1]]
   s: String?
+  settled: Array[Integer]
   slots: Array[String]
   some: Array[String?]
   stored_first: Array[String?]
   t: String?
+  text_or_list: Array[String] | String
   u: Array[String]
+  unbound: Array[Integer?]
   unshifted: Array[String]
   v: Dynamic[top]
   w: String?
@@ -45,16 +51,20 @@ assertions:
   '6': Array[Dynamic[top]]
   '7': Array[String]
   '8': Array[Integer | String | nil]
-  '9': Array[String]
-  '10': Array[String?]
-  '11': Array[Integer]
-  '12': Array[String]
+  '9': Array[Integer?]
+  '10': Array[String]
+  '11': Array[String?]
+  '12': Array[Integer]
   '13': Array[String]
-  '14': Hash[Integer, String]
-  '15': Hash[String, Integer]
-  '16': Array[String]
+  '14': Array[String]
+  '15': Hash[Integer, String]
+  '16': Hash[String, Integer]
   '17': Array[String]
   '18': Array[String]
-  '19': Hash[String, Dynamic[top]]
-  '20': Array[String]
-  '21': Array[Array[1 | Dynamic[top] | Integer] | [1]]
+  '19': Array[String]
+  '20': Hash[String, Dynamic[top]]
+  '21': Array[String]
+  '22': Array[Integer]
+  '23': Array[Dynamic[top]] | Hash[String, Integer]
+  '24': Array[String] | String
+  '25': Array[Array[1 | Dynamic[top] | Integer] | [1]]

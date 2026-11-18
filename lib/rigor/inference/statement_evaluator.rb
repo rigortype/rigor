@@ -3963,18 +3963,16 @@ module Rigor
       def loop_store_site_scopes(stores, site_pass, post_loop, converged, body_first)
         return NO_SHADOWS if site_pass.nil?
 
-        locals = converged.keys.select { |name| CapturedLocals.local_name?(name) }
-        last_entry = site_pass.entry
-        capped = last_entry != converged
+        capped = site_pass.entry != converged
         table = site_pass.scopes
         stores.each_value.with_object({}.compare_by_identity) do |sites, scopes|
           sites.each do |site|
             reached = table[site]
             next if reached.nil?
 
-            argument_scope = locals.reduce(post_loop) do |acc, name|
-              type = store_site_binding(name, reached, post_loop, capped: capped, last_entry: last_entry,
-                                                                  converged: converged, body_first: body_first,
+            argument_scope = converged.each_key.reduce(post_loop) do |acc, name|
+              type = store_site_binding(name, reached, post_loop, capped: capped,
+                                                                  first_in_body: body_first.include?(name),
                                                                   mutated: stores.key?(name))
               type.nil? ? acc : acc.with_local(name, type)
             end
@@ -3987,31 +3985,26 @@ module Rigor
       # The type a store's arguments read the rebound local `name` at, given `reached`, the scope the fixpoint's
       # last pass reached the store with; nil to keep the continuation binding `post_loop` holds.
       #
-      # - The continuation binding stays when the pass did not bind the name at the store, and when the fixpoint
-      #   floored it to `Dynamic[top]`: a precise arm in its place would read as knowledge the analysis lacks
+      # - The continuation binding stays when the pass did not bind the name as a local at the store (an instance
+      #   variable the fixpoint tracks never is one), and when the fixpoint floored it to `Dynamic[top]`: a precise
+      #   arm in its place would read as knowledge the analysis lacks
       #   (`v = "a" if i > 1; out << v`, where `v` first moves on the capped pass).
       # - A capped fixpoint's last pass ran from an assumption the cap then widened, so the binding it reached the
       #   store with is widened the same way (`n = i; out << n` is `Integer`, not the `0 | 1 | 2` of the pass).
-      #   A pre-existing local whose own assumption grew by more than that on the capped pass was never read at
-      #   the store with its final binding, and keeps the continuation binding.
+      #   {BodyFixpoint} moves a name on that pass to its value-pinned widening or to the `Dynamic[top]` floor
+      #   above, and nowhere else.
       # - A body-first local is not fed back into the next pass ({#loop_body_exit_bindings}), so where the pass
       #   reaches the store with a `nil` — a path that skips this iteration's assignment — an earlier iteration's
       #   value may be what is stored (`c = 1 if x; out << c; c = "s"` pushes `"s"`): the continuation binding
       #   joins in.
       # - A local the body also mutates in place is stored as an object the body may go on mutating (`rows << row;
       #   row << 2`), so the non-nil part of its continuation binding joins in.
-      def store_site_binding(name, reached, post_loop, capped:, last_entry:, converged:, body_first:, mutated:) # rubocop:disable Metrics/ParameterLists
+      def store_site_binding(name, reached, post_loop, capped:, first_in_body:, mutated:)
         at_store = reached.local(name)
         settled = post_loop.local(name)
         return nil if at_store.nil? || settled.nil? || Type::Combinator.untyped?(settled)
 
-        first_in_body = body_first.include?(name)
-        if capped
-          return nil unless first_in_body ||
-                            Type::Combinator.widen_value_pinned(last_entry[name]) == converged[name]
-
-          at_store = Type::Combinator.widen_value_pinned(at_store)
-        end
+        at_store = Type::Combinator.widen_value_pinned(at_store) if capped
         joined = store_site_join(at_store, settled, first_in_body, mutated)
         joined == settled ? nil : joined
       end

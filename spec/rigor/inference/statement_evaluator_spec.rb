@@ -4051,6 +4051,34 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
     end
   end
 
+  # Issue #3337 — the loop seam types a store's arguments from the scope the rebind fixpoint's last pass reached
+  # the store with. The display path's re-record pass and the unrecorded `break`-arm pass both run from the
+  # converged bindings, where `i > 5` no longer folds, and only one of the two paths runs each: a store typed from
+  # either would answer `Array[String | Symbol]` on one path and `Array[String]` on the other. The store sits in a
+  # nested loop because only there does such a pass have a table to write into, the enclosing loop's.
+  describe "a loop store's argument scope" do
+    def stored_after(source, **)
+      evaluator = Rigor::Inference::StatementEvaluator.new(scope: scope, **)
+      evaluator.evaluate(parse_program(source)).last.local(:out).describe
+    end
+
+    def nested_loop_storing(extra = "")
+      inner = "  i = 0\n  while i < 9\n    s = i > 5 ? :big : \"a\"\n    out << s\n#{extra}    i += 1\n  end\n"
+      "out = []\nk = 0\nwhile k < 2\n#{inner}  k += 1\nend\n"
+    end
+
+    it "reads no store from the display path's re-record pass" do
+      plain = stored_after(nested_loop_storing)
+      recorded = stored_after(nested_loop_storing, on_enter: ->(_node, _scope) {}, converged_loop_recording: true)
+
+      expect([plain, recorded]).to eq(["Array[String]", "Array[String]"])
+    end
+
+    it "reads no store from the unrecorded `break`-arm pass" do
+      expect(stored_after(nested_loop_storing("    break if i > 7\n"))).to eq("Array[String]")
+    end
+  end
+
   # See docs/notes/20260615-loop-break-binding-propagation-design.md.
   describe "break-path binding propagation (loop continuation)" do
     def local_after(source, name)

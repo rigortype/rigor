@@ -39,7 +39,11 @@ locals:
   post_test: Array[Integer | String | nil]
   renumbered: Array[Integer | String]
   retried: Array[Dynamic[top] | Integer | Symbol | nil]
-  s: String?
+  s: Integer | String
+  s1: String?
+  s2: String?
+  s3: String?
+  s4: String?
   saved: Proc?
   slotted: Array[Integer | String | nil]
   spread: Array[String?]
@@ -92,5 +96,6 @@ assertions:
   '35': Array[String?]
   '36': Array[String?]
   '37': Array[String?]
-  '38': Array[Dynamic[top] | String | nil]
+  '38': Array[Dynamic[top] | String]
   '39': Array[Dynamic[top] | String | nil]
+  '40': Array[Dynamic[top] | String | nil]

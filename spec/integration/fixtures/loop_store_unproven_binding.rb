@@ -426,51 +426,65 @@ assert_type("Array[Integer | String]", renumbered)
 # two, which store `nil`: `["a", "a"]`, `["ab", "ab"]`, `[nil, nil]` twice
 or_written = []
 i = 0
-s = nil
+s1 = nil
 while i < 2
-  w = proc { s ||= 3 }
-  s = "a"
+  w = proc { s1 ||= 3 }
+  s1 = "a"
   w.call
-  or_written << s
+  or_written << s1
   i += 1
 end
 assert_type("Array[String?]", or_written)
 
 appended = []
 i = 0
-s = nil
+s2 = nil
 while i < 2
-  w = proc { s += "b" }
-  s = "a"
+  w = proc { s2 += "b" }
+  s2 = "a"
   w.call
-  appended << s
+  appended << s2
   i += 1
 end
 assert_type("Array[String?]", appended)
 
 and_written = []
 i = 0
-s = nil
+s3 = nil
 while i < 2
-  w = proc { s &&= nil }
-  s = "a"
+  w = proc { s3 &&= nil }
+  s3 = "a"
   w.call
-  and_written << s
+  and_written << s3
   i += 1
 end
 assert_type("Array[String?]", and_written)
 
 spread = []
 i = 0
-s = nil
+s4 = nil
 while i < 2
-  w = proc { s, t = nil, 4 }
-  s = "a"
+  w = proc { s4, t = nil, 4 }
+  s4 = "a"
   w.call
-  spread << s
+  spread << s4
   i += 1
 end
 assert_type("Array[String?]", spread)
+
+# a closure in a parameter default writes the parameter: `[nil, nil]`
+def loop_store_default_closure(held = nil, clear = proc { held = nil })
+  cleared = []
+  i = 0
+  while i < 2
+    held = "a"
+    clear.call
+    cleared << held
+    i += 1
+  end
+  assert_type("Array[String?]", cleared)
+  cleared
+end
 
 # === A store in a class or method body inside the loop is on that body's
 # own locals: the loop's `own` and `mine` hold `["a", "a"]`, and the inner

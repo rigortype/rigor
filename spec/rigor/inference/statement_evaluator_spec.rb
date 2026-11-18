@@ -4080,6 +4080,13 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       "out = #{out}\ni = 0\nwhile i < 3\n#{body}  i += 1\nend\n"
     end
 
+    # A scope with no frame hides the frame's closures, which may write the local between assignment and store.
+    it "keeps the continuation binding where the scope carries no frame" do
+      program = parse_program(loop_storing("  s = ENV.fetch(\"X\", \"a\")\n  out << s\n"))
+
+      expect(scope.evaluate(program).last.local(:out).describe).to eq("Array[String?]")
+    end
+
     it "reads no store from the display path's re-record pass" do
       expect(stored_by_path(nested_loop_storing).uniq.size).to eq(1)
     end

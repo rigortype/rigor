@@ -204,7 +204,7 @@ RSpec.describe Rigor::Builtins::StaticReturnRefinements do
       "ne[0..]" => "Array[\"x\"] | Array[String]"
     }.each do |expression, expected|
       it "drops the nil of #{expression}" do
-        expect(type_after_seed(expression)).to eq(expected)
+        expect(type_after_seed(expression)).to eq(expected), "#{expression} still reads as nilable"
       end
     end
 
@@ -232,7 +232,7 @@ RSpec.describe Rigor::Builtins::StaticReturnRefinements do
       "n&.[](0..)" => "Array[String]?"
     }.each do |expression, expected|
       it "keeps the declared answer of #{expression}" do
-        expect(type_after_seed(expression)).to eq(expected)
+        expect(type_after_seed(expression)).to eq(expected), "#{expression} moved off its declared answer"
       end
     end
 
@@ -263,7 +263,7 @@ RSpec.describe Rigor::Builtins::StaticReturnRefinements do
       environment = Rigor::Environment.for_project(
         project_patched_methods: Rigor::Inference::ProjectPatchedMethods.new(entries: entries)
       )
-      answers = %w[a[0..] a.slice(0..) s[0..] s.slice(0..)].map { |expr| type_after_seed(expr, environment: environment) }
+      answers = %w[a[0..] a.slice(0..) s[0..] s.slice(0..)].map { |e| type_after_seed(e, environment: environment) }
       expect(answers).to eq(["Array[String]?", "Array[String]", "String", "String?"])
     end
   end

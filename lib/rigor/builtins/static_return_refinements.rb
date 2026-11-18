@@ -171,7 +171,7 @@ module Rigor
           return nil unless call_node.is_a?(Prism::CallNode) && call_node.name == method_name
 
           arguments = call_node.arguments&.arguments
-          return nil unless arguments&.size == arity
+          return nil if arguments.nil? || arguments.size != arity
 
           arguments.first
         end

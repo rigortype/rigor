@@ -23,8 +23,9 @@ module Rigor
     #
     # A closure is a lambda literal or a block that may run after its call returns
     # ({RemoverHolderScan.deferred_block?}: `proc`, `lambda`, `define_method`, `define_singleton_method`, any block
-    # but a catalogued iterator's or `tap` / `then` / `yield_self`'s), anywhere in the frame body the guard runs in,
-    # so one made in a scope enclosing the guard counts. A closure the guard itself sits in does not: its own
+    # but a catalogued iterator's, `tap` / `then` / `yield_self`'s or `Kernel#loop`'s), anywhere in the frame body
+    # the guard runs in, so one made in a scope enclosing the guard counts. A closure the guard itself sits in does
+    # not: its own
     # statements run in order, and the straight-line rules read them. That assumes the closure does not call itself,
     # which would re-enter it past the guard.
     #

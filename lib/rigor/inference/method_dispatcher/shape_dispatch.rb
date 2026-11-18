@@ -634,8 +634,20 @@ module Rigor
 
             return difference if base.class_name == "String" &&
                                  NON_EMPTY_STRING_PRESERVING_UNARY.include?(method_name)
+            return non_empty_array_pop(base) if method_name == :pop
 
             non_zero_int_unary_projection(difference, base, method_name)
+          end
+
+          # Issue #3338 — a `pop` with no argument on `non-empty-array[T]` removes an element that is there, so it
+          # answers `T` where core RBS spells `() -> E?`. `shift` / `first` / `last` / `sample` already read `E`
+          # through their `%a{implicitly-returns-nil}`; `pop` carries no such annotation. The refinement itself is
+          # dropped by `MutationWidening` after the call, so a second `pop` reads `T?` again. A stale fact (#3351)
+          # makes this answer `T` on an array that may be empty.
+          def non_empty_array_pop(base)
+            return nil unless base.class_name == "Array"
+
+            base.type_args.first
           end
 
           def non_zero_int_unary_projection(difference, base, method_name)

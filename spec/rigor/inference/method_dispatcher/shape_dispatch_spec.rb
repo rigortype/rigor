@@ -1673,6 +1673,26 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
     end
   end
 
+  # Issue #3338 — `pop` removes an element a non-empty array holds; `pop(n)` answers an array and stays with RBS.
+  describe "non-empty-array pop" do
+    let(:string) { Rigor::Type::Combinator.nominal_of("String") }
+
+    it "answers the element type for argument-free `pop`" do
+      receiver = Rigor::Type::Combinator.non_empty_array(string)
+      expect(dispatch(receiver: receiver, method_name: :pop)).to eq(string)
+    end
+
+    it "falls through for `pop(n)`" do
+      receiver = Rigor::Type::Combinator.non_empty_array(string)
+      expect(dispatch(receiver: receiver, method_name: :pop, args: [constant(1)])).to be_nil
+    end
+
+    it "falls through for a non-empty Hash, which has no `pop`" do
+      receiver = Rigor::Type::Combinator.non_empty_hash(string, string)
+      expect(dispatch(receiver: receiver, method_name: :pop)).to be_nil
+    end
+  end
+
   describe "non-zero-int / positive-int propagation through Integer operations" do
     let(:non_zero) { Rigor::Type::Combinator.non_zero_int }
     let(:positive_int) { Rigor::Type::Combinator.positive_int }

@@ -436,11 +436,11 @@ SIG_PROVENANCE_PARAMETER_ONLY_MARKED = [
   "sig/rigor/scope.rbs Rigor::Scope#def_node_slot"
 ].freeze
 
-# #3335 — method declarations whose parameter list was compared with the paired `def` on the tree this pin was taken
-# from (1028 on 2026-11-18, every one fitting). A floor, not an exact pin, because every new declaration of a `def`
+# #3335 — method declarations whose parameter list was compared with a recorded `def` on the tree this pin was taken
+# from (1031 on 2026-11-19, every one fitting). A floor, not an exact pin, because every new declaration of a `def`
 # raises it: raise it when the count grows, and lower it only with the reason in the commit body (a deleted
 # declaration, or a `def` the pairing stopped finding, which is the case this floor exists to catch).
-SIG_PARAMETER_SHAPE_COMPARED_FLOOR = 1028
+SIG_PARAMETER_SHAPE_COMPARED_FLOOR = 1031
 
 module SigProvenanceSpecHelpers
   # The hard-rule failure for unmarked `tighter_return` rows. A row whose declared return is the bare `untyped` claims
@@ -897,17 +897,50 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
       expect(fits.uniq).to eq([nil])
     end
 
+    it "lets keywords fill a free optional or rest slot of a def with no keyword parameter (a positional Hash)" do
+      expect(misfits(
+        ["(untyped a, ?key: Integer) -> untyped", "def m(a, o = {}) = a"],
+        ["(key: Integer) -> untyped", "def n(*a) = a"],
+        ["(Integer, key: Integer) -> untyped", "def o(*) = 1"],
+        ["(untyped a, **untyped) -> untyped", "def m(a, o = {}) = a"]
+      ).uniq).to eq([nil])
+    end
+
+    it "still rejects keywords with no free positional slot, or on a `**nil` def" do
+      expect(misfits(
+        ["(untyped a, key: Integer) -> untyped", "def p(a) = a"],
+        ["(untyped a, untyped o, key: Integer) -> untyped", "def m(a, o = {}) = a"],
+        ["(untyped a, key: Integer) -> untyped", "def q(a, o = {}, **nil) = a"]
+      ).uniq).to eq(["names keyword(s) the def does not take: key"])
+    end
+
+    it "reads a block query only bare, on `self` or on `Kernel`, and a `yield` inside a block of the body" do
+      expect(misfits(
+               ["() { () -> untyped } -> untyped", "def n = Kernel.block_given?"],
+               ["() { () -> untyped } -> untyped", "def n = ::Kernel.block_given?"],
+               ["() { () -> untyped } -> untyped", "def n = self.block_given?"],
+               ["() { () -> untyped } -> untyped", "def n = iterator?"],
+               ["() { (untyped) -> untyped } -> untyped", "def n = [1].each { |e| yield e }"],
+               ["() { () -> untyped } -> untyped", "def n = x.block_given?"],
+               ["() { () -> untyped } -> untyped", "def n = Other.block_given?"]
+             )).to eq([nil, nil, nil, nil, nil,
+                       "declares a block, the def neither takes nor yields one",
+                       "declares a block, the def neither takes nor yields one"])
+    end
+
     it "rejects a positional count the def cannot take, in either direction" do
       expect(misfits(
                ["(untyped x) -> untyped", "def n(x, y) = x"],
                ["(untyped x, untyped y, untyped z) -> untyped", "def n(x, y = 1) = x"],
                ["(untyped x, *untyped rest) -> untyped", "def n(x, y = 1) = x"],
                ["(?untyped x) -> untyped", "def n(x) = x"],
+               ["(untyped a) -> untyped", "def m(a, *r, b) = a"],
                ["() -> untyped", "def n(x, ...) = m(...)"]
              )).to eq(["admits 1 positional argument(s), the def requires 2",
                        "admits 3 positional argument(s), the def takes at most 2",
                        "admits any number of positional argument(s), the def takes at most 2",
                        "admits 0 positional argument(s), the def requires 1",
+                       "admits 1 positional argument(s), the def requires 2",
                        "admits 0 positional argument(s), the def requires 1"])
     end
 
@@ -958,6 +991,47 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
         result = SigParameterShape.check(audit_fixture(ruby: ruby, rbs: rbs))
         expect(result.mismatches.map { |m| [m.declaration.method_name, m.declared] }).to eq(
           [["initialize", "() -> void"], ["n", "(Integer x, Integer y) -> untyped"], ["run", "() -> untyped"]]
+        )
+      end
+
+      it "compares a def sig-gen makes no candidate of: a parameterless `initialize`" do
+        rows = audit_fixture(ruby: "class Widget\n  def initialize\n  end\nend\n",
+                             rbs: "class Widget\n  def initialize: (Integer x) -> void\nend\n")
+        row = rows.find { |r| r.declaration.method_name == "initialize" }
+        expect(row.paired).to be(false)
+        result = SigParameterShape.check(rows)
+        expect(result.mismatches.map(&:to_s)).to eq(
+          ["sig/fixture.rbs:2: Widget#initialize — declared `(Integer x) -> void`, def `def initialize()`: " \
+           "admits 1 positional argument(s), the def takes at most 0"]
+        )
+      end
+
+      it "passes an overload any def of a contested slot accepts, and names every def when none does" do
+        ruby = "class Widget\n  if RUBY_VERSION > \"3\"\n    def n(x)\n      x\n    end\n  else\n    " \
+               "def n(x, y)\n      x\n    end\n  end\nend\n"
+        rbs = "class Widget\n  def n: (untyped x) -> untyped | (untyped x, untyped y) -> untyped | " \
+              "(untyped x, untyped y, untyped z) -> untyped\nend\n"
+        result = SigParameterShape.check(audit_fixture(ruby: ruby, rbs: rbs))
+        expect(result.mismatches.map(&:to_s)).to eq(
+          ["sig/fixture.rbs:2: Widget#n — declared `(untyped x, untyped y, untyped z) -> untyped`, " \
+           "def `def n(x)` | `def n(x, y)`: admits 3 positional argument(s), the def takes at most 1"]
+        )
+      end
+
+      it "compares against the def in every file of a reopened class" do
+        write_fixture("lib/other.rb", "class Widget\n  def n(x, y)\n    x\n  end\nend\n")
+        rbs = "class Widget\n  def n: (untyped x) -> untyped | (untyped x, untyped y) -> untyped\nend\n"
+        rows = audit_fixture(ruby: "class Widget\n  def n(x)\n    x\n  end\nend\n", rbs: rbs)
+        expect(rows.find { |r| r.declaration.method_name == "n" }.source_defs.size).to eq(2)
+        expect(SigParameterShape.check(rows).mismatches).to be_empty
+      end
+
+      it "spells a singleton declaration and its def as Ruby calls them" do
+        result = SigParameterShape.check(audit_fixture(ruby: "class Widget\n  def self.n(x)\n    x\n  end\nend\n",
+                                                       rbs: "class Widget\n  def self.n: () -> untyped\nend\n"))
+        expect(result.mismatches.map(&:to_s)).to eq(
+          ["sig/fixture.rbs:2: Widget.n — declared `() -> untyped`, def `def self.n(x)`: " \
+           "admits 0 positional argument(s), the def requires 1"]
         )
       end
 

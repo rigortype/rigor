@@ -404,7 +404,8 @@ RSpec.describe "bin/verify-changed spec selection" do
           end
 
           # A deleted or renamed spec leaves its row behind until the next refresh;
-          # no lookup reaches it, so it changes nothing and warns about nothing.
+          # no lookup reaches it, so it changes nothing and warns about nothing. A guard:
+          # no line of the selection reads a row except by the path of a spec it found.
           it "ignores a row naming a spec that no longer exists" do
             files = { "lib/rigor/mod.rb" => "" }.merge(spec_files("spec/rigor/mod", 1))
                                                 .merge(cost_table("spec/rigor/mod/s0_spec.rb" => 0.01,

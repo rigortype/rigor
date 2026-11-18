@@ -444,11 +444,7 @@ module Rigor
             members << following
           end
 
-          # Engine cannot see the `members << following`
-          # mutation inside the loop, so it folds the
-          # `size == 1` guard to a constant; the loop body
-          # actually grows the tuple, so the guard is real.
-          members.size == 1 ? first : TypeNode::Union.new(nodes: members) # rigor:disable flow.always-truthy-condition
+          members.size == 1 ? first : TypeNode::Union.new(nodes: members)
         end
 
         def parse_single_type_arg_ast
@@ -459,13 +455,9 @@ module Rigor
           elsif (literal = @scanner.scan(SIGNED_INT))
             TypeNode::IntegerLiteral.new(value: Integer(literal))
           elsif @scanner.scan(SYMBOL_LITERAL)
-            # StringScanner#[] accepts Symbol for named captures
-            # (Ruby behaviour); upstream RBS shim only declares the
-            # positional-capture (Integer) overload, so the
-            # argument-type-mismatch diagnostic is suppressed.
-            TypeNode::SymbolLiteral.new(value: @scanner[:value].to_sym) # rigor:disable argument-type-mismatch
+            TypeNode::SymbolLiteral.new(value: @scanner[:value].to_sym)
           elsif @scanner.scan(STRING_LITERAL)
-            TypeNode::StringLiteral.new(value: @scanner[:value]) # rigor:disable argument-type-mismatch
+            TypeNode::StringLiteral.new(value: @scanner[:value])
           else
             parse_type_ast
           end

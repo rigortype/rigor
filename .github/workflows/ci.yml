@@ -947,8 +947,10 @@ jobs:
       # ADR-127 WD3 — the memo audit over Rigor's own source: every hit in the callee floor's memos is recomputed and
       # compared (`MemoAudit`), and a key that misses an input raises. A separate step. A raise surfaces as an
       # `internal analyzer error` diagnostic, so the output is kept; the exit status is the gate.
+      # `.rigor.gates.yml` keeps `parameter_inference:` off here, as for the shadow below: with it on, this step
+      # would take ~2.4x as long (#3324).
       - name: Run the callee-floor memo audit
-        run: RIGOR_MEMO_AUDIT=1 bundle exec exe/rigor check --no-cache --workers 0 lib
+        run: RIGOR_MEMO_AUDIT=1 bundle exec exe/rigor check --config .rigor.gates.yml --no-cache --workers 0 lib
 
       # ADR-129 stage 3 — G1's shadow over Rigor's own source and the integration fixtures: every would-be hit of the
       # type_of memo is recomputed and compared, and nothing is served, so the diagnostics are not read here. Advisory
@@ -956,14 +958,15 @@ jobs:
       # and the report check fails a missing or empty report and a run that checked nothing, so neither run can drop out
       # unseen. Each run's exit status goes to the check too: `lib` must exit clean, and the fixtures may exit 1 on
       # their expected diagnostics.
+      # Both runs read `.rigor.gates.yml` (`parameter_inference:` off), like the memo audit above.
       - name: Run the type_of shadow (advisory)
         continue-on-error: true
         run: |
           rm -f "$RUNNER_TEMP"/type-of-shadow-*.jsonl
           RIGOR_TYPE_OF_SHADOW=1 RIGOR_TYPE_OF_SHADOW_REPORT="$RUNNER_TEMP/type-of-shadow-lib.jsonl" \
-            bundle exec exe/rigor check --no-cache --workers 0 --format json lib > /dev/null || lib_status=$?
+            bundle exec exe/rigor check --config .rigor.gates.yml --no-cache --workers 0 --format json lib > /dev/null || lib_status=$?
           RIGOR_TYPE_OF_SHADOW=1 RIGOR_TYPE_OF_SHADOW_REPORT="$RUNNER_TEMP/type-of-shadow-fixtures.jsonl" \
-            bundle exec exe/rigor check --no-cache --workers 0 --format json spec/integration/fixtures > /dev/null ||
+            bundle exec exe/rigor check --config .rigor.gates.yml --no-cache --workers 0 --format json spec/integration/fixtures > /dev/null ||
             fixtures_status=$?
           if ! ruby tool/type_of_shadow_report.rb --status "lib=${lib_status:-0}:0" \
             --status "fixtures=${fixtures_status:-0}:1" \

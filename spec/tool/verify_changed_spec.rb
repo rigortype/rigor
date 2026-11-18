@@ -542,7 +542,8 @@ RSpec.describe "bin/verify-changed spec selection" do
     let(:engine_path) { "lib/rigor/inference/statement_evaluator.rb" }
     let(:drift) do
       %w[spec/integration/precision_snapshot_spec.rb spec/rigor/public_api_drift_spec.rb
-         spec/rigor/sig_gen/provenance_spec.rb spec/rigor/scope/ancestry_walker_detection_spec.rb]
+         spec/rigor/sig_gen/provenance_spec.rb spec/rigor/scope/ancestry_walker_detection_spec.rb
+         spec/rigor/self_check_suppressions_spec.rb]
     end
 
     it "selects only the mirror spec for an engine path, where the default adds the drift set" do
@@ -619,6 +620,18 @@ RSpec.describe "bin/verify-changed spec selection" do
       end
       expect(status.exitstatus).to eq(2)
       expect(err).to include("--list-specs only")
+    end
+  end
+
+  # #3324: the gates-config spec reads these four files, so a change to any of them selects it, in both tiers.
+  describe "the self-check configuration split" do
+    %w[.rigor.gates.yml .rigor.dist.yml Makefile .github/workflows/ci.yml].each do |path|
+      it "selects the gates-config spec for a change to #{path}" do
+        full, = selection_for(path)
+        quick, = selection_for(path, quick: true)
+        expect(full).to include("spec/rigor/self_check_gates_config_spec.rb")
+        expect(quick).to include("spec/rigor/self_check_gates_config_spec.rb")
+      end
     end
   end
 end

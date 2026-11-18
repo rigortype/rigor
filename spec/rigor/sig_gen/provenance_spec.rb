@@ -689,6 +689,20 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
         expect(row).to be_marked
       end
 
+      it "never leaves the class on its own for a self-recursive method: the author declares the return" do
+        ruby = "class Widget\n  def n(xs, k)\n    return k if xs.empty?\n\n    n(xs.drop(1), k + 1)\n  end\nend\n"
+        stuck = only_row(widget("(Array[Integer] xs, Integer k) -> untyped"), ruby: ruby)
+        declared = only_row(widget("(Array[Integer] xs, Integer k) -> Integer"), ruby: ruby)
+        expect(stuck.classification).to eq(SigProvenanceAuditor::PARAMETER_ONLY)
+        expect(declared.classification).to eq(SigProvenanceAuditor::PARAMETER_INTENT)
+      end
+
+      it "leaves for `declared_divergent` residue, not `tighter_return`, when the return becomes a bare `nil`" do
+        row = only_row(widget("(Integer x) -> untyped"), ruby: "class Widget\n  def n(x)\n    nil\n  end\nend\n")
+        expect(row.classification).to eq(SigProvenanceAuditor::DECLARED_DIVERGENT)
+        expect(row).to be_residue
+      end
+
       it "does not apply to a skip for any other reason" do
         declaration = SigProvenanceAuditor::Declaration.new(
           path: "sig/widget.rbs", line: 2, class_name: "Widget", method_name: "n", kind: :instance,

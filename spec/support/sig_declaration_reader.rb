@@ -104,7 +104,7 @@ module SigDeclarationReader
         function = overload.method_type.type
         next true if function.is_a?(RBS::Types::UntypedFunction)
 
-        overload.method_type.block || function_parameters(function).any? { |p| !states_nothing?(p.type) }
+        overload.method_type.block || function_parameters(function).any? { |p| !untyped?(p.type) }
       end
     end
 

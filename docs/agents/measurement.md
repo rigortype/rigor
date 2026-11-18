@@ -386,7 +386,7 @@ base=$(git merge-base HEAD origin/master) && rm -rf tmp/ratchet-base && mkdir -p
   bundle exec exe/rigor coverage --config .rigor.gates.yml --format json lib > tmp/ratchet-head.json
 ```
 
-The failure message prints the same command. Run it inside the Flake, about three minutes for the two scans. Then:
+The failure message prints the same command. Run it inside the Flake: two scans, each as long as `make coverage`. A merge base older than #3356 has no call-site fields, so only precision compares there. Then:
 
 1. If the delta is the change's own, declare in `sig/` what it left untyped. `rigor sig-gen --print PATH` proposes
    it.

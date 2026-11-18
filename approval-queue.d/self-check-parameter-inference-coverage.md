@@ -1,6 +1,6 @@
 # Keep `parameter_inference:` out of the `make coverage` precision gate
 
-- **PR:** none
+- **PR:** [#3353](https://github.com/rigortype/rigor/pull/3353)
 - **Issue:** [#3324](https://github.com/rigortype/rigor/issues/3324)
 - **Class:** scope
 - **Precedent:** none — sets one

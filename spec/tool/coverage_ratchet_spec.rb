@@ -3,6 +3,7 @@
 require "spec_helper"
 require "json"
 require "stringio"
+require "fileutils"
 require "tmpdir"
 require "yaml"
 require_relative "../../tool/coverage_ratchet"
@@ -130,24 +131,20 @@ RSpec.describe "tool/coverage_ratchet.rb" do
     let(:gates_config) { File.join(CoverageRatchet::ROOT, ".rigor.gates.yml") }
     let(:scan_summary) { summary }
     let(:scan_status) { 0 }
+    let(:dir) { Dir.mktmpdir }
 
-    around do |example|
-      Dir.mktmpdir do |dir|
-        @dir = dir
-        File.write(File.join(dir, "pins.yml"), File.read(CoverageRatchet::PINS)
-          .sub(/^(precision:\n  pin: )\S+.*$/, '\10.6 # x').sub(/^(dynamic_call_share:\n  pin: )\S+.*$/, '\10.5 # y'))
-        example.run
-      end
-    end
+    after { FileUtils.rm_rf(dir) }
 
     before do
+      File.write(pins_path, File.read(CoverageRatchet::PINS)
+        .sub(/^(precision:\n  pin: )\S+.*$/, '\10.6 # x').sub(/^(dynamic_call_share:\n  pin: )\S+.*$/, '\10.5 # y'))
       allow(Rigor::CLI).to receive(:start) do |_argv, out:|
         out.write(JSON.generate({ "summary" => scan_summary }))
         scan_status
       end
     end
 
-    def pins_path = File.join(@dir, "pins.yml")
+    def pins_path = File.join(dir, "pins.yml")
 
     def run_ratchet(*argv)
       out = StringIO.new
@@ -180,7 +177,7 @@ RSpec.describe "tool/coverage_ratchet.rb" do
     end
 
     it "refuses a config at another path, even with the key off, before scanning" do
-      other = File.join(@dir, "other.yml")
+      other = File.join(dir, "other.yml")
       File.write(other, "parameter_inference: false\n")
       status, out = run_ratchet("--config", other, "lib")
       expect(status).to eq(1)
@@ -208,7 +205,17 @@ RSpec.describe "tool/coverage_ratchet.rb" do
       end
     end
 
-    context "when the scan is worse than a pin" do
+    context "when the scan is worse than a pin but within the slack" do
+      let(:scan_summary) { summary(precise_count: 239_800, dynamic_call_count: 50_050) }
+
+      it "passes and leaves both pins alone with --tighten" do
+        before = File.read(pins_path)
+        expect(run_ratchet("--config", gates_config, "--tighten", "lib").first).to eq(0)
+        expect(File.read(pins_path)).to eq(before)
+      end
+    end
+
+    context "when the scan is worse than a pin past the slack" do
       let(:scan_summary) { summary(precise_count: 239_000) }
 
       it "never loosens a pin with --tighten" do

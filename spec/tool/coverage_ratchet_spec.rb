@@ -82,9 +82,9 @@ RSpec.describe "tool/coverage_ratchet.rb" do
   end
 
   it "rounds a new pin toward the worse side" do
-    # 49,801.5 / 100,000 cannot happen, so use a denominator that leaves a fifth decimal: 0.498015 and 0.602513.
+    # 0.498015 and 0.602575: rounding to the nearest would give 0.4980 and 0.6026, each claiming more than measured.
     _, text = judge(summary(call_sites: 200_000, dynamic_call_count: 99_603, expressions_typed: 400_000,
-                            precise_count: 241_005))
+                            precise_count: 241_030))
     expect(text).to include("dynamic_call_share.pin: 0.4981 #", "precision.pin: 0.6025 #")
   end
 
@@ -215,10 +215,10 @@ RSpec.describe "tool/coverage_ratchet.rb" do
       end
     end
 
-    context "when the scan is worse than a pin past the slack" do
-      let(:scan_summary) { summary(precise_count: 239_000) }
+    context "when the scan is worse than one pin past the slack and better than the other" do
+      let(:scan_summary) { summary(precise_count: 239_000, dynamic_call_count: 49_800) }
 
-      it "never loosens a pin with --tighten" do
+      it "fails and writes neither pin with --tighten" do
         before = File.read(pins_path)
         expect(run_ratchet("--config", gates_config, "--tighten", "lib").first).to eq(1)
         expect(File.read(pins_path)).to eq(before)

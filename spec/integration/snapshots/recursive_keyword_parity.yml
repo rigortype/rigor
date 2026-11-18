@@ -48,18 +48,18 @@ assertions:
   '44': ":base"
   '45': ":base"
   '46': ":base"
-  '47': Integer
-  '48': ":fast"
+  '47': '1'
+  '48': Integer
   '49': ":fast"
-  '50': '1'
+  '50': ":fast"
   '51': '1'
-  '52': "[Symbol]"
-  '53': "{ a: Integer }"
-  '54': Dynamic[top]
+  '52': '1'
+  '53': "[Symbol]"
+  '54': "{ a: Integer }"
   '55': Dynamic[top]
   '56': Dynamic[top]
-  '57': ":slow | Dynamic[top]"
-  '58': Dynamic[top]
+  '57': Dynamic[top]
+  '58': ":slow | Dynamic[top]"
   '59': Dynamic[top]
   '60': Dynamic[top]
   '61': Dynamic[top]
@@ -72,3 +72,4 @@ assertions:
   '68': Dynamic[top]
   '69': Dynamic[top]
   '70': Dynamic[top]
+  '71': Dynamic[top]

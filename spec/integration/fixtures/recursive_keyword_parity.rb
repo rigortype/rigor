@@ -163,11 +163,13 @@ assert_type("{}", subject.keyword_hash_returned(2))
 assert_type("[1, 2]", subject.positional_tuple_returned(2, [1, 2]))
 
 # A pin below the first level: a shape in a keyword, a tuple in a keyword, a tuple, a union of shapes.
-# Ruby: :base for the first three, 1 for the last.
+# Ruby: :base for the first three, 1 for the last two. Both union members pin `kw[:n]` to 2 in the first
+# (#3320), so it unrolls as `{ n: 2 }` does; the second reads `2 | 3` and takes the widened retry.
 assert_type(":base", subject.keyword_nested(opts: { n: some_int }))
 assert_type(":base", subject.keyword_tuple(xs: [some_int]))
 assert_type(":base", subject.positional_tuple([some_int]))
-assert_type("Integer", subject.positional_hash(1, coin ? { n: 2 } : { n: 2, m: 1 }))
+assert_type("1", subject.positional_hash(1, coin ? { n: 2 } : { n: 2, m: 1 }))
+assert_type("Integer", subject.positional_hash(1, coin ? { n: 2 } : { n: 3, m: 1 }))
 
 # A parameter every recursive call passes through unchanged keeps its binding in the retry.
 # Ruby: :fast, :fast (the `mode:` shorthand), 1, 1.

@@ -3,6 +3,7 @@
 require "prism"
 
 require_relative "alias_mutation_floor"
+require_relative "deep_erasure"
 require_relative "mutation_rejoin"
 require_relative "mutation_widening"
 require_relative "receiver_alias"
@@ -76,6 +77,37 @@ module Rigor
         return scope if arguments.nil?
 
         floor_reads(local_arguments(arguments), scope, nil)
+      end
+
+      # `scope` with every local `body` hands to code the engine cannot read, or mutates through a form the
+      # straight-line widening reads only at the call ({.reached_reads}), floored: what the local can hold once any
+      # prefix of `body` has run, for the rescue clause that follows it (`ClauseWidening.content_entry`).
+      def floor_reached(body, scope)
+        floor_reads(reached_reads(body, []), scope, nil)
+      end
+
+      # The variable reads under `node`, outside a nested `def`, that a `yield` passes, an opaque receiver names
+      # ({.opaque_receiver}), a literal `send` or a literal-named `Method` object mutates, or a symbol block mutates
+      # as an element of a literal Array.
+      def reached_reads(node, reads)
+        return reads if node.nil? || node.is_a?(Prism::DefNode)
+
+        if node.is_a?(Prism::YieldNode)
+          reads.concat(local_arguments(node.arguments&.arguments || NO_READS))
+        elsif node.is_a?(Prism::CallNode)
+          call_reads(node, reads)
+        end
+        node.rigor_each_child { |child| reached_reads(child, reads) }
+        reads
+      end
+
+      def call_reads(call_node, reads)
+        made = AliasMutationFloor.literal_send_target(call_node) || method_object_target(call_node)
+        receiver = made && SELF_MUTATORS.include?(made.name) ? made.receiver : opaque_receiver(call_node)
+        reads.concat(ReceiverAlias.mutated_reads(receiver)) if receiver
+        return unless call_node.receiver.is_a?(Prism::ArrayNode) && DeepErasure.symbol_proc_mutation?(call_node.block)
+
+        call_node.receiver.elements.each { |element| reads.concat(ReceiverAlias.mutated_reads(element)) }
       end
 
       # The receiver `call_node` hands to code that may mutate it, or nil.

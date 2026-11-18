@@ -3,7 +3,6 @@
 require "prism"
 
 require_relative "alias_mutation_floor"
-require_relative "block_call_timing"
 require_relative "deep_erasure"
 require_relative "mutation_widening"
 require_relative "opaque_mutation"
@@ -23,11 +22,10 @@ module Rigor
     #
     # A closure is a lambda literal or a block that may run after its call returns
     # ({RemoverHolderScan.deferred_block?}: `proc`, `lambda`, `define_method`, `define_singleton_method`, any block
-    # but a catalogued iterator's, `tap` / `then` / `yield_self`'s or `Kernel#loop`'s), anywhere in the frame body
-    # the guard runs in, so one made in a scope enclosing the guard counts. A closure the guard itself sits in does
-    # not: its own
-    # statements run in order, and the straight-line rules read them. That assumes the closure does not call itself,
-    # which would re-enter it past the guard.
+    # but a catalogued iterator's or `tap` / `then` / `yield_self`'s, so a `loop` block too), anywhere in the frame
+    # body the guard runs in, so one made in a scope enclosing the guard counts. A closure the guard itself sits in
+    # does not: its own statements run in order, and the straight-line rules read them. That assumes the closure
+    # does not call itself, which would re-enter it past the guard.
     #
     # It can empty the local when its body, a nested block included, runs on a read of it that resolves outside the
     # closure: a mutator that can leave a non-empty receiver empty (every {MUTATORS} name but the ones
@@ -69,12 +67,11 @@ module Rigor
         found
       end
 
-      # A lambda literal, or a block that may run after its call returns, that does not hold the guard. A
-      # `Kernel#loop` block runs before its call returns, like a catalogued iterator's, and its own entry and
-      # continuation read what it mutates.
+      # A lambda literal, or a block that may run after its call returns, that does not hold the guard. A `loop`
+      # block counts: the name is no catalogued iterator's, a project may define it and keep the block, and the
+      # entry of a `Kernel#loop` body reads only the mutators the body spells on the local.
       def later_closure?(node, parent, guard_offset)
         return false unless node.is_a?(Prism::LambdaNode) || RemoverHolderScan.deferred_block?(parent)
-        return false if parent.is_a?(Prism::CallNode) && BlockCallTiming.kernel_loop?(parent)
 
         location = node.location
         guard_offset < location.start_offset || guard_offset >= location.end_offset

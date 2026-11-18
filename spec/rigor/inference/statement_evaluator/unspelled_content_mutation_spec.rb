@@ -188,6 +188,48 @@ RSpec.describe "content facts past a mutation the call site does not spell", typ
     RUBY
   end
 
+  # The guard is declined for a local a `loop` block can empty, whatever form the emptier takes and whether or not
+  # `loop` is Kernel's: the body's entry reads only the mutators spelled on the local.
+  def loop_bodies
+    forms = ["xs.pop", "yield xs", "xs.method(:pop).call", "[xs].each(&:pop)", "xs.instance_eval { pop }",
+             "xs.send(m)", "xs.send(:pop)"]
+    defs = forms.each_with_index.map do |form, index|
+      "def loop_#{index}(m)\n  #{guard}\n  loop do\n    Rigor.dump_type(xs.size)\n    #{form}\n  end\nend\n"
+    end
+    <<~RUBY
+      #{defs.join("\n")}
+      class Keeper
+        def loop(&blk) = @blk = blk
+
+        def kept
+          #{guard}
+          loop { xs.pop }
+          @blk.call
+          Rigor.dump_type(xs.size)
+        end
+      end
+    RUBY
+  end
+
+  it "reads no `positive-int` size in or after a `loop` block that can empty the local by any form" do
+    types = dumped_types(loop_bodies)
+    expect(types.size).to eq(8)
+    expect(types).not_to include("positive-int")
+  end
+
+  it "enters a `Kernel#loop` body with a literal's shape its own back edge falsifies dropped" do
+    expect(dumped_types(<<~RUBY)).to eq(["Array[1 | 2 | Dynamic[top]]"])
+      def drain_literal
+        xs = [1, 2]
+        loop do
+          Rigor.dump_type(xs)
+          break if xs.empty?
+          xs.pop
+        end
+      end
+    RUBY
+  end
+
   # Unchanged, and a known limit: a `Kernel#loop` body reads a capture it rebinds at its call-site binding on every
   # pass, where a later pass holds the rebound value. Pinned so the content entry does not move it by accident.
   it "leaves a capture a `Kernel#loop` body rebinds at its call-site binding" do
@@ -252,6 +294,35 @@ RSpec.describe "content facts past a mutation the call site does not spell", typ
         end
       end
     RUBY
+  end
+
+  # The optional-keys shape stands only where removing is all the body does with the local. A store through a
+  # literal `send`, a `yield`, a remover's own block or an element read leaves no value pin to trust.
+  def reached_hash_bodies
+    bodies = ["h.delete(:a); h.send(:store, :a, 1)", "h.delete(:a); yield h",
+              'h.select! { |_k, v| v.replace("q") || true }', "h[:a].delete(:x)"]
+    bodies.each_with_index.map do |body, index|
+      seed = index == 3 ? "{ a: { x: 1 } }" : '{ a: +"x" }'
+      "def reached_#{index}\n  h = #{seed}\n  begin\n    #{body}\n    raise \"x\"\n  rescue StandardError\n    " \
+        "Rigor.dump_type(h)\n  end\nend\n"
+    end.join("\n")
+  end
+
+  it "does not keep a hash shape at a rescue entry where the body reaches the hash another way" do
+    types = dumped_types(reached_hash_bodies)
+    expect(types.first(3).grep(/\A\{/)).to be_empty
+    # The remover runs on an element, so `h` keeps its key and the element loses its shape.
+    expect(types.last).to eq("{ a: Hash[Dynamic[top] | Symbol, 1 | Dynamic[top]] }")
+  end
+
+  it "enters a rescue clause with the fact dropped for a local the body hands to unread code" do
+    forms = ["yield xs", "xs.send(:clear)", "xs.method(:clear).call", "[xs].each(&:clear)",
+             "xs.instance_eval { clear }", "xs.send(m)"]
+    source = forms.each_with_index.map do |form, index|
+      "def handed_#{index}(m)\n  #{guard}\n  begin\n    #{form}\n    raise \"x\"\n  rescue StandardError\n    " \
+        "#{read}\n  end\nend\n"
+    end.join("\n")
+    expect_no_stale_size(source, reads: 6)
   end
 
   # A guard, not a pin of this change: a `begin` a `retry` targets re-enters its chain from the retry-widened entry,

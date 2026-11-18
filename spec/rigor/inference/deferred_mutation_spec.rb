@@ -20,7 +20,8 @@ RSpec.describe Rigor::Inference::DeferredMutation do
 
   it "answers for a lambda, a proc and a method-defining block that can empty the local" do
     ["f = -> { xs.clear }", "f = lambda { xs.pop }", "f = proc { xs.shift }", "define_method(:z) { xs.replace([]) }",
-     "define_singleton_method(:z) { xs.delete(1) }", "on_event { xs.reject! { |x| x } }"].each do |closure|
+     "define_singleton_method(:z) { xs.delete(1) }", "on_event { xs.reject! { |x| x } }",
+     "loop { xs.pop }", "Kernel.loop { yield xs }"].each do |closure|
       expect(empties?(closure)).to be(true), closure
     end
   end
@@ -47,7 +48,7 @@ RSpec.describe Rigor::Inference::DeferredMutation do
   end
 
   it "answers nothing for a block that runs at once, a shadowing parameter, or a nested def" do
-    ["[1].each { xs.clear }", "xs.tap { xs.clear }", "loop { xs.pop }", "Kernel.loop { xs.pop }",
+    ["[1].each { xs.clear }", "xs.tap { xs.clear }",
      "f = ->(xs) { xs.clear }", "f = proc { |;xs| xs.clear }",
      "f = -> { def wipe(xs) = xs.clear }", "f = ->(xs) { [1].each { xs.clear } }"].each do |closure|
       expect(empties?(closure)).to be(false), closure

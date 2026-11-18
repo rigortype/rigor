@@ -231,6 +231,18 @@ while i < 3
 end
 assert_type("Array[String]", branched)
 
+# --- A work list: `[1]`. The reader's own answer carries a `Dynamic[top]`
+# arm (the list is grown in the body), and so does the binding at the
+# store, so it still replaces the continuation binding and its `nil`. ---
+taken = []
+stack = [1]
+until stack.empty?
+  node = stack.shift
+  taken << node if node.odd?
+  stack.concat([])
+end
+assert_type("Array[1 | Dynamic[top]]", taken)
+
 # --- A store in a nested loop is typed for both loops. ---
 nested = []
 i = 0

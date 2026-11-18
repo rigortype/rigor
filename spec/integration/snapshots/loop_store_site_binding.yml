@@ -23,6 +23,7 @@ locals:
   m: Integer?
   "n": Integer?
   nested: Array[String]
+  node: 1 | Dynamic[top] | nil
   out: Array[String]
   pinned: Array["a"]
   pre: String?
@@ -36,8 +37,10 @@ locals:
   settled: Array[Integer]
   slots: Array[String]
   some: Array[String?]
+  stack: Array[1]
   stored_first: Array[String?]
   t: String?
+  taken: Array[1 | Dynamic[top]]
   text_or_list: Array[String] | String
   u: Array[String]
   unbound: Array[Integer?]
@@ -66,8 +69,9 @@ assertions:
   '19': Array[String]
   '20': Hash[String, Dynamic[top]]
   '21': Array[String]
-  '22': Array[String]
-  '23': Array[Integer]
-  '24': Array[Dynamic[top]] | Hash[String, Integer]
-  '25': Array[String] | String
-  '26': Array[Array[1 | Dynamic[top] | Integer] | [1]]
+  '22': Array[1 | Dynamic[top]]
+  '23': Array[String]
+  '24': Array[Integer]
+  '25': Array[Dynamic[top]] | Hash[String, Integer]
+  '26': Array[String] | String
+  '27': Array[Array[1 | Dynamic[top] | Integer] | [1]]

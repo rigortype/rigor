@@ -446,7 +446,9 @@ module SigProvenanceSpecHelpers
 
   # Runs the whole classifier over a two-file fixture project, so a unit example exercises the same
   # join the corpus examples do rather than a parallel reimplementation of it.
-  def parameter_only_marker_message(added)
+  # `keys` is every marked `parameter_only` row; only those beyond the grandfathered set are named.
+  def parameter_only_marker_message(keys)
+    added = keys - SIG_PROVENANCE_PARAMETER_ONLY_MARKED
     "a marker on a `parameter_only` row silences the `tighter_return` the row earns once sig-gen renders its " \
       "return, so it would turn the watched class into a permanent exemption. Remove the marker: #{added.join(', ')}"
   end
@@ -939,13 +941,13 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
       marked = SIG_PROVENANCE_ROWS.select { |row| row.classification == SigProvenanceAuditor::PARAMETER_ONLY && row.marked? }
       keys = marked.map { |row| "#{row.declaration.path} #{row.declaration.class_name}##{row.declaration.method_name}" }
       added = keys - SIG_PROVENANCE_PARAMETER_ONLY_MARKED
-      expect(added).to be_empty, -> { parameter_only_marker_message(added) }
+      expect(added).to be_empty, -> { parameter_only_marker_message(keys) }
       gone = SIG_PROVENANCE_PARAMETER_ONLY_MARKED - keys
       expect(gone).to be_empty, -> { parameter_only_grandfather_message(gone) }
     end
 
     it "names only the NEW marked `parameter_only` rows in its failure message, never the grandfathered ones" do
-      message = parameter_only_marker_message(["sig/new.rbs Widget#n"])
+      message = parameter_only_marker_message(SIG_PROVENANCE_PARAMETER_ONLY_MARKED + ["sig/new.rbs Widget#n"])
       expect(message).to include("Remove the marker: sig/new.rbs Widget#n")
       SIG_PROVENANCE_PARAMETER_ONLY_MARKED.each { |key| expect(message).not_to include(key) }
       gone = parameter_only_grandfather_message(["sig/old.rbs Widget#m"])

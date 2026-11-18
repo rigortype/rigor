@@ -48,7 +48,9 @@ traps that fail silently (zsh, `grep -q` under `pipefail`) are in
 Local runs are targeted; the full gate is CI on the pull request.
 
 - Between edits: `make verify-quick` — whitespace, RuboCop, and the specs the diff names directly: a
-  changed spec, a changed file's mirror spec and mirror directory (up to 30 specs), the specs reading
+  changed spec, a changed file's mirror spec and mirror directory (cheapest first by
+  `tool/spec_costs.tsv`, up to 20 s of estimated spec time; the specs left out are named with the
+  command that runs them, and `make verify-changed` spends 330 s), the specs reading
   a changed fixture, and for a plugin or example file the integration specs that load it. For a `lib/`, `sig/` or `data/`
   change it adds none of the whole-engine drift specs (a plugin or fixture path still selects the gates
   named for it), the "flip this when" pins, the incremental not-re-checked specs, the two all-plugin conformance specs,

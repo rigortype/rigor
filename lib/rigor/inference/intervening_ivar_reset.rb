@@ -6,6 +6,7 @@ require_relative "../type"
 require_relative "reflective_ivar_write"
 require_relative "refined_dispatch/own_method"
 require_relative "self_call_ivar_writes"
+require_relative "unknown_store_widening"
 
 module Rigor
   module Inference
@@ -170,8 +171,15 @@ module Rigor
         end
         return scope if calls.empty?
 
-        widen(scope, mark: true) { proven_writes(calls, scope) }
+        widen_past(calls, scope)
       end
+
+      # {.widen} past `calls`, under `mark: true`, over the names they are proven to write and the contents they are
+      # proven to mutate ({.proven_effects}), or over every name when one of them is not proven.
+      def widen_past(calls, scope)
+        widen(scope, mark: true) { proven_effects(calls, scope) }
+      end
+      private_class_method :widen_past
 
       # `scope` with each instance variable narrowed below its class-ivar seed widened back over the seed. The block
       # answers the names the call may write, or nil for any; it runs at most once, and only when an instance
@@ -184,12 +192,19 @@ module Rigor
       # proven) and `direct_writes` (called at most once, answering a `Set`) does not name the variable: a call
       # proven to write it, or whose callee visibly assigns it a possibly-nil value ({DirectIvarWrites}), widens it
       # unmarked.
+      #
+      # Issue #3340 — the block may answer a {SelfCallIvarWrites::Effects} in place of the names, whose `mutated`
+      # (`{ name => [call, ...] }`) names the instance variables a proven call mutates in place without writing
+      # them. Such a binding keeps its narrowing, the call having rebound nothing, and takes each call's unknown
+      # store ({UnknownStoreWidening.widen}), which forgets what the binding said about the object's contents:
+      # `return if @xs.empty?; reset!` leaves `@xs` an `Array[String]` when `reset!` runs `@xs.clear`.
       def widen(scope, mark: false, direct_writes: nil)
         seed = class_ivar_seed(scope)
         return scope if seed.nil? || seed.empty?
 
         computed = false
         writes = nil
+        mutated = nil
         direct = lazy_set(direct_writes)
         seed.reduce(scope) do |widened, (name, seed_type)|
           local_type = scope.ivar(name)
@@ -198,8 +213,12 @@ module Rigor
           unless computed
             writes = yield
             computed = true
+            if writes.is_a?(SelfCallIvarWrites::Effects)
+              mutated = writes.mutated
+              writes = writes.written
+            end
           end
-          next widened if writes && !writes.include?(name)
+          next widen_mutated(widened, name, local_type, mutated) if writes && !writes.include?(name)
 
           joined = Type::Combinator.union(local_type, seed_type)
           widened = widened.with_ivar(name, joined)
@@ -217,6 +236,17 @@ module Rigor
         mark != :unproven || (writes.nil? && !direct.call.include?(name))
       end
       private_class_method :widen_marks?
+
+      # `scope` with the instance variable `name`, bound to `local_type`, at the unknown store of each call
+      # `mutated` names for it; `scope` itself when it names none or no store widens the binding.
+      def widen_mutated(scope, name, local_type, mutated)
+        sites = mutated&.[](name)
+        return scope if sites.nil?
+
+        widened = UnknownStoreWidening.widen(local_type, sites)
+        widened == local_type ? scope : scope.with_ivar(name, widened)
+      end
+      private_class_method :widen_mutated
 
       # A callable answering `callable`'s `Set`, computed on the first call; an empty one when `callable` is nil.
       def lazy_set(callable)
@@ -241,7 +271,7 @@ module Rigor
         calls = candidate_calls(node, run_lambdas, scope)
         return scope if calls.empty?
 
-        widen(scope, mark: true) { proven_writes(calls, scope) }
+        widen_past(calls, scope)
       end
 
       # Whether a candidate call in `node` may write the instance variable `name`. A `when` test passes
@@ -256,13 +286,20 @@ module Rigor
       end
 
       # The union of the names each call may write ({SelfCallIvarWrites.of}), or nil when one is not proven.
-      def proven_writes(calls, scope)
-        calls.reduce(Set.new) do |acc, call|
-          writes = SelfCallIvarWrites.of(call, scope)
-          break nil if writes.nil?
+      def proven_writes(calls, scope) = proven_effects(calls, scope)&.written
 
-          acc.merge(writes)
+      # The {SelfCallIvarWrites::Effects} of `calls` together, or nil when one is not proven.
+      def proven_effects(calls, scope)
+        written = Set.new
+        mutated = {}
+        calls.each do |call|
+          effects = SelfCallIvarWrites.effects(call, scope)
+          return nil if effects.nil?
+
+          written.merge(effects.written)
+          effects.mutated.each { |name, sites| (mutated[name] ||= []).concat(sites) }
         end
+        SelfCallIvarWrites::Effects.new(written: written, mutated: mutated)
       end
 
       # The candidate calls under `node`, in source order.

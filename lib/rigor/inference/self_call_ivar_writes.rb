@@ -7,6 +7,7 @@ require_relative "../source/node_children"
 require_relative "../source/parameter_envelope"
 require_relative "../type"
 require_relative "guard_rebinding"
+require_relative "mutation_widening"
 require_relative "project_method_ownership"
 require_relative "refined_dispatch/own_method"
 require_relative "../typing_state"
@@ -100,7 +101,21 @@ module Rigor
 
       # The names of the instance variables `call_node`, an implicit-self or `self.` call, may write, as a frozen
       # `Set`, or nil when the analysis cannot prove the set. `scope` is the scope the call's operands were typed in.
-      def of(call_node, scope)
+      def of(call_node, scope) = effects(call_node, scope)&.written
+
+      # Issue #3340 — what a proven call does to `self`'s instance variables: `written`, the names {.of} answers, and
+      # `mutated`, `{ name => [call, ...] }` for each instance variable the read code calls an in-place mutator on
+      # ({MUTATORS}: `@xs.clear`, `@h[k] = v`). A mutation rebinds nothing, so it is no write, but it falsifies what
+      # the caller's binding says about the object's contents (`return if @xs.empty?; reset!; @xs.size`).
+      Effects = Data.define(:written, :mutated)
+
+      # The names an in-place mutation of an instance variable is read by: the ones the straight-line widening
+      # responds to, on any carrier.
+      MUTATORS = (MutationWidening::SHAPE_MUTATORS | SetMutation::MUTATORS).freeze
+
+      # The {Effects} of `call_node`, an implicit-self or `self.` call, or nil when the analysis cannot prove them.
+      # `scope` is the scope the call's operands were typed in.
+      def effects(call_node, scope)
         return nil unless call_node.is_a?(Prism::CallNode)
         return nil unless call_node.receiver.nil? || call_node.receiver.is_a?(Prism::SelfNode)
 
@@ -112,7 +127,7 @@ module Rigor
         proof.no_protocol_override
         proof.self_call(call_node)
         proof.read(call_node.block)
-        proof.written.freeze
+        Effects.new(written: proof.written.freeze, mutated: proof.mutated.each_value(&:freeze).freeze)
       rescue StandardError # an `Unprovable`, or a lookup that raised: either proves nothing
         nil
       end
@@ -163,13 +178,14 @@ module Rigor
 
       # One proof's state: the instance variables read code writes, and the `def` bodies already read.
       class Proof
-        attr_reader :written
+        attr_reader :written, :mutated
 
         def initialize(self_type, scope)
           @self_type = self_type
           @class_name = self_type.class_name
           @scope = scope
           @written = Set.new
+          @mutated = {}
           @visited = {}.compare_by_identity
         end
 
@@ -312,6 +328,9 @@ module Rigor
           unprovable! if GuardRebinding.code_running_name?(node.name) || refined?(node.name)
           type = receiver_type(receiver)
           unprovable! if type.nil? || GuardRebinding.type_method_foreign?(type, node.name, @scope)
+          return unless receiver.is_a?(Prism::InstanceVariableReadNode) && MUTATORS.include?(node.name)
+
+          (@mutated[receiver.name] ||= []) << node
         end
 
         def read_def(def_node)

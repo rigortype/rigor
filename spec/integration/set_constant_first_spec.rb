@@ -48,12 +48,14 @@ RSpec.describe "Set#first on a constant-folded Set", type: :runner do
   end
 
   # Each of these empties the set without a modelled mutator at the call, so the fold must decline and leave the RBS
-  # answer rather than claim a member Ruby no longer returns.
+  # answer rather than claim a member Ruby no longer returns. Issue #3340 — the first four now widen the Set as the
+  # mutation they make does, so they answer the widened carrier's `first`, which keeps the `nil` arm as the proc's
+  # answer always did.
   {
-    "a lambda called later" => "f = -> { s.clear }\nf.call",
-    "a container element" => "[s].each(&:clear)",
-    "a Method object" => "s.method(:clear).call",
-    "instance_eval" => "s.instance_eval { clear }",
+    "a lambda called later" => ["f = -> { s.clear }\nf.call", "Dynamic[top] | String | nil"],
+    "a container element" => ["[s].each(&:clear)", "Dynamic[top] | String | nil"],
+    "a Method object" => ["s.method(:clear).call", "Dynamic[top] | String | nil"],
+    "instance_eval" => ["s.instance_eval { clear }", "Dynamic[String]?"],
     "a proc called later" => ["pr = proc { s.clear }\npr.call", "Dynamic[top] | String | nil"],
     # Issue #3057 — the same reflective frame access through a `send`-family dispatch on a literal
     # frame-call name (Symbol or String), `local_variable_get`-style names, or a `TOPLEVEL_BINDING` reference.

@@ -78,6 +78,12 @@ module Rigor
         call_node.name == :loop && kernel_spelled_receiver?(call_node.receiver)
       end
 
+      # Issue #3340 — `:loop` for a call {.kernel_loop?} accepts, else nil: the class
+      # `StatementEvaluator#repeating_block_entry` gives a call its escape analysis leaves `:unknown` although it
+      # runs its block until the block breaks or raises. Its body enters with the captures it mutates in place
+      # widened, as a catalogued iterator's does, and a capture it rebinds keeps its call-site binding.
+      def loop_class(call_node) = kernel_loop?(call_node) ? :loop : nil
+
       # Issue #1107 — whether a `loop` call can complete normally although its declared return is `bot`.
       #
       # `Kernel#loop` is `() { () -> void } -> bot` in core RBS, yet it rescues a `StopIteration` its block

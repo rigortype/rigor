@@ -28,6 +28,27 @@ RSpec.describe Rigor::Inference::SelfCallIvarWrites do
     expect(described_class.of(call("self.log('x')"), scope)).to eq(Set[:@count, :@seen])
   end
 
+  # Issue #3340 — an in-place mutation rebinds nothing, so it is no write, but the caller's binding says things about
+  # the object's contents the mutation falsifies.
+  it "names the instance variables the reachable defs mutate in place, beside the ones they write" do
+    scope = scope_for(<<~RUBY)
+      def reset! = (@xs.clear; touch)
+      def touch = (@h[:k] = 1; @count = 0; @xs.size)
+    RUBY
+    scope = scope.with_discovery(scope.discovery.with(class_ivars: { "Holder" => {
+                                                        :@xs => Rigor::Type::Combinator.nominal_of("Array"),
+                                                        :@h => Rigor::Type::Combinator.nominal_of("Hash")
+                                                      } }))
+    effects = described_class.effects(call("reset!"), scope)
+    expect(effects.written).to eq(Set[:@count])
+    expect(effects.mutated.transform_values { |sites| sites.map(&:name) }).to eq({ :@xs => [:clear], :@h => [:[]=] })
+    expect(described_class.of(call("reset!"), scope)).to eq(Set[:@count])
+  end
+
+  it "answers no effects where it proves no write set" do
+    expect(described_class.effects(call("log"), scope_for("def log = yield"))).to be_nil
+  end
+
   it "reads the call's literal block as code that may run" do
     scope = scope_for("def log = nil")
     expect(described_class.of(call("log { @io = nil }"), scope)).to eq(Set[:@io])

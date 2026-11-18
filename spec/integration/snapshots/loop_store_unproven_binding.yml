@@ -1,0 +1,55 @@
+---
+locals:
+  by_arrow: Array[Integer?]
+  by_lambda: Array[Integer?]
+  by_new: Array[Integer?]
+  by_proc: Array[Integer?]
+  c: Integer | String | nil
+  cleanup: Array[Dynamic[top] | Symbol | nil]
+  d: Integer?
+  defaults: Hash[Integer | String | nil, Dynamic[top]]
+  ensured: Array[Dynamic[top] | Symbol | nil]
+  front: Array[Integer | String | nil]
+  guarded: Array[Integer | String | nil]
+  i: Integer[2..]
+  in_each: Array[Integer | String | nil]
+  in_for: Array[Integer | String | nil]
+  inner: Array[Integer | String | nil]
+  j: Integer?
+  kept: Array[Integer | String | nil]
+  keys: Hash[Integer | String | nil, Integer]
+  matched: Array[Integer | String | nil]
+  multi: Array[Integer | String | nil]
+  "n": Dynamic[top] | Symbol | nil
+  negated: Array[Integer | String | nil]
+  post_test: Array[Integer | String | nil]
+  retried: Array[Dynamic[top] | Integer | Symbol | nil]
+  s: Integer | String | nil
+  saved: Proc?
+  slotted: Array[Integer | String | nil]
+  twice: Array[Integer | String | nil]
+  unless_nil: Array[Integer | String | nil]
+  x: Integer?
+assertions:
+  '1': Array[Integer | String | nil]
+  '2': Array[Integer | String | nil]
+  '3': Array[Integer | String | nil]
+  '4': Array[Integer | String | nil]
+  '5': Array[Integer | String | nil]
+  '6': Array[Integer | String | nil]
+  '7': Array[Integer | String | nil]
+  '8': Array[Integer | String | nil]
+  '9': Hash[Integer | String | nil, Integer]
+  '10': Hash[Integer | String | nil, Dynamic[top]]
+  '11': Array[Integer | String | nil]
+  '12': Array[Integer | String | nil]
+  '13': Array[Integer | String | nil]
+  '14': Array[Integer?]
+  '15': Array[Integer?]
+  '16': Array[Integer?]
+  '17': Array[Integer?]
+  '18': Array[Integer | String | nil]
+  '19': Array[Integer | String | nil]
+  '20': Array[Dynamic[top] | Symbol | nil]
+  '21': Array[Dynamic[top] | Symbol | nil]
+  '22': Array[Dynamic[top] | Integer | Symbol | nil]

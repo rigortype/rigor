@@ -3671,8 +3671,8 @@ module Rigor
         # post-predicate binding; a local FIRST assigned inside the body seeds with `nil` so the 0-iteration path
         # degrades it to `T | nil`, matching the nil-injection treatment.
         break_pass = { entry: nil, arms: [], values: [] } if jumps.breaks || later_pass_returns?(node.statements)
-        stores = loop_store_sites(node.statements)
-        site_pass = LoopStoreSites::Pass.new(stores, @store_sites) unless stores.empty?
+        sites = loop_store_sites(node.statements)
+        site_pass = LoopStoreSites::Pass.new(sites, @store_sites) unless sites.assigned.empty?
         result = loop_rebind_fixpoint(node, post_pred, names, body_first, jumps, break_pass, site_pass)
         # Display-path re-record: the fixpoint's body re-evaluations fire `on_enter` with the cap-N INTERMEDIATE
         # assumptions, so the last-visit-wins scope index would annotate loop-body lines with stale pre-convergence
@@ -3684,9 +3684,9 @@ module Rigor
         # the continuation collection. Pre-state comes from `post_pred` for a name the loop only content-mutates and
         # from `post_loop` for one it also rebinds, so composition still works — see {#loop_content_writeback}.
         # Issue #3337 — each store's arguments are typed with the rebound locals as the last pass reached the store.
-        site_scopes = LoopStoreSites.argument_scopes(stores, site_pass, post_loop, result, body_first)
+        site_scopes = LoopStoreSites.argument_scopes(sites, site_pass, post_loop, result)
         post_loop = loop_content_writeback(node.statements, post_loop, pre_body: post_pred, rebound: names,
-                                                                       stores: stores, site_scopes: site_scopes)
+                                                                       stores: sites.stores, site_scopes: site_scopes)
         arms, values = loop_break_arms(node, post_pred, result, body_first, jumps, break_pass)
         [join_break_scopes(post_loop, arms, names), values]
       end
@@ -3897,7 +3897,7 @@ module Rigor
       # `site_scopes` holds, for a store the rebind fixpoint's last pass reached, the scope its arguments are typed
       # in instead of `post_loop` ({LoopStoreSites.argument_scopes}, issue #3337).
       def loop_content_writeback(statements, post_loop, pre_body: nil, rebound: nil,
-                                 stores: loop_store_sites(statements), site_scopes: NO_SHADOWS)
+                                 stores: loop_store_sites(statements).stores, site_scopes: NO_SHADOWS)
         return post_loop if stores.empty?
 
         rewrites = local_rewrites(statements) { true }
@@ -3911,7 +3911,7 @@ module Rigor
         end
       end
 
-      # `{ name => [site, ...] }` for every content mutation in a loop body whose receiver is a local: the stores
+      # The {LoopStoreSites::Sites} of a loop body: every content mutation whose receiver is a local, which
       # {#loop_content_writeback} joins. A loop body shares the surrounding scope, so there is no depth filter.
       def loop_store_sites(statements)
         LoopStoreSites.scan(statements) { |node| content_mutation_target(node) { |_r| true } }
@@ -4030,7 +4030,7 @@ module Rigor
       def loop_body_exit_bindings(node, post_pred, bindings, names, body_first, jumps, break_pass = nil, # rubocop:disable Metrics/ParameterLists
                                   site_pass = nil)
         entry = loop_pass_entry(node, post_pred, bindings, body_first, jumps)
-        site_pass.entry = bindings.dup if site_pass
+        site_pass&.start(bindings)
         exit_scope, breaks, values = loop_iteration(node.statements, entry, jumps, store_sites: site_pass&.scopes)
         if break_pass
           break_pass[:entry] = bindings.except(*body_first)

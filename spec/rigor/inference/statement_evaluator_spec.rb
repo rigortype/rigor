@@ -4052,14 +4052,22 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
   end
 
   # Issue #3337 — the loop seam types a store's arguments from the scope the rebind fixpoint's last pass reached
-  # the store with. The display path's re-record pass and the unrecorded `break`-arm pass both run from the
-  # converged bindings, where `i > 5` no longer folds, and only one of the two paths runs each: a store typed from
-  # either would answer `Array[String | Symbol]` on one path and `Array[String]` on the other. The store sits in a
-  # nested loop because only there does such a pass have a table to write into, the enclosing loop's.
+  # the store with. The three paths that evaluate a body differ in what else they run: the display path adds a
+  # re-record pass from the converged bindings, a loop with a `break` an unrecorded pass from them, and the check
+  # path records a rescue or `ensure` clause under a widened entry (issue #1231). A store typed from any of those
+  # would answer differently per path, so each example compares the paths and pins no value.
+  #
+  # Known limit, pinned nowhere: `s = i > 5 ? :big : "a"` under `i += 1` reads `Array[String]` on every path,
+  # though Ruby stores `:big`. `i > 5` folds under the capped fixpoint's value-pinned assumptions, and `s`'s own
+  # continuation binding misses `:big` the same way.
   describe "a loop store's argument scope" do
-    def stored_after(source, **)
-      evaluator = Rigor::Inference::StatementEvaluator.new(scope: scope, **)
-      evaluator.evaluate(parse_program(source)).last.local(:out).describe
+    def stored_by_path(source)
+      recorder = ->(_node, _scope) {}
+      [{}, { on_enter: recorder, converged_loop_recording: true }, { on_enter: recorder, widen_clauses: true }]
+        .map do |options|
+          evaluator = Rigor::Inference::StatementEvaluator.new(scope: scope, **options)
+          evaluator.evaluate(parse_program(source)).last.local(:out).describe
+        end
     end
 
     def nested_loop_storing(extra = "")
@@ -4067,15 +4075,41 @@ RSpec.describe Rigor::Inference::StatementEvaluator do
       "out = []\nk = 0\nwhile k < 2\n#{inner}  k += 1\nend\n"
     end
 
-    it "reads no store from the display path's re-record pass" do
-      plain = stored_after(nested_loop_storing)
-      recorded = stored_after(nested_loop_storing, on_enter: ->(_node, _scope) {}, converged_loop_recording: true)
+    def loop_storing(body, out: "[]")
+      "out = #{out}\ni = 0\nwhile i < 3\n#{body}  i += 1\nend\n"
+    end
 
-      expect([plain, recorded]).to eq(["Array[String]", "Array[String]"])
+    it "reads no store from the display path's re-record pass" do
+      expect(stored_by_path(nested_loop_storing).uniq.size).to eq(1)
     end
 
     it "reads no store from the unrecorded `break`-arm pass" do
-      expect(stored_after(nested_loop_storing("    break if i > 7\n"))).to eq("Array[String]")
+      plain = stored_by_path(nested_loop_storing).first
+
+      expect(stored_by_path(nested_loop_storing("    break if i > 7\n")).uniq).to eq([plain])
+    end
+
+    # The `rescue` modifier and the `else` clause rows are guards: no path types them differently today.
+    it "answers alike on every path for a store anywhere in a `begin` with clauses, and in a `rescue` modifier" do
+      guarded = "  n = 1\n  begin\n    n = \"s\"\n    out << n\n    n = :t\n"
+      sources = ["#{guarded}  rescue ArgumentError\n    out << n\n  end\n", "#{guarded}  ensure\n    out << n\n  end\n",
+                 "#{guarded}  rescue ArgumentError\n    n = 2\n  else\n    out << n\n  end\n",
+                 "  n = 1\n  out << (n = :t) rescue (out << n)\n"]
+
+      expect(sources.map { |source| stored_by_path(loop_storing(source)).uniq.size }).to eq([1, 1, 1, 1])
+    end
+
+    it "answers alike on every path for each store it types where the store runs" do
+      assigned = "  s = ENV.fetch(\"X\", \"a\")\n"
+      stores = ["  out << s\n", "  out.push(s, s)\n", "  out.unshift(s)\n", "  out[i] = s\n", "  out << s if s\n",
+                "  j = 0\n  while j < 2\n    out << s\n    j += 1\n  end\n"]
+      answers = stores.map { |store| stored_by_path(loop_storing(assigned + store)) }
+      hashes = ["  out.store(s, i)\n", "  out[s] ||= i\n"].map do |store|
+        stored_by_path(loop_storing(assigned + store, out: "{}"))
+      end
+
+      expect(answers.map(&:uniq)).to eq([["Array[String]"]] * stores.size)
+      expect(hashes.map(&:uniq)).to eq([["Hash[String, Integer]"], ["Hash[String, Dynamic[top]]"]])
     end
   end
 

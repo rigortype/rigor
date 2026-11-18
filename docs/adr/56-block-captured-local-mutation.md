@@ -1274,17 +1274,40 @@ neither: on the zero-iteration path it never ran, and a rebind after it
 held. A local that is `nil` before the loop and assigned in the body
 ahead of the store is the same defect with a pre-existing name.
 
-The seam now reads each local the rebind fixpoint tracks at the binding
+The seam now reads a local the rebind fixpoint tracks at the binding
 the fixpoint's last pass reached the store with. The statement walk
 leaves the scope it enters each store site with in a table the loop
 threads through `sub_eval`, so the join costs no body pass: the consult
 that located the defect confirmed it with an extra unrecorded pass, and
-that form was not taken. The binding rules, and the four cases that
-keep or join the continuation binding, are in
-[`inference-engine.md`](../internal-spec/inference-engine.md) (the
-"loop seam's argument scope" bullet).
+that form was not taken.
 
-Three things this had to settle:
+**The rule.** The binding at the store REPLACES the continuation
+binding only where every execution of the store follows an assignment
+of the local in the same iteration. Everywhere else the answer holds
+every class the continuation binding holds. The first draft replaced
+wherever the pass had a binding and joined the continuation binding
+only when a `nil` survived to the store; review showed three ways that
+drops a class Ruby stores, each of which the rule now closes:
+
+- **A narrowed `nil` hides the previous iteration.** A body-first local
+  is not fed back into the next pass (the slice-B decision that keeps a
+  `nil` seed out of the body), so the pass reads
+  `c = "x" if i.zero?; out << c if c; c = 5 if i.odd?` as storing a
+  `String`. Ruby stores `["x", "x", 5]`. "Follows an assignment" is
+  therefore syntactic: a plain `name = value` statement earlier in a
+  statement list on the way down to the store. Anything else joins.
+- **A body that runs later is typed with the wrong scope.**
+  `saved = proc { out << s } if i.zero?; s = 9; saved.call` stores `9`,
+  and the walk reached the store when the proc was made. A store under
+  a block, lambda or `for` body gets no overlay.
+- **A clause is not the same scope on every path.** The check path
+  records a rescue or `ensure` clause under a widened entry (#1231) and
+  the display path does not, so a store typed there made `rigor check`
+  and `rigor type-of` disagree. A store in a clause gets no overlay,
+  and one in the guarded body only joins, since `retry` runs that body
+  again.
+
+Three more things this had to settle:
 
 - **Only a fixpoint pass feeds the table.** The display path's
   re-record pass and the unrecorded `break`-arm pass run from the
@@ -1298,22 +1321,25 @@ Three things this had to settle:
   `Array[Dynamic[top]]`: `i > 1` folds to `false` until the capped pass,
   `v` first moves there, and `BodyFixpoint` floors a name that does. The
   answer was the same before this change, for the same reason.
-- **A body-first local is not fed back into the next pass**
-  (the slice-B decision that keeps a `nil` seed out of the body), so a
-  store reached with a `nil` joins the continuation binding: the path
-  that skipped this iteration's assignment may hold what an earlier
-  iteration left.
+- **The capped pass still folds branches.** `s = i > 5 ? :big : "a"`
+  under `i += 1` reads `Array[String]`: no pass saw `:big`. The local's
+  own continuation binding misses it the same way, so this is the
+  fixpoint's gap and not the seam's, and it is not closed here.
 
-`until`, `begin … end while` and a store in a block inside the loop body
-share the seam and are fixed by it. Not changed: the block seam, which
-types a store's read of a block-introduced local as `Dynamic[top]`
+`until` and `begin … end while` share the seam and are fixed by it. Not
+changed: the block seam, which types a store's read of a
+block-introduced local as `Dynamic[top]`
 (`xs.each { |x| t = f(x); out << t }` reads `Array[Dynamic[top]]`, with
 no `nil`), `Kernel#loop`, which is that block seam, and `for`, which
 has no content join.
 
-Gate: the `loop_store_site_binding` fixture, each section with what
-Ruby 4.0.5 leaves in the collection, and the two path-consistency
-examples in `statement_evaluator_spec.rb`.
+Gate: the `loop_store_site_binding` fixture (what the seam now reads at
+the store) and the `loop_store_unproven_binding` fixture (what it must
+not), each section with what Ruby 4.0.5 leaves in the collection, and
+the path-parity examples in `statement_evaluator_spec.rb`. The binding
+text is in
+[`inference-engine.md`](../internal-spec/inference-engine.md) (the
+"loop seam's argument scope" bullet).
 
 ### WD3 — One mechanism, shared
 

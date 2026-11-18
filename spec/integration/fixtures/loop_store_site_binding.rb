@@ -3,10 +3,12 @@ include Rigor::Testing
 
 # Issue #3337 — ADR-56 slice C, the loop seam's ARGUMENT side. A store in a
 # `while` / `until` body is typed with each local the loop rebinds at the
-# binding the body pass reached the store with, not at its post-loop
-# binding: that one carries the `nil` the zero-iteration path seeds a
-# body-first local with, and on that path the store never ran. Each
-# section says what Ruby 4.0.5 leaves in the collection.
+# binding the body pass reached the store with, where the store follows an
+# assignment of that local in the same iteration. The post-loop binding
+# carries the `nil` the zero-iteration path seeds a body-first local with,
+# and on that path the store never ran. Each section says what Ruby 4.0.5
+# leaves in the collection. `loop_store_unproven_binding.rb` holds the
+# shapes that keep the post-loop binding.
 
 # --- The issue's shape: `["a", "a", "a"]`. ---
 out = []
@@ -95,9 +97,8 @@ while i < 4
 end
 assert_type("Array[Integer | String | nil]", carried)
 
-# --- Stored on a path the body pass reaches with the local unbound:
-# `[1, 1]`. There is no binding at the store to read, so the store keeps
-# the continuation binding and its `nil`. ---
+# --- Stored on a path that does not follow an assignment: `[1, 1]`. The
+# store keeps the continuation binding and its `nil`. ---
 unbound = []
 i = 0
 while i < 3
@@ -216,15 +217,19 @@ while i < 3
 end
 assert_type("Hash[String, Dynamic[top]]", keyed)
 
-# --- A store in a block the body calls: `["A", "B", "A", "B"]`. The loop
-# counts the block's `t` among the locals its body first assigns. ---
-in_block = []
+# --- The store follows the assignment on the way down an `if`, and a
+# `next` guard narrows it: Strings only. ---
+branched = []
 i = 0
-while i < 2
-  %w[a b].each { |x| t = x.upcase; in_block << t }
+while i < 3
+  if rand > 0.5
+    q = ENV["X"]
+    (i += 1; next) unless q
+    branched << q
+  end
   i += 1
 end
-assert_type("Array[String]", in_block)
+assert_type("Array[String]", branched)
 
 # --- A store in a nested loop is typed for both loops. ---
 nested = []

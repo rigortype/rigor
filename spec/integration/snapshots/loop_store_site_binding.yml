@@ -1,6 +1,7 @@
 ---
 locals:
   b: Array[String]
+  branched: Array[String]
   by_index: Hash[Integer, String]
   by_key: Hash[String, Integer]
   c: String?
@@ -12,7 +13,6 @@ locals:
   g: String?
   guarded: Array[String]
   i: Integer[2..]
-  in_block: Array[String]
   inner: String?
   j: Integer | Integer[2..] | nil
   k: String?
@@ -27,6 +27,7 @@ locals:
   pinned: Array["a"]
   pre: String?
   pushed: Array[String]
+  q: String?
   real_nil: Array[String?]
   reassigned: Array[String]
   row: Array[1 | 2 | Dynamic[top] | Integer]

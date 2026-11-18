@@ -1,6 +1,6 @@
 # Hold `make coverage` to two-sided pins on precision and the Dynamic call share
 
-- **PR:** none
+- **PR:** [#3356](https://github.com/rigortype/rigor/pull/3356)
 - **Issue:** [#3315](https://github.com/rigortype/rigor/issues/3315)
 - **Class:** open-choice
 - **Precedent:** [ADR-97](../docs/adr/97-adr-index-budgets.md)

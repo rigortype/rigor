@@ -1,0 +1,2 @@
+- **[coverage]** `rigor coverage` reports how many call sites there are and how many of them return `Dynamic`. ([#3356](https://github.com/rigortype/rigor/pull/3356))
+  - Text output prints both counts in the summary. `--format json` adds `call_sites`, `dynamic_call_count` and `dynamic_call_ratio` to `summary`, and `call_sites` and `dynamic_call_count` to each `by_file` row.

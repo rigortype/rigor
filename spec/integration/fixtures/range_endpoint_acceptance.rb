@@ -20,11 +20,13 @@ assert_type("Float", g.rand(0.0...1.0))
 assert_type("Integer", g.rand(1..6))
 
 # `Range[Integer?]` is core RBS's spelling of the slicing parameter, and it must keep accepting both
-# the Integer-endpoint and the endless literals real code passes it.
+# the Integer-endpoint and the endless literals real code passes it. The two `ARGV` reads start at 1:
+# a zero start answers ahead of the RBS tier without the `nil` (#3326), so it would no longer reach
+# the parameter this pins.
 assert_type("[1, 2]", [1, 2, 3][0..1])
 assert_type('"abc"', "abc"[0..])
-assert_type("Array[String]?", ARGV[0..1])
-assert_type("Array[String]?", ARGV[0..])
+assert_type("Array[String]?", ARGV[1..2])
+assert_type("Array[String]?", ARGV[1..])
 
 # `Comparable#clamp: [A] (Range[A]) -> (self | A)` on a plain Integer receiver. Before #834 the
 # unbound `A` degraded to `Dynamic[top]` and the whole call answered `Dynamic[top] | Integer`; #833

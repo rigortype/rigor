@@ -377,15 +377,60 @@ module Rigor
             end
           end
 
+          # Issue #3320 — on a literal key read, each `HashShape` / `Tuple` member is first offered to
+          # {ShapeDispatch}, which is what answers that member when it is the lone receiver. Without it every shape
+          # member projected to `Hash[K, V]` / `Array[E]` in {#dispatch_one}, so
+          # `({ a: 1, b: "s" } | { a: 2, b: :t })[:a]` answered every value of every key. A member the shape tier
+          # declines, and every other member, keeps its `dispatch_one` answer, so the result is the lone answers
+          # joined and no member is dispatched twice.
           def dispatch_union(receiver, method_name, args, environment, block_type, self_type_override = nil, # rubocop:disable Metrics/ParameterLists
                              public_only: false, scope: nil, call_node: nil)
+            shape_read = shape_key_read?(method_name, args)
             results = receiver.members.map do |member|
-              dispatch_one(member, method_name, args, environment, block_type, self_type_override,
-                           public_only: public_only, scope: scope, call_node: call_node)
+              (shape_read && shape_member_read(member, method_name, args, block_type)) ||
+                dispatch_one(member, method_name, args, environment, block_type, self_type_override,
+                             public_only: public_only, scope: scope, call_node: call_node)
             end
             return nil if results.any?(&:nil?)
 
             Type::Combinator.union(*results)
+          end
+
+          # The key positions — every argument of `dig`, the first of `[]` / `fetch` — are each a value-pinned
+          # `Constant` or a union of them. A computed key (`Symbol`) keeps the projection's answer: a lone shape
+          # answers it with every value plus `nil`, which would widen today's answer for the union.
+          def shape_key_read?(method_name, args)
+            case method_name
+            when :dig then !args.empty? && args.all? { |arg| literal_key?(arg) }
+            when :[], :fetch then !args.empty? && literal_key?(args.first)
+            when :first, :last then true
+            else false
+            end
+          end
+
+          def literal_key?(arg)
+            case arg
+            when Type::Constant then true
+            when Type::Union then arg.members.all?(Type::Constant)
+            else false
+            end
+          end
+
+          # `first` / `last` (with or without a count) are element reads on a Tuple; on a HashShape they are not key
+          # reads and keep the projection. The block goes to the shape tier as the lone receiver passes it, so a
+          # block-form call defers there (ADR-78 WD1) and the member keeps its `dispatch_one` answer.
+          def shape_member_read(member, method_name, args, block_type)
+            unless member.is_a?(Type::Tuple) || (member.is_a?(Type::HashShape) && hash_key_read?(method_name))
+              return nil
+            end
+
+            ShapeDispatch.try_dispatch(
+              CallContext.build(receiver: member, method_name: method_name, args: args, block_type: block_type)
+            )
+          end
+
+          def hash_key_read?(method_name)
+            method_name != :first && method_name != :last
           end
 
           def dispatch_one(receiver, method_name, args, environment, block_type, self_type_override = nil, # rubocop:disable Metrics/ParameterLists
@@ -596,8 +641,8 @@ module Rigor
 
           # An open shape's unseen keys may hold any value (rbs-erasure.md § *Open shapes with extra-value
           # bounds*), so its projection carries a `Dynamic[top]` arm on both sides. Without it every read the
-          # shape tier does not answer — a `Union` receiver, a non-literal key — took the known values for a
-          # key outside them: `h = { a: 1 }; h.default = 0 if flag; h[:b] == 1` folded always-truthy.
+          # shape tier does not answer — a non-literal key, a `Union` member it defers on — took the known values
+          # for a key outside them: `h = { a: 1 }; h.default = 0 if flag; h[:b] == 1` folded always-truthy.
           def hash_shape_type_args(shape)
             return [] if shape.pairs.empty?
 

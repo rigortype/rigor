@@ -71,6 +71,37 @@ RSpec.describe Rigor::Inference::PrecisionScanner do
     end
   end
 
+  # #3315 — the call-site tally behind `make coverage`'s Dynamic call share.
+  describe "call-site tally" do
+    it "counts every CallNode and, of those, the ones whose result is in a Dynamic tier" do
+      # `undefined_helper` and `.upcase` on its result are opaque calls; `"a".upcase` is a typed one. The string
+      # literal is an expression but not a call site.
+      result = scan("undefined_helper.upcase\n\"a\".upcase\n")
+      expect(result.call_sites).to eq(3)
+      expect(result.dynamic_call_sites).to eq(2)
+      expect(result.dynamic_call_ratio).to eq(2.0 / 3)
+    end
+
+    it "does not count a Top result as a Dynamic call site" do
+      scanner = described_class.new
+      allow(scanner).to receive(:classify).and_return(:top)
+      result = scanner.scan(Prism.parse("foo\n").value)
+      expect([result.call_sites, result.dynamic_call_sites]).to eq([1, 0])
+    end
+
+    it "counts a dynamic_specific result as a Dynamic call site" do
+      scanner = described_class.new
+      allow(scanner).to receive(:classify).and_return(:dynamic_specific)
+      result = scanner.scan(Prism.parse("foo\n").value)
+      expect([result.call_sites, result.dynamic_call_sites]).to eq([1, 1])
+    end
+
+    it "defaults the tally to zero and its ratio to 0.0 on a FileResult built without it" do
+      result = described_class::FileResult.new(total: 0, tier_counts: {})
+      expect([result.call_sites, result.dynamic_call_sites, result.dynamic_call_ratio]).to eq([0, 0, 0.0])
+    end
+  end
+
   describe "FileResult helper methods" do
     it "precision_ratio is 1.0 when every expression is precise" do
       result = scan("1\n")

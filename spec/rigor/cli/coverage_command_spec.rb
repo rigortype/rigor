@@ -77,6 +77,37 @@ RSpec.describe Rigor::CLI::CoverageCommand do
     end
   end
 
+  # #3315 — the call-site tally `make coverage` ratchets (tool/coverage_ratchet.rb): every `Prism::CallNode`, and of
+  # those the ones whose result is in a Dynamic tier.
+  describe "call-site tally" do
+    before do
+      File.write("calls.rb", <<~RUBY)
+        def shout(word)
+          word.upcase
+        end
+
+        "hi".upcase
+        [1, 2].size
+      RUBY
+    end
+
+    it "reports call sites and Dynamic call sites in the JSON summary and per file" do
+      status, out, = run(["--format", "json", "calls.rb"])
+
+      expect(status).to eq(0)
+      document = JSON.parse(out)
+      expect(document.fetch("summary")).to include("call_sites" => 3, "dynamic_call_count" => 1,
+                                                   "dynamic_call_ratio" => 0.3333)
+      expect(document.fetch("by_file").first).to include("call_sites" => 3, "dynamic_call_count" => 1)
+    end
+
+    it "prints both counts in the text summary" do
+      _, out, = run(["calls.rb"])
+
+      expect(out).to include("call sites:           3\n", "dynamic call sites:   1 (33.3%)\n")
+    end
+  end
+
   it "rejects --mutation without --protection (usage error)" do
     File.write("a.rb", "x = 1\n")
     status, _out, err = run(["--mutation", "a.rb"])

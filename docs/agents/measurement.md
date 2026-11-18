@@ -353,6 +353,38 @@ output looks right, but it acted on the wrong input or measured the wrong thing.
   per arm instead of `check` diagnostics. The host Ruby defaults to US-ASCII, so read sweep JSON with
   `encoding: "UTF-8"`.
 
+### The self-typing ratchet
+
+`make coverage` runs `tool/coverage_ratchet.rb --config .rigor.gates.yml lib` (#3315). That is one in-process
+`rigor coverage --format json` scan, and it holds two of the summary's figures to the pins in
+`tool/coverage_ratchet.yml`:
+
+- **precision**: `precise_count / expressions_typed`.
+- **Dynamic call share**: `dynamic_call_count / call_sites`. A call site is a `Prism::CallNode`. It is Dynamic when
+  `PrecisionScanner` classifies its result as `dynamic_top` or `dynamic_specific`: a whole `Dynamic`, or a union
+  whose worst member is one. A `Top` result does not count, and neither does a union of `Dynamic` and `Top`.
+
+Each figure fails when it moves past its `slack` in either direction. A loss calls for a declaration in `sig/`, or a
+higher pin with the reason in the commit message. A gain calls for a new pin, so the next change cannot spend it.
+The figures differ by machine only if the engine does: three runs on one tree gave identical counts. The key-off
+scan uses no workers (`parameter_inference:` is the only part of the precision lens that forks). The slack is
+therefore the drift an ordinary change may carry, not noise margin; the pins file records how it was sized. The
+tool also fails a run under any config other than the pinned one, a summary without the call-site fields, a parse
+error, a scan under the floors, and a move larger than `max_step`, which only an instrument change produces.
+
+To find where a figure moved, diff the per-file `dynamic_call_count` and `precise_ratio` of `rigor coverage --config
+.rigor.gates.yml --format json lib` between the two trees. To refresh a pin, run `make coverage`, copy the figure
+and counts its failure message prints into the pins file, and say in the commit why the figure moved.
+
+What it does not see: the scan runs with `parameter_inference:` off, as the gates config sets it. A regression in
+declarations or in the engine moves it; a regression in parameter inference itself does not. To measure with the
+key on, run `rigor coverage --format json lib` under `.rigor.dist.yml` by hand; it takes about three times as long.
+
+The call-site tally reconciles with #3315's scratch instrument. That instrument was an in-process `rigor check` that
+recorded `type_of` from the check's own scopes. On `8ef9d1e3a` it counted 51,004 Dynamic of 101,807 call sites;
+the lens counts 50,996 of 101,806. #3354's three `sig/` files moved the instrument by −265 and the lens by −265
+too (to 50,731). The 8-site gap comes from the two scope sources, not from the definition.
+
 ### Refreshing verify-changed's spec cost table
 
 `tool/spec_costs.tsv` prices each spec under or beside a mirror directory for `bin/verify-changed`'s

@@ -12,15 +12,15 @@ RSpec.describe "MethodDispatcher key read on a union of shapes" do
   def u(*types) = comb.union(*types)
   def shape(pairs, **) = comb.hash_shape_of(pairs, **)
 
-  def dispatch(receiver, method_name, args = [])
+  def dispatch(receiver, method_name, args = [], block_type: nil)
     Rigor::Inference::MethodDispatcher.dispatch(
-      receiver_type: receiver, method_name: method_name, arg_types: args,
+      receiver_type: receiver, method_name: method_name, arg_types: args, block_type: block_type,
       environment: Rigor::Environment.default
     )
   end
 
-  def lone_join(members, method_name, args = [])
-    u(*members.map { |member| dispatch(member, method_name, args) })
+  def lone_join(members, method_name, args = [], block_type: nil)
+    u(*members.map { |member| dispatch(member, method_name, args, block_type: block_type) })
   end
 
   def expect_read(members, method_name, args, expected)
@@ -124,6 +124,56 @@ RSpec.describe "MethodDispatcher key read on a union of shapes" do
         expect(dispatch(u(*records), method_name)).not_to eq(lone_join(records, method_name))
       end
       expect(dispatch(u(*records), :key?, [c(:a)])).to eq(u(c(true), c(false)))
+    end
+
+    it "leaves `values_at` to the projection, which answers every value of every key (a known limit)" do
+      answer = dispatch(u(*records), :values_at, [c(:a)])
+
+      expect(answer).not_to eq(lone_join(records, :values_at, [c(:a)]))
+      expect(answer.members).to all(be_a(Rigor::Type::Nominal))
+    end
+  end
+
+  describe "a block-form read answers as the lone members do" do
+    let(:tuples) { [comb.tuple_of(c(1), c("a")), comb.tuple_of(c(2), c(:b))] }
+
+    # Ruby ignores the block on these reads, but the shape tier declines every block-form call (ADR-78 WD1), so a
+    # lone member answers through its projection and the union joins those answers, not the shape folds.
+    it "joins the projected answers for `first`, `last` and `dig` with a block on a union of Tuples" do
+      [[:first, []], [:last, []], [:dig, [c(0)]]].each do |method_name, args|
+        answer = dispatch(u(*tuples), method_name, args, block_type: c(0))
+        expect(answer).to eq(lone_join(tuples, method_name, args, block_type: c(0)))
+        expect(answer).not_to eq(dispatch(u(*tuples), method_name, args))
+      end
+    end
+
+    it "joins the projected answers for `fetch` with a block on a union of hash shapes" do
+      answer = dispatch(u(*records), :fetch, [c(:a)], block_type: c(0))
+
+      expect(answer).to eq(lone_join(records, :fetch, [c(:a)], block_type: c(0)))
+      expect(answer).not_to eq(u(c(1), c(2)))
+    end
+  end
+
+  describe "the arms the read set and the key gate add" do
+    # Ruby: `{ a: 1, b: "s" }[:zz]` and `{ a: 2, b: :t }[:zz]` are nil, so a key that may be `:zz` may read nil.
+    it "answers a union-of-literals key with an undeclared member as each lone shape does, `nil` included" do
+      expect_read(records, :[], [u(c(:a), c(:zz))], u(c(1), c("s"), c(2), c(:t), c(nil)))
+    end
+
+    it "keeps the projection when a later `dig` argument is not value-pinned (guard)" do
+      members = [shape({ a: shape({ b: c(1), c: c("x") }) }), shape({ a: shape({ b: c(:q), c: c(2.0) }) })]
+      args = [c(:a), comb.nominal_of("Symbol")]
+
+      expect(dispatch(u(*members), :dig, args)).not_to eq(lone_join(members, :dig, args))
+    end
+
+    # Ruby: `[1, "a"].first(1)` is `[1]` and `[2, :b].last(2)` is `[2, :b]`.
+    it "answers `first(n)` and `last(n)` on a union of Tuples with each member's sub-tuple" do
+      tuples = [comb.tuple_of(c(1), c("a")), comb.tuple_of(c(2), c(:b))]
+
+      expect_read(tuples, :first, [c(1)], u(comb.tuple_of(c(1)), comb.tuple_of(c(2))))
+      expect_read(tuples, :last, [c(2)], u(*tuples))
     end
   end
 end

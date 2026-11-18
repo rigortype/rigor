@@ -387,7 +387,7 @@ module Rigor
                              public_only: false, scope: nil, call_node: nil)
             shape_read = shape_key_read?(method_name, args)
             results = receiver.members.map do |member|
-              (shape_read && shape_member_read(member, method_name, args)) ||
+              (shape_read && shape_member_read(member, method_name, args, block_type)) ||
                 dispatch_one(member, method_name, args, environment, block_type, self_type_override,
                              public_only: public_only, scope: scope, call_node: call_node)
             end
@@ -416,14 +416,17 @@ module Rigor
             end
           end
 
-          # `first` / `last` are `[0]` / `[-1]` on a Tuple; on a HashShape they are not key reads and keep the
-          # projection.
-          def shape_member_read(member, method_name, args)
+          # `first` / `last` (with or without a count) are element reads on a Tuple; on a HashShape they are not key
+          # reads and keep the projection. The block goes to the shape tier as the lone receiver passes it, so a
+          # block-form call defers there (ADR-78 WD1) and the member keeps its `dispatch_one` answer.
+          def shape_member_read(member, method_name, args, block_type)
             unless member.is_a?(Type::Tuple) || (member.is_a?(Type::HashShape) && hash_key_read?(method_name))
               return nil
             end
 
-            ShapeDispatch.try_dispatch(CallContext.build(receiver: member, method_name: method_name, args: args))
+            ShapeDispatch.try_dispatch(
+              CallContext.build(receiver: member, method_name: method_name, args: args, block_type: block_type)
+            )
           end
 
           def hash_key_read?(method_name)

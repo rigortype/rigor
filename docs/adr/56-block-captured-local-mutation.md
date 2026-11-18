@@ -1247,6 +1247,74 @@ Redmine patches onto `Array` and now reads the receiver as
 a catalogued iterator, so a `loop do … end` body keeps its entry; an
 instance variable mutated in place is still not collected (#1208).
 
+### WD2.14 — The loop seam reads a store's arguments where the store runs (2026-11-18, issue #3337)
+
+WD2.11 ruled that the zero-iteration `nil` does not survive the content
+join, and placed the zero-iteration path upstream, in the injection.
+That ruling was about the RECEIVER's seed. The same `nil` reached the
+join from the other side: the loop seam typed a store's ARGUMENTS in
+the continuation scope, where a local first assigned in the body is
+`T | nil`.
+
+```ruby
+out = []
+i = 0
+while i < 3
+  s = ENV.fetch("X", "a")
+  out << s
+  i += 1
+end
+out.each { |o| o.upcase }   # call.possible-nil-receiver, on Array[String?]
+```
+
+Every element pushed is a `String`. The continuation binding of `s`
+joins its fixpoint seed with the body's exit binding, and the store saw
+neither: on the zero-iteration path it never ran, and a rebind after it
+(`out << s; s = nil`, which read `Array[nil]`) is a value it never
+held. A local that is `nil` before the loop and assigned in the body
+ahead of the store is the same defect with a pre-existing name.
+
+The seam now reads each local the rebind fixpoint tracks at the binding
+the fixpoint's last pass reached the store with. The statement walk
+leaves the scope it enters each store site with in a table the loop
+threads through `sub_eval`, so the join costs no body pass: the consult
+that located the defect confirmed it with an extra unrecorded pass, and
+that form was not taken. The binding rules, and the four cases that
+keep or join the continuation binding, are in
+[`inference-engine.md`](../internal-spec/inference-engine.md) (the
+"loop seam's argument scope" bullet).
+
+Three things this had to settle:
+
+- **Only a fixpoint pass feeds the table.** The display path's
+  re-record pass and the unrecorded `break`-arm pass run from the
+  converged bindings and would type a store better, but the check path
+  and the display path do not both run them, and a hover must not
+  disagree with the diagnostic beside it.
+- **A capped fixpoint's last pass is not the converged one.** Its
+  binding at the store is value-pin widened, as the cap widens the
+  assumption it ran from; a name the cap floors keeps the floor. That is
+  why `v = "a" if i > 1; out << v` under `i += 1` still reads
+  `Array[Dynamic[top]]`: `i > 1` folds to `false` until the capped pass,
+  `v` first moves there, and `BodyFixpoint` floors a name that does. The
+  answer was the same before this change, for the same reason.
+- **A body-first local is not fed back into the next pass**
+  (the slice-B decision that keeps a `nil` seed out of the body), so a
+  store reached with a `nil` joins the continuation binding: the path
+  that skipped this iteration's assignment may hold what an earlier
+  iteration left.
+
+`until`, `begin … end while` and a store in a block inside the loop body
+share the seam and are fixed by it. Not changed: the block seam, which
+types a store's read of a block-introduced local as `Dynamic[top]`
+(`xs.each { |x| t = f(x); out << t }` reads `Array[Dynamic[top]]`, with
+no `nil`), `Kernel#loop`, which is that block seam, and `for`, which
+has no content join.
+
+Gate: the `loop_store_site_binding` fixture, each section with what
+Ruby 4.0.5 leaves in the collection, and the two path-consistency
+examples in `statement_evaluator_spec.rb`.
+
 ### WD3 — One mechanism, shared
 
 Slices A and B implement **one** fixpoint helper (body-evaluator +

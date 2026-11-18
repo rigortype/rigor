@@ -12,6 +12,7 @@ locals:
   g: String?
   guarded: Array[String]
   i: Integer[2..]
+  in_block: Array[String]
   inner: String?
   j: Integer | Integer[2..] | nil
   k: String?
@@ -64,7 +65,8 @@ assertions:
   '19': Array[String]
   '20': Hash[String, Dynamic[top]]
   '21': Array[String]
-  '22': Array[Integer]
-  '23': Array[Dynamic[top]] | Hash[String, Integer]
-  '24': Array[String] | String
-  '25': Array[Array[1 | Dynamic[top] | Integer] | [1]]
+  '22': Array[String]
+  '23': Array[Integer]
+  '24': Array[Dynamic[top]] | Hash[String, Integer]
+  '25': Array[String] | String
+  '26': Array[Array[1 | Dynamic[top] | Integer] | [1]]

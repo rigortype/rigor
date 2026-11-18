@@ -216,6 +216,16 @@ while i < 3
 end
 assert_type("Hash[String, Dynamic[top]]", keyed)
 
+# --- A store in a block the body calls: `["A", "B", "A", "B"]`. The loop
+# counts the block's `t` among the locals its body first assigns. ---
+in_block = []
+i = 0
+while i < 2
+  %w[a b].each { |x| t = x.upcase; in_block << t }
+  i += 1
+end
+assert_type("Array[String]", in_block)
+
 # --- A store in a nested loop is typed for both loops. ---
 nested = []
 i = 0

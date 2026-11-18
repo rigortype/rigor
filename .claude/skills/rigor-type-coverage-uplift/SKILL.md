@@ -433,8 +433,9 @@ nix develop --command \
   bundle exec exe/rigor coverage lib
 ```
 
-`make coverage` enforces the precision floor set by its `--threshold` in the `Makefile` — any
-slice that regresses precision below it fails CI.
+`make coverage` holds precision and the Dynamic call share on Rigor's own `lib/` to pins in
+`tool/coverage_ratchet.yml`: a slice that worsens either past its slack fails CI, and an uplift PR
+that improves one should tighten the pins with `make coverage-tighten`.
 
 ---
 

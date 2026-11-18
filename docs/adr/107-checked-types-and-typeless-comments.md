@@ -291,6 +291,12 @@ Already in force, and already serving the invariant: the precision gate
 `spec/rigor/public_api_drift_spec.rb` keeps `sig/` and the public surface from separating;
 `make steep-check` reads `sig/` with a second checker.
 
+> **Note, 2026-11-19 ([#3356](https://github.com/rigortype/rigor/pull/3356)):** the precision gate cited here and in
+> the table above is no longer `rigor coverage --threshold 0.58 lib`. `make coverage` now runs
+> `tool/coverage_ratchet.rb`, which holds the precision ratio and the share of Dynamic call sites to pins in
+> `tool/coverage_ratchet.yml` (`docs/agents/measurement.md` § "The self-typing ratchet"). The role it plays for this
+> ADR is unchanged.
+
 G1 is the load-bearing half of this ADR, for the reason the three sweeps give: the rule survives the
 session that read it only if something enforces it afterwards. Its detector is the bracket — a
 lexical shape a spec can find, which is why the decision keeps YARD's tag grammar rather than moving

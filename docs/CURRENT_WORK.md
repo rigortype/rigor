@@ -40,9 +40,10 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
   - **The brake, ruled by the maintainer on 2026-11-18:** if another engine defect turns up behind
     those, stop chasing: turn the key on with an inline suppression that names the issue, and leave
     the defect to the backlog.
-  - The ratchet: `make coverage` holds precision and the Dynamic call share to two-sided pins in
-    `tool/coverage_ratchet.yml` (key off; `docs/agents/measurement.md` § "The self-typing
-    ratchet"). Still open: #3307, #3355, and declarations for the modules #3315 names.
+  - The ratchet: `make coverage` holds precision and the Dynamic call share to one-sided pins in
+    `tool/coverage_ratchet.yml` (key off; `make coverage-tighten` claims gains;
+    `docs/agents/measurement.md` § "The self-typing ratchet"). Still open: #3307, #3355, and
+    declarations for the modules #3315 names.
 - **Engine defects found on the way are filed, not owned by this work**: #3327 (ADR-67 WD6b holes),
   #3331–#3334, #3336, #3342, #3343.
 - **Two approval-queue entries from the campaign await ratification**:

@@ -908,9 +908,9 @@ jobs:
           ruby-version: "4.0"
           bundler-cache: true
 
-      # Precision gate: `rigor coverage --threshold 0.58 lib` fails when the
-      # type-inference precision ratio on Rigor's own source drops below 58 %.
-      # See the Makefile's `coverage` target for how that number is calibrated.
+      # Self-typing ratchet (#3315): `tool/coverage_ratchet.rb` fails when the
+      # precision ratio or the Dynamic call share on Rigor's own source is worse
+      # than its pin in tool/coverage_ratchet.yml. See the Makefile's `coverage` target.
       - name: Run precision coverage gate
         run: make coverage
 

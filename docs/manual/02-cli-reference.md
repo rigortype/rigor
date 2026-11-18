@@ -1114,9 +1114,11 @@ as [`rigor check`](#rigor-check).
 exits `1` when the precision ratio falls below `RATIO`
 (`0.0`–`1.0`), making it a CI gate.
 
-The precision report also counts **call sites**: every method call,
-and of those the ones whose result is `Dynamic`, either the whole
-type or the worst member of a union. Text output prints both counts
+The precision report also counts **call sites**: every method call
+node (`recv.m(...)`, `m(...)`, operators, index reads and attribute
+writes; compound writes such as `a.b += 1` or `a[i] ||= x`, `super`
+and `yield` are not counted), and of those the ones whose result is
+`Dynamic`, either the whole type or the worst member of a union. Text output prints both counts
 in the summary. `--format=json` carries `call_sites`,
 `dynamic_call_count` and `dynamic_call_ratio` in `summary`, and
 `call_sites` and `dynamic_call_count` in each `by_file` row.

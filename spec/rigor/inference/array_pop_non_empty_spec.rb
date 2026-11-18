@@ -2,7 +2,7 @@
 
 require "spec_helper"
 
-# Issue #3338 — argument-free `Array#pop` on a receiver proven non-empty answers the element type.
+# Issue #3338 — `Array#pop` with no argument and no block on a receiver proven non-empty answers the element type.
 #
 # Core RBS spells `pop: () -> E?`, while `shift` / `first` / `last` / `sample` carry `%a{implicitly-returns-nil}`
 # and so already read `E`. After `return if xs.empty?` the receiver is `non-empty-array[E]` (ADR-47 §4-4), so
@@ -12,8 +12,14 @@ require "spec_helper"
 # Every example below was checked against Ruby 4.0.5: `["a"].pop` is `"a"`, a second `pop` is `nil`, and
 # `["a", "b"].pop(1)` is `["b"]`.
 #
-# The unrefined, union, `&.pop`, tuple and unguarded examples are guards: controls that must not move, which no
+# The block, unrefined, union, `&.pop`, tuple and unguarded examples are guards: controls that must not move, which no
 # removal of the fix's lines breaks.
+#
+# Known limit (#3351): the projection trusts the `non-empty-array` fact, so where the fact is stale `pop` answers `T`
+# on an array that may be empty. The "stale fact" context pins the seams the engine drops the fact at (#3347): a
+# closure, the `Kernel#loop` back-edge, a rescue entry, a `self` call on an ivar, the receiver escaping. A mutation
+# through an alias the engine does not link still leaves the fact in place. That was accepted because `shift`,
+# `first`, `last` and `sample` already answer `T` on any array, with no guard at all.
 RSpec.describe "Array#pop on non-empty-array", type: :runner do
   def dumps(source)
     result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))
@@ -87,6 +93,18 @@ RSpec.describe "Array#pop on non-empty-array", type: :runner do
     expect(dumps(source)).to eq(["Array[String]"])
   end
 
+  # Ruby ignores the block (`["a"].pop { 1 }` is `"a"`), but the call with a block never reaches the projection.
+  it "keeps `pop { }` nilable" do
+    source = <<~RUBY
+      def f
+        xs = gets.to_s.chars
+        return if xs.empty?
+        dump_type(xs.pop { 1 })
+      end
+    RUBY
+    expect(dumps(source)).to eq(["String?"])
+  end
+
   it "keeps `pop` nilable on an unrefined array" do
     source = <<~RUBY
       def f
@@ -150,5 +168,108 @@ RSpec.describe "Array#pop on non-empty-array", type: :runner do
       end
     RUBY
     expect(nil_receiver_lines(source)).to eq([4])
+  end
+
+  # Each array below is empty at the `pop` in Ruby 4.0.5; the engine must have dropped the fact the guard wrote.
+  context "with a stale fact" do
+    it "reads `pop` as nilable after a closure made before the guard empties the array" do
+      source = <<~RUBY
+        def f
+          xs = gets.to_s.chars
+          clear_it = -> { xs.clear }
+          return if xs.empty?
+          clear_it.call
+          dump_type(xs.pop)
+        end
+      RUBY
+      expect(dumps(source)).to eq(["String?"])
+    end
+
+    it "reads `pop` as nilable after a closure made after the guard empties the array" do
+      source = <<~RUBY
+        def f
+          xs = gets.to_s.chars
+          return if xs.empty?
+          clear_it = -> { xs.clear }
+          clear_it.call
+          dump_type(xs.pop)
+        end
+      RUBY
+      expect(dumps(source)).to eq(["String?"])
+    end
+
+    it "reports the receiver of a `pop` on the `Kernel#loop` back-edge" do
+      source = <<~RUBY
+        def f
+          xs = gets.to_s.chars
+          return if xs.empty?
+          loop do
+            n = xs.pop
+            n.upcase
+          end
+        end
+      RUBY
+      expect(nil_receiver_lines(source)).to eq([6])
+    end
+
+    it "reads `pop` as nilable in a rescue clause entered after the body emptied the array" do
+      source = <<~RUBY
+        def f
+          xs = gets.to_s.chars
+          return if xs.empty?
+          begin
+            xs.clear
+            Integer(gets)
+          rescue ArgumentError
+            dump_type(xs.pop)
+          end
+        end
+      RUBY
+      expect(dumps(source)).to eq(["String?"])
+    end
+
+    it "reads `pop` as nilable on an ivar a `self` call emptied" do
+      source = <<~RUBY
+        class Holder
+          def initialize
+            @xs = gets.to_s.chars
+          end
+
+          def drain = @xs.clear
+
+          def run
+            return if @xs.empty?
+
+            drain
+            dump_type(@xs.pop)
+          end
+        end
+      RUBY
+      expect(dumps(source)).to eq(["String?"])
+    end
+
+    it "reads `pop` as nilable after the array is yielded" do
+      source = <<~RUBY
+        def f
+          xs = gets.to_s.chars
+          return if xs.empty?
+          yield xs
+          dump_type(xs.pop)
+        end
+      RUBY
+      expect(dumps(source)).to eq(["Dynamic[String]?"])
+    end
+
+    it "reads `pop` as nilable after `[xs].each(&:clear)`" do
+      source = <<~RUBY
+        def f
+          xs = gets.to_s.chars
+          return if xs.empty?
+          [xs].each(&:clear)
+          dump_type(xs.pop)
+        end
+      RUBY
+      expect(dumps(source)).to eq(["String?"])
+    end
   end
 end

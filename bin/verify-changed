@@ -391,6 +391,8 @@ flat_fixture_audit_spec=spec/rigor/typing_state_reachability_spec.rb
 # The inline-suppression gate reads every `# rigor:disable` under `lib/` and analyses under `.rigor.dist.yml`, so
 # an edit to either can make it fail.
 self_check_suppressions_spec=spec/rigor/self_check_suppressions_spec.rb
+# The variant-B split (#3324): which Makefile targets and acceptance-gates steps read `.rigor.gates.yml`.
+self_check_gates_spec=spec/rigor/self_check_gates_config_spec.rb
 engine_drift_specs=(
   "$snapshot_gate_spec"
   "$self_check_suppressions_spec"
@@ -403,6 +405,9 @@ engine_drift_specs=(
 )
 
 for path in ${changed[@]+"${changed[@]}"}; do
+  case "$path" in
+    .rigor.gates.yml | .rigor.dist.yml | Makefile | .github/workflows/ci.yml) add_spec "$self_check_gates_spec" ;;
+  esac
   case "$path" in
     lib/* | spec/* | plugins/* | examples/* | apps/*) lint_files+="$path"$'\n' ;;
   esac
@@ -569,6 +574,9 @@ for path in ${changed[@]+"${changed[@]}"}; do
   esac
 done
 for path in ${deleted[@]+"${deleted[@]}"}; do
+  case "$path" in
+    .rigor.gates.yml | .rigor.dist.yml | Makefile | .github/workflows/ci.yml) add_spec "$self_check_gates_spec" ;;
+  esac
   # A deleted sig/ file drops rows provenance_spec pins, so a deletion runs the drift specs too.
   case "$path" in
     lib/* | sig/* | data/* | .rigor.dist.yml)

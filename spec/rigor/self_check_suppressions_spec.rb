@@ -22,12 +22,6 @@ RSpec.describe "Inline suppressions in the self-check" do
                     "(`new(all_names, aliases)`) does not describe it. Kept while the gemspec allows rbs 3.x."
     [
       {
-        path: "lib/rigor/analysis/require_relative_closure.rb",
-        anchor: "calls.sort_by { |call| call.location.start_offset }",
-        rule: "call.possible-nil-receiver",
-        issue: "#3338, fixed by #3339"
-      },
-      {
         path: "lib/rigor/environment/deferred_signature_plan.rb",
         anchor: "klass.new(env)",
         rule: "call.wrong-arity",

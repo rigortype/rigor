@@ -622,4 +622,16 @@ RSpec.describe "bin/verify-changed spec selection" do
       expect(err).to include("--list-specs only")
     end
   end
+
+  # #3324: the gates-config spec reads these four files, so a change to any of them selects it, in both tiers.
+  describe "the self-check configuration split" do
+    %w[.rigor.gates.yml .rigor.dist.yml Makefile .github/workflows/ci.yml].each do |path|
+      it "selects the gates-config spec for a change to #{path}" do
+        full, = selection_for(path)
+        quick, = selection_for(path, quick: true)
+        expect(full).to include("spec/rigor/self_check_gates_config_spec.rb")
+        expect(quick).to include("spec/rigor/self_check_gates_config_spec.rb")
+      end
+    end
+  end
 end

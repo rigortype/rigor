@@ -21,8 +21,9 @@ The lane first kept the key out of `make coverage` alone. Review showed the key 
 - **A: every consumer inherits the key.** One configuration everywhere. The gates also check cache and incremental
   consistency, and the memo audit, under parameter-inferred types on Rigor's own tree. `acceptance-gates` goes to
   about 54 min.
-- **B: only the self-check proper and `check-plugins` use the key.** `make check`, `check-json`, `check-plugins`,
-  the CI self-check jobs and `ruby-next.yml` read `.rigor.dist.yml` with the key on. These keep the key off through
+- **B: only the self-check proper, `check-plugins` and `check-mutation-cache` use the key.** `make check`,
+  `check-json`, `check-plugins`, `check-mutation-cache` (by config discovery; about +13 s), the CI self-check jobs
+  and `ruby-next.yml` read `.rigor.dist.yml` with the key on. These keep the key off through
   `.rigor.gates.yml` (`includes: .rigor.dist.yml` plus `parameter_inference: false`): `make coverage`, both
   `make check-incremental` lines, the memo audit and both `type_of` shadow runs. `acceptance-gates` stays at about
   27 min.
@@ -33,15 +34,17 @@ B, as ruled by the maintainer. Those gates check the same things they checked on
 the key off, so nothing they gated before is lost. `make coverage` also keeps its threshold, which is calibrated on
 the key-off engine.
 
-What is therefore not gated: cache and incremental consistency (ADR-46), the callee-floor memo audit (ADR-127 WD3)
-and the `type_of` shadow (ADR-129) on Rigor's own tree with the key on. On fixtures, the incremental
+What is therefore not gated on Rigor's own tree with the key on: incremental-check consistency (ADR-46), the
+callee-floor memo audit (ADR-127 WD3) and the `type_of` shadow (ADR-129). The mutation-result cache gate
+(`check-mutation-cache`) does run with the key on. On fixtures, the incremental
 parameter-table path is covered by `spec/rigor/analysis/incremental_session_spec.rb`.
-`spec/rigor/self_check_gates_config_spec.rb` holds the split in place: the gates file may differ from
-`.rigor.dist.yml` only in `parameter_inference:`, and each listed Makefile target and CI step must pass it with
-`--config`.
+`spec/rigor/self_check_gates_config_spec.rb` holds the split in place. The gates file may differ from
+`.rigor.dist.yml` only in `parameter_inference:`. The spec checks a fixed list of named Makefile targets and CI steps:
+the key-off ones must pass `--config .rigor.gates.yml`, the key-on ones must pass no `--config`. A new
+`acceptance-gates` step that runs rigor fails the spec until it is added to that list on one side.
 
-Revisit when the memo audit and the incremental check become cheap enough with the key on to run in
-`acceptance-gates` without roughly doubling it.
+Revisit when the memo audit's key-on/key-off wall-time ratio falls under 1.3 (2.4 on 2026-11-19), or when
+`acceptance-gates` with every step key-on fits in about 35 min (about 54 min on 2026-11-19).
 
 ## To undo
 

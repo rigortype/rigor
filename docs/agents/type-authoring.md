@@ -42,6 +42,31 @@ Prefer `rigor sig-gen --print` / `--diff` over hand-written or AI-authored RBS. 
 signal about the engine, so propose the generated output first and hand-edit only after the user has
 reviewed that alternative. Correcting existing `.rbs` is fine when the task authorizes it.
 
+### The provenance gate's row classes
+
+`spec/rigor/sig_gen/provenance_spec.rb` classifies every `sig/` declaration against what `rigor sig-gen`
+renders, and pins the unmarked residue per file (`SIG_PROVENANCE_RESIDUE`). A row is earned when its return
+is what sig-gen generates (`generated`), when the return is equivalent and a parameter or block is typed
+(`parameter_intent`), or when it is `void` (`return_intent`). It is residue when sig-gen cannot confirm the
+return (`declared_divergent`, `unrenderable`, and the rows with no attributed `def`), unless it carries a
+`# sig-gen gap:` or `# authored:` marker. A declared return that sig-gen would narrow (`tighter_return`)
+needs a marker or the generated return.
+
+`parameter_only` is a fourth state, neither earned nor residue. It holds when sig-gen skips the method as
+`sig.skipped.untyped-return`, the declaration types at least one parameter or the block, and every
+overload's return is the bare `untyped`. Typing a method's parameters is what lets sig-gen render its
+return, and its callers' returns; a declaration that types the parameters and leaves the return `untyped`
+makes no claim the gate cannot check, so it does not count against the file's pin. The row is watched, not
+waived: the report prints the `parameter_only` count per file and in total, so the number can be seen to
+fall. `void`, `bool`, `[untyped, untyped]`, `Array[untyped]`, `untyped?` and a union with `untyped` are
+returns that state something and stay residue, as does an all-`untyped` declaration with no typed
+parameter. The block's own return type is not the method's return and is not read.
+
+The row leaves the class the moment sig-gen can render the return. The declared `untyped` is then looser
+than the generated return, so the row reads `tighter_return` and needs the generated type or a marker. The
+class is a step toward declaring the return, not a place to stay. Print the report with
+`nix develop --command bundle exec ruby -Ilib -Ispec/support -e 'require "sig_provenance_auditor"; SigProvenanceAuditor.report'`.
+
 ### Respect a declared `void`
 
 Every Ruby method returns its last expression, so a body almost always *has* a value. An author who

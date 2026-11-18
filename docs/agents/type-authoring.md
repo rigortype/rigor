@@ -53,10 +53,10 @@ rows with no attributed `def`: `synthetic_source`, `inherited_source`, `runtime_
 unless it carries a `# sig-gen gap:` or `# authored:` marker. A declared return that sig-gen would narrow
 (`tighter_return`) needs the generated return, or a marker.
 
-`parameter_only` is a fifth state besides earned, residue and `tighter_return`. It holds when sig-gen skips
+`parameter_only` is a fourth state besides earned, residue and `tighter_return`. It holds when sig-gen skips
 the method as `sig.skipped.untyped-return`, the declaration states some type, and every overload's return is
 the bare `untyped`. "States some type" means: not `(?)`, and at least one positional, optional, rest,
-keyword or keyword-rest parameter that is not `untyped`, or a block whose own parameters, or declared
+keyword or keyword-rest parameter whose type is not `untyped`, `top` or an optional of either, or a block whose own parameters, or declared
 return, are not `untyped`. A block that declares a typed return says what the caller's block must return,
 which is authored intent like a parameter. The method's own return is read from the method, never from the
 block: `{ (untyped) -> untyped } -> Integer` has a typed method return and is residue.
@@ -67,7 +67,9 @@ not count against the file's pin. The row is watched, not waived: the report pri
 count per file and in total, and `SIG_PROVENANCE_PARAMETER_ONLY` pins it per file, marked and unmarked rows
 apart, in both directions. `void`, `bool`, `[untyped, untyped]`, `Array[untyped]`, `untyped?` and a union
 with `untyped` state a return and stay residue, as does a declaration that states no type
-(`(untyped x) -> untyped`, `(?) -> untyped`, an all-`untyped` block).
+(`(untyped x) -> untyped`, `(untyped? x) -> untyped`, `(top x) -> untyped`, `(?) -> untyped`, an all-`untyped` block).
+A container (`Array[untyped]`, a tuple, a record, a proc) counts as a type. An alias that expands to `untyped` is
+not expanded, so it counts as one too.
 
 **The way out is to declare the return.** The row leaves the class when sig-gen can render the return, and
 then reads `tighter_return` (the declared `untyped` is looser than the generated type) or, when the body

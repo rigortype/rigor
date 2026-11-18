@@ -104,7 +104,7 @@ module SigDeclarationReader
         function = overload.method_type.type
         next true if function.is_a?(RBS::Types::UntypedFunction)
 
-        overload.method_type.block || function_parameters(function).any? { |p| !untyped?(p.type) }
+        overload.method_type.block || function_parameters(function).any? { |p| !states_nothing?(p.type) }
       end
     end
 
@@ -142,13 +142,21 @@ module SigDeclarationReader
     end
 
     def function_types_something?(function)
-      function_parameters(function).any? { |p| !untyped?(p.type) }
+      function_parameters(function).any? { |p| !states_nothing?(p.type) }
     end
 
     def block_types_something?(block)
       return false if block.nil? || block.type.is_a?(RBS::Types::UntypedFunction)
 
-      function_types_something?(block.type) || !untyped?(block.type.return_type)
+      function_types_something?(block.type) || !states_nothing?(block.type.return_type)
+    end
+
+    # `untyped`, `top` and their optionals state no type for `parameter_only`. An alias that expands to `untyped` is
+    # not expanded here (no environment is at hand where the declarations are read), so it still counts as a type.
+    def states_nothing?(type)
+      return states_nothing?(type.type) if type.is_a?(RBS::Types::Optional)
+
+      type.is_a?(RBS::Types::Bases::Any) || type.is_a?(RBS::Types::Bases::Top)
     end
 
     def function_parameters(function)

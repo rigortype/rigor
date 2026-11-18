@@ -446,6 +446,16 @@ module SigProvenanceSpecHelpers
 
   # Runs the whole classifier over a two-file fixture project, so a unit example exercises the same
   # join the corpus examples do rather than a parallel reimplementation of it.
+  def parameter_only_marker_message(added)
+    "a marker on a `parameter_only` row silences the `tighter_return` the row earns once sig-gen renders its " \
+      "return, so it would turn the watched class into a permanent exemption. Remove the marker: #{added.join(', ')}"
+  end
+
+  def parameter_only_grandfather_message(gone)
+    "a grandfathered `parameter_only` row left the class or lost its marker: shrink " \
+      "SIG_PROVENANCE_PARAMETER_ONLY_MARKED (#{gone.join(', ')})"
+  end
+
   def audit_fixture(ruby:, rbs:)
     write_fixture("lib/fixture.rb", ruby)
     write_fixture("sig/fixture.rbs", rbs)
@@ -656,6 +666,20 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
       it "does not read the block's return as the method's return: a typed method return stays residue" do
         row = only_row(widget("(untyped x, untyped y) { (untyped) -> untyped } -> Integer"))
         expect(row.classification).to eq(SigProvenanceAuditor::UNRENDERABLE)
+      end
+
+      it "treats `untyped?`, `top` and `top?` as stating nothing, in a parameter and in a block" do
+        shapes = ["(untyped? x, untyped y) -> untyped", "(top x, untyped y) -> untyped",
+                  "(top? x, untyped y) -> untyped", "(untyped x, untyped y) { (untyped?) -> top } -> untyped"]
+        classes = shapes.to_h { |sig| [sig, only_row(widget(sig)).classification] }
+        expect(classes.values.uniq).to eq([SigProvenanceAuditor::UNRENDERABLE])
+      end
+
+      it "still counts a container of `untyped` as stating a type" do
+        shapes = ["(Array[untyped] x, untyped y) -> untyped", "([untyped, untyped] x, untyped y) -> untyped",
+                  "({ a: untyped } x, untyped y) -> untyped", "(^(untyped) -> untyped x, untyped y) -> untyped"]
+        classes = shapes.to_h { |sig| [sig, only_row(widget(sig)).classification] }
+        expect(classes.values.uniq).to eq([SigProvenanceAuditor::PARAMETER_ONLY])
       end
 
       it "counts any non-`untyped` parameter kind: optional, rest, keyword and keyword-rest" do
@@ -906,19 +930,26 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
         "#{drift.size} file(s) drifted from SIG_PROVENANCE_PARAMETER_ONLY:\n#{drift.join("\n")}\n\n" \
           "`parameter_only` rows are declarations with typed parameters and a bare `untyped` return on a method " \
           "sig-gen cannot render. The count is expected to GROW as parameters are declared and to SHRINK as returns " \
-          "become renderable; edit the pin in this file in the same PR, with the reason in the commit body."
+          "become renderable (an increase is expected only for newly declared parameters, a decrease means a return " \
+          "became renderable); edit the pin in this file in the same PR, with the reason in the commit body."
       }
     end
 
     it "carries no marker on a `parameter_only` row beyond the grandfathered two (a marker would make it permanent)" do
       marked = SIG_PROVENANCE_ROWS.select { |row| row.classification == SigProvenanceAuditor::PARAMETER_ONLY && row.marked? }
       keys = marked.map { |row| "#{row.declaration.path} #{row.declaration.class_name}##{row.declaration.method_name}" }
-      expect(keys - SIG_PROVENANCE_PARAMETER_ONLY_MARKED).to be_empty, lambda {
-        "a marker on a `parameter_only` row silences the `tighter_return` the row earns once sig-gen renders its " \
-          "return, so it would turn the watched class into a permanent exemption. Remove the marker: #{keys.join(', ')}"
-      }
+      added = keys - SIG_PROVENANCE_PARAMETER_ONLY_MARKED
+      expect(added).to be_empty, -> { parameter_only_marker_message(added) }
       gone = SIG_PROVENANCE_PARAMETER_ONLY_MARKED - keys
-      expect(gone).to be_empty, "a grandfathered row left the class: shrink the set (#{gone.join(', ')})"
+      expect(gone).to be_empty, -> { parameter_only_grandfather_message(gone) }
+    end
+
+    it "names only the NEW marked `parameter_only` rows in its failure message, never the grandfathered ones" do
+      message = parameter_only_marker_message(["sig/new.rbs Widget#n"])
+      expect(message).to include("Remove the marker: sig/new.rbs Widget#n")
+      SIG_PROVENANCE_PARAMETER_ONLY_MARKED.each { |key| expect(message).not_to include(key) }
+      gone = parameter_only_grandfather_message(["sig/old.rbs Widget#m"])
+      expect(gone).to include("left the class or lost its marker")
     end
 
     it "reports the residue as a total, so the number is visible without a failure" do

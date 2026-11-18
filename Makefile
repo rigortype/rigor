@@ -129,9 +129,13 @@ check-plugins:
 # the soundness failure the gate exists to catch. Deliberately NOT in
 # `verify`: it runs ~3 analyses per target (baseline + subset + full), too
 # slow for the local fast path. CI runs it (cold variant).
+#
+# `.rigor.gates.yml` keeps `parameter_inference:` off here: with it on the gate takes ~1.8x as long
+# (#3324), and the incremental parameter-table path is covered on fixtures by
+# `spec/rigor/analysis/incremental_session_spec.rb`.
 check-incremental:
-	bundle exec exe/rigor check --verify-incremental --no-stats lib
-	bundle exec exe/rigor check --verify-incremental --no-stats plugins/*/lib examples/*/lib
+	bundle exec exe/rigor check --config .rigor.gates.yml --verify-incremental --no-stats lib
+	bundle exec exe/rigor check --config .rigor.gates.yml --verify-incremental --no-stats plugins/*/lib examples/*/lib
 
 # Issue #134 slice 3 — the same obligation for the per-file MUTATION-result
 # cache: a warm `rigor coverage --protection --mutation --format json` run must
@@ -185,13 +189,13 @@ check-json:
 # The threshold shifts by the same ~0.8 points to keep the calibrated
 # margin unchanged.
 #
-# `.rigor.coverage.yml` is the self-check configuration with `parameter_inference:` off. The
+# `.rigor.gates.yml` is the self-check configuration with `parameter_inference:` off. The
 # threshold above is calibrated on the key-off engine, and the key would add ~5 points of slack
 # and triple the run (#3324: 101 s -> 307 s, 59.45 % -> 64.45 %).
 #
 # Use `rigor coverage lib/` without --threshold for a non-gating report.
 coverage:
-	bundle exec exe/rigor coverage --config .rigor.coverage.yml --threshold 0.58 lib
+	bundle exec exe/rigor coverage --config .rigor.gates.yml --threshold 0.58 lib
 
 # ADR-50 WD4 perf-regression gate. Runs this checkout's `rigor check
 # --no-cache` in-process over `lib` of the frozen corpus bench/baseline.json

@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=schemas/rigor-config.schema.json
+# The self-check's configuration with parameter inference off, for the gates that check something other than
+# Rigor's own diagnostics and would double in cost with the key (#3324): `make coverage` (its threshold is
+# calibrated on the key-off engine), both `make check-incremental` lines, and CI's memo audit and `type_of`
+# shadow runs. `make check`, `make check-plugins` and the CI self-check jobs read `.rigor.dist.yml`, key on.
+# `spec/rigor/self_check_gates_config_spec.rb` holds this file to that one difference and those callers.
+includes:
+  - .rigor.dist.yml
+parameter_inference: false

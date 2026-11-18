@@ -1,6 +1,0 @@
-# yaml-language-server: $schema=schemas/rigor-config.schema.json
-# `make coverage` only: the self-check's configuration with parameter inference off. The precision gate's 58%
-# threshold is calibrated on the key-off engine (see the Makefile), and the key roughly triples the run (#3324).
-includes:
-  - .rigor.dist.yml
-parameter_inference: false

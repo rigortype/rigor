@@ -34,7 +34,8 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
   - #3324 turns the key on now (maintainer, 2026-11-19), with one inline suppression in
     `require_relative_closure.rb` for the row that waits on #3338 alone. Its fix, PR #3339 (which
     waits for #3340), deletes the suppression: `spec/rigor/self_check_suppressions_spec.rb` fails
-    once the finding is gone. `make coverage` keeps the key off (`.rigor.coverage.yml`).
+    once the finding is gone. `make coverage`, `check-incremental`, the memo audit and
+    the `type_of` shadow keep the key off through `.rigor.gates.yml` (maintainer, variant B on #3353).
   - **The brake, ruled by the maintainer on 2026-11-18:** if another engine defect turns up behind
     those, stop chasing: turn the key on with an inline suppression that names the issue, and leave
     the defect to the backlog.

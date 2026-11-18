@@ -22,6 +22,7 @@
 #
 # `bundle exec rspec -r ./tool/spec_costs.rb …` with SPEC_COSTS_OUT set is the probe the
 # refresh runs in each child process.
+require "fileutils"
 require "json"
 require "open3"
 
@@ -82,15 +83,23 @@ module SpecCosts
 
   def format_seconds(seconds) = Kernel.format("%.2f", seconds)
 
-  def refresh(dirs)
-    measured = {}
-    dirs.each do |dir|
-      out = File.join("tmp", "spec_costs_#{dir.tr('/', '_')}.json")
-      command = ["bundle", "exec", "rspec", "-r", "./tool/spec_costs.rb", dir]
+  # { path => seconds } over `targets` (spec directories or files), one rspec process each. The
+  # probe's output file is deleted before each run, so a child that dies before writing one
+  # records nothing rather than handing back an earlier run's numbers.
+  def measure(targets)
+    FileUtils.mkdir_p("tmp")
+    targets.each_with_object({}) do |target, measured|
+      out = File.join("tmp", "spec_costs_#{target.tr('/', '_')}.json")
+      FileUtils.rm_f(out)
+      command = ["bundle", "exec", "rspec", "-r", "./tool/spec_costs.rb", target]
       _, err, status = Open3.capture3({ "SPEC_COSTS_OUT" => out }, *command, stdin_data: "")
-      warn "#{dir}: rspec exited #{status.exitstatus}; its costs are still recorded\n#{err}" unless status.success?
+      warn "#{target}: rspec exited #{status.exitstatus}; what it recorded is kept\n#{err}" unless status.success?
       measured.merge!(JSON.parse(File.read(out))) if File.exist?(out)
     end
+  end
+
+  def refresh(targets)
+    measured = measure(targets)
     text = File.exist?(TABLE) ? File.read(TABLE) : ""
     rows = merge(parse(text), measured, mirrored_specs)
     File.write(TABLE, format(header(text), rows))

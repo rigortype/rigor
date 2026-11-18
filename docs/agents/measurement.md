@@ -352,3 +352,14 @@ output looks right, but it acted on the wrong input or measured the wrong thing.
   effect-summary changes, diff `rigor sig-gen --format=json` and `rigor effects --full --format json`
   per arm instead of `check` diagnostics. The host Ruby defaults to US-ASCII, so read sweep JSON with
   `encoding: "UTF-8"`.
+
+### Refreshing verify-changed's spec cost table
+
+`tool/spec_costs.tsv` prices each spec under or beside a mirror directory for `bin/verify-changed`'s
+time budget (#3289). No ordinary PR edits it: a new spec is priced at the default and a deleted
+one's row is ignored. Refresh it with `nix develop --command bundle exec ruby tool/spec_costs.rb`
+(or name spec directories and files to refresh only those) when the not-covered line keeps naming
+a spec you know is cheap, after a split or move of many spec files, or when `spec_costs_spec`
+says the table is no longer mostly live or covering. Anyone may run it; run one at a time, on a
+host whose load is near the header's, and push the result as its own small PR. Rows within a
+factor of two of their new value stay, so the diff is the specs that really moved.

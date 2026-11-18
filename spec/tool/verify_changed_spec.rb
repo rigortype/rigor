@@ -403,11 +403,23 @@ RSpec.describe "bin/verify-changed spec selection" do
             expect(specs).to eq(["spec/tool/x/s0_spec.rb", "spec/tool/x/s1_spec.rb"])
           end
 
+          # A deleted or renamed spec leaves its row behind until the next refresh;
+          # no lookup reaches it, so it changes nothing and warns about nothing.
+          it "ignores a row naming a spec that no longer exists" do
+            files = { "lib/rigor/mod.rb" => "" }.merge(spec_files("spec/rigor/mod", 1))
+                                                .merge(cost_table("spec/rigor/mod/s0_spec.rb" => 0.01,
+                                                                  "spec/rigor/mod/gone_spec.rb" => budget * 5))
+            specs, err = list_in_temp_repo(files, "lib/rigor/mod.rb", quick: quick)
+            expect(specs).to eq(["spec/rigor/mod/s0_spec.rb"])
+            expect(err).not_to include("spec_costs.tsv")
+          end
+
           it "adds the directory to a same-named spec" do
             files = priced({ "lib/rigor/mod.rb" => "", "spec/rigor/mod_spec.rb" => "# spec\n" }
                     .merge(spec_files("spec/rigor/mod", 2)), 0.01)
             specs, err = list_in_temp_repo(files, "lib/rigor/mod.rb", quick: quick)
-            expect(specs).to eq(%w[spec/rigor/mod/s0_spec.rb spec/rigor/mod/s1_spec.rb spec/rigor/mod_spec.rb])
+            expect(specs).to eq(%w[spec/rigor/mod/s0_spec.rb spec/rigor/mod/s1_spec.rb
+                                   spec/rigor/mod_spec.rb])
             expect(err).not_to include("budget")
           end
 
@@ -416,19 +428,32 @@ RSpec.describe "bin/verify-changed spec selection" do
           it "charges the same-named spec first, always runs it, and gives the directory what it leaves" do
             files = { "lib/rigor/mod.rb" => "", "spec/rigor/mod_spec.rb" => "# spec\n" }
                     .merge(spec_files("spec/rigor/mod", 2))
-            files.merge!(cost_table("spec/rigor/mod_spec.rb" => (budget * 0.9).round(2),
+            files.merge!(cost_table("spec/rigor/mod_spec.rb" => (budget * 0.4).round(2),
                                     "spec/rigor/mod/s0_spec.rb" => (budget * 0.05).round(2),
-                                    "spec/rigor/mod/s1_spec.rb" => (budget * 0.2).round(2)))
+                                    "spec/rigor/mod/s1_spec.rb" => (budget * 0.6).round(2)))
             specs, err = list_in_temp_repo(files, "lib/rigor/mod.rb", quick: quick)
             expect(specs).to eq(%w[spec/rigor/mod/s0_spec.rb spec/rigor/mod_spec.rb])
-            expect(err).to include("budget less ~#{(budget * 0.9).round}s for spec/rigor/mod_spec.rb; " \
+            expect(err).to include("budget less ~#{(budget * 0.4).round}s for spec/rigor/mod_spec.rb; " \
                                    "cheapest first, 1 left out — run them with: " \
                                    "bundle exec rspec spec/rigor/mod/s1_spec.rb)")
+          end
 
-            files["tool/spec_costs.tsv"] = cost_table("spec/rigor/mod_spec.rb" => budget * 2)["tool/spec_costs.tsv"]
+          # Past half the budget the run is over budget anyway; charging the spec whole
+          # dropped a cheap directory whole (runner/: 11 specs, ~4 s, behind a ~33 s
+          # runner_spec). The directory keeps at least half.
+          it "charges the same-named spec at most half the budget, and says when it alone is over the budget" do
+            files = { "lib/rigor/mod.rb" => "", "spec/rigor/mod_spec.rb" => "# spec\n" }
+                    .merge(spec_files("spec/rigor/mod", 3))
+            files.merge!(cost_table("spec/rigor/mod_spec.rb" => budget * 3,
+                                    "spec/rigor/mod/s0_spec.rb" => (budget * 0.2).round(2),
+                                    "spec/rigor/mod/s1_spec.rb" => (budget * 0.2).round(2),
+                                    "spec/rigor/mod/s2_spec.rb" => (budget * 0.2).round(2)))
             specs, err = list_in_temp_repo(files, "lib/rigor/mod.rb", quick: quick)
-            expect(specs).to eq(["spec/rigor/mod_spec.rb"])
-            expect(err).to include("2 left out")
+            expect(specs).to eq(%w[spec/rigor/mod/s0_spec.rb spec/rigor/mod/s1_spec.rb spec/rigor/mod_spec.rb])
+            expect(err).to include("budget less ~#{(budget / 2).round}s for spec/rigor/mod_spec.rb, which alone is " \
+                                   "estimated at ~#{(budget * 3).round}s, so this run takes at least that long; " \
+                                   "cheapest first, 1 left out — run them with: " \
+                                   "bundle exec rspec spec/rigor/mod/s2_spec.rb)")
           end
         end
       end
@@ -447,6 +472,54 @@ RSpec.describe "bin/verify-changed spec selection" do
         expect(full).to eq(["spec/rigor/mod/s0_spec.rb"])
         expect(quick).to be_empty
         expect(err).to include("bundle exec rspec spec/rigor/mod/s0_spec.rb")
+      end
+    end
+
+    # The table only orders and bounds the selection, so a broken one never fails
+    # the gate; but it must not change the selection silently either. Each case
+    # warns on stderr and prices what it cannot read at the default.
+    describe "a cost table it cannot fully read" do
+      let(:budget) { script_number("mirror_dir_budget_quick") }
+      let(:default) { script_number("spec_cost_default") }
+      let(:tree) { { "lib/rigor/mod.rb" => "" }.merge(spec_files("spec/rigor/mod", 2)) }
+      let(:dear) { "spec/rigor/mod/s0_spec.rb" }
+      let(:cheap) { "spec/rigor/mod/s1_spec.rb" }
+
+      def table(text) = { "tool/spec_costs.tsv" => text }
+
+      it "warns when the table is missing, and prices every spec at the default" do
+        specs, err = list_in_temp_repo(tree, "lib/rigor/mod.rb", quick: true)
+        expect(err).to include("verify-changed: tool/spec_costs.tsv is missing; " \
+                               "every mirror-directory spec is priced at the default " \
+                               "#{default.to_s.delete_suffix('.0')}s")
+        expect(specs).to eq([dear, cheap].first((budget / default).floor))
+      end
+
+      it "warns when the table has no usable row" do
+        _, err = list_in_temp_repo(tree.merge(table("# only a header\n\n")), "lib/rigor/mod.rb", quick: true)
+        expect(err).to include("verify-changed: tool/spec_costs.tsv has no usable row")
+      end
+
+      it "reads a table written with CRLF line ends as if it had LF" do
+        text = "# header\r\n#{budget * 2}\t#{dear}\r\n0.01\t#{cheap}\r\n"
+        specs, err = list_in_temp_repo(tree.merge(table(text)), "lib/rigor/mod.rb", quick: true)
+        expect(specs).to eq([cheap])
+        expect(err).not_to include("spec_costs.tsv")
+      end
+
+      it "prices a non-numeric cost at the default and names the row" do
+        text = "# header\nslow\t#{dear}\n0.01\t#{cheap}\n"
+        _, err = list_in_temp_repo(tree.merge(table(text)), "lib/rigor/mod.rb", quick: true)
+        expect(err).to include("verify-changed: tool/spec_costs.tsv line 2 (slow\t#{dear}) is not")
+        expect(err).to include("its spec is priced at the default")
+      end
+
+      # Read as written, a negative cost would make its spec free and let the next one in too.
+      it "prices a negative cost at the default and names the row" do
+        text = "# header\n-#{budget * 2}\t#{dear}\n#{budget - 0.5}\t#{cheap}\n"
+        specs, err = list_in_temp_repo(tree.merge(table(text)), "lib/rigor/mod.rb", quick: true)
+        expect(err).to include("tool/spec_costs.tsv line 2 (-#{budget * 2}\t#{dear}) is not")
+        expect(specs).to eq([dear])
       end
     end
 

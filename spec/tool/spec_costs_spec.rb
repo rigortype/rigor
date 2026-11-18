@@ -2,6 +2,9 @@
 
 # Gates tool/spec_costs.tsv, the per-file cost table `bin/verify-changed` budgets a
 # mirror directory with (#3289), and the refresh that rewrites it.
+require "fileutils"
+require "json"
+require "tmpdir"
 require "spec_helper"
 require_relative "../../tool/spec_costs"
 
@@ -26,24 +29,30 @@ RSpec.describe SpecCosts do
       expect(paths).to eq(paths.uniq.sort)
     end
 
-    # A row for a deleted or moved spec would price nothing and hide that the new
-    # path is unmeasured.
-    it "names only spec files that exist under or beside a mirror directory" do
-      expect(rows.keys - described_class.mirrored_specs(root)).to eq([])
+    # A row for a deleted or renamed spec is tolerated: no lookup reaches it, and the next
+    # refresh drops it, so a deletion needs no table edit. A table that is mostly dangling is
+    # not that, but a wrong path prefix, and would price everything at the default.
+    it "is mostly live: more than half its rows name a spec under or beside a mirror directory" do
+      live = rows.keys & described_class.mirrored_specs(root)
+      expect(live.length).to be > (rows.length / 2)
     end
 
-    # Coverage is "an entry or the default": a spec the table does not list is priced
-    # at the default, so the default must stay at the dear end of what was measured,
-    # or a new slow spec would ride in cheaply until the next refresh.
+    # Coverage is "an entry or the default": a spec the table does not list is priced at
+    # the default, so the default must stay at the dear end of what was measured, or a new
+    # slow spec would ride in cheaply until the next refresh. Only the lower bound is pinned;
+    # the default (10 s) sits well above the measured p90 (~6 s) so a refresh does not force
+    # a retune.
     it "prices an unlisted spec at least at the 90th percentile of the measured ones" do
       costs = rows.values.sort
       expect(costs.length).to be > 100
       expect(script_number("spec_cost_default")).to be >= costs[(costs.length * 0.9).floor]
     end
 
-    it "lists most of the mirrored specs, so the default is the exception" do
+    # Half, not all: new specs ride at the default until a refresh, and no ordinary PR has to
+    # add rows. Below half the default is no longer the exception and the table needs one.
+    it "lists more than half of the mirrored specs, so the default is the exception" do
       mirrored = described_class.mirrored_specs(root)
-      expect((mirrored & rows.keys).length).to be >= (mirrored.length * 0.8)
+      expect((mirrored & rows.keys).length).to be > (mirrored.length / 2)
     end
   end
 
@@ -52,6 +61,37 @@ RSpec.describe SpecCosts do
       dirs = described_class.mirror_dirs(root)
       expect(dirs).to include("spec/rigor/cli", "spec/rigor/analysis/check_rules")
       expect(dirs).not_to include("spec/rigor")
+    end
+  end
+
+  # A child that dies before its probe writes must record nothing, not the numbers an
+  # earlier run left in the same file.
+  describe ".measure" do
+    let(:failed) { instance_double(Process::Status, success?: false, exitstatus: 1) }
+
+    it "deletes a stale output file before each run" do
+      Dir.mktmpdir("spec-costs") do |dir|
+        Dir.chdir(dir) do
+          FileUtils.mkdir_p("tmp")
+          File.write("tmp/spec_costs_spec_x.json", JSON.generate("spec/x/old_spec.rb" => 9.0))
+          allow(Open3).to receive(:capture3).and_return(["", "boom", failed])
+          measured = nil
+          expect { measured = described_class.measure(["spec/x"]) }.to output(%r{spec/x: rspec exited 1}).to_stderr
+          expect(measured).to eq({})
+        end
+      end
+    end
+
+    it "records what the child wrote" do
+      Dir.mktmpdir("spec-costs") do |dir|
+        Dir.chdir(dir) do
+          allow(Open3).to receive(:capture3) do |env, *|
+            File.write(env.fetch("SPEC_COSTS_OUT"), JSON.generate("spec/x/a_spec.rb" => 1.5))
+            ["", "", instance_double(Process::Status, success?: true)]
+          end
+          expect(described_class.measure(["spec/x"])).to eq("spec/x/a_spec.rb" => 1.5)
+        end
+      end
     end
   end
 

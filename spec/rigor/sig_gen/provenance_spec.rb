@@ -973,6 +973,18 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
         expect(result.compared).to eq(1)
         expect(result.mismatches).to be_empty
       end
+
+      it "prints the compared and exempt counts, and each mismatch, in the report" do
+        rows = audit_fixture(ruby: "class Widget\n  def n(x)\n    x\n  end\nend\n",
+                             rbs: "class Widget\n  def n: () -> untyped\nend\n")
+        out = StringIO.new
+        SigProvenanceReport.render(rows, out: out, shapes: SigParameterShape.check(rows))
+        expect(out.string).to include(
+          "### parameter lists against the def: 1 compared, 0 exempt (no_def 0, attribute 0, " \
+          "candidate_without_def 0, untyped_function 0), 1 mismatched"
+        )
+        expect(out.string).to include("- sig/fixture.rbs:2: Widget#n — declared `() -> untyped`, def `def n(x)`")
+      end
     end
   end
 

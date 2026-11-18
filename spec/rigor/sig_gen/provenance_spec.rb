@@ -417,6 +417,25 @@ SIG_PROVENANCE_RESIDUE = {
   "sig/rigor/type.rbs" => 175
 }.freeze
 
+# The `parameter_only` class (#3323), per file, marked and unmarked rows apart. Exact in BOTH directions, like the
+# residue pins above: the count is expected to GROW as parameters are declared on methods whose return sig-gen cannot
+# yet render, and to SHRINK as those returns become renderable (the row then leaves for `generated`,
+# `tighter_return` or `declared_divergent`). Edit a pin in the same PR that moves it, with the reason in the commit
+# body, so a PR that adds 500 such rows shows 500 in its diff. A row that is `parameter_only` is not residue, so the
+# class is bounded only by this table.
+SIG_PROVENANCE_PARAMETER_ONLY = {
+  # Both rows were marked `unrenderable` rows before the class existed.
+  "sig/rigor/scope.rbs" => { unmarked: 0, marked: 2 }
+}.freeze
+
+# The only `parameter_only` rows allowed to carry a marker: marked `unrenderable` rows that predate the class. A
+# marker on a `parameter_only` row silences the later `tighter_return` (a marked row is never flagged), so a marker
+# would turn the watched class into a permanent exemption. The set can only shrink.
+SIG_PROVENANCE_PARAMETER_ONLY_MARKED = [
+  "sig/rigor/scope.rbs Rigor::Scope::DiscoveryIndex#empty_value",
+  "sig/rigor/scope.rbs Rigor::Scope#def_node_slot"
+].freeze
+
 module SigProvenanceSpecHelpers
   def provenance_failure(label, rows)
     lines = rows.map(&:to_s)
@@ -618,17 +637,63 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
         expect(mixed.classification).to eq(SigProvenanceAuditor::UNRENDERABLE)
       end
 
-      it "reads the method's return, not the block's: a typed block over an untyped return qualifies" do
-        typed_block = only_row(widget("(Integer x, untyped y) { (untyped) -> Integer } -> untyped"))
-        untyped_block = only_row(widget("(untyped x, untyped y) { (untyped) -> untyped } -> Integer"))
-        expect(typed_block.classification).to eq(SigProvenanceAuditor::PARAMETER_ONLY)
-        expect(untyped_block.classification).to eq(SigProvenanceAuditor::UNRENDERABLE)
+      it "counts a signature as typed only when it states some type: `(?)` and untyped blocks do not" do
+        shapes = ["(?) -> untyped", "(untyped x, untyped y) { (untyped) -> untyped } -> untyped",
+                  "(untyped x, untyped y) ?{ () -> untyped } -> untyped",
+                  "(untyped x, untyped y) { (?) -> untyped } -> untyped"]
+        classes = shapes.to_h { |sig| [sig, only_row(widget(sig)).classification] }
+        expect(classes.values.uniq).to eq([SigProvenanceAuditor::UNRENDERABLE])
+      end
+
+      it "counts a type anywhere in the block as typing something, a block parameter or the block's own return" do
+        shapes = ["(untyped x, untyped y) { (Integer) -> untyped } -> untyped",
+                  "(untyped x, untyped y) { (untyped) -> String } -> untyped",
+                  "(untyped x, untyped y) ?{ (untyped) -> String } -> untyped"]
+        classes = shapes.to_h { |sig| [sig, only_row(widget(sig)).classification] }
+        expect(classes.values.uniq).to eq([SigProvenanceAuditor::PARAMETER_ONLY])
+      end
+
+      it "does not read the block's return as the method's return: a typed method return stays residue" do
+        row = only_row(widget("(untyped x, untyped y) { (untyped) -> untyped } -> Integer"))
+        expect(row.classification).to eq(SigProvenanceAuditor::UNRENDERABLE)
+      end
+
+      it "counts any non-`untyped` parameter kind: optional, rest, keyword and keyword-rest" do
+        shapes = ["(untyped x, untyped y, ?Integer z) -> untyped", "(untyped x, untyped y, *Integer z) -> untyped",
+                  "(untyped x, untyped y, k: Integer) -> untyped", "(untyped x, untyped y, **Integer rest) -> untyped"]
+        ruby = "class Widget\n  def n(x, y, z = nil, *r, k: 1, **o)\n    y\n  end\nend\n"
+        classes = shapes.to_h { |sig| [sig, only_row(widget(sig), ruby: ruby).classification] }
+        expect(classes.values.uniq).to eq([SigProvenanceAuditor::PARAMETER_ONLY])
+      end
+
+      it "classes a stale typed/`untyped` declaration `no_source` and residue, never `parameter_only`" do
+        row = audit_fixture(ruby: "class Widget\n  def n\n    42\n  end\nend\n",
+                            rbs: "class Widget\n  def gone: (Integer x) -> untyped\nend\n")
+              .find { |r| r.declaration.method_name == "gone" }
+        expect(row.classification).to eq(SigProvenanceAuditor::NO_SOURCE)
+        expect(row).to be_residue
+      end
+
+      it "classes a `define_method` member declared with typed parameters and `untyped` `synthetic_source`" do
+        row = audit_fixture(ruby: "class Widget\n  define_method(:n) { |x| x }\nend\n",
+                            rbs: "class Widget\n  def n: (Integer x) -> untyped\nend\n")
+              .find { |r| r.declaration.method_name == "n" }
+        expect(row.classification).to eq(SigProvenanceAuditor::SYNTHETIC)
+        expect(row).to be_residue
+      end
+
+      it "leaves a MARKED all-`untyped` row `unrenderable`: a marker never qualifies a row" do
+        rbs = "class Widget\n  # authored: nothing stated.\n  def n: (untyped x, untyped y) -> untyped\nend\n"
+        row = only_row(rbs)
+        expect(row.classification).to eq(SigProvenanceAuditor::UNRENDERABLE)
+        expect(row).to be_marked
       end
 
       it "does not apply to a skip for any other reason" do
         declaration = SigProvenanceAuditor::Declaration.new(
           path: "sig/widget.rbs", line: 2, class_name: "Widget", method_name: "n", kind: :instance,
-          typed_params: true, return_rbs: "untyped", untyped_return: true, marker: nil
+          typed_params: true, types_something: true, return_rbs: "untyped", untyped_return: true,
+          marker: nil
         )
         classes = %i[untyped_return complex_shape unrenderable_rbs].to_h do |reason|
           skipped = Rigor::SigGen::MethodCandidate.new(
@@ -810,6 +875,36 @@ RSpec.describe "sig/ provenance (ADR-107 G3)" do
           "count — or move the pin in this file with the reason in the commit body. A count that " \
           "DROPPED is an engine fix: lower the pin in the same commit."
       }
+    end
+
+    it "keeps each file's `parameter_only` count at its pin, marked and unmarked apart, in both directions" do
+      rows = SIG_PROVENANCE_ROWS.select { |row| row.classification == SigProvenanceAuditor::PARAMETER_ONLY }
+      actual = rows.group_by { |row| row.declaration.path }.transform_values do |group|
+        marked, unmarked = group.partition(&:marked?)
+        { unmarked: unmarked.size, marked: marked.size }
+      end
+      drift = (actual.keys | SIG_PROVENANCE_PARAMETER_ONLY.keys).filter_map do |path|
+        pinned = SIG_PROVENANCE_PARAMETER_ONLY.fetch(path, { unmarked: 0, marked: 0 })
+        found = actual.fetch(path, { unmarked: 0, marked: 0 })
+        "  #{path}: #{found} (pinned #{pinned})" unless found == pinned
+      end
+      expect(drift).to be_empty, lambda {
+        "#{drift.size} file(s) drifted from SIG_PROVENANCE_PARAMETER_ONLY:\n#{drift.join("\n")}\n\n" \
+          "`parameter_only` rows are declarations with typed parameters and a bare `untyped` return on a method " \
+          "sig-gen cannot render. The count is expected to GROW as parameters are declared and to SHRINK as returns " \
+          "become renderable; edit the pin in this file in the same PR, with the reason in the commit body."
+      }
+    end
+
+    it "carries no marker on a `parameter_only` row beyond the grandfathered two (a marker would make it permanent)" do
+      marked = SIG_PROVENANCE_ROWS.select { |row| row.classification == SigProvenanceAuditor::PARAMETER_ONLY && row.marked? }
+      keys = marked.map { |row| "#{row.declaration.path} #{row.declaration.class_name}##{row.declaration.method_name}" }
+      expect(keys - SIG_PROVENANCE_PARAMETER_ONLY_MARKED).to be_empty, lambda {
+        "a marker on a `parameter_only` row silences the `tighter_return` the row earns once sig-gen renders its " \
+          "return, so it would turn the watched class into a permanent exemption. Remove the marker: #{keys.join(', ')}"
+      }
+      gone = SIG_PROVENANCE_PARAMETER_ONLY_MARKED - keys
+      expect(gone).to be_empty, "a grandfathered row left the class: shrink the set (#{gone.join(', ')})"
     end
 
     it "reports the residue as a total, so the number is visible without a failure" do

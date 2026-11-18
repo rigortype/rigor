@@ -28,7 +28,7 @@ RSpec.describe SpecCosts do
 
     # A row for a deleted or moved spec would price nothing and hide that the new
     # path is unmeasured.
-    it "names only spec files that exist under a mirror directory" do
+    it "names only spec files that exist under or beside a mirror directory" do
       expect(rows.keys - described_class.mirrored_specs(root)).to eq([])
     end
 

@@ -1,0 +1,3 @@
+- **[inference]** `Array#[]`, `Array#slice`, `String#[]` and `String#slice` with a start that is statically `0` (`a[0...-1]`, `a[0..i]`, `a[..n]`, `s[0..]`) no longer read as nilable, so `call.possible-nil-receiver` stops firing on their result. ([#3330](https://github.com/rigortype/rigor/pull/3330))
+  - The two-argument form `a[0, len]` drops the nil only when `len` is known to be non-negative, since `[1][0, -1]` is nil.
+  - Any other start keeps the declared `Array[Elem]?` / `String?`, as do a subclass that overrides the method, an in-effect refinement and a `pre_eval:` patch of it.

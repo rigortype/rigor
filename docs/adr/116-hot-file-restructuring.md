@@ -8,7 +8,9 @@ builds five tables in one run per file. This ADR fixes the direction, the three 
 slice order (WD0–WD7). Each slice lands as its own PR in the `v0.4.x` milestone, tracked by
 #1192–#1199 (WD0–WD7). WD0–WD5 and WD7 preserve behaviour; WD6 changes it and carries its own corpus
 diff. **Amended 2026-11-17** after a re-measurement: criterion C4 and slices WD8–WD13 are added
-([below](#amendment-2026-11-17--what-the-re-measurement-added)).
+([below](#amendment-2026-11-17--what-the-re-measurement-added)). **Campaign closed 2026-11-18** at the pure
+moves; the slices not yet started are separate design tasks
+([below](#landing-point-2026-11-18--the-pure-moves-are-done-the-rest-is-design)).
 
 Grounding: [`docs/notes/20260923-hot-file-churn-audit.md`](../notes/20260923-hot-file-churn-audit.md)
 (the 60-day churn, growth and co-change measurement, and the mechanisms M1–M6 cited below); its
@@ -386,6 +388,30 @@ amendment rule requires.
 A slice on one of the six hottest files is announced before it starts and lands within the day:
 about fifteen PRs merge a day, and a move that stays open collides with each of them. Feature
 lanes on that file wait for it or rebase onto it.
+
+## Landing point, 2026-11-18 — the pure moves are done; the rest is design
+
+The maintainer closed the restructuring campaign at this line on 2026-11-18.
+
+**Landed.** Step 1 and step 2 of "Order and procedure": WD0, the quick tier, the code map, and eleven
+pure moves. `check_rules.rb` went from 5,228 lines to 363, `configuration.rb` from 1,335 to 527,
+`narrowing.rb` from 4,180 to 2,989, `runner.rb` from 3,066 to 2,818, `scope_indexer.rb` from 14,173
+to 13,704, `statement_evaluator.rb` from 10,335 to 9,476, and `expression_typer.rb` from 7,269 to
+6,592. `spec/docs/lib_file_budgets.yml` holds each file at its new size.
+
+**Not part of the campaign any more.** Step 3 — WD8, WD9, WD2, WD10 and WD11–WD13. What is left in
+`scope_indexer.rb`, `statement_evaluator.rb` and `expression_typer.rb` does not pass the rule for
+leaving a stateful class (it writes an instance variable, or reads state that changes during the
+walk), so taking it out is a decomposition of that class, not a move. Each of those slices is its
+own design task with its own issue (#3283, #3284 and #3286 carry what remains of the three largest
+files) and starts when its design is accepted, not because this ADR lists it.
+
+**Still owed under this ADR.** #3289: the quick tier's directory mirror is capped by a count of spec
+files, which stops selecting a directory's specs once it grows past the cap; the cap should be a time
+budget.
+
+A file at its budget is the signal to look for a seam, not to raise the number: new logic that has a
+seam goes into its own file from the start (`inference/loop_store_sites.rb` is the first case).
 
 ## Rejected / deferred alternatives
 

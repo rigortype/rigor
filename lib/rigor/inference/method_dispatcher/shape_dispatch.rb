@@ -644,7 +644,7 @@ module Rigor
           # their `%a{implicitly-returns-nil}`; `pop` carries no such annotation. The refinement itself is dropped
           # by `MutationWidening` after the call, so a second `pop` reads `T?` again.
           def non_empty_array_pop(base)
-            return nil unless base.class_name == "Array" && base.type_args.size == 1
+            return nil unless base.class_name == "Array"
 
             base.type_args.first
           end

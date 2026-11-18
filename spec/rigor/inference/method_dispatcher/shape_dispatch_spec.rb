@@ -1687,8 +1687,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ShapeDispatch do
       expect(dispatch(receiver: receiver, method_name: :pop, args: [constant(1)])).to be_nil
     end
 
-    it "falls through for an Array base with no element argument" do
-      receiver = Rigor::Type::Difference.new(Rigor::Type::Combinator.nominal_of("Array"), tuple)
+    it "falls through for a non-empty Hash, which has no `pop`" do
+      receiver = Rigor::Type::Combinator.non_empty_hash(string, string)
       expect(dispatch(receiver: receiver, method_name: :pop)).to be_nil
     end
   end

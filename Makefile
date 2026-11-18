@@ -185,9 +185,13 @@ check-json:
 # The threshold shifts by the same ~0.8 points to keep the calibrated
 # margin unchanged.
 #
+# `.rigor.coverage.yml` is the self-check configuration with `parameter_inference:` off. The
+# threshold above is calibrated on the key-off engine, and the key would add ~5 points of slack
+# and triple the run (#3324: 101 s -> 307 s, 59.45 % -> 64.45 %).
+#
 # Use `rigor coverage lib/` without --threshold for a non-gating report.
 coverage:
-	bundle exec exe/rigor coverage --threshold 0.58 lib
+	bundle exec exe/rigor coverage --config .rigor.coverage.yml --threshold 0.58 lib
 
 # ADR-50 WD4 perf-regression gate. Runs this checkout's `rigor check
 # --no-cache` in-process over `lib` of the frozen corpus bench/baseline.json

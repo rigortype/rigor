@@ -5,6 +5,9 @@ paths:
 test_paths:
   - spec
 plugins: []
+# Parameter types are inferred from call sites (ADR-67), as a user who turns the key on gets them (#3324).
+# `make coverage` reads `.rigor.coverage.yml`, which turns it back off.
+parameter_inference: true
 # A declared `-> void` is a contract about the caller ("do not rely on the value"); the rule that checks it
 # is off in every severity profile, so the self-check enables it (ADR-107; 0 findings when enabled).
 severity_overrides:

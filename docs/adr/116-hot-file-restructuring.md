@@ -406,9 +406,9 @@ walk), so taking it out is a decomposition of that class, not a move. Each of th
 own design task with its own issue (#3344 for `StatementEvaluator`, #3345 for `ExpressionTyper`,
 #3346 for `ScopeIndexer`; #3286 for what remains of `Runner`) and starts when its design is accepted, not because this ADR lists it.
 
-**Still owed under this ADR.** #3289: the quick tier's directory mirror is capped by a count of spec
-files, which stops selecting a directory's specs once it grows past the cap; the cap should be a time
-budget.
+**Owed under this ADR and since landed.** #3289 (#3349): the quick tier's directory mirror was capped by a count
+of spec files, which stopped selecting a directory's specs once it grew past the cap; it is now a time
+budget read from `tool/spec_costs.tsv`.
 
 A file at its budget is the signal to look for a seam, not to raise the number: new logic that has a
 seam goes into its own file from the start (`inference/loop_store_sites.rb` is the first case).

@@ -16,41 +16,42 @@ The session handoff (ADR-98). It answers ONE question: what should the next sess
 Transient; replaced wholesale. Backlog lives in GitHub Issues, release planning in Milestones.
 If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the one that is wrong.
 
-## State at 2026-11-18
+## State at 2026-11-19
+
+Two pieces of work ended here; neither leaves a queue to work down.
 
 - **The ADR-116 restructuring campaign is closed** at the pure moves (ADR-116 § "Landing point,
-  2026-11-18"). `docs/agents/code-map.md` is the map to read before planning under `lib/rigor/`;
-  `make verify-quick` is the between-edits gate; `spec/docs/lib_file_budgets.yml` holds file sizes.
-  The redesign of the three large files is filed per file (#3344 `StatementEvaluator`, #3345
-  `ExpressionTyper`, #3346 `ScopeIndexer`) and is taken up on its own, not as a queue to work down. #3289 (a time
-  budget for the quick tier's directory mirror) is the one item still owed.
-- **Typing Rigor's own source (#3315) is the active follow-on**, and it ends at two things: the
-  self-check runs with `parameter_inference: true` (#3324), and a gate stops the share of Dynamic call
-  sites from growing back. Measured before it started: 40.4% of `lib/` expressions and 50.2% of call
-  sites are Dynamic, 57% of that rooted in untyped parameters.
-  - Landed: #3328 (keyed reads on a union of shapes), #3329 (the provenance gate counts a
-    parameter-only declaration apart from residue), #3330 (zero-start range reads), #3341 (#3337,
-    body-first locals in a post-loop collection), #3347 (#3340), #3339 (#3338, `pop` on a
-    non-empty array).
-  - #3324 turns the key on (maintainer, 2026-11-19). With #3337 and #3338 fixed, the self-check runs
-    with it and no issue-bound suppression; `spec/rigor/self_check_suppressions_spec.rb` holds every
-    `lib/` marker to a reason and to still firing. `make coverage`, `check-incremental`, the memo
-    audit and the `type_of` shadow keep the key off through `.rigor.gates.yml` (maintainer, variant B
-    on #3353).
-  - **The brake, ruled by the maintainer on 2026-11-18:** if another engine defect turns up behind
-    those, stop chasing: turn the key on with an inline suppression that names the issue, and leave
-    the defect to the backlog.
-  - The ratchet: `make coverage` holds precision and the Dynamic call share to one-sided pins in
-    `tool/coverage_ratchet.yml` (key off; `make coverage-tighten` claims gains;
-    `docs/agents/measurement.md` § "The self-typing ratchet"). Still open: #3307, #3355, and
-    declarations for the modules #3315 names.
+  2026-11-18"), and its last owed item landed (#3349: `make verify-quick` selects a mirror directory's
+  specs by a time budget from `tool/spec_costs.tsv`). Read `docs/agents/code-map.md` before planning
+  under `lib/rigor/`; `spec/docs/lib_file_budgets.yml` holds file sizes, and
+  `inference/statement_evaluator.rb` sits one line under its budget, so new logic there goes into a
+  module of its own. The redesign of the three large files is filed per file and taken up on its own:
+  #3344 (`StatementEvaluator`), #3345 (`ExpressionTyper`), #3346 (`ScopeIndexer`).
+- **Typing Rigor's own source (#3315) is closed** at its two end points.
+  - The self-check runs with `parameter_inference: true` (`.rigor.dist.yml`) and no issue-bound
+    suppression; `spec/rigor/self_check_suppressions_spec.rb` holds every `# rigor:disable` under `lib/`
+    to a tabled reason and to still firing. `make coverage`, `check-incremental`, the memo audit and the
+    `type_of` shadow keep the key off through `.rigor.gates.yml`
+    (`spec/rigor/self_check_gates_config_spec.rb` pins the split; a new rigor-running step in
+    `acceptance-gates` must be put on one side).
+  - `make coverage` holds expression precision and the share of Dynamic call sites to one-sided pins in
+    `tool/coverage_ratchet.yml` (key off): 59.58% and 49.83% at #3356; with the key on, measured by
+    hand, 64.75% and 43.89%. A gain is claimed by `make coverage-tighten`; moving a pin the worse way is
+    an approval-queue entry. `docs/agents/measurement.md` § "The self-typing ratchet".
+  - A hand-written parameter in `sig/` is checked for shape against its `def` (#3348) and counted apart
+    from residue while its return stays unrenderable (#3329); `docs/agents/type-authoring.md`.
+  - What is left is backlog, in order of yield: #3355 (four inference gaps behind the largest Dynamic
+    roots — the memo-Hash read-back alone outweighs a batch of declarations), #3357 (declarations for
+    the modules the moves created; #3354 is the worked example, about 265 call sites a batch), #3307.
 - **Engine defects found on the way are filed, not owned by this work**: #3327 (ADR-67 WD6b holes),
-  #3331–#3334, #3336, #3342, #3343.
-- **Two approval-queue entries from the campaign await ratification**:
-  `statement-evaluator-clusters.md` and `expression-typer-clusters.md`.
+  #3331–#3334, #3336, #3343 (loop content join), #3351 (known limitation: a non-empty fact stale after
+  a mutation through an alias the engine does not link), #3352, #3342 and #3350 (tooling).
+- **Approval-queue entries from this work await ratification**: `statement-evaluator-clusters.md`,
+  `expression-typer-clusters.md`, `verify-quick-time-budget.md`, `non-empty-fact-invalidation.md`,
+  `self-check-parameter-inference-gates.md`, `self-typing-ratchet.md`.
 
 ## Next
 
-1. Land #3324 and the ratchet; then the `sig/` declarations (#3355 first).
-2. Triage the current milestone (`gh issue list --milestone <name>`). Read
+1. Triage the current milestone (`gh issue list --milestone <name>`). Read
    `docs/agents/parallel-lanes.md` before fanning out.
+2. If typing Rigor's own source is taken up again, start with #3355's gap A, not with more declarations.

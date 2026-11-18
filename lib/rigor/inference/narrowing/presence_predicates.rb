@@ -2,6 +2,7 @@
 
 require "prism"
 require_relative "../../type"
+require_relative "../deferred_mutation"
 require_relative "../key_presence_guard"
 
 module Rigor
@@ -44,6 +45,9 @@ module Rigor
 
           non_empty = narrow_to_non_empty_array(current)
           return nil if non_empty.equal?(current) # receiver is not an Array shape → opaque
+          # Issue #3340 — a closure that may run later can empty the local after the guard, so the guard proves
+          # nothing that lasts ({DeferredMutation}).
+          return nil if reader == :local && DeferredMutation.empties?(scope, node.receiver.name, node)
 
           non_empty_scope = scope.public_send(writer, node.receiver.name, non_empty)
           name == :any? ? [non_empty_scope, scope] : [scope, non_empty_scope]

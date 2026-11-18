@@ -55,6 +55,92 @@ RSpec.describe "content facts past a mutation the call site does not spell", typ
     RUBY
   end
 
+  def closures_before_guard
+    <<~RUBY
+      def arrow_before
+        xs = gets.to_s.chars
+        clear_it = -> { xs.clear }
+        return if xs.empty?
+        clear_it.call
+        #{read}
+      end
+
+      def proc_before
+        xs = gets.to_s.chars
+        drop = proc { xs.pop }
+        return if xs.empty?
+        drop.call
+        #{read}
+      end
+
+      def defined_before
+        xs = gets.to_s.chars
+        define_singleton_method(:zap) { xs.shift }
+        self.class.define_method(:wipe) { [xs].each(&:clear) }
+        return if xs.empty?
+        zap
+        #{read}
+      end
+
+      def enclosing_scope
+        xs = gets.to_s.chars
+        wipe = lambda { xs.send(:clear) }
+        [1].each do
+          next if xs.empty?
+          wipe.call
+          #{read}
+        end
+      end
+    RUBY
+  end
+
+  # A closure made before the guard may run after it, so the guard narrows nothing ({DeferredMutation}).
+  it "does not take the guard's fact for a local a closure made before the guard can empty" do
+    expect_no_stale_size(closures_before_guard, reads: 4)
+  end
+
+  def harmless_closures
+    <<~RUBY
+      def reader_before
+        xs = gets.to_s.chars
+        show = -> { xs.size }
+        add = -> { xs << "a" }
+        return if xs.empty?
+        show.call
+        add.call
+        Rigor.dump_type(xs.size)
+      end
+
+      def finished_before
+        xs = gets.to_s.chars
+        [1].each { xs.clear }
+        return if xs.empty?
+        Rigor.dump_type(xs.size)
+      end
+
+      def shadowed
+        xs = gets.to_s.chars
+        wipe = ->(xs) { xs.clear }
+        return if xs.empty?
+        wipe.call([1])
+        Rigor.dump_type(xs.size)
+      end
+
+      def guard_inside
+        xs = gets.to_s.chars
+        proc do
+          next if xs.empty?
+          Rigor.dump_type(xs.size)
+          xs.pop
+        end
+      end
+    RUBY
+  end
+
+  it "keeps the guard's fact beside a closure that cannot empty the local, or that holds the guard" do
+    expect(dumped_types(harmless_closures)).to eq(%w[positive-int positive-int positive-int positive-int])
+  end
+
   it "drops a literal's shape a lambda literal's body falsifies" do
     expect(dumped_types(<<~RUBY)).to eq(["Array[1 | 2]", "Hash[Symbol, 1]", "String"])
       def tuple
@@ -305,6 +391,75 @@ RSpec.describe "content facts past a mutation the call site does not spell", typ
         end
       end
     RUBY
+  end
+
+  # The seven shapes the review of #3339 listed, and the closure made before the guard, in one file: `pop` on a
+  # non-empty array answers `T` only where none of them leaves `positive-int` behind.
+  def shapes_waited_on
+    <<~RUBY
+      class Holder
+        def initialize
+          @xs = gets.to_s.chars
+        end
+
+        def reset! = @xs.clear
+
+        def ivar_reset
+          return if @xs.empty?
+          reset!
+          Rigor.dump_type(@xs.size)
+        end
+      end
+
+      def closure_before
+        xs = gets.to_s.chars
+        clear_it = -> { xs.clear }
+        return if xs.empty?
+        clear_it.call
+        Rigor.dump_type(xs.size)
+      end
+
+      def closure_after
+        #{guard}
+        clear_it = -> { xs.clear }
+        clear_it.call
+        Rigor.dump_type(xs.size)
+      end
+
+      def loop_back_edge
+        #{guard}
+        loop do
+          Rigor.dump_type(xs.size)
+          xs.pop
+        end
+      end
+
+      def rescue_entry
+        #{guard}
+        begin
+          xs.clear
+          raise "x"
+        rescue StandardError
+          Rigor.dump_type(xs.size)
+        end
+      end
+
+      def yielded
+        #{guard}
+        yield xs
+        Rigor.dump_type(xs.size)
+      end
+
+      def symbol_block
+        #{guard}
+        [xs].each(&:clear)
+        Rigor.dump_type(xs.size)
+      end
+    RUBY
+  end
+
+  it "leaves no `positive-int` size in the file of shapes #3339 waits on" do
+    expect(dumped_types(shapes_waited_on)).to eq(Array.new(7, "non-negative-int"))
   end
 
   describe "what stays as it was" do

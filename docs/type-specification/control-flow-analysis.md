@@ -443,7 +443,9 @@ What a binding says about the contents of its object, a literal's shape or the `
 
 So after `return if xs.empty?`, each of these leaves `xs.size` a `non-negative-int` and `xs.size == 0` unfolded. Code that only reads the collection in the same positions (`-> { xs.size }`, `xs.send(:size)`, `xs.instance_eval { size }`, `yield ys`) leaves the fact in place. The forms that hand the object to unread code drop only what a mutation can falsify: a literal shape or an emptiness witness widens to its nominal with a gradual element, and a binding already typed as a nominal (`Array[String]`) is unchanged.
 
-Not covered: a closure created before the fact is established and called after it (`f = -> { xs.clear }; return if xs.empty?; f.call`), a `Method` object kept in a variable and called later, and any of the opaque forms written as an operand of another call (`puts(yield(xs))`).
+A closure that may run later is a standing way to mutate the object, so an emptiness guard MUST NOT narrow a local that such a closure in the same method, class or file body can empty: `f = -> { xs.clear }; return if xs.empty?; f.call; xs.size` reads a `non-negative-int`, wherever the closure is made relative to the guard. The closures are a lambda literal and a block that may run after its call returns (`proc`, `lambda`, `define_method`, `define_singleton_method`, a callback); the ways to empty are a mutator that can leave a non-empty Array empty (`clear`, `pop`, `shift`, `delete`, `replace`, `reject!`, …) called on the local, and the forms above that hand it to unread code. A closure that only reads the local or only appends to it (`<<`, `push`), a block a catalogued iterator ran and finished, and the closure the guard itself sits in leave the guard's narrowing in place.
+
+Not covered: an alias of the local made inside such a closure, a `Method` object kept in a variable and called later, and any of the opaque forms written as an operand of another call (`puts(yield(xs))`).
 
 ### Closure captures
 

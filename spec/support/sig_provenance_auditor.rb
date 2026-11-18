@@ -57,6 +57,7 @@
 require "rbs"
 require "rigor"
 require "rigor/sig_gen"
+require_relative "sig_declaration_reader"
 require_relative "sig_provenance_report"
 require_relative "sig_source_index"
 
@@ -83,6 +84,15 @@ class SigProvenanceAuditor
   UNTRANSLATABLE = :untranslatable_declared
   # `sig-gen` declined the `def` (`sig.skipped.*` — overwhelmingly `untyped-return`).
   UNRENDERABLE = :unrenderable
+  # `sig-gen` declined the `def` as `sig.skipped.untyped-return`, the declaration types at least one parameter
+  # (or the block), and EVERY overload's return is the bare `untyped`. The declaration claims nothing about the
+  # return, so there is nothing for the gate to doubt; it states the parameters, which are authored intent
+  # (ADR-107, ADR-5 clause 2). Typing a method's parameters is what lets sig-gen render its return, and its
+  # callers' returns, so the gate must not count the first step against the file's pin (#3323). Watched, not
+  # waived: it is neither earned nor residue, the report prints its count per file and in total, and the row
+  # leaves the class the moment sig-gen can render the return, because the declared `untyped` is then looser
+  # than the generated return and reads `tighter_return` (a marker is required) or `generated`.
+  PARAMETER_ONLY = :parameter_only
   # `sig-gen` found the `def` but the RBS environment did not resolve it to this declaration.
   UNMATCHED = :unmatched_declaration
   # No `def`, but Rigor's own recognition finds the method on the declaring class: an `attr_*`, a
@@ -100,6 +110,8 @@ class SigProvenanceAuditor
   # return type to generate, so the provenance rule has nothing to say about them.
   NON_METHOD = :non_method
 
+  # Neither earned nor residue; counted on its own so the number can be watched fall.
+  WATCHED = [PARAMETER_ONLY].freeze
   EARNED = [GENERATED, PARAMETER_INTENT, RETURN_INTENT].freeze
   # The three #839 states are residue, not earned: knowing that a declared method EXISTS says nothing
   # about where its type came from, and the type is what ADR-107 § Decision asks about. Splitting them
@@ -107,20 +119,13 @@ class SigProvenanceAuditor
   RESIDUE = [DECLARED_DIVERGENT, UNTRANSLATABLE, UNRENDERABLE, UNMATCHED, SYNTHETIC, INHERITED,
              RUNTIME_DEFINED, NO_SOURCE].freeze
 
-  MARKER_PATTERN = /sig-gen gap:\s*#(?<issue>\d+)\b/
-  # A deliberately hand-written row: no engine work would ever let sig-gen answer it, so it gets
-  # its own marker rather than a gap pointer with an issue number on the allow-list (#1011).
-  AUTHORED_PATTERN = /\bauthored:\s*(?<reason>.*)$/
-
-  Declaration = Struct.new(:path, :line, :class_name, :method_name, :kind, :typed_params, :return_rbs,
-                           :marker, :authored_reason, keyword_init: true) do
-    def to_s
-      "#{path}:#{line}: #{class_name}##{method_name}"
-    end
-  end
+  Declaration = SigDeclarationReader::Declaration
 
   Row = Struct.new(:declaration, :classification, :detail, keyword_init: true) do
     def marked? = !declaration.marker.nil? || !declaration.authored_reason.nil?
+
+    # A marker records a row without changing that it is watched: `marked?` rows still count here.
+    def watched? = WATCHED.include?(classification)
 
     def residue? = RESIDUE.include?(classification) && !marked?
 
@@ -164,9 +169,7 @@ class SigProvenanceAuditor
 
     # Every member of every `.rbs` under `sig/`, in file then source order.
     def declarations(root:)
-      Dir.glob(File.join(root, "sig/**/*.rbs")).flat_map do |file|
-        read_signature(file, file.delete_prefix("#{root}/"))
-      end
+      SigDeclarationReader.declarations(root: root)
     end
 
     # `sig-gen`'s view of `lib/`. `include_private: true` because `sig/` declares private helpers
@@ -243,11 +246,21 @@ class SigProvenanceAuditor
         Row.new(declaration: decl, classification: TIGHTER_RETURN,
                 detail: "declared #{candidate.declared_return_rbs}, " \
                         "sig-gen proposes #{candidate.inferred_return&.erase_to_rbs}")
-      when Rigor::SigGen::Classification::SKIPPED
-        Row.new(declaration: decl, classification: UNRENDERABLE,
-                detail: Rigor::SigGen::Classification::SKIP_DIAGNOSTIC_IDS[candidate.skip_reason])
+      when Rigor::SigGen::Classification::SKIPPED then classify_skipped(decl, candidate)
       else classify_new_method(decl, candidate)
       end
+    end
+
+    # `parameter_only` needs all three: sig-gen skipped the def for `untyped-return` specifically (any other skip
+    # reason says nothing about the return), a typed parameter or block, and a declared return that is the bare
+    # `untyped` in every overload. A block's own return type is not the method's return and is not read.
+    def classify_skipped(decl, candidate)
+      detail = Rigor::SigGen::Classification::SKIP_DIAGNOSTIC_IDS[candidate.skip_reason]
+      if candidate.skip_reason == :untyped_return && decl.types_something && decl.untyped_return
+        return Row.new(declaration: decl, classification: PARAMETER_ONLY, detail: detail)
+      end
+
+      Row.new(declaration: decl, classification: UNRENDERABLE, detail: detail)
     end
 
     # Issue #839 — `sig-gen` attributed no `def` to this declaration. Ask the project index, then the
@@ -297,98 +310,5 @@ class SigProvenanceAuditor
 
       Rigor::SigGen::TypeElaborator.elaborate(type, environment: environment).erase_to_rbs
     end
-
-    def read_signature(file, relative_path)
-      buffer = RBS::Buffer.new(name: Pathname(file), content: File.read(file))
-      _, _, decls = RBS::Parser.parse_signature(buffer)
-      collect(decls, [], relative_path)
-    end
-
-    def collect(members, namespace, path)
-      members.flat_map do |member|
-        case member
-        when RBS::AST::Declarations::Class, RBS::AST::Declarations::Module
-          nested = namespace + [member.name.to_s.delete_prefix("::")]
-          [declaration(member, path, nested.join("::"), nil, nil)] + collect(member.members, nested, path)
-        when RBS::AST::Members::MethodDefinition
-          [declaration(member, path, namespace.join("::"), member.name.to_s, member.kind,
-                       typed_params: typed_params?(member.overloads),
-                       return_rbs: return_rbs(member.overloads))]
-        when RBS::AST::Members::AttrReader, RBS::AST::Members::AttrWriter,
-             RBS::AST::Members::AttrAccessor
-          attribute_declarations(member, path, namespace.join("::"))
-        else
-          [declaration(member, path, namespace.join("::"), member_label(member), nil)]
-        end
-      end
-    end
-
-    ATTR_NAMES = {
-      RBS::AST::Members::AttrReader => ->(name) { [name.to_s] },
-      RBS::AST::Members::AttrWriter => ->(name) { ["#{name}="] },
-      RBS::AST::Members::AttrAccessor => ->(name) { [name.to_s, "#{name}="] }
-    }.freeze
-    private_constant :ATTR_NAMES
-
-    def attribute_declarations(member, path, class_name)
-      ATTR_NAMES.fetch(member.class).call(member.name).map do |name|
-        # A writer's parameter type is its attribute type, so a non-`untyped` attribute makes the
-        # writer parameter-intent; the reader's own signature takes no parameter at all.
-        typed = name.end_with?("=") && !untyped?(member.type)
-        declaration(member, path, class_name, name, member.kind, typed_params: typed,
-                                                                 return_rbs: member.type.to_s)
-      end
-    end
-
-    def declaration(member, path, class_name, method_name, kind, typed_params: false, return_rbs: nil)
-      Declaration.new(path: path, line: member.location&.start_line, class_name: class_name,
-                      method_name: method_name, kind: kind, typed_params: typed_params,
-                      return_rbs: return_rbs, marker: marker_for(member),
-                      authored_reason: authored_for(member))
-    end
-
-    # A member with no name of its own (`include`, `alias`, an instance-variable declaration) is
-    # reported by its member class so the audit's `non_method` rows stay legible.
-    def member_label(member)
-      return member.name.to_s if member.respond_to?(:name) && member.name
-
-      member.class.name.split("::").last.downcase
-    end
-
-    def marker_for(member)
-      text = member.respond_to?(:comment) ? member.comment&.string : nil
-      match = text && MARKER_PATTERN.match(text)
-      match && match[:issue]
-    end
-
-    def authored_for(member)
-      text = member.respond_to?(:comment) ? member.comment&.string : nil
-      match = text && AUTHORED_PATTERN.match(text)
-      match && match[:reason]&.strip
-    end
-
-    def typed_params?(overloads)
-      overloads.any? do |overload|
-        function = overload.method_type.type
-        next true if function.is_a?(RBS::Types::UntypedFunction)
-
-        overload.method_type.block || function_parameters(function).any? { |p| !untyped?(p.type) }
-      end
-    end
-
-    # Overloads are joined with ` | ` so a multi-overload member reads as one spelling; the only
-    # comparison made against it is the exact `"void"` of a constructor, which has one overload.
-    def return_rbs(overloads)
-      overloads.map { |overload| overload.method_type.type.return_type.to_s }.uniq.join(" | ")
-    end
-
-    def function_parameters(function)
-      function.required_positionals + function.optional_positionals +
-        function.trailing_positionals + function.required_keywords.values +
-        function.optional_keywords.values +
-        [function.rest_positionals, function.rest_keywords].compact
-    end
-
-    def untyped?(type) = type.is_a?(RBS::Types::Bases::Any)
   end
 end

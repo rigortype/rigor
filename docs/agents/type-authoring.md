@@ -42,6 +42,53 @@ Prefer `rigor sig-gen --print` / `--diff` over hand-written or AI-authored RBS. 
 signal about the engine, so propose the generated output first and hand-edit only after the user has
 reviewed that alternative. Correcting existing `.rbs` is fine when the task authorizes it.
 
+### The provenance gate's row classes
+
+`spec/rigor/sig_gen/provenance_spec.rb` classifies every `sig/` declaration against what `rigor sig-gen`
+renders, and pins the unmarked residue per file (`SIG_PROVENANCE_RESIDUE`). A row is earned when its return
+is what sig-gen generates (`generated`), when the return is equivalent and a parameter or block is typed
+(`parameter_intent`), or when it is `void` (`return_intent`). It is residue when sig-gen cannot confirm the
+return (`declared_divergent`, `untranslatable_declared`, `unrenderable`, `unmatched_declaration`, and the
+rows with no attributed `def`: `synthetic_source`, `inherited_source`, `runtime_defined`, `no_source`),
+unless it carries a `# sig-gen gap:` or `# authored:` marker. A declared return that sig-gen would narrow
+(`tighter_return`) needs the generated return, or a marker.
+
+`parameter_only` is a fourth state besides earned, residue and `tighter_return`. It holds when sig-gen skips
+the method as `sig.skipped.untyped-return`, the declaration states some type, and every overload's return is
+the bare `untyped`. "States some type" means: not `(?)`, and at least one positional, optional, rest,
+keyword or keyword-rest parameter whose type is not `untyped`, `top` or an optional of either, or a block whose own parameters, or declared
+return, are not `untyped`. A block that declares a typed return says what the caller's block must return,
+which is authored intent like a parameter. The method's own return is read from the method, never from the
+block: `{ (untyped) -> untyped } -> Integer` has a typed method return and is residue.
+
+Typing a method's parameters is what lets sig-gen render its return, and its callers' returns; a declaration
+that types the parameters and leaves the return `untyped` makes no claim the gate cannot check, so it does
+not count against the file's pin. The row is watched, not waived: the report prints the `parameter_only`
+count per file and in total, and `SIG_PROVENANCE_PARAMETER_ONLY` pins it per file, marked and unmarked rows
+apart, in both directions. `void`, `bool`, `[untyped, untyped]`, `Array[untyped]`, `untyped?` and a union
+with `untyped` state a return and stay residue, as does a declaration that states no type
+(`(untyped x) -> untyped`, `(untyped? x) -> untyped`, `(top x) -> untyped`, `(?) -> untyped`, an all-`untyped` block).
+A container (`Array[untyped]`, a tuple, a record, a proc) counts as a type. An alias that expands to `untyped` is
+not expanded, so it counts as one too.
+
+**The way out is to declare the return.** The row leaves the class when sig-gen can render the return, and
+then reads `tighter_return` (the declared `untyped` is looser than the generated type) or, when the body
+proves only `nil`, `declared_divergent` residue, because sig-gen declines to propose a bare `nil` over a
+declared `untyped`. Either way the author declares the return and the gate confirms it. A return that
+depends on the method's own declared return never becomes renderable on its own: the declared `untyped`
+makes a recursive call read `untyped`, so sig-gen keeps skipping a self-recursive method, or two
+`parameter_only` methods that call each other. Declare it: `(Array[Integer] xs, Integer n) -> Integer` on
+`def depth(xs, n); return n if xs.empty?; depth(xs.drop(1), n + 1); end` is confirmed as `parameter_intent`.
+
+**Never add a marker to a `parameter_only` row.** A `# sig-gen gap:` marker records an engine gap with an
+allow-listed issue (ADR-14); it is not a way to quiet a row. On a marked row the later `tighter_return` is
+silent, so a marker would turn the watched class into a permanent exemption. The gate fails a marked
+`parameter_only` row except the two that were marked `unrenderable` rows before the class existed
+(`SIG_PROVENANCE_PARAMETER_ONLY_MARKED`, which can only shrink).
+
+Print the report with
+`nix develop --command bundle exec ruby -Ilib -Ispec/support -e 'require "sig_provenance_auditor"; SigProvenanceAuditor.report'`.
+
 ### Respect a declared `void`
 
 Every Ruby method returns its last expression, so a body almost always *has* a value. An author who

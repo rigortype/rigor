@@ -1359,7 +1359,6 @@ text is in
 [`inference-engine.md`](../internal-spec/inference-engine.md) (the
 "loop seam's argument scope" bullet).
 
-||||||| parent of b20a59179 (Drop a content fact past a mutation the call site does not spell)
 ### WD2.15 — A `Kernel#loop` body enters as a repeating block's does, for the captures it mutates (2026-11-18, issue #3340)
 
 WD2.13 left open that "`Kernel#loop` is not a catalogued iterator, so a

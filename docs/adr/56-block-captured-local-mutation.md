@@ -1317,6 +1317,10 @@ Two more review rounds added two:
   body does not. The rule is now syntactic and covers both: a local
   that any block or lambda in the frame writes (a local write with a
   positive `depth`) is joined, never replaced.
+- **A `Binding` writes with no write node.** `s = "a";
+  binding.local_variable_set(:s, nil); out << s` stores `nil`. A frame
+  that holds a `binding`, `eval` or `local_variable_set` call, or a
+  `*_eval` call given an argument, joins every store.
 - **A scope body's locals are its own.** A store in a method, class or
   module body inside the loop gets no overlay: a same-named local there
   is not the loop's.

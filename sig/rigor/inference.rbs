@@ -134,6 +134,83 @@ module Rigor
       interface _DispatchTier
         def try_dispatch: (CallContext) -> Type::t?
       end
+
+      # The dispatch tiers (#3315). Each `try_dispatch` is reached only with the `CallContext` the dispatcher builds.
+      module ArithmeticSequenceElements
+        def self?.try_dispatch: (CallContext context) -> (Type::Nominal | nil)
+      end
+      module ArrayToHFolding
+        def self?.try_dispatch: (CallContext context) -> (Type::Nominal | nil)
+      end
+      module BlockFolding
+        def self?.try_dispatch: (CallContext context) -> untyped
+      end
+      module CGIFolding
+        def self?.try_dispatch: (CallContext context) -> (Type::Constant | nil)
+      end
+      module ConstantFolding
+        def self?.try_dispatch: (CallContext context) -> untyped
+      end
+      module DataFolding
+        def self?.try_dispatch: (CallContext context) -> untyped
+      end
+      module FileFolding
+        def self?.try_dispatch: (CallContext context) -> (Type::Constant | Type::Tuple | nil)
+      end
+      module HashTransformKeysFolding
+        def self?.try_dispatch: (CallContext context) -> Type::t?
+      end
+      module JSONFolding
+        def self?.try_dispatch: (CallContext context) -> (Type::Nominal | nil)
+      end
+      module KernelDispatch
+        def self?.try_dispatch: (CallContext context) -> Type::t?
+      end
+      module MatchDataFolding
+        def self?.try_dispatch: (CallContext context) -> (Type::Tuple | nil)
+      end
+      module MathFolding
+        def self?.try_dispatch: (CallContext context) -> (Type::Constant | Type::FloatRange | Type::Tuple | nil)
+      end
+      module ProcessFolding
+        def self?.try_dispatch: (CallContext context) -> untyped
+      end
+      module RandomFolding
+        def self?.try_dispatch: (CallContext context) -> (Type::FloatRange | Type::IntegerRange | nil)
+      end
+      module RbsDispatch
+        def self?.try_dispatch: (CallContext context) -> untyped
+      end
+      module ReduceFolding
+        def self?.try_dispatch: (CallContext context) -> Type::t?
+      end
+      module RegexpFolding
+        def self?.try_dispatch: (CallContext context) -> Type::t?
+      end
+      module SetFolding
+        def self?.try_dispatch: (CallContext context) -> (Type::Constant | Type::Nominal | nil)
+      end
+      module ShapeDispatch
+        def self?.try_dispatch: (CallContext context) -> untyped
+      end
+      module ShellwordsFolding
+        def self?.try_dispatch: (CallContext context) -> (Type::Constant | Type::Tuple | nil)
+      end
+      module SingletonMixinDispatch
+        def self?.try_dispatch: (CallContext context) -> (Type::Nominal | nil)
+      end
+      module StructFolding
+        def self?.try_dispatch: (CallContext context) -> untyped
+      end
+      module TimeFolding
+        def self?.try_dispatch: (CallContext context) -> (Type::Constant | nil)
+      end
+      module UniversalObjectDispatch
+        def self?.try_dispatch: (CallContext context) -> untyped
+      end
+      module URIFolding
+        def self?.try_dispatch: (CallContext context) -> (Type::Constant | Type::Tuple | nil)
+      end
     end
 
     class MethodParameterBinder

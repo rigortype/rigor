@@ -424,6 +424,10 @@ SIG_PROVENANCE_RESIDUE = {
 # body, so a PR that adds 500 such rows shows 500 in its diff. A row that is `parameter_only` is not residue, so the
 # class is bounded only by this table.
 SIG_PROVENANCE_PARAMETER_ONLY = {
+  # +8 (#3315): the `try_dispatch` of eight dispatch tiers declares its `CallContext` parameter; sig-gen still renders
+  # no return for `BlockFolding`, `ConstantFolding`, `DataFolding`, `ProcessFolding`, `RbsDispatch`, `ShapeDispatch`,
+  # `StructFolding` or `UniversalObjectDispatch` (`sig.skipped.untyped-return`).
+  "sig/rigor/inference.rbs" => { unmarked: 8, marked: 0 },
   # Both rows were marked `unrenderable` rows before the class existed.
   "sig/rigor/scope.rbs" => { unmarked: 0, marked: 2 }
 }.freeze
@@ -437,10 +441,10 @@ SIG_PROVENANCE_PARAMETER_ONLY_MARKED = [
 ].freeze
 
 # #3335 — method declarations whose parameter list was compared with a recorded `def` on the tree this pin was taken
-# from (1031 on 2026-11-19, every one fitting). A floor, not an exact pin, because every new declaration of a `def`
-# raises it: raise it when the count grows, and lower it only with the reason in the commit body (a deleted
+# from (1059 on 2026-11-19 after #3315, every one fitting). A floor, not an exact pin, because every new declaration
+# of a `def` raises it: raise it when the count grows, and lower it only with the reason in the commit body (a deleted
 # declaration, or a `def` the pairing stopped finding, which is the case this floor exists to catch).
-SIG_PARAMETER_SHAPE_COMPARED_FLOOR = 1031
+SIG_PARAMETER_SHAPE_COMPARED_FLOOR = 1059
 
 module SigProvenanceSpecHelpers
   # The hard-rule failure for unmarked `tighter_return` rows. A row whose declared return is the bare `untyped` claims

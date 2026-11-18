@@ -211,6 +211,9 @@ RSpec.describe Rigor::Builtins::StaticReturnRefinements do
       "w[0...-1]" => "Array[String] | []",
       "ne[0..]" => "Array[String] | [\"x\"]",
       "w[0..i]" => "Array[Dynamic[top]] | Array[String]",
+      # The RBS union path offers a Tuple member to ShapeDispatch only for `[]` (#3320), so for `slice` the arm also
+      # becomes exact, where base answered `Array[Dynamic[top]] | Array[String] | nil`.
+      "w.slice(0..)" => "Array[String] | []",
       "ne[0..i]" => "Array[\"x\"] | Array[String]"
     }.each do |expression, expected|
       it "drops the nil of #{expression}" do

@@ -403,8 +403,8 @@ to 13,704, `statement_evaluator.rb` from 10,335 to 9,476, and `expression_typer.
 `scope_indexer.rb`, `statement_evaluator.rb` and `expression_typer.rb` does not pass the rule for
 leaving a stateful class (it writes an instance variable, or reads state that changes during the
 walk), so taking it out is a decomposition of that class, not a move. Each of those slices is its
-own design task with its own issue (#3283, #3284 and #3286 carry what remains of the three largest
-files) and starts when its design is accepted, not because this ADR lists it.
+own design task with its own issue (#3344 for `StatementEvaluator`, #3345 for `ExpressionTyper`,
+#3346 for `ScopeIndexer`; #3286 for what remains of `Runner`) and starts when its design is accepted, not because this ADR lists it.
 
 **Still owed under this ADR.** #3289: the quick tier's directory mirror is capped by a count of spec
 files, which stops selecting a directory's specs once it grows past the cap; the cap should be a time

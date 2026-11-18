@@ -21,7 +21,8 @@ If this file disagrees with an ADR, the CHANGELOG, or an issue, this file is the
 - **The ADR-116 restructuring campaign is closed** at the pure moves (ADR-116 § "Landing point,
   2026-11-18"). `docs/agents/code-map.md` is the map to read before planning under `lib/rigor/`;
   `make verify-quick` is the between-edits gate; `spec/docs/lib_file_budgets.yml` holds file sizes.
-  WD8–WD13 are separate design tasks (#3283, #3284, #3286), not a queue to work down. #3289 (a time
+  The redesign of the three large files is filed per file (#3344 `StatementEvaluator`, #3345
+  `ExpressionTyper`, #3346 `ScopeIndexer`) and is taken up on its own, not as a queue to work down. #3289 (a time
   budget for the quick tier's directory mirror) is the one item still owed.
 - **Typing Rigor's own source (#3315) is the active follow-on**, and it ends at two things: the
   self-check runs with `parameter_inference: true` (#3324), and a gate stops the share of Dynamic call

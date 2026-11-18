@@ -500,11 +500,23 @@ module Rigor
         return nil unless members.all? { |member| static_refinement_owner_for(member, candidates) }
 
         results = members.map do |member|
-          try_static_refinement(member, method_name, arg_types, context.with(receiver: member))
+          static_member_answer(member, method_name, arg_types, context)
         end
         return nil if results.any?(&:nil?)
 
         Type::Combinator.union(*results)
+      end
+
+      # A `Tuple` member the table answers is offered to {ShapeDispatch} first, as it is when it is the lone receiver
+      # (the precise tiers run ahead of this one) and as `RbsDispatch`'s union path offers it (#3320): `[][0...-1]` is
+      # the exact `[]` there, not the `Array[untyped]` projection.
+      def static_member_answer(member, method_name, arg_types, context)
+        answer = try_static_refinement(member, method_name, arg_types, context.with(receiver: member))
+        return answer unless answer && member.is_a?(Type::Tuple)
+
+        ShapeDispatch.try_dispatch(
+          CallContext.build(receiver: member, method_name: method_name, args: arg_types, block_type: context.block_type)
+        ) || answer
       end
 
       # Picks the most specific override owner the receiver honours. For Kernel-owned overrides

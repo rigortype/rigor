@@ -205,8 +205,12 @@ RSpec.describe Rigor::Builtins::StaticReturnRefinements do
       "e[0..i]" => "Array[Dynamic[top]]",
       "u[0..]" => "Array[String] | Array[non-negative-int]",
       "m[0...-1]" => "Array[String] | String",
-      "w[0...-1]" => "Array[Dynamic[top]] | Array[String]",
-      "ne[0..]" => "Array[\"x\"] | Array[String]"
+      # A Tuple member answers as it does alone: exactly where ShapeDispatch reads the range, and as the `Array[E]`
+      # RBS projects it to where it does not (a range with a non-constant end).
+      "w[0...-1]" => "Array[String] | []",
+      "ne[0..]" => "Array[String] | [\"x\"]",
+      "w[0..i]" => "Array[Dynamic[top]] | Array[String]",
+      "ne[0..i]" => "Array[\"x\"] | Array[String]"
     }.each do |expression, expected|
       it "drops the nil of #{expression}" do
         expect(type_after_seed(expression)).to eq(expected), "#{expression} still reads as nilable"
@@ -233,7 +237,7 @@ RSpec.describe Rigor::Builtins::StaticReturnRefinements do
       "s[1, 2]" => "String?",
       "t[1..i]" => "Array[1 | non-negative-int]?",
       "u[1..]" => "Array[String] | Array[non-negative-int] | nil",
-      "w[1..]" => "Array[Dynamic[top]] | Array[String] | nil",
+      "w[1..]" => "Array[String]?",
       "n&.[](0..)" => "Array[String]?",
       # A union is answered by the table only when every member is: a member with no owner (a `Hash`, whose
       # `{}[0..]` is nil; a `non-empty-array` refinement carrier) or an owned member that declines (a raw

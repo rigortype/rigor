@@ -3588,6 +3588,18 @@ RSpec.describe "Rigor type construction (integration)" do
       end
     end
 
+    # Issue #3337 — the loop seam types a store's arguments with each local the loop rebinds at the binding the
+    # body pass reached the store with. The fixture's `assert_type` lines are the examples; each carries what
+    # Ruby 4.0.5 leaves in the collection.
+    describe "fixtures/loop_store_site_binding.rb — a loop store reads its arguments where it runs" do
+      let(:harness) { harness_for("loop_store_site_binding") }
+
+      it "produces no assert_type mismatches" do
+        mismatches = harness.errors.select { |d| d.message.start_with?("assert_type ") }
+        expect(mismatches.map { |d| [d.line, d.message] }).to be_empty
+      end
+    end
+
     # Issue #631 — ADR-56 WD2.11. The seam rederives ONE carrier and writes it over the whole
     # binding, which is only the right answer for the pre-state members the mutation applied to as a
     # collection of that class. A `Union` seed's non-carrier members (a whole-variable `Dynamic`, a

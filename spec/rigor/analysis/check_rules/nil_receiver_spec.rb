@@ -144,6 +144,28 @@ RSpec.describe Rigor::Analysis::CheckRules::NilReceiver do
     end
   end
 
+  # Issue #3337 — a local first assigned in a loop body is `nil` only where the body never ran, and a store in the
+  # body never ran there either.
+  describe "an element a loop body stored" do
+    def loop_store(assignment)
+      "out = []\ni = 0\nwhile i < 3\n  #{assignment}\n  out << s\n  i += 1\nend\nout.each { |o| o.upcase }\n"
+    end
+
+    it "is silent for a local the body always assigns a String" do
+      expect(fired(loop_store("s = ENV.fetch(\"X\", \"a\")"))).to eq([])
+    end
+
+    it "reports a local the body assigns a nilable value" do
+      expect(fired(loop_store("s = ENV[\"X\"]"))).to eq(
+        [[8, "possible nil receiver: `upcase' is undefined on NilClass"]]
+      )
+    end
+
+    it "reports a local the body assigns on some iterations only" do
+      expect(fired(loop_store("s = \"a\" if rand > 0.5")).map(&:first)).to eq([8])
+    end
+  end
+
   describe ".union_contains_nil?" do
     let(:combinator) { Rigor::Type::Combinator }
 

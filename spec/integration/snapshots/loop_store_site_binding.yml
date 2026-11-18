@@ -1,0 +1,60 @@
+---
+locals:
+  b: Array[String]
+  by_index: Hash[Integer, String]
+  by_key: Hash[String, Integer]
+  c: String?
+  carried: Array[Integer | String | nil]
+  counted: Array[Integer]
+  first: String?
+  g: String?
+  guarded: Array[String]
+  i: Integer[2..]
+  inner: String?
+  j: Integer?
+  k: String?
+  keyed: Hash[String, Dynamic[top]]
+  late: Array[Dynamic[top]]
+  later_nil: Array[String]
+  lit: '"a"?'
+  "n": Integer?
+  nested: Array[String]
+  out: Array[String]
+  pinned: Array["a"]
+  pre: String?
+  pushed: Array[String]
+  real_nil: Array[String?]
+  reassigned: Array[String]
+  row: Array[1 | 2 | Dynamic[top] | Integer]
+  rows: Array[Array[1 | Dynamic[top] | Integer] | [1]]
+  s: String?
+  slots: Array[String]
+  some: Array[String?]
+  stored_first: Array[String?]
+  t: String?
+  u: Array[String]
+  unshifted: Array[String]
+  v: Dynamic[top]
+  w: String?
+assertions:
+  '1': Array[String]
+  '2': Array[String]
+  '3': Array["a"]
+  '4': Array[String?]
+  '5': Array[String?]
+  '6': Array[Dynamic[top]]
+  '7': Array[String]
+  '8': Array[Integer | String | nil]
+  '9': Array[String]
+  '10': Array[String?]
+  '11': Array[Integer]
+  '12': Array[String]
+  '13': Array[String]
+  '14': Hash[Integer, String]
+  '15': Hash[String, Integer]
+  '16': Array[String]
+  '17': Array[String]
+  '18': Array[String]
+  '19': Hash[String, Dynamic[top]]
+  '20': Array[String]
+  '21': Array[Array[1 | Dynamic[top] | Integer] | [1]]

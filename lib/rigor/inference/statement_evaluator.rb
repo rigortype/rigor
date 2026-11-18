@@ -189,8 +189,10 @@ module Rigor
       private_constant :OPERAND_SEQUENCES
 
       # The keywords of a pass whose scopes the per-node scope index must not keep — neither the nodes it
-      # evaluates nor the later operands an {OperandWalk} inside it takes ({#walk_recorder}).
-      UNRECORDED = { on_enter: nil, operand_recorder: nil }.freeze
+      # evaluates nor the later operands an {OperandWalk} inside it takes ({#walk_recorder}). Such a pass leaves a
+      # loop's store sites alone as well (`store_sites:`): the check path and the display path do not run the same
+      # unrecorded passes, and both must type a store from the same one.
+      UNRECORDED = { on_enter: nil, operand_recorder: nil, store_sites: nil }.freeze
       private_constant :UNRECORDED
 
       # Thread-local sink (an Array) collecting the value types of explicit `return value` nodes reached while
@@ -362,11 +364,16 @@ module Rigor
       # @param widen_clauses — issue #1231: when true (and a recorder is installed), a rescue or `ensure` clause
       #   records its per-node entry scopes under {#widen_clause_entry}'s widening. The check path sets it; every
       #   other reader of the index (parameter inference, sig-gen, the scanners) keeps the clause's plain entry.
+      # @param store_sites — issue #3337: the identity-keyed Hash an enclosing `while` / `until` loop keeps of its
+      #   body's content-mutation sites ({#loop_store_sites}), or nil. {#evaluate} writes the scope it reaches such
+      #   a site with, so the loop's content join can type the store's arguments where the store runs
+      #   ({#loop_store_site_scopes}). Threaded through `sub_eval` like `next_scope_sink`.
       def initialize(scope:, tracer: nil, on_enter: nil, class_context: [].freeze, # rubocop:disable Metrics/ParameterLists
                      lexical_nesting: EMPTY_NESTING, converged_loop_recording: false, next_scope_sink: nil,
                      operand_scope: nil, in_operand: false, operand_recorder: nil, operand_types: nil,
-                     opaque_class: false, widen_clauses: false)
+                     opaque_class: false, widen_clauses: false, store_sites: nil)
         @scope = scope
+        @store_sites = store_sites
         @widen_clauses = widen_clauses
         @opaque_class = opaque_class
         @tracer = tracer
@@ -450,6 +457,7 @@ module Rigor
         return evaluator_at(@scope.forget_last_line).evaluate(node) if forget_last_line_first?(node)
 
         @on_enter&.call(node, @scope)
+        @store_sites[node] = @scope if @store_sites&.key?(node)
 
         handler = HANDLERS[node.class]
         return forget_aliased_key_guards(node, forget_implicit_call_guards(node, send(handler, node))) if handler
@@ -3665,7 +3673,9 @@ module Rigor
         # post-predicate binding; a local FIRST assigned inside the body seeds with `nil` so the 0-iteration path
         # degrades it to `T | nil`, matching the nil-injection treatment.
         break_pass = { entry: nil, arms: [], values: [] } if jumps.breaks || later_pass_returns?(node.statements)
-        result = loop_rebind_fixpoint(node, post_pred, names, body_first, jumps, break_pass)
+        stores = loop_store_sites(node.statements)
+        site_pass = loop_site_pass(stores)
+        result = loop_rebind_fixpoint(node, post_pred, names, body_first, jumps, break_pass, site_pass)
         # Display-path re-record: the fixpoint's body re-evaluations fire `on_enter` with the cap-N INTERMEDIATE
         # assumptions, so the last-visit-wins scope index would annotate loop-body lines with stale pre-convergence
         # constants. One extra pass from the converged bindings (result discarded) re-records the body's entry scopes.
@@ -3675,7 +3685,9 @@ module Rigor
         # << n`) keeps only the seed's element types after the single-pass widen; join the appended/stored types into
         # the continuation collection. Pre-state comes from `post_pred` for a name the loop only content-mutates and
         # from `post_loop` for one it also rebinds, so composition still works — see {#loop_content_writeback}.
-        post_loop = loop_content_writeback(node.statements, post_loop, pre_body: post_pred, rebound: names)
+        site_scopes = loop_store_site_scopes(stores, site_pass, post_loop, result, body_first)
+        post_loop = loop_content_writeback(node.statements, post_loop, pre_body: post_pred, rebound: names,
+                                                                       stores: stores, site_scopes: site_scopes)
         arms, values = loop_break_arms(node, post_pred, result, body_first, jumps, break_pass)
         [join_break_scopes(post_loop, arms, names), values]
       end
@@ -3780,10 +3792,12 @@ module Rigor
       #
       # The `next` scopes are collected into a sink threaded through `sub_eval` ({#evaluate_invocation} does the same
       # for a block), and the `break` scopes into a thread-local one, each installed only when the body has such a
-      # jump. `recorded: false` evaluates without recording into the per-node scope index.
-      def loop_iteration(statements, entry, jumps, recorded: true)
+      # jump. `recorded: false` evaluates without recording into the per-node scope index. `store_sites` is the
+      # table the pass leaves its store sites' scopes in ({#loop_site_pass}): an enclosing loop's by default, and
+      # none for an unrecorded pass.
+      def loop_iteration(statements, entry, jumps, recorded: true, store_sites: @store_sites)
         next_sink = jumps.nexts && []
-        recording = recorded ? {} : UNRECORDED
+        recording = recorded ? { store_sites: store_sites } : UNRECORDED
         evaluate = -> { sub_eval(statements, entry, next_scope_sink: next_sink, **recording).last }
         if jumps.breaks
           break_sink, (fall_through, value_sink) = collect_break_scopes do
@@ -3881,24 +3895,136 @@ module Rigor
       #
       # A name the loop rebinds keeps reading `post_loop`, which is what lets a local both rebound (slice B) and
       # content-mutated compose — the documented behaviour, and there the fixpoint's answer IS the right base.
-      def loop_content_writeback(statements, post_loop, pre_body: nil, rebound: nil)
-        return post_loop if statements.nil?
-
-        mutations = Hash.new { |h, k| h[k] = [] }
-        Source::NodeWalker.each(statements) do |descendant|
-          name, node = content_mutation_target(descendant) { |_r| true }
-          mutations[name] << node unless name.nil?
-        end
-        return post_loop if mutations.empty?
+      #
+      # `stores` is the body's {#loop_store_sites} when the caller already scanned for them. `site_scopes` holds,
+      # for a store the rebind fixpoint's last pass reached, the scope its arguments are typed in instead of
+      # `post_loop` ({#loop_store_site_scopes}, issue #3337).
+      def loop_content_writeback(statements, post_loop, pre_body: nil, rebound: nil,
+                                 stores: loop_store_sites(statements), site_scopes: NO_SHADOWS)
+        return post_loop if stores.empty?
 
         rewrites = local_rewrites(statements) { true }
-        mutations.reduce(post_loop) do |acc, (name, calls)|
+        stores.reduce(post_loop) do |acc, (name, calls)|
           seed_scope = content_seed_scope(name, acc, pre_body, rebound)
           seed = lookup_mutated_seed(statements, name, seed_scope.local(name)) { |depth, nesting| depth == nesting }
-          joined = join_content_for_param(calls, seed, post_loop)
+          joined = join_content_for_param(calls, seed, post_loop, site_scopes)
           next acc if joined.nil?
 
           acc.with_mutated_local(name, rewritten_capture(joined, seed, rewrites.fetch(name, NO_REWRITES)))
+        end
+      end
+
+      NO_STORE_SITES = {}.freeze
+      private_constant :NO_STORE_SITES
+
+      # `{ name => [site, ...] }` for every content mutation in a loop body whose receiver is a local: the stores
+      # {#loop_content_writeback} joins. A loop body shares the surrounding scope, so there is no depth filter.
+      def loop_store_sites(statements)
+        return NO_STORE_SITES if statements.nil?
+
+        stores = nil
+        Source::NodeWalker.each(statements) do |descendant|
+          name, node = content_mutation_target(descendant) { |_r| true }
+          ((stores ||= {})[name] ||= []) << node unless name.nil?
+        end
+        stores || NO_STORE_SITES
+      end
+
+      # What the rebind fixpoint's passes leave for the loop's content join (issue #3337): `scopes`, the
+      # identity-keyed table {#evaluate} writes each store site's scope into, and `entry`, the assumption the last
+      # pass ran from. Nil for a body with no store.
+      #
+      # A loop nested in another loop's body shares the outer table: the outer scan already listed every site of the
+      # inner body, and the outer join reads what the inner loop leaves there ({#loop_store_site_scopes}).
+      LoopSitePass = Struct.new(:scopes, :entry)
+      private_constant :LoopSitePass
+
+      def loop_site_pass(stores)
+        return nil if stores.empty?
+
+        scopes = @store_sites || {}.compare_by_identity
+        stores.each_value { |sites| sites.each { |site| scopes[site] = nil unless scopes.key?(site) } }
+        LoopSitePass.new(scopes, nil)
+      end
+
+      # Issue #3337 — `{ site => scope }`: for each store the rebind fixpoint's last pass reached, `post_loop` with
+      # every local the loop rebinds at the binding that pass reached the store with. The join types the store's
+      # arguments there. `post_loop` alone reads each such local at its continuation binding, which is the join
+      # of the pre-loop binding and the body's EXIT binding: a local first assigned in the body carries the `nil`
+      # its zero-iteration seed gives it, though the store never ran on that path (`s = f; out << s` read
+      # `Array[String?]` and drew `call.possible-nil-receiver` on correct code), and a local rebound after the
+      # store carries a value the store never saw (`out << s; s = nil` read `Array[nil]`).
+      #
+      # A store the last pass did not reach as a statement (dead under its assumption, or nested in an expression
+      # the statement walk hands to the expression typer) has no entry and keeps `post_loop`.
+      #
+      # The scopes are also left in the shared table, so an enclosing loop's join reads this loop's locals as
+      # settled here, not at the raw pass binding.
+      def loop_store_site_scopes(stores, site_pass, post_loop, converged, body_first)
+        return NO_SHADOWS if site_pass.nil?
+
+        locals = converged.keys.select { |name| CapturedLocals.local_name?(name) }
+        last_entry = site_pass.entry
+        capped = last_entry != converged
+        table = site_pass.scopes
+        stores.each_value.with_object({}.compare_by_identity) do |sites, scopes|
+          sites.each do |site|
+            reached = table[site]
+            next if reached.nil?
+
+            argument_scope = locals.reduce(post_loop) do |acc, name|
+              type = store_site_binding(name, reached, post_loop, capped: capped, last_entry: last_entry,
+                                                                  converged: converged, body_first: body_first,
+                                                                  mutated: stores.key?(name))
+              type.nil? ? acc : acc.with_local(name, type)
+            end
+            table[site] = argument_scope
+            scopes[site] = argument_scope unless argument_scope.equal?(post_loop)
+          end
+        end
+      end
+
+      # The type a store's arguments read the rebound local `name` at, given `reached`, the scope the fixpoint's
+      # last pass reached the store with; nil to keep the continuation binding `post_loop` holds.
+      #
+      # - The continuation binding stays when the pass did not bind the name at the store, and when the fixpoint
+      #   floored it to `Dynamic[top]`: a precise arm in its place would read as knowledge the analysis lacks
+      #   (`v = "a" if i > 1; out << v`, where `v` first moves on the capped pass).
+      # - A capped fixpoint's last pass ran from an assumption the cap then widened, so the binding it reached the
+      #   store with is widened the same way (`n = i; out << n` is `Integer`, not the `0 | 1 | 2` of the pass).
+      #   A pre-existing local whose own assumption grew by more than that on the capped pass was never read at
+      #   the store with its final binding, and keeps the continuation binding.
+      # - A body-first local is not fed back into the next pass ({#loop_body_exit_bindings}), so where the pass
+      #   reaches the store with a `nil` — a path that skips this iteration's assignment — an earlier iteration's
+      #   value may be what is stored (`c = 1 if x; out << c; c = "s"` pushes `"s"`): the continuation binding
+      #   joins in.
+      # - A local the body also mutates in place is stored as an object the body may go on mutating (`rows << row;
+      #   row << 2`), so the non-nil part of its continuation binding joins in.
+      def store_site_binding(name, reached, post_loop, capped:, last_entry:, converged:, body_first:, mutated:) # rubocop:disable Metrics/ParameterLists
+        at_store = reached.local(name)
+        settled = post_loop.local(name)
+        return nil if at_store.nil? || settled.nil? || Type::Combinator.untyped?(settled)
+
+        first_in_body = body_first.include?(name)
+        if capped
+          return nil unless first_in_body ||
+                            Type::Combinator.widen_value_pinned(last_entry[name]) == converged[name]
+
+          at_store = Type::Combinator.widen_value_pinned(at_store)
+        end
+        joined = store_site_join(at_store, settled, first_in_body, mutated)
+        joined == settled ? nil : joined
+      end
+
+      # `at_store` with the part of the continuation binding `settled` a store may also hold
+      # ({#store_site_binding}'s last two cases).
+      def store_site_join(at_store, settled, first_in_body, mutated)
+        if first_in_body && Narrowing.narrow_non_nil(at_store) != at_store
+          Type::Combinator.union(at_store, settled)
+        elsif mutated
+          Type::Combinator.union(at_store, Narrowing.narrow_non_nil(settled))
+        else
+          at_store
         end
       end
 
@@ -3926,11 +4052,11 @@ module Rigor
       # local seeds with its post-predicate binding; a local FIRST assigned inside the body seeds with `nil` so the
       # 0-iteration path (the body may never run) degrades it to `T | nil`, matching the historical nil-injection
       # treatment. `break_pass` rides along so every pass leaves its `break` arms for {#loop_break_arms}.
-      def loop_rebind_fixpoint(node, post_pred, names, body_first, jumps, break_pass)
+      def loop_rebind_fixpoint(node, post_pred, names, body_first, jumps, break_pass, site_pass = nil)
         nil_const = Type::Combinator.constant_of(nil)
         seed = names.to_h { |name| [name, CapturedLocals.bound_type(post_pred, name) || nil_const] }
         evaluate_body = lambda do |bindings|
-          loop_body_exit_bindings(node, post_pred, bindings, names, body_first, jumps, break_pass)
+          loop_body_exit_bindings(node, post_pred, bindings, names, body_first, jumps, break_pass, site_pass)
         end
         BodyFixpoint.converge(
           names: names,
@@ -4009,9 +4135,15 @@ module Rigor
       # With a `break_pass` record the pass also leaves its entry and its `break` arms there for {#loop_break_arms};
       # `BodyFixpoint` hands every pass the same mutable assumption, and `except` copies it before the fixpoint moves
       # it.
-      def loop_body_exit_bindings(node, post_pred, bindings, names, body_first, jumps, break_pass = nil)
+      #
+      # Only a fixpoint pass is given a `site_pass` ({#loop_site_pass}): it leaves its store sites' scopes and its
+      # assumption there. The display path's re-record pass ({#record_converged_loop_body}) is given none and leaves
+      # no store site's scope, so both paths type a store from the same pass.
+      def loop_body_exit_bindings(node, post_pred, bindings, names, body_first, jumps, break_pass = nil, # rubocop:disable Metrics/ParameterLists
+                                  site_pass = nil)
         entry = loop_pass_entry(node, post_pred, bindings, body_first, jumps)
-        exit_scope, breaks, values = loop_iteration(node.statements, entry, jumps)
+        site_pass.entry = bindings.dup if site_pass
+        exit_scope, breaks, values = loop_iteration(node.statements, entry, jumps, store_sites: site_pass&.scopes)
         if break_pass
           break_pass[:entry] = bindings.except(*body_first)
           break_pass[:arms] = breaks
@@ -7770,9 +7902,13 @@ module Rigor
 
       # `scope` with each name a site's enclosing inner blocks bind bound to `Dynamic[top]`: the seam's scope cannot
       # see those bindings, and the name would otherwise resolve to the outer local it shadows.
+      #
+      # The loop seam's table holds a whole scope for a site instead ({#loop_store_site_scopes}), which answers as
+      # it is.
       def site_evidence_scope(scope, site, shadows)
         names = shadows[site]
         return scope if names.nil?
+        return names if names.is_a?(Scope)
 
         names.reduce(scope) { |acc, name| bind_capture_slot(acc, name, Type::Combinator.untyped) }
       end
@@ -8235,20 +8371,22 @@ module Rigor
       # not synthesize a hash carrier — mail's `compose_codepoints` mutated its untyped Array param through
       # integer/range index writes and returned `Hash[Integer | Range, …]` to its caller (issue #553). Dynamic in,
       # Dynamic out: a shapeless pre-state falls through to `join_array_param`, which declines it.
-      def join_content_for_param(calls, pre_state, block_entry)
+      #
+      # `shadows` is {#site_evidence_scope}'s per-site table; the loop seam passes its store-site scopes there.
+      def join_content_for_param(calls, pre_state, block_entry, shadows = NO_SHADOWS)
         return nil if pre_state.nil?
-        return join_string_union(calls, pre_state, block_entry) if string_union?(pre_state)
+        return join_string_union(calls, pre_state, block_entry, shadows) if string_union?(pre_state)
 
         if stringish?(pre_state)
           # String carries no element parameter; mutating `<<`/`concat` makes the constant value unsound (`s = "a"; s <<
           # x` → runtime `"a…"`), so widen to the nominal base. Sound — only widens.
           Type::Combinator.nominal_of("String")
         elsif content_kind(pre_state) == :mixed
-          ContentJoin.join_mixed_content(pre_state, *mixed_content_evidence(calls, block_entry))
+          ContentJoin.join_mixed_content(pre_state, *mixed_content_evidence(calls, block_entry, shadows))
         elsif hashish?(pre_state)
-          join_hash_param(calls, pre_state, block_entry)
+          join_hash_param(calls, pre_state, block_entry, shadows)
         else
-          join_array_param(calls, pre_state, block_entry)
+          join_array_param(calls, pre_state, block_entry, shadows)
         end
       end
 
@@ -8256,8 +8394,8 @@ module Rigor
       # `String`, which has no element evidence to join, and the rest join as a union of their own. Joined whole, the
       # union reached the Array or Hash join, which dropped the String member and read a String mutator's arguments as
       # elements — `x.force_encoding(e)` on an `Array | String` capture typed it `Array[1 | Encoding]`.
-      def join_string_union(calls, union, block_entry)
-        join_string_members(union) { |others| join_content_for_param(calls, others, block_entry) }
+      def join_string_union(calls, union, block_entry, shadows)
+        join_string_members(union) { |others| join_content_for_param(calls, others, block_entry, shadows) }
       end
 
       # `String` for the String members of `union`, beside what the block answers for the rest (as a union of their
@@ -8279,17 +8417,17 @@ module Rigor
         UnknownStoreWidening.carrier_class(type) == "String"
       end
 
-      def join_hash_param(calls, pre_state, block_entry)
-        pairs = hash_pair_evidence(calls, block_entry)
+      def join_hash_param(calls, pre_state, block_entry, shadows)
+        pairs = hash_pair_evidence(calls, block_entry, shadows)
         return nil if pairs.empty? && !hashish?(pre_state)
 
         ContentJoin.join_hash_content(pre_state, pairs)
       end
 
-      def join_array_param(calls, pre_state, block_entry)
+      def join_array_param(calls, pre_state, block_entry, shadows)
         return nil unless arrayish?(pre_state)
 
-        ContentJoin.join_array_content(pre_state, array_element_evidence(calls, block_entry))
+        ContentJoin.join_array_content(pre_state, array_element_evidence(calls, block_entry, shadows))
       end
 
       # No site sits under an inner block that shadows a name — the loop seam's answer, and the default.
@@ -9322,10 +9460,10 @@ module Rigor
       # unnameable body gets a frame, and its `def`s a nominal `self`, as they did before #1518.
       def sub_eval(node, with_scope, class_context: @class_context, lexical_nesting: @lexical_nesting, # rubocop:disable Metrics/ParameterLists
                    on_enter: @on_enter, next_scope_sink: @next_scope_sink, operand_recorder: @operand_recorder,
-                   opaque_class: @opaque_class && class_context.empty?)
+                   opaque_class: @opaque_class && class_context.empty?, store_sites: @store_sites)
         evaluator_at(with_scope, class_context: class_context, lexical_nesting: lexical_nesting, on_enter: on_enter,
                                  next_scope_sink: next_scope_sink, operand_recorder: operand_recorder,
-                                 opaque_class: opaque_class).evaluate(node)
+                                 opaque_class: opaque_class, store_sites: store_sites).evaluate(node)
       end
       public :sub_eval
 
@@ -9335,7 +9473,7 @@ module Rigor
       def evaluator_at(with_scope, class_context: @class_context, lexical_nesting: @lexical_nesting, # rubocop:disable Metrics/ParameterLists
                        on_enter: @on_enter, next_scope_sink: @next_scope_sink, operand_scope: nil,
                        in_operand: @in_operand, operand_recorder: @operand_recorder, operand_types: nil,
-                       opaque_class: @opaque_class)
+                       opaque_class: @opaque_class, store_sites: @store_sites)
         StatementEvaluator.new(
           scope: with_scope,
           tracer: tracer,
@@ -9349,7 +9487,8 @@ module Rigor
           in_operand: in_operand,
           operand_recorder: operand_recorder,
           operand_types: operand_types,
-          opaque_class: opaque_class
+          opaque_class: opaque_class,
+          store_sites: store_sites
         )
       end
 

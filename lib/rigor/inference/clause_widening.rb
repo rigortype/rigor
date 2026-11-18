@@ -67,11 +67,16 @@ module Rigor
         widened.equal?(scope) ? nil : widened
       end
 
-      # Issue #3340 — `scope`, a rescue clause's entry, with each local of `stores` (`{ name => [site, ...] }`, the
-      # in-place mutation sites of the `begin` body, `CapturedLocals.loop_content_mutations`) at what it can hold
-      # after any prefix of the body ran ({.past_any_prefix}).
-      def content_entry(scope, stores)
-        stores.reduce(scope) do |acc, (name, sites)|
+      # Issue #3340 — `scope`, the entry of `node`'s rescue chain, with each local the `begin` body mutates in place
+      # (`CapturedLocals.loop_content_mutations`) at what it can hold after any prefix of the body ran
+      # ({.past_any_prefix}): a clause runs after the body raised from any point, and an in-place mutation rebinds
+      # nothing, so {.widen} does not see it. `scope` itself for a `begin` with no rescue clause, and for a body
+      # that can mutate nothing `scope` binds ({CapturedLocals.may_touch_capture?}, an allocation-free scan).
+      def content_entry(scope, node)
+        body = node.statements
+        return scope unless node.rescue_clause && body && CapturedLocals.may_touch_capture?(body, scope)
+
+        CapturedLocals.loop_content_mutations(body, scope).reduce(scope) do |acc, (name, sites)|
           type = acc.local(name)
           type.nil? ? acc : acc.with_mutated_local(name, past_any_prefix(type, sites))
         end

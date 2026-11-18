@@ -20,7 +20,7 @@ module Rigor
     #   A literal name is the call it makes instead ({.method_object_target}), as a literal `send` is;
     # - the receiver of `instance_eval` / `instance_exec`, whose block runs with that object as `self`: a literal
     #   block that calls a mutator on `self` (`xs.instance_eval { clear }`), a block passed as a value, or a string;
-    # - a local among the arguments of a `yield` ({.floor_yielded}), which the method's block receives as a call's
+    # - a local among the arguments of a `yield` ({.yielded}), which the method's block receives as a call's
     #   arguments are received by an opaque proc.
     #
     # Each such variable takes one unknown store, and only when its binding holds a literal shape or an empty-witness
@@ -37,7 +37,7 @@ module Rigor
       METHOD_OBJECT_NAMES = %i[method public_method].to_set.freeze
       # The names that run a `Method` object: `m.call`, `m.()` (which parses as `call`), `m[]` and `m === x`.
       METHOD_CALL_NAMES = %i[call [] ===].to_set.freeze
-      # Every call name {.floor_after_call} reads, so any other call returns at one lookup.
+      # Every call name {.floor} reads, so any other call returns at one lookup.
       NAMES = (SEND_NAMES | SELF_EVAL_NAMES | METHOD_CALL_NAMES).freeze
       # The names a mutation of `self` is read by inside an `instance_eval` block: the straight-line widening's, a
       # Set-only adder's, and a `send`, which may name any of them.
@@ -60,7 +60,7 @@ module Rigor
       end
 
       # `scope` after `call_node`, with each variable its opaque receiver names floored ({.floor_reads}).
-      def floor_after_call(call_node, scope)
+      def floor(call_node, scope)
         return scope unless NAMES.include?(call_node.name)
 
         receiver = opaque_receiver(call_node)
@@ -69,9 +69,10 @@ module Rigor
         floor_reads(ReceiverAlias.mutated_reads(receiver), scope, call_node)
       end
 
-      # `scope` after `yield_node`, with each local it passes, positionally or as a keyword's value, floored.
-      def floor_yielded(yield_node, scope)
-        arguments = yield_node.arguments&.arguments
+      # `scope` after `node` when it is a `yield`, with each local it passes, positionally or as a keyword's value,
+      # floored; `scope` itself for any other node.
+      def yielded(node, scope)
+        arguments = node.arguments&.arguments if node.is_a?(Prism::YieldNode)
         return scope if arguments.nil?
 
         floor_reads(local_arguments(arguments), scope, nil)

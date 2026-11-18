@@ -177,9 +177,7 @@ module Rigor
       # {.widen} past `calls`, under `mark: true`, over the names they are proven to write and the contents they are
       # proven to mutate ({.proven_effects}), or over every name when one of them is not proven.
       def widen_past(calls, scope)
-        memo = nil
-        proven = -> { (memo ||= [proven_effects(calls, scope)]).first }
-        widen(scope, mark: true, mutations: -> { proven.call&.mutated }) { proven.call&.written }
+        widen(scope, mark: true) { proven_effects(calls, scope) }
       end
       private_class_method :widen_past
 
@@ -195,17 +193,18 @@ module Rigor
       # proven to write it, or whose callee visibly assigns it a possibly-nil value ({DirectIvarWrites}), widens it
       # unmarked.
       #
-      # Issue #3340 — `mutations` (called at most once, answering `{ name => [call, ...] }` or nil) names the
-      # instance variables a proven call mutates in place without writing them. Such a binding keeps its narrowing,
-      # the call having rebound nothing, and takes each call's unknown store ({UnknownStoreWidening.widen}), which
-      # forgets what the binding said about the object's contents: `return if @xs.empty?; reset!` leaves `@xs` an
-      # `Array[String]` when `reset!` runs `@xs.clear`.
-      def widen(scope, mark: false, direct_writes: nil, mutations: nil)
+      # Issue #3340 — the block may answer a {SelfCallIvarWrites::Effects} in place of the names, whose `mutated`
+      # (`{ name => [call, ...] }`) names the instance variables a proven call mutates in place without writing
+      # them. Such a binding keeps its narrowing, the call having rebound nothing, and takes each call's unknown
+      # store ({UnknownStoreWidening.widen}), which forgets what the binding said about the object's contents:
+      # `return if @xs.empty?; reset!` leaves `@xs` an `Array[String]` when `reset!` runs `@xs.clear`.
+      def widen(scope, mark: false, direct_writes: nil)
         seed = class_ivar_seed(scope)
         return scope if seed.nil? || seed.empty?
 
         computed = false
         writes = nil
+        mutated = nil
         direct = lazy_set(direct_writes)
         seed.reduce(scope) do |widened, (name, seed_type)|
           local_type = scope.ivar(name)
@@ -214,8 +213,12 @@ module Rigor
           unless computed
             writes = yield
             computed = true
+            if writes.is_a?(SelfCallIvarWrites::Effects)
+              mutated = writes.mutated
+              writes = writes.written
+            end
           end
-          next widen_mutated(widened, name, local_type, mutations) if writes && !writes.include?(name)
+          next widen_mutated(widened, name, local_type, mutated) if writes && !writes.include?(name)
 
           joined = Type::Combinator.union(local_type, seed_type)
           widened = widened.with_ivar(name, joined)
@@ -235,9 +238,9 @@ module Rigor
       private_class_method :widen_marks?
 
       # `scope` with the instance variable `name`, bound to `local_type`, at the unknown store of each call
-      # `mutations` names for it; `scope` itself when it names none or no store widens the binding.
-      def widen_mutated(scope, name, local_type, mutations)
-        sites = mutations&.call&.[](name)
+      # `mutated` names for it; `scope` itself when it names none or no store widens the binding.
+      def widen_mutated(scope, name, local_type, mutated)
+        sites = mutated&.[](name)
         return scope if sites.nil?
 
         widened = UnknownStoreWidening.widen(local_type, sites)

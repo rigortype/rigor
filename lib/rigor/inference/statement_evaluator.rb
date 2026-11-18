@@ -465,8 +465,6 @@ module Rigor
         # observes the current scope's locals) and leave the scope unchanged, but for the match globals a call in it
         # may rebind (`super(line.sub(re, ""))`, issue #1365).
         after = reset_ivars_past_unknown_code(node, forget_rebound_specials(@scope, node))
-        # Issue #3340 — the block a `yield` runs may mutate a local it is handed.
-        after = OpaqueMutation.floor_yielded(node, after) if node.is_a?(Prism::YieldNode)
         [@scope.type_of(node, tracer: @tracer), after]
       end
 
@@ -477,7 +475,7 @@ module Rigor
       def reset_ivars_past_unknown_code(node, after)
         return after if @in_operand || !InterveningIvarReset.candidate?(node)
 
-        InterveningIvarReset.after_operand(node, after)
+        OpaqueMutation.yielded(node, InterveningIvarReset.after_operand(node, after))
       end
 
       # Issue #1429 — a compound write or a `for` loop calls a method its syntax does not spell (`r += r` calls `r.+`,
@@ -2060,11 +2058,8 @@ module Rigor
       # Issue #2335 — a literal-symbol `send` (`a.send(:push, x)`) widens as the call it makes, and a mutation through a
       # receiver that may be another local's object floors every local whose object another holder may reach
       # ({AliasMutationFloor}).
-      # Issue #3340 — so does `a.method(:push).call(x)`, and a receiver handed to code the call does not show (a
-      # computed `send`, `instance_eval`) takes one unknown store ({OpaqueMutation}).
       def widen_mutated_receivers(node, current_scope)
         call_node = AliasMutationFloor.literal_send_target(node) || OpaqueMutation.method_object_target(node) || node
-        current_scope = OpaqueMutation.floor_after_call(node, current_scope)
         arg_types = mutator_arg_types(call_node, current_scope)
         widened = MutationWidening.widen_after_call(call_node: call_node, current_scope: current_scope,
                                                     arg_types: arg_types,
@@ -2077,7 +2072,7 @@ module Rigor
           end
         end
         # Issue #2499 — a stdlib call that fills a String argument (`io.read(n, buf)`, `StringIO.new(s)`).
-        floor_ivar_mutating_callee(node, OutBufferMutation.floor(call_node, widened))
+        floor_ivar_mutating_callee(node, OpaqueMutation.floor(node, OutBufferMutation.floor(call_node, widened)))
       end
 
       # Issue #2335 — a call on a local that may hold another local's object (`box = Box.new(a)`) to a project method
@@ -2794,7 +2789,7 @@ module Rigor
         # after it, or a rescue clause, may have set `$_` enters with it forgotten; a rescue clause runs after any
         # prefix of the body, and so reads it forgotten whenever the body may set it.
         entry = edge ? forget_guard_if_rebinds(LastLine.forget_if_set(scope, node), node) : scope
-        rescue_entry = rescue_entry_scope(node, entry)
+        rescue_entry = ClauseWidening.content_entry(rescue_entry_scope(node, entry), node)
         collector = begin_fact_collector(node, rescue_entry, edge)
         primary_type, primary_scope = eval_begin_primary_under(node, entry, edge: edge, collector: collector)
         rescue_chain = collect_rescue_chain_results(node.rescue_clause, rescue_entry,
@@ -2961,15 +2956,8 @@ module Rigor
 
       # The scope a rescue clause of `node` enters with: it runs after any prefix of the body, so neither a `$_`
       # (issue #1359) nor a guard's narrowing of a global or constant (issue #1429) the body may rebind holds there.
-      # Issue #3340 — nor does what the entry says about the contents of a local the body mutates in place: each
-      # enters as after any prefix of the body ({ClauseWidening.content_entry}). A body that can
-      # mutate nothing the entry binds ({CapturedLocals.may_touch_capture?}, allocation-free) skips the site scan.
       def rescue_entry_scope(node, entry)
-        body = node.statements
-        entry = forget_guard_if_rebinds(LastLine.forget_if_set(entry, body), body)
-        return entry unless node.rescue_clause && body && CapturedLocals.may_touch_capture?(body, entry)
-
-        ClauseWidening.content_entry(entry, loop_content_mutations(body, entry))
+        forget_guard_if_rebinds(LastLine.forget_if_set(entry, node.statements), node.statements)
       end
 
       # Issue #2691 — a rescue clause runs after any prefix of the `begin` body raised, so a fact the clause's
@@ -4967,7 +4955,7 @@ module Rigor
         post_scope = post_scope.forget_last_line if rebinds_last_line?(node, post_scope)
         if post_scope.guard_narrowed? && GuardRebinding.call_may_rebind?(node, operand_scope)
           # Issue #1596 — a self-call proven to write only some instance variables restores only theirs.
-          writes = intervening_call_candidate?(node) ? self_call_ivar_writes(node) : nil
+          writes = intervening_call_candidate?(node) ? self_call_ivar_effects(node)&.written : nil
           post_scope = if writes
                          writes.reduce(post_scope) { |acc, name| acc.forget_guard_narrowing_of(:ivar, name) }
                        else
@@ -5121,7 +5109,7 @@ module Rigor
       # is one that could plausibly mutate ivars on the enclosing class (implicit-self or explicit `self.foo`).
       # External-receiver calls (`obj.method`) cannot reach the caller's ivars; they pass through unchanged, apart from
       # the literal-block case below.
-      # Issue #1596 — where the call is proven to write only some ivars ({#self_call_ivar_writes}), only those widen.
+      # Issue #1596 — where the call is proven to write only some ivars ({#self_call_ivar_effects}), only those widen.
       #
       # Issue #1402 — a proc's call (`blk.call`) is a candidate too, and so is a call on another receiver whose literal
       # block makes one ({InterveningIvarReset.after_block}: `[1].each { reset }`). Both widen as a condition's
@@ -5138,9 +5126,8 @@ module Rigor
           if intervening_call_candidate?(call_node)
             mark = InterveningIvarReset.self_call?(call_node) ? :unproven : true
             direct_writes = -> { DirectIvarWrites.of(call_node, operand_scope) }
-            mutations = -> { self_call_ivar_effects(call_node)&.mutated }
-            InterveningIvarReset.widen(current_scope, mark:, direct_writes:, mutations:) do
-              self_call_ivar_writes(call_node)
+            InterveningIvarReset.widen(current_scope, mark: mark, direct_writes: direct_writes) do
+              self_call_ivar_effects(call_node)
             end
           else
             InterveningIvarReset.after_block(call_node, current_scope)
@@ -5150,14 +5137,9 @@ module Rigor
 
       # Issue #1596 — the ivars the implicit-self / `self.` call `call_node` may write, or nil when that is not proven
       # ({SelfCallIvarWrites.of}). Memoised per call node: the reset and the guard restore ask it of the same call.
-      def self_call_ivar_writes(call_node) = self_call_ivar_effects(call_node)&.written
-
-      # Issue #3340 — the {SelfCallIvarWrites::Effects} of `call_node` (its writes and in-place mutations), or nil.
       def self_call_ivar_effects(call_node)
         memo = (@self_call_ivar_effects ||= {}.compare_by_identity)
-        return memo[call_node] if memo.key?(call_node)
-
-        memo[call_node] = SelfCallIvarWrites.effects(call_node, operand_scope)
+        memo.fetch(call_node) { memo[call_node] = SelfCallIvarWrites.effects(call_node, operand_scope) }
       end
 
       def intervening_call_candidate?(call_node)
@@ -8626,14 +8608,10 @@ module Rigor
         body = block.body
         return build_block_entry_scope(call_node, block) if body.nil? || !CapturedLocals.may_touch_capture?(body, scope)
 
-        # Issue #3340 — `Kernel#loop`, which {#repeating_block_class} leaves out, runs its block until it breaks or
-        # raises, so its body enters with the captures it mutates in place widened as a catalogued iterator's does.
-        # A capture it rebinds keeps its call-site binding, as it did.
-        classification = repeating_block_class(call_node)
-        kernel_loop = classification.nil? && BlockCallTiming.kernel_loop?(call_node)
-        return build_block_entry_scope(call_node, block) if classification.nil? && !kernel_loop
+        classification = repeating_block_class(call_node) || BlockCallTiming.loop_class(call_node)
+        return build_block_entry_scope(call_node, block) if classification.nil?
 
-        bindings = kernel_loop ? NO_CAPTURE_BINDINGS : unproven_rebind_bindings(call_node, block, classification)
+        bindings = unproven_rebind_bindings(call_node, block, classification)
         return build_block_entry_scope(call_node, block) if bindings.empty? && block_content_mutations(block).empty?
 
         block_pass_entry(call_node, block, bindings)
@@ -8674,7 +8652,7 @@ module Rigor
       # A call the write-back reaches answers none: its fixpoint enters every pass it records at the converged
       # binding.
       def unproven_rebind_bindings(call_node, block, classification)
-        return NO_CAPTURE_BINDINGS if call_node.receiver && classification == :non_escaping
+        return NO_CAPTURE_BINDINGS if classification == :loop || (call_node.receiver && classification == :non_escaping)
 
         names = CapturedLocals.writes(block, scope, ivars: true, foreign_self: foreign_self_block?(call_node))
         return NO_CAPTURE_BINDINGS if names.empty?
@@ -8785,10 +8763,7 @@ module Rigor
         lambda_type = scope.type_of(node, tracer: tracer)
         without_return_sink { sub_eval(node.body, build_block_entry_scope(nil, node)) } unless node.body.nil?
 
-        # Issue #3340 — the body's mutators widen the outer bindings they name, as a block's do
-        # ({MutationWidening.widen_after_block}); the content floor reads only the calls that store.
-        post_scope = escaping_closure_captures(node, scope)
-        [lambda_type, MutationWidening.walk_for_outer_mutations(node.body, post_scope)]
+        [lambda_type, MutationWidening.walk_for_outer_mutations(node.body, escaping_closure_captures(node, scope))]
       end
 
       # The continuation effects of an escaping closure body: the outer locals it can rebind drop their narrowing, and

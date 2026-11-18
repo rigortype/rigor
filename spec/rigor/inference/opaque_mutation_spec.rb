@@ -83,12 +83,12 @@ RSpec.describe Rigor::Inference::OpaqueMutation do
     end
   end
 
-  describe ".floor_after_call" do
+  describe ".floor" do
     let(:combinator) { Rigor::Type::Combinator }
 
     def floored(type, source = "xs.send(name)")
       scope = Rigor::Scope.empty.with_local(:xs, type)
-      described_class.floor_after_call(call("xs = name = nil\n#{source}"), scope).local(:xs)
+      described_class.floor(call("xs = name = nil\n#{source}"), scope).local(:xs)
     end
 
     it "gives a literal shape one unknown store" do
@@ -117,11 +117,11 @@ RSpec.describe Rigor::Inference::OpaqueMutation do
     end
   end
 
-  describe ".floor_yielded" do
+  describe ".yielded" do
     it "floors the locals a yield passes, positionally or as a keyword's value, and no other" do
       tuple = Rigor::Type::Combinator.tuple_of(Rigor::Type::Combinator.constant_of(1))
       scope = %i[a b c].reduce(Rigor::Scope.empty) { |acc, name| acc.with_local(name, tuple) }
-      after = described_class.floor_yielded(call("def m(a, b, c) = yield(a, key: b)").body.body.first, scope)
+      after = described_class.yielded(call("def m(a, b, c) = yield(a, key: b)").body.body.first, scope)
       expect(%i[a b c].map { |name| after.local(name).equal?(tuple) }).to eq([false, false, true])
     end
   end

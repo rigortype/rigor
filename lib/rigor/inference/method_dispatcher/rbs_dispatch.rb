@@ -638,7 +638,7 @@ module Rigor
 
           # An open shape's unseen keys may hold any value (rbs-erasure.md § *Open shapes with extra-value
           # bounds*), so its projection carries a `Dynamic[top]` arm on both sides. Without it every read the
-          # shape tier does not answer — a `Union` receiver, a non-literal key — took the known values for a
+          # shape tier does not answer — a non-literal key, a `Union` member it defers on — took the known values for a
           # key outside them: `h = { a: 1 }; h.default = 0 if flag; h[:b] == 1` folded always-truthy.
           def hash_shape_type_args(shape)
             return [] if shape.pairs.empty?

@@ -22,13 +22,13 @@ parameter_inference: false
 # `precise_ratio` of `rigor coverage --format json lib`: expressions whose type is constant, nominal, shaped, refined
 # or bot, over every expression counted.
 precision:
-  pin: 0.5959 # 239216 / 401461
+  pin: 0.5959 # 239217 / 401466
   slack: 0.0010
 
 # `dynamic_call_count` / `call_sites`: the `Prism::CallNode`s whose result is a whole `Dynamic` or a union whose worst
 # member is one (the `dynamic_top` and `dynamic_specific` tiers), over every `Prism::CallNode`.
 dynamic_call_share:
-  pin: 0.4983 # 50985 / 102323
+  pin: 0.4983 # 50984 / 102322
   slack: 0.0010
 
 # A scan that counted fewer than these visited the wrong tree or lost files, and its ratios prove nothing.

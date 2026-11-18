@@ -9,6 +9,7 @@ locals:
   d: Integer?
   defaults: Hash[Integer | String | nil, Dynamic[top]]
   ensured: Array[Dynamic[top] | Symbol | nil]
+  f: Proc
   front: Array[Integer | String | nil]
   guarded: Array[Integer | String | nil]
   i: Integer[2..]
@@ -19,16 +20,23 @@ locals:
   kept: Array[Integer | String | nil]
   keys: Hash[Integer | String | nil, Integer]
   matched: Array[Integer | String | nil]
+  mine: Array[Dynamic[top] | String]
   multi: Array[Integer | String | nil]
   "n": Dynamic[top] | Symbol | nil
   negated: Array[Integer | String | nil]
+  obj: Object
+  own: Array[Dynamic[top] | String]
   post_test: Array[Integer | String | nil]
   retried: Array[Dynamic[top] | Integer | Symbol | nil]
-  s: Integer | String | nil
+  s: Dynamic[top] | String
   saved: Proc?
   slotted: Array[Integer | String | nil]
   twice: Array[Integer | String | nil]
   unless_nil: Array[Integer | String | nil]
+  via_arrow: Array[Dynamic[top] | String]
+  via_lambda: Array[Dynamic[top] | String]
+  via_method: Array[Dynamic[top] | String]
+  via_proc: Array[Dynamic[top] | String]
   x: Integer?
 assertions:
   '1': Array[Integer | String | nil]
@@ -53,3 +61,9 @@ assertions:
   '20': Array[Dynamic[top] | Symbol | nil]
   '21': Array[Dynamic[top] | Symbol | nil]
   '22': Array[Dynamic[top] | Integer | Symbol | nil]
+  '23': Array[Dynamic[top] | String]
+  '24': Array[Dynamic[top] | String]
+  '25': Array[Dynamic[top] | String]
+  '26': Array[Dynamic[top] | String]
+  '27': Array[Dynamic[top] | String]
+  '28': Array[Dynamic[top] | String]

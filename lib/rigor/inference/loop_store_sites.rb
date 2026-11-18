@@ -2,6 +2,7 @@
 
 require_relative "../type"
 require_relative "../source/node_walker"
+require_relative "jump_targets"
 require_relative "narrowing"
 
 module Rigor
@@ -54,16 +55,18 @@ module Rigor
         end
       end
 
-      # A store under one of these runs at another time than the statement walk reaches it, or more often: a block
-      # or lambda body (`saved = proc { out << s }` stores what `s` holds when it is called), and a `for` body,
-      # which has no rebind fixpoint to settle a local it rebinds. A method, class or module body is not listed: its
-      # locals are its own, so a store there never reaches a collection of the loop's, whatever it is typed with.
-      DEFERRED_BODIES = [Prism::BlockNode, Prism::LambdaNode, Prism::ForNode].freeze
+      # The constructs {JumpTargets.boundary?} names that a store may still sit under: a nested loop of the seam's
+      # own kind, whose rebind fixpoint settles the locals it rebinds. Every other one keeps a store on the join's
+      # own scope. A block or lambda body runs at another time than the statement walk reaches it, or more often
+      # (`saved = proc { out << s }` stores what `s` holds when it is called). A `for` body has no rebind fixpoint.
+      # A method, class or module body has locals of its own, and a same-named one there is not the loop's (`s =
+      # "a"; class Foo; s = 5; o = []; o << s; end`).
+      SETTLING_LOOPS = [Prism::WhileNode, Prism::UntilNode].freeze
       # A rescue or `ensure` clause runs from any point of the body it guards, and the check path records such a
       # clause under a widened entry the display path does not use (issue #1231): a store typed there would answer
       # differently per path.
       CLAUSE_NODES = [Prism::RescueNode, Prism::EnsureNode, Prism::RescueModifierNode].freeze
-      private_constant :DEFERRED_BODIES, :CLAUSE_NODES
+      private_constant :SETTLING_LOOPS, :CLAUSE_NODES
 
       module_function
 
@@ -87,7 +90,10 @@ module Rigor
       # True when a store under `ancestors` (the loop body first) runs when the statement walk reaches it, once per
       # iteration of the loops it is nested in, and from the scope that walk holds on every path.
       def overlaid?(ancestors)
-        ancestors.none? { |ancestor| DEFERRED_BODIES.include?(ancestor.class) || CLAUSE_NODES.include?(ancestor.class) }
+        ancestors.none? do |ancestor|
+          CLAUSE_NODES.include?(ancestor.class) ||
+            (JumpTargets.boundary?(ancestor) && !SETTLING_LOOPS.include?(ancestor.class))
+        end
       end
 
       # True when a store under `ancestors` is in a `begin` with a rescue or `ensure` clause. Its body runs again
@@ -100,7 +106,7 @@ module Rigor
 
       # The locals every execution of `site` follows an assignment of, in the same iteration: those a plain
       # `name = value` statement assigns earlier in a statement list on the way down to the site. Such a statement
-      # always runs before the later statements of its list, and nothing on the way is a deferred body
+      # always runs before the later statements of its list, and nothing on the way is a body that runs later or again
       # ({.overlaid?}), so the local holds at the store what this iteration gave it, never what an earlier
       # iteration left. A conditional write, a multiple assignment and a write nested in an expression do not count.
       def assigned_before(site, ancestors)
@@ -158,6 +164,9 @@ module Rigor
       # - A local the store does not follow an assignment of (`assigned` false) may hold what an earlier iteration
       #   left, whatever the pass narrowed it to: `c = "x" if a; out << c if c; c = 5 if b` stores `5`. The
       #   continuation binding joins in whole.
+      # - So does a continuation binding with a gradual arm the binding at the store lacks. That arm says a write
+      #   the walk cannot see may have run — a closure made before the loop that captures the local (`f = -> { s =
+      #   :sym }`, then `s = "a"; f.call; out << s` stores `:sym`) — and the pass did not see it either.
       # - A local the body also mutates in place is stored as an object the body may go on mutating (`rows << row;
       #   row << 2`), so the non-nil part of its continuation binding joins in.
       def binding(name, reached, post_loop, capped:, assigned:, mutated:)
@@ -166,8 +175,14 @@ module Rigor
         return nil if at_store.nil? || settled.nil? || Type::Combinator.untyped?(settled)
 
         at_store = Type::Combinator.widen_value_pinned(at_store) if capped
+        assigned &&= gradual?(at_store) || !gradual?(settled)
         joined = join(at_store, settled, assigned, mutated)
         joined == settled ? nil : joined
+      end
+
+      # True for `Dynamic` and for a union with a `Dynamic` member.
+      def gradual?(type)
+        type.is_a?(Type::Dynamic) || (type.is_a?(Type::Union) && type.members.any?(Type::Dynamic))
       end
 
       # `at_store` with the part of the continuation binding `settled` a store may also hold ({.binding}'s last two

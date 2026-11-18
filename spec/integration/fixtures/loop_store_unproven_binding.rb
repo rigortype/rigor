@@ -279,3 +279,87 @@ while i < 2
   i += 1
 end
 assert_type("Array[Dynamic[top] | Integer | Symbol | nil]", retried)
+
+# === A closure made before the loop captures the local and writes it:
+# `[:sym, :sym]`. The local's continuation binding carries a `Dynamic[top]`
+# arm for that write, which the binding at the store lacks, so the two are
+# joined.
+via_arrow = []
+i = 0
+s = nil
+f = -> { s = :sym }
+while i < 2
+  s = "a"
+  f.call
+  via_arrow << s
+  i += 1
+end
+assert_type("Array[Dynamic[top] | String]", via_arrow)
+
+via_proc = []
+i = 0
+s = nil
+f = proc { s = :sym }
+while i < 2
+  s = "a"
+  f.call
+  via_proc << s
+  i += 1
+end
+assert_type("Array[Dynamic[top] | String]", via_proc)
+
+via_lambda = []
+i = 0
+s = nil
+f = lambda { s = :sym }
+while i < 2
+  s = "a"
+  f.call
+  via_lambda << s
+  i += 1
+end
+assert_type("Array[Dynamic[top] | String]", via_lambda)
+
+via_method = []
+i = 0
+s = nil
+obj = Object.new
+obj.define_singleton_method(:write) { s = :sym }
+while i < 2
+  s = "a"
+  obj.write
+  via_method << s
+  i += 1
+end
+assert_type("Array[Dynamic[top] | String]", via_method)
+
+# === A store in a class or method body inside the loop is on that body's
+# own locals: the loop's `own` and `mine` hold `["a", "a"]`, and the inner
+# `5` reaches neither.
+own = []
+i = 0
+while i < 2
+  s = "a"
+  class LoopStoreScope
+    s = 5
+    own = []
+    own << s
+  end
+  own << s
+  i += 1
+end
+assert_type("Array[Dynamic[top] | String]", own)
+
+mine = []
+i = 0
+while i < 2
+  s = "a"
+  def loop_store_scope
+    s = 5
+    mine = []
+    mine << s
+  end
+  mine << s
+  i += 1
+end
+assert_type("Array[Dynamic[top] | String]", mine)

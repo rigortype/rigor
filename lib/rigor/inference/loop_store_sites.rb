@@ -153,7 +153,7 @@ module Rigor
 
       # `post_loop` with each of `converged`'s names at its {.binding} for a store reached with the scope `reached`.
       # `follows` holds the locals the store is known to follow an assignment of.
-      def argument_scope(reached, post_loop, converged, stores, capped, follows) # rubocop:disable Metrics/ParameterLists
+      def argument_scope(reached, post_loop, converged, stores, capped, follows)
         converged.each_key.reduce(post_loop) do |acc, name|
           type = binding(name, reached, post_loop, capped: capped, assigned: follows.include?(name),
                                                    mutated: stores.key?(name))

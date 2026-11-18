@@ -34,7 +34,7 @@ RSpec.describe Rigor::Inference::DeferredMutation do
   it "answers for the forms that reach an emptying mutator without spelling it on the local" do
     ["f = -> { xs.send(:clear) }", "f = -> { xs.method(:pop).call }", "f = -> { [xs].each(&:clear) }",
      "f = -> { xs.send(name) }", "f = -> { xs.instance_eval { clear } }", "f = -> { xs.method(name).call }",
-     "f = -> { (flag ? xs : ys).clear }"].each do |closure|
+     "f = -> { (flag ? xs : ys).clear }", "f = -> { yield(1, key: xs) }"].each do |closure|
       expect(empties?(closure)).to be(true), closure
     end
   end
@@ -48,7 +48,7 @@ RSpec.describe Rigor::Inference::DeferredMutation do
 
   it "answers nothing for a block that runs at once, a shadowing parameter, or a nested def" do
     ["[1].each { xs.clear }", "xs.tap { xs.clear }", "f = ->(xs) { xs.clear }", "f = proc { |;xs| xs.clear }",
-     "f = -> { def wipe(xs) = xs.clear }"].each do |closure|
+     "f = -> { def wipe(xs) = xs.clear }", "f = ->(xs) { [1].each { xs.clear } }"].each do |closure|
       expect(empties?(closure)).to be(false), closure
     end
   end

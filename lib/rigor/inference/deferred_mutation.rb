@@ -37,9 +37,7 @@ module Rigor
     module DeferredMutation
       MUTATORS = (MutationWidening::SHAPE_MUTATORS | SetMutation::MUTATORS).freeze
       SCOPE_NODES = Set[Prism::BlockNode, Prism::LambdaNode].freeze
-      # A `def`, class or module body sees no local of the frame around it.
-      OPAQUE_NODES = Set[Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
-      private_constant :MUTATORS, :SCOPE_NODES, :OPAQUE_NODES
+      private_constant :MUTATORS, :SCOPE_NODES
 
       module_function
 
@@ -54,11 +52,9 @@ module Rigor
 
       # `depth` counts the blocks and lambdas entered from the outermost later-running closure on, that one
       # included; zero outside every such closure. A read at `depth` names the frame's local when it resolves that
-      # many scopes out.
+      # many scopes out, which a read inside a nested `def` or class body never does.
       def closure_emptier?(node, name, depth, parent, guard_offset)
         klass = node.class
-        return false if OPAQUE_NODES.include?(klass)
-
         if SCOPE_NODES.include?(klass)
           depth += 1 if depth.positive? || later_closure?(node, parent, guard_offset)
         elsif depth.positive? && emptier?(node, name, depth)

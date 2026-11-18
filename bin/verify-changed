@@ -14,8 +14,9 @@
 #      and every spec under its mirror directory (`lib/rigor/a/b.rb` selects
 #      `spec/rigor/a/b_spec.rb` and every `*_spec.rb` below `spec/rigor/a/b/`,
 #      whether or not a same-named spec exists). The directory is bounded: never
-#      the unit-spec root itself (`lib/rigor.rb`), and only a directory holding at
-#      most 30 specs (mirror_dir_cap); a larger one is reported as not selected;
+#      the unit-spec root itself (`lib/rigor.rb`), and only as many of its specs,
+#      cheapest first by tool/spec_costs.tsv, as fit the tier's time budget
+#      (20 s for --quick, 330 s otherwise); the rest are reported by name;
 #      the specs that name a changed fixture — by its directory path when it
 #      lives under a fixtures/ tree, since `demo.rb` alone names dozens of
 #      fixture directories; for a changed plugin or example,
@@ -170,29 +171,120 @@ add_spec() {
   esac
 }
 add_mirror_spec() { [[ -f "$1" ]] && add_spec "$1"; }
-# add_mirror_dir_specs <spec path without .rb>: every spec below the mirror
+# select_mirror_dir <spec path without .rb>: the specs below the mirror
 # directory, whether or not a same-named spec exists (`lib/rigor/analysis/check_rules.rb`
-# has none; `spec/rigor/analysis/check_rules/` is its spec directory, over the cap since it reached 35).
+# has none; `spec/rigor/analysis/check_rules/` is its spec directory). The arms
+# below only record the directory; it is selected after every other rule has
+# run, so a spec another rule already selected costs the directory nothing.
 #
-# Bounded, identically in both tiers. The unit-spec root (`lib/rigor.rb` ->
-# `spec/rigor/`, 721 specs) never applies, and a directory over the cap is named in
-# the not-covered report instead. The cap exists because a mirror directory is
-# a whole module's specs: a `--quick` run for `lib/rigor/cli.rb` selected 50 and
-# took 9 min 7 s on a loaded host. Counts at the time of writing: cli 49,
-# method_dispatcher 49, effects 45, environment 40 (all over); plugin 27, type
-# 26, sig_gen 25 (selected); check_rules was 21 (selected) and is now 35 (over).
+# Bounded by estimated TIME, not by a file count (#3289). The count bound (30
+# files) dropped check_rules/ whole once ADR-116 split it to 46 files, while it
+# kept sig_gen/ (25 files, over five minutes). Each spec file costs what
+# tool/spec_costs.tsv says, in seconds as tool/spec_costs.rb measured it (load
+# plus its top-level groups, in one rspec process); a file the table does not
+# list costs $spec_cost_default, at or above the table's 90th percentile (a spec
+# pins that lower bound only; 10 s sits well above the ~6 s measured, so a
+# refresh does not force a retune), so a new spec is priced as slow until it is
+# measured rather than riding free. The directory's specs are taken cheapest
+# first, ties by path, while the running total stays within the tier's budget;
+# the first that does not fit and every dearer one are named in the not-covered report, with the
+# command that runs them. The changed file's same-named spec (`b_spec.rb` beside
+# `b/`) always runs, so it is charged first, at most half the budget, and the
+# directory gets what it leaves.
+#
+# The budgets are in the table's units (measured at a load average of about 13
+# on the 12-core reference host, which is slower than idle). --quick spends 20 s
+# per directory: the dear directories then keep most of their files (check_rules
+# 38 of 46, effects 37 of 45, environment 30 of 40, method_dispatcher 45 of 50,
+# sig_gen 18 of 25, language_server 18 of 20, cli 26 of 49 behind a ~215 s
+# cli_spec) and every other one runs whole.
+# The default tier, the pre-push gate, spends 330 s: enough that every directory
+# the count bound selected whole still is, same-named spec charged, so the gate
+# checks nothing less. The dearest of those is mcp/ (2 files, ~300 s: two
+# server_spec examples run lens and sig-gen for minutes each); next is sig_gen/
+# less provenance_spec, which the drift set selects anyway (~190 s). The
+# directories over the old count now select all of their specs instead of none,
+# except cli/ (44 of 49, after cli_spec).
+#
+# The unit-spec root (`lib/rigor.rb` -> `spec/rigor/`, 721 specs) never applies.
 unit_spec_root=spec/rigor
-mirror_dir_cap=30
-add_mirror_dir_specs() {
-  local spec count found
+spec_cost_table=tool/spec_costs.tsv
+spec_cost_default=10
+mirror_dir_budget_quick=20
+mirror_dir_budget_default=330
+mirror_dirs=""
+select_mirror_dir() {
+  local found budget mirror_cost=0 charge=0 out kind f1 f2 f3 f4 note=""
   [[ -d "$1" && "$1" != "$unit_spec_root" ]] || return 0
-  found="$(find "$1" -name '*_spec.rb' | sort)"
-  count="$(printf '%s' "$found" | grep -c .)"
-  if ((count > mirror_dir_cap)); then
-    uncovered+="$1/ ($count specs, over the $mirror_dir_cap-spec mirror-directory bound, none selected by the directory rule: run the ones your change touches yourself)"$'\n'
+  found="$(find "$1" -name '*_spec.rb' | LC_ALL=C sort)"
+  [[ -n "$found" ]] || return 0
+  if [[ -n "$quick" ]]; then budget="$mirror_dir_budget_quick"; else budget="$mirror_dir_budget_default"; fi
+  # The same-named mirror spec runs whatever the budget says, so it is charged
+  # first, but never more than half the budget: past that the run is over
+  # budget anyway, and charging it whole would also drop a cheap directory
+  # whole (runner_spec ~33 s left none of runner/'s 11 specs, ~4 s, in --quick).
+  if [[ -f "$1_spec.rb" ]]; then
+    mirror_cost="$(spec_costs_of "$1_spec.rb" | cut -f1)"
+    charge="$(awk -v c="$mirror_cost" -v b="$budget" 'BEGIN { print (c < b / 2) ? c : b / 2 }')"
+    note=" less ~$(awk -v c="$charge" 'BEGIN { printf "%.0f", c }')s for $1_spec.rb"
+    awk -v c="$mirror_cost" -v b="$budget" 'BEGIN { exit !(c > b) }' &&
+      note+=", which alone is estimated at ~$(awk -v c="$mirror_cost" 'BEGIN { printf "%.0f", c }')s, so this run takes at least that long"
+  fi
+  # Out: "K\t<path>" for each spec kept, then one
+  # "L\t<count>\t<total>\t<dropped>\t<left-out paths>" line when any is left out.
+  out="$(spec_costs_of "$found" | LC_ALL=C sort -t $'\t' -k1,1g -k2,2 |
+    awk -F'\t' -v budget="$budget" -v kept="$charge" -v selected="$(lines "$specs$pool_specs$plugin_specs")" '
+      BEGIN { n = split(selected, s, "\n"); for (i = 1; i <= n; i++) already[s[i]] = 1 }
+      { count++; total += $1 }
+      $2 in already { next }
+      left == "" && kept + $1 <= budget { kept += $1; print "K\t" $2; next }
+      { left = left " " $2; dropped++ }
+      END { if (dropped) printf "L\t%d\t%.0f\t%d\t%s\n", count, total, dropped, left }
+    ')"
+  # K lines carry the path in f1; the L line carries count, total, dropped and the paths.
+  while IFS=$'\t' read -r kind f1 f2 f3 f4; do
+    case "$kind" in
+      K) add_spec "$f1" ;;
+      L) uncovered+="$1/ ($f1 specs, ~${f2}s estimated, over the ${budget}s mirror-directory budget${note}; cheapest first, $f3 left out — run them with: bundle exec rspec$f4)"$'\n' ;;
+    esac
+  done <<< "$out"
+  return 0
+}
+# The table's rows, read once: "<seconds>\t<path>" per line, `#` lines are
+# comments, a trailing CR is dropped. A row whose cost is not a non-negative
+# number prices its path at the default, and is named on stderr; so is a table
+# that is missing or has no usable row, which prices everything at the default.
+# None of it fails the gate: the table only orders and bounds the selection.
+# A row naming a spec that no longer exists is harmless (no lookup reaches it)
+# and the next refresh drops it, so a deletion or rename needs no table edit.
+spec_cost_rows=""
+read_spec_cost_table() {
+  if [[ ! -f "$spec_cost_table" ]]; then
+    echo "verify-changed: $spec_cost_table is missing; every mirror-directory spec is priced at the default ${spec_cost_default}s" >&2
     return 0
   fi
-  while IFS= read -r spec; do [[ -n "$spec" ]] && add_spec "$spec"; done <<< "$found"
+  spec_cost_rows="$(awk -F'\t' -v table="$spec_cost_table" -v def="$spec_cost_default" '
+    { sub(/\r$/, "") }
+    /^#/ || /^[[:space:]]*$/ { next }
+    NF == 2 && $1 ~ /^[0-9]+(\.[0-9]+)?$/ { print; usable++; next }
+    { printf "verify-changed: %s line %d (%s) is not \"<seconds>\\t<path>\" with a non-negative number; its spec is priced at the default %ss\n", table, NR, $0, def > "/dev/stderr" }
+    END {
+      if (!usable)
+        printf "verify-changed: %s has no usable row; every mirror-directory spec is priced at the default %ss\n", table, def > "/dev/stderr"
+    }
+  ' "$spec_cost_table")"
+}
+# spec_costs_of <newline-separated spec paths>: "<cost>\t<path>" for each, from
+# the table, or the default for a path it does not price. read_spec_cost_table
+# must have run in this shell first (a command substitution cannot fill it).
+spec_costs_of() {
+  printf '%s\n' "$1" | awk -F'\t' -v def="$spec_cost_default" -v rows="$spec_cost_rows" '
+    BEGIN {
+      n = split(rows, r, "\n")
+      for (i = 1; i <= n; i++) if (split(r[i], f, "\t") == 2) cost[f[2]] = f[1]
+    }
+    $0 != "" { printf "%s\t%s\n", (($0 in cost) ? cost[$0] : def), $0 }
+  '
 }
 # ere_literal <string>: the string as an ERE that matches only itself. A `.` in
 # a fixture directory name would otherwise match any character, and because a
@@ -394,7 +486,7 @@ for path in ${changed[@]+"${changed[@]}"}; do
     lib/*.rb)
       mirror="spec/${path#lib/}"
       add_mirror_spec "${mirror%.rb}_spec.rb"
-      add_mirror_dir_specs "${mirror%.rb}"
+      mirror_dirs+="${mirror%.rb}"$'\n'
       check_files+="$path"$'\n'
       case "$path" in
         lib/rigor/analysis/incremental*.rb | lib/rigor/analysis/incremental*/*.rb | lib/rigor/analysis/dependency_recorder.rb)
@@ -411,10 +503,12 @@ for path in ${changed[@]+"${changed[@]}"}; do
           ;;
       esac
       ;;
+    # The mirror-directory cost table: its own gate and the selection that reads it.
+    tool/spec_costs.tsv) add_spec spec/tool/spec_costs_spec.rb; add_spec spec/tool/verify_changed_spec.rb ;;
     tool/*.rb)
       mirror="spec/${path}"
       add_mirror_spec "${mirror%.rb}_spec.rb"
-      add_mirror_dir_specs "${mirror%.rb}"
+      mirror_dirs+="${mirror%.rb}"$'\n'
       ;;
     # Issue #3298 — a script under bin/. The identifier rules match a changed
     # file's basename WITH its extension, and a script has none, so `land-pr` could
@@ -495,6 +589,12 @@ for path in ${deleted[@]+"${deleted[@]}"}; do
     *) uncovered+="$path (deleted: its dependents are not checked locally)"$'\n' ;;
   esac
 done
+
+# After every other rule, so the budget charges only what they left unselected.
+[[ -n "$mirror_dirs" ]] && read_spec_cost_table
+while IFS= read -r dir; do
+  [[ -n "$dir" ]] && select_mirror_dir "$dir"
+done < <(lines "$mirror_dirs")
 
 if [[ -n "$dependency_edit" && -z "$quick" ]]; then
   while IFS= read -r spec; do add_spec "$spec"; done < <(

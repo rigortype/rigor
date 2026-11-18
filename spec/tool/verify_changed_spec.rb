@@ -294,12 +294,23 @@ RSpec.describe "bin/verify-changed spec selection" do
 
   # #3277: a module with a spec directory and no same-named spec. Before the
   # directory rule, check_rules.rb selected none of spec/rigor/analysis/check_rules/; it did select them
-  # when the rule landed, and the directory has since grown past the bound (35 specs, see #3289), so these
-  # examples build their tree in a temporary repository rather than lean on a real directory's size.
+  # when the rule landed, lost them again when it grew past the old 30-file bound, and since #3289 takes as
+  # many as fit a time budget. These examples build their tree and its cost table in a temporary
+  # repository rather than lean on a real directory's size or measured costs.
   describe "the directory mirror rule" do
     def spec_files(dir, count, nested: false)
       count.times.to_h { |i| ["#{dir}#{'/deep/er' if nested && i.odd?}/s#{i}_spec.rb", "# spec\n"] }
     end
+
+    # The cost table the script reads, with the given rows ({ path => seconds }).
+    def cost_table(rows)
+      { "tool/spec_costs.tsv" => "# header\n#{rows.sort.map { |path, seconds| "#{seconds}\t#{path}\n" }.join}" }
+    end
+
+    # Every spec of `files` priced at `seconds` in the cost table.
+    def priced(files, seconds) = files.merge(cost_table(files.keys.grep(/_spec\.rb\z/).to_h { |path| [path, seconds] }))
+
+    def script_number(name) = Float(File.read(script)[/^#{name}=([\d.]+)$/, 1])
 
     def list_in_temp_repo(files, path, quick:)
       with_temp_repo(files) do |dir|
@@ -313,7 +324,7 @@ RSpec.describe "bin/verify-changed spec selection" do
     end
 
     it "selects every spec under the mirror directory when there is no same-named spec" do
-      files = { "lib/rigor/a/b.rb" => "" }.merge(spec_files("spec/rigor/a/b", 6, nested: true))
+      files = priced({ "lib/rigor/a/b.rb" => "" }.merge(spec_files("spec/rigor/a/b", 6, nested: true)), 0.01)
       [false, true].each do |quick|
         specs, = list_in_temp_repo(files, "lib/rigor/a/b.rb", quick: quick)
         expect(specs).to match_array(files.keys.grep(%r{\Aspec/}).sort), "quick=#{quick}"
@@ -321,55 +332,202 @@ RSpec.describe "bin/verify-changed spec selection" do
     end
 
     it "does not pull in a sibling module's directory" do
-      files = { "lib/rigor/a/b.rb" => "" }.merge(spec_files("spec/rigor/a/b", 2))
-                                          .merge(spec_files("spec/rigor/a/c", 2))
+      files = priced({ "lib/rigor/a/b.rb" => "" }.merge(spec_files("spec/rigor/a/b", 2))
+                                                 .merge(spec_files("spec/rigor/a/c", 2)), 0.01)
       specs, = list_in_temp_repo(files, "lib/rigor/a/b.rb", quick: true)
       expect(specs).not_to be_empty
       expect(specs.grep(%r{\Aspec/rigor/a/(?!b/)})).to be_empty
     end
 
-    # The bound, on a temporary repository so the counts are exact: the real
-    # directories drift (cli 49, check_rules 21 at the time of writing).
-    describe "its bound" do
+    # The bound is estimated time (#3289), on a temporary repository so the costs
+    # are exact. It replaced a 30-file count, which dropped a cheap directory whole
+    # once it grew and kept a dear one that stayed small.
+    describe "its time budget" do
       [false, true].each do |quick|
         context "with quick=#{quick}" do
+          let(:budget) { script_number(quick ? "mirror_dir_budget_quick" : "mirror_dir_budget_default") }
+
           it "selects nothing for the unit-spec root" do
             files = { "lib/rigor.rb" => "", "spec/rigor/a_spec.rb" => "# spec\n" }
             specs, err = list_in_temp_repo(files, "lib/rigor.rb", quick: quick)
             expect(specs).to be_empty
-            expect(err).not_to include("bound")
+            expect(err).not_to include("budget")
           end
 
-          it "selects every spec of a directory at the bound, nested ones included" do
-            files = { "lib/rigor/mod.rb" => "" }.merge(spec_files("spec/rigor/mod", 30, nested: true))
+          # Sixty files, twice the old count bound, cost next to nothing.
+          it "selects every spec of a cheap directory however many files it holds, nested ones included" do
+            files = priced({ "lib/rigor/mod.rb" => "" }.merge(spec_files("spec/rigor/mod", 60, nested: true)), 0.01)
             specs, err = list_in_temp_repo(files, "lib/rigor/mod.rb", quick: quick)
-            expect(specs.length).to eq(30)
-            expect(specs.grep(%r{/deep/er/}).length).to eq(15)
-            expect(err).not_to include("bound")
+            expect(specs.length).to eq(60)
+            expect(specs.grep(%r{/deep/er/}).length).to eq(30)
+            expect(err).not_to include("budget")
           end
 
-          it "selects none from a directory over the bound and says so, naming the directory and the count" do
-            files = { "lib/rigor/mod.rb" => "" }.merge(spec_files("spec/rigor/mod", 31, nested: true))
+          it "takes the cheapest specs that fit and names the rest with the command that runs them" do
+            files = { "lib/rigor/mod.rb" => "" }.merge(spec_files("spec/rigor/mod", 4))
+            files.merge!(cost_table("spec/rigor/mod/s0_spec.rb" => (budget * 0.5).round(2),
+                                    "spec/rigor/mod/s1_spec.rb" => (budget * 0.4).round(2),
+                                    "spec/rigor/mod/s2_spec.rb" => (budget * 0.3).round(2),
+                                    "spec/rigor/mod/s3_spec.rb" => 0.01))
             specs, err = list_in_temp_repo(files, "lib/rigor/mod.rb", quick: quick)
-            expect(specs).to be_empty
-            expect(err).to include("spec/rigor/mod/ (31 specs")
-            expect(err).to include("run the ones your change touches yourself")
+            expect(specs).to eq(%w[spec/rigor/mod/s1_spec.rb spec/rigor/mod/s2_spec.rb spec/rigor/mod/s3_spec.rb])
+            shown = budget.to_s.delete_suffix(".0")
+            expect(err).to include("  - spec/rigor/mod/ (4 specs, ~#{(budget * 1.2).round}s estimated, " \
+                                   "over the #{shown}s mirror-directory budget; cheapest first, " \
+                                   "1 left out — run them with: bundle exec rspec spec/rigor/mod/s0_spec.rb)")
+          end
+
+          # Ties go by path, and a spec the table does not list is charged the default.
+          it "charges an unlisted spec the default cost and breaks ties by path" do
+            default = script_number("spec_cost_default")
+            fits = (budget / default).floor
+            files = { "lib/rigor/mod.rb" => "" }.merge(spec_files("spec/rigor/mod", fits + 2))
+            specs, err = list_in_temp_repo(files, "lib/rigor/mod.rb", quick: quick)
+            expected = (0...(fits + 2)).map { |i| "spec/rigor/mod/s#{i}_spec.rb" }.sort
+            expect(specs).to eq(expected.first(fits))
+            expect(err).to include("#{expected.last(2).join(' ')})")
+          end
+
+          it "does not report a left-out spec that another rule selected" do
+            files = { "lib/rigor/mod.rb" => "" }.merge(spec_files("spec/rigor/mod", 2))
+                                                .merge(cost_table("spec/rigor/mod/s0_spec.rb" => budget * 2,
+                                                                  "spec/rigor/mod/s1_spec.rb" => 0.01))
+            specs, err = list_in_temp_repo(files, "lib/rigor/mod.rb\nspec/rigor/mod/s0_spec.rb", quick: quick)
+            expect(specs).to eq(%w[spec/rigor/mod/s0_spec.rb spec/rigor/mod/s1_spec.rb])
+            expect(err).not_to include("budget")
           end
 
           it "applies to a tool/ file's mirror directory" do
-            files = { "tool/x.rb" => "" }.merge(spec_files("spec/tool/x", 2))
+            files = priced({ "tool/x.rb" => "" }.merge(spec_files("spec/tool/x", 2)), 0.01)
             specs, = list_in_temp_repo(files, "tool/x.rb", quick: quick)
             expect(specs).to eq(["spec/tool/x/s0_spec.rb", "spec/tool/x/s1_spec.rb"])
           end
 
+          # A deleted or renamed spec leaves its row behind until the next refresh;
+          # no lookup reaches it, so it changes nothing and warns about nothing. A guard:
+          # no line of the selection reads a row except by the path of a spec it found.
+          it "ignores a row naming a spec that no longer exists" do
+            files = { "lib/rigor/mod.rb" => "" }.merge(spec_files("spec/rigor/mod", 1))
+                                                .merge(cost_table("spec/rigor/mod/s0_spec.rb" => 0.01,
+                                                                  "spec/rigor/mod/gone_spec.rb" => budget * 5))
+            specs, err = list_in_temp_repo(files, "lib/rigor/mod.rb", quick: quick)
+            expect(specs).to eq(["spec/rigor/mod/s0_spec.rb"])
+            expect(err).not_to include("spec_costs.tsv")
+          end
+
           it "adds the directory to a same-named spec" do
+            files = priced({ "lib/rigor/mod.rb" => "", "spec/rigor/mod_spec.rb" => "# spec\n" }
+                    .merge(spec_files("spec/rigor/mod", 2)), 0.01)
+            specs, err = list_in_temp_repo(files, "lib/rigor/mod.rb", quick: quick)
+            expect(specs).to eq(%w[spec/rigor/mod/s0_spec.rb spec/rigor/mod/s1_spec.rb
+                                   spec/rigor/mod_spec.rb])
+            expect(err).not_to include("budget")
+          end
+
+          # The same-named spec runs whatever it costs, so it is charged first: `cli_spec.rb`
+          # alone takes minutes, and an uncharged one let `--quick` for cli.rb run for four.
+          it "charges the same-named spec first, always runs it, and gives the directory what it leaves" do
             files = { "lib/rigor/mod.rb" => "", "spec/rigor/mod_spec.rb" => "# spec\n" }
                     .merge(spec_files("spec/rigor/mod", 2))
-            specs, = list_in_temp_repo(files, "lib/rigor/mod.rb", quick: quick)
-            expect(specs).to include("spec/rigor/mod_spec.rb", "spec/rigor/mod/s0_spec.rb", "spec/rigor/mod/s1_spec.rb")
+            files.merge!(cost_table("spec/rigor/mod_spec.rb" => (budget * 0.4).round(2),
+                                    "spec/rigor/mod/s0_spec.rb" => (budget * 0.05).round(2),
+                                    "spec/rigor/mod/s1_spec.rb" => (budget * 0.6).round(2)))
+            specs, err = list_in_temp_repo(files, "lib/rigor/mod.rb", quick: quick)
+            expect(specs).to eq(%w[spec/rigor/mod/s0_spec.rb spec/rigor/mod_spec.rb])
+            expect(err).to include("budget less ~#{(budget * 0.4).round}s for spec/rigor/mod_spec.rb; " \
+                                   "cheapest first, 1 left out — run them with: " \
+                                   "bundle exec rspec spec/rigor/mod/s1_spec.rb)")
+          end
+
+          # Past half the budget the run is over budget anyway; charging the spec whole
+          # dropped a cheap directory whole (runner/: 11 specs, ~4 s, behind a ~33 s
+          # runner_spec). The directory keeps at least half.
+          it "charges the same-named spec at most half the budget, and says when it alone is over the budget" do
+            files = { "lib/rigor/mod.rb" => "", "spec/rigor/mod_spec.rb" => "# spec\n" }
+                    .merge(spec_files("spec/rigor/mod", 3))
+            files.merge!(cost_table("spec/rigor/mod_spec.rb" => budget * 3,
+                                    "spec/rigor/mod/s0_spec.rb" => (budget * 0.2).round(2),
+                                    "spec/rigor/mod/s1_spec.rb" => (budget * 0.2).round(2),
+                                    "spec/rigor/mod/s2_spec.rb" => (budget * 0.2).round(2)))
+            specs, err = list_in_temp_repo(files, "lib/rigor/mod.rb", quick: quick)
+            expect(specs).to eq(%w[spec/rigor/mod/s0_spec.rb spec/rigor/mod/s1_spec.rb spec/rigor/mod_spec.rb])
+            expect(err).to include("budget less ~#{(budget / 2).round}s for spec/rigor/mod_spec.rb, which alone is " \
+                                   "estimated at ~#{(budget * 3).round}s, so this run takes at least that long; " \
+                                   "cheapest first, 1 left out — run them with: " \
+                                   "bundle exec rspec spec/rigor/mod/s2_spec.rb)")
           end
         end
       end
+
+      # The default tier is the pre-push gate and spends more: a spec that fits its
+      # budget and not the edit loop's runs before a push and is named in --quick.
+      it "gives the default tier the larger budget" do
+        quick_budget = script_number("mirror_dir_budget_quick")
+        full_budget = script_number("mirror_dir_budget_default")
+        expect(full_budget).to be > quick_budget
+        between = (quick_budget + full_budget) / 2
+        files = { "lib/rigor/mod.rb" => "" }.merge(spec_files("spec/rigor/mod", 1))
+                                            .merge(cost_table("spec/rigor/mod/s0_spec.rb" => between))
+        full, = list_in_temp_repo(files, "lib/rigor/mod.rb", quick: false)
+        quick, err = list_in_temp_repo(files, "lib/rigor/mod.rb", quick: true)
+        expect(full).to eq(["spec/rigor/mod/s0_spec.rb"])
+        expect(quick).to be_empty
+        expect(err).to include("bundle exec rspec spec/rigor/mod/s0_spec.rb")
+      end
+    end
+
+    # The table only orders and bounds the selection, so a broken one never fails
+    # the gate; but it must not change the selection silently either. Each case
+    # warns on stderr and prices what it cannot read at the default.
+    describe "a cost table it cannot fully read" do
+      let(:budget) { script_number("mirror_dir_budget_quick") }
+      let(:default) { script_number("spec_cost_default") }
+      let(:tree) { { "lib/rigor/mod.rb" => "" }.merge(spec_files("spec/rigor/mod", 2)) }
+      let(:dear) { "spec/rigor/mod/s0_spec.rb" }
+      let(:cheap) { "spec/rigor/mod/s1_spec.rb" }
+
+      def table(text) = { "tool/spec_costs.tsv" => text }
+
+      it "warns when the table is missing, and prices every spec at the default" do
+        specs, err = list_in_temp_repo(tree, "lib/rigor/mod.rb", quick: true)
+        expect(err).to include("verify-changed: tool/spec_costs.tsv is missing; " \
+                               "every mirror-directory spec is priced at the default " \
+                               "#{default.to_s.delete_suffix('.0')}s")
+        expect(specs).to eq([dear, cheap].first((budget / default).floor))
+      end
+
+      it "warns when the table has no usable row" do
+        _, err = list_in_temp_repo(tree.merge(table("# only a header\n\n")), "lib/rigor/mod.rb", quick: true)
+        expect(err).to include("verify-changed: tool/spec_costs.tsv has no usable row")
+      end
+
+      it "reads a table written with CRLF line ends as if it had LF" do
+        text = "# header\r\n#{budget * 2}\t#{dear}\r\n0.01\t#{cheap}\r\n"
+        specs, err = list_in_temp_repo(tree.merge(table(text)), "lib/rigor/mod.rb", quick: true)
+        expect(specs).to eq([cheap])
+        expect(err).not_to include("spec_costs.tsv")
+      end
+
+      it "prices a non-numeric cost at the default and names the row" do
+        text = "# header\nslow\t#{dear}\n0.01\t#{cheap}\n"
+        _, err = list_in_temp_repo(tree.merge(table(text)), "lib/rigor/mod.rb", quick: true)
+        expect(err).to include("verify-changed: tool/spec_costs.tsv line 2 (slow\t#{dear}) is not")
+        expect(err).to include("its spec is priced at the default")
+      end
+
+      # Read as written, a negative cost would make its spec free and let the next one in too.
+      it "prices a negative cost at the default and names the row" do
+        text = "# header\n-#{budget * 2}\t#{dear}\n#{budget - 0.5}\t#{cheap}\n"
+        specs, err = list_in_temp_repo(tree.merge(table(text)), "lib/rigor/mod.rb", quick: true)
+        expect(err).to include("tool/spec_costs.tsv line 2 (-#{budget * 2}\t#{dear}) is not")
+        expect(specs).to eq([dear])
+      end
+    end
+
+    it "selects the cost table's own gate and this file for a changed cost table" do
+      specs, uncovered = selection_for("tool/spec_costs.tsv", quick: true)
+      expect(uncovered).to be_empty
+      expect(specs).to eq(%w[spec/tool/spec_costs_spec.rb spec/tool/verify_changed_spec.rb])
     end
 
     it "selects nothing for a path with no spec and no spec directory" do

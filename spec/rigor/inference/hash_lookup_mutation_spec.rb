@@ -152,10 +152,10 @@ RSpec.describe "Hash lookup mutation widening", type: :runner do
       RUBY
     end
 
-    # A `Union` receiver's `[]` reads each member through its RBS projection rather than the shape tier. A reopened
-    # member's projection carries a `Dynamic[top]` arm, so a missing key does not read as the known values alone.
+    # A `Union` receiver's literal `[]` reads each member as the lone shape does (#3320). A reopened member reads an
+    # undeclared key as `Dynamic[top]`, so a missing key does not read as the known values, or as `nil`, alone.
     it "widens every HashShape member of a Union" do
-      reopened = ["{ a: 1, ... } | { b: 2, ... }", "1 | 2 | Dynamic[top]"]
+      reopened = ["{ a: 1, ... } | { b: 2, ... }", "Dynamic[top]"]
       expect(dumped_types(<<~RUBY)).to eq([*reopened, "{ a: 1 } | { b: 2 }"])
         def defaulted(flag)
           u = flag ? { a: 1 } : { b: 2 }
@@ -180,7 +180,7 @@ RSpec.describe "Hash lookup mutation widening", type: :runner do
     end
 
     it "joins a conditional `default=` with the branch that skipped it" do
-      expect(dumped_types(<<~RUBY)).to eq(["{ a: 1 } | { a: 1, ... }", "1 | Dynamic[top]"])
+      expect(dumped_types(<<~RUBY)).to eq(["{ a: 1 } | { a: 1, ... }", "Dynamic[top]?"])
         def maybe(flag)
           h = { a: 1 }
           h.default = 0 if flag

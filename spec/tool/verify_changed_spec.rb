@@ -403,16 +403,32 @@ RSpec.describe "bin/verify-changed spec selection" do
             expect(specs).to eq(["spec/tool/x/s0_spec.rb", "spec/tool/x/s1_spec.rb"])
           end
 
-          # A guard: the same-named spec lies outside the directory, so no line of the
-          # budget can charge it today. It fails if the budget ever starts to.
-          it "adds the directory to a same-named spec, which the budget does not charge" do
+          it "adds the directory to a same-named spec" do
+            files = priced({ "lib/rigor/mod.rb" => "", "spec/rigor/mod_spec.rb" => "# spec\n" }
+                    .merge(spec_files("spec/rigor/mod", 2)), 0.01)
+            specs, err = list_in_temp_repo(files, "lib/rigor/mod.rb", quick: quick)
+            expect(specs).to eq(%w[spec/rigor/mod/s0_spec.rb spec/rigor/mod/s1_spec.rb spec/rigor/mod_spec.rb])
+            expect(err).not_to include("budget")
+          end
+
+          # The same-named spec runs whatever it costs, so it is charged first: `cli_spec.rb`
+          # alone takes minutes, and an uncharged one let `--quick` for cli.rb run for four.
+          it "charges the same-named spec first, always runs it, and gives the directory what it leaves" do
             files = { "lib/rigor/mod.rb" => "", "spec/rigor/mod_spec.rb" => "# spec\n" }
                     .merge(spec_files("spec/rigor/mod", 2))
-            files.merge!(cost_table("spec/rigor/mod_spec.rb" => budget * 2,
-                                    "spec/rigor/mod/s0_spec.rb" => 0.01, "spec/rigor/mod/s1_spec.rb" => 0.01))
+            files.merge!(cost_table("spec/rigor/mod_spec.rb" => (budget * 0.9).round(2),
+                                    "spec/rigor/mod/s0_spec.rb" => (budget * 0.05).round(2),
+                                    "spec/rigor/mod/s1_spec.rb" => (budget * 0.2).round(2)))
             specs, err = list_in_temp_repo(files, "lib/rigor/mod.rb", quick: quick)
-            expect(specs).to include("spec/rigor/mod_spec.rb", "spec/rigor/mod/s0_spec.rb", "spec/rigor/mod/s1_spec.rb")
-            expect(err).not_to include("budget")
+            expect(specs).to eq(%w[spec/rigor/mod/s0_spec.rb spec/rigor/mod_spec.rb])
+            expect(err).to include("budget less ~#{(budget * 0.9).round}s for spec/rigor/mod_spec.rb; " \
+                                   "cheapest first, 1 left out — run them with: " \
+                                   "bundle exec rspec spec/rigor/mod/s1_spec.rb)")
+
+            files["tool/spec_costs.tsv"] = cost_table("spec/rigor/mod_spec.rb" => budget * 2)["tool/spec_costs.tsv"]
+            specs, err = list_in_temp_repo(files, "lib/rigor/mod.rb", quick: quick)
+            expect(specs).to eq(["spec/rigor/mod_spec.rb"])
+            expect(err).to include("2 left out")
           end
         end
       end

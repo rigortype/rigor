@@ -187,20 +187,22 @@ add_mirror_spec() { [[ -f "$1" ]] && add_spec "$1"; }
 # riding free. The directory's specs are taken cheapest first, ties by path,
 # while the running total stays within the tier's budget; the first that does
 # not fit and every dearer one are named in the not-covered report, with the
-# command that runs them. The changed file's own mirror spec (`b_spec.rb` beside
-# `b/`) is outside the directory and always selected.
+# command that runs them. The changed file's same-named spec (`b_spec.rb` beside
+# `b/`) always runs, so it is charged first and the directory gets what it leaves.
 #
 # The budgets are in the table's units (measured at a load average of about 13
 # on the 12-core reference host, which is slower than idle). --quick spends 20 s
-# per directory: the dear directories then keep most of their files (cli 29 of
-# 49, check_rules 38 of 46, effects 37 of 45, environment 31 of 40,
-# method_dispatcher 46 of 50, sig_gen 18 of 25) and every other one runs whole.
+# per directory: the dear directories then keep most of their files (check_rules
+# 38 of 46, effects 37 of 45, environment 30 of 40, method_dispatcher 45 of 50,
+# sig_gen 18 of 25, language_server 18 of 20), every small one runs whole, and
+# three get none because their same-named spec alone is over it (cli_spec ~215 s,
+# incremental_run_slot_spec ~88 s, runner_spec ~33 s).
 # The default tier, the pre-push gate, spends 330 s: enough that every directory
-# the count bound selected whole still is, so the gate checks nothing less. The
-# dearest of those is mcp/ (2 files, ~300 s: two server_spec examples run lens
+# the count bound selected whole still is, same-named spec charged, so the gate
+# checks nothing less. The dearest of those is mcp/ (2 files, ~300 s: two server_spec examples run lens
 # and sig-gen for minutes each); next is sig_gen/ less provenance_spec, which the
 # drift set selects anyway (~190 s). The directories over the old count now select
-# most or all of their specs instead of none.
+# all of their specs instead of none, except cli/ (40 of 49, after cli_spec).
 #
 # The unit-spec root (`lib/rigor.rb` -> `spec/rigor/`, 721 specs) never applies.
 unit_spec_root=spec/rigor
@@ -210,23 +212,18 @@ mirror_dir_budget_quick=20
 mirror_dir_budget_default=330
 mirror_dirs=""
 select_mirror_dir() {
-  local found budget out kind f1 f2 f3 f4
+  local found budget mirror_cost=0 out kind f1 f2 f3 f4 f5 charged
   [[ -d "$1" && "$1" != "$unit_spec_root" ]] || return 0
   found="$(find "$1" -name '*_spec.rb' | LC_ALL=C sort)"
   [[ -n "$found" ]] || return 0
   if [[ -n "$quick" ]]; then budget="$mirror_dir_budget_quick"; else budget="$mirror_dir_budget_default"; fi
-  # In: "<cost>\t<path>", cheapest first, ties by path (a table line is
-  # "<seconds>\t<path>"; a `#` line is a comment). Out: "K\t<path>" for each spec
-  # kept, then one "L\t<count>\t<total>\t<dropped>\t<left-out paths>" line when
-  # any is left out.
-  out="$(printf '%s\n' "$found" | awk -F'\t' -v def="$spec_cost_default" -v table="$spec_cost_table" '
-    BEGIN {
-      while ((getline line < table) > 0)
-        if (line !~ /^#/ && split(line, f, "\t") == 2) cost[f[2]] = f[1]
-    }
-    { printf "%s\t%s\n", (($0 in cost) ? cost[$0] : def), $0 }
-  ' | LC_ALL=C sort -t $'\t' -k1,1g -k2,2 |
-    awk -F'\t' -v budget="$budget" -v selected="$(lines "$specs$pool_specs$plugin_specs")" '
+  # The same-named mirror spec runs whatever the budget says, so it is charged
+  # first and the directory gets what it leaves.
+  [[ -f "$1_spec.rb" ]] && mirror_cost="$(spec_costs_of "$1_spec.rb" | cut -f1)"
+  # Out: "K\t<path>" for each spec kept, then one
+  # "L\t<count>\t<total>\t<dropped>\t<left-out paths>" line when any is left out.
+  out="$(spec_costs_of "$found" | LC_ALL=C sort -t $'\t' -k1,1g -k2,2 |
+    awk -F'\t' -v budget="$budget" -v kept="$mirror_cost" -v selected="$(lines "$specs$pool_specs$plugin_specs")" '
       BEGIN { n = split(selected, s, "\n"); for (i = 1; i <= n; i++) already[s[i]] = 1 }
       { count++; total += $1 }
       $2 in already { next }
@@ -234,14 +231,28 @@ select_mirror_dir() {
       { left = left " " $2; dropped++ }
       END { if (dropped) printf "L\t%d\t%.0f\t%d\t%s\n", count, total, dropped, left }
     ')"
-# K lines carry the path in f1; the L line carries count, total, dropped and the paths.
-while IFS=$'\t' read -r kind f1 f2 f3 f4; do
-  case "$kind" in
-    K) add_spec "$f1" ;;
-    L) uncovered+="$1/ ($f1 specs, ~${f2}s estimated, over the ${budget}s mirror-directory budget; cheapest first, $f3 left out — run them with: bundle exec rspec$f4)"$'\n' ;;
-  esac
-done <<< "$out"
+  charged=""
+  [[ "$mirror_cost" != 0 ]] && charged=" less ~$(awk -v c="$mirror_cost" 'BEGIN { printf "%.0f", c }')s for $1_spec.rb"
+  # K lines carry the path in f1; the L line carries count, total, dropped and the paths.
+  while IFS=$'\t' read -r kind f1 f2 f3 f4; do
+    case "$kind" in
+      K) add_spec "$f1" ;;
+      L) uncovered+="$1/ ($f1 specs, ~${f2}s estimated, over the ${budget}s mirror-directory budget${charged}; cheapest first, $f3 left out — run them with: bundle exec rspec$f4)"$'\n' ;;
+    esac
+  done <<< "$out"
   return 0
+}
+# spec_costs_of <newline-separated spec paths>: "<cost>\t<path>" for each, from
+# the table (a line is "<seconds>\t<path>"; a `#` line is a comment), or the
+# default for a path it does not list.
+spec_costs_of() {
+  printf '%s\n' "$1" | awk -F'\t' -v def="$spec_cost_default" -v table="$spec_cost_table" '
+    BEGIN {
+      while ((getline line < table) > 0)
+        if (line !~ /^#/ && split(line, f, "\t") == 2) cost[f[2]] = f[1]
+    }
+    $0 != "" { printf "%s\t%s\n", (($0 in cost) ? cost[$0] : def), $0 }
+  '
 }
 # ere_literal <string>: the string as an ERE that matches only itself. A `.` in
 # a fixture directory name would otherwise match any character, and because a

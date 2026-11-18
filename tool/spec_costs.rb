@@ -4,9 +4,10 @@
 # Measures what each spec file under a mirror directory costs, for the time budget
 # `bin/verify-changed` puts on a mirror directory (#3289), and rewrites tool/spec_costs.tsv.
 #
-# A mirror directory is a spec directory a changed lib/ or tool/ file selects whole:
+# A mirror directory is a spec directory a changed lib/ or tool/ file selects from:
 # `spec/<x>/` beside `lib/<x>.rb`, or `spec/tool/<x>/` beside `tool/<x>.rb`, never the
-# unit-spec root `spec/rigor/`. A file's cost is the seconds it adds to one rspec process:
+# unit-spec root `spec/rigor/`. The same-named `spec/<x>_spec.rb` is measured too, since the
+# budget charges it first. A file's cost is the seconds it adds to one rspec process:
 # loading it, plus its top-level groups (hooks and examples). The process's own boot is
 # not in it; a run pays that once whatever it selects.
 #
@@ -17,7 +18,7 @@
 # an idle host, one directory at a time if you like:
 #
 #   bundle exec ruby tool/spec_costs.rb                 # every mirror directory
-#   bundle exec ruby tool/spec_costs.rb spec/rigor/cli  # just these
+#   bundle exec ruby tool/spec_costs.rb spec/rigor/cli spec/rigor/cli_spec.rb  # just these
 #
 # `bundle exec rspec -r ./tool/spec_costs.rb …` with SPEC_COSTS_OUT set is the probe the
 # refresh runs in each child process.
@@ -39,10 +40,18 @@ module SpecCosts
     sources.uniq.reject { |dir| dir == "spec/rigor" }.select { |dir| File.directory?(File.join(root, dir)) }.sort
   end
 
-  # Every spec file under a mirror directory, sorted.
+  # Every spec file under a mirror directory, and the same-named spec beside one, sorted.
   def mirrored_specs(root = Dir.pwd)
-    mirror_dirs(root).flat_map { |dir| Dir.glob("#{dir}/**/*_spec.rb", base: root) }.uniq.sort
+    mirror_dirs(root).flat_map do |dir|
+      [*Dir.glob("#{dir}/**/*_spec.rb", base: root), *same_named_spec(dir, root)]
+    end.uniq.sort
   end
+
+  # The same-named spec beside a mirror directory, when there is one.
+  def same_named_spec(dir, root = Dir.pwd) = ["#{dir}_spec.rb"].select { |path| File.file?(File.join(root, path)) }
+
+  # What a full refresh measures: every mirror directory and every same-named spec.
+  def targets(root = Dir.pwd) = mirror_dirs(root).flat_map { |dir| [dir, *same_named_spec(dir, root)] }
 
   # { path => seconds } from the table's text; `#` lines are comments.
   def parse(text)
@@ -131,5 +140,5 @@ end
 if defined?(RSpec::Core) && ENV["SPEC_COSTS_OUT"]
   SpecCosts::Probe.install(ENV.fetch("SPEC_COSTS_OUT"))
 elsif $PROGRAM_NAME == __FILE__
-  SpecCosts.refresh(ARGV.empty? ? SpecCosts.mirror_dirs : ARGV)
+  SpecCosts.refresh(ARGV.empty? ? SpecCosts.targets : ARGV)
 end

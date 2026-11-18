@@ -1,0 +1,9 @@
+module Rigor
+  module Analysis
+    # The process-wide gates every recording call site asks first (#3315). The rest of the module is undeclared.
+    module DependencyRecorder
+      def self?.active?: () -> bool
+      def self?.recording?: () -> bool
+    end
+  end
+end

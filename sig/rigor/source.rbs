@@ -21,6 +21,10 @@ module Rigor
       def self?.symbol_arg: (untyped? call_node, Integer index) -> Symbol?
     end
 
+    module ConstantPath
+      def self?.declaration_prefix: (Array[untyped] outer_prefix, untyped constant_path) -> (Array[untyped] | [String] | nil)
+    end
+
     module SymbolName
       def self?.of: (String? text) -> Symbol?
     end

@@ -18,8 +18,9 @@ require "spec_helper"
 # Known limit (#3351): the projection trusts the `non-empty-array` fact, so where the fact is stale `pop` answers `T`
 # on an array that may be empty. The "stale fact" context pins the seams the engine drops the fact at (#3347): a
 # closure, the `Kernel#loop` back-edge, a rescue entry, a `self` call on an ivar, the receiver escaping. A mutation
-# through an alias the engine does not link still leaves the fact in place. That was accepted because `shift`,
-# `first`, `last` and `sample` already answer `T` on any array, with no guard at all.
+# through an alias the engine does not link (`xs.instance_eval { clear }`, `xs.public_send(m)`) still leaves the fact
+# in place. That was accepted because `shift`, `first`, `last` and `sample` already answer `T` on any array, with no
+# guard at all.
 RSpec.describe "Array#pop on non-empty-array", type: :runner do
   def dumps(source)
     result = analyze(%(require "rigor/testing"\ninclude Rigor::Testing\n#{source}))

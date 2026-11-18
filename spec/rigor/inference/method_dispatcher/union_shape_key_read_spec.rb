@@ -64,7 +64,7 @@ RSpec.describe "MethodDispatcher key read on a union of shapes" do
       expect_read(disjoint, :[], [c(:a)], u(c(1), c(nil)))
     end
 
-    it "keeps what a lone shape answers to `fetch`, which the shape tier leaves to the projection" do
+    it "keeps what a lone shape answers to `fetch`, which the shape tier leaves to the projection (guard)" do
       expect_read(disjoint, :fetch, [c(:a)], u(c(1), c(2)))
       # Without a scope the default binds to `Dynamic[top]` here; `rigor check` answers `0 | 1 | 2`.
       expect_read(disjoint, :fetch, [c(:a), c(0)], u(c(1), c(2), comb.untyped))
@@ -86,12 +86,12 @@ RSpec.describe "MethodDispatcher key read on a union of shapes" do
       expect_read([records.first, plain], :[], [c(:a)], u(c(1), comb.nominal_of("String")))
     end
 
-    it "declines with a `nil` member, as before (the typer's nil-receiver path owns that read)" do
+    it "(guard) declines with a `nil` member, as before (the typer's nil-receiver path owns that read)" do
       expect(dispatch(u(records.first, c(nil)), :[],
                       [c(:a)])).to eq(dispatch(u(comb.nominal_of("Object"), c(nil)), :[], [c(:a)]))
     end
 
-    it "declines with a `Dynamic` member, as before, so the caller keeps the read gradual" do
+    it "(guard) declines with a `Dynamic` member, as before, so the caller keeps the read gradual" do
       expect(dispatch(u(records.first, comb.untyped), :[], [c(:a)])).to be_nil
     end
   end
@@ -101,7 +101,7 @@ RSpec.describe "MethodDispatcher key read on a union of shapes" do
       expect(dispatch(u(*records), :[], [comb.nominal_of("Symbol")])).to eq(u(c(1), c("s"), c(2), c(:t)))
     end
 
-    it "answers a union of declared keys as the lone shapes do" do
+    it "answers a union of declared keys as the lone shapes do (guard: the same answer as before)" do
       expect_read(records, :[], [u(c(:a), c(:b))], u(c(1), c("s"), c(2), c(:t)))
     end
   end

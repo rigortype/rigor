@@ -385,7 +385,7 @@ module Rigor
           # joined and no member is dispatched twice.
           def dispatch_union(receiver, method_name, args, environment, block_type, self_type_override = nil, # rubocop:disable Metrics/ParameterLists
                              public_only: false, scope: nil, call_node: nil)
-            shape_read = block_type.nil? && shape_key_read?(method_name, args)
+            shape_read = shape_key_read?(method_name, args)
             results = receiver.members.map do |member|
               (shape_read && shape_member_read(member, method_name, args)) ||
                 dispatch_one(member, method_name, args, environment, block_type, self_type_override,

@@ -1,0 +1,38 @@
+# Pins for `make coverage` (tool/coverage_ratchet.rb, #3315): two figures of the precision scan over Rigor's own
+# `lib/`, each held within `slack` of its `pin` in BOTH directions.
+#
+# - A figure that worsens past the slack fails: declare what the change left untyped, or raise the pin in the same
+#   commit with the reason in its message.
+# - A figure that improves past the slack also fails, so the gain is locked in: set the pin to the new figure.
+#
+# The scan is deterministic (the same tree gives the same counts on every run), so the slack is not noise margin. It
+# is the drift an ordinary change may carry without touching this file, sized on measured moves: a run of lib-only
+# commits moved either figure by under 0.05 points, while #3354's five `sig/` declarations moved the Dynamic call share
+# by 0.26 points and precision by 0.16. How to read and refresh the figures: docs/agents/measurement.md
+# § "The self-typing ratchet".
+
+# The configuration the figures are measured under; the tool refuses any other. `.rigor.gates.yml` is the self-check
+# configuration with `parameter_inference:` off, so the ratchet sees a regression in declarations or in the engine but
+# not one in parameter inference itself.
+config: .rigor.gates.yml
+parameter_inference: false
+
+# `precise_ratio` of `rigor coverage --format json lib`: expressions whose type is constant, nominal, shaped, refined
+# or bot, over every expression counted.
+precision:
+  pin: 0.5959 # 239216 / 401461
+  slack: 0.0015
+
+# `dynamic_call_count` / `call_sites`: the `Prism::CallNode`s whose result is a whole `Dynamic` or a union whose worst
+# member is one (the `dynamic_top` and `dynamic_specific` tiers), over every `Prism::CallNode`.
+dynamic_call_share:
+  pin: 0.4983 # 50985 / 102323
+  slack: 0.0015
+
+# A scan that counted fewer than these visited the wrong tree or lost files, and its ratios prove nothing.
+floors:
+  expressions: 350000
+  call_sites: 90000
+
+# A move larger than this in one change is an instrument change, not a typing change.
+max_step: 0.02

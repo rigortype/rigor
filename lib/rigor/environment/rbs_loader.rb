@@ -2542,7 +2542,7 @@ module Rigor
       end
 
       # Returns true when the named RBS declaration is a Module (`RBS::AST::Declarations::Module`) rather
-      # than a Class. The `user_class_fallback_receiver` tier consults this to route
+      # than a Class. The user-class fallback tier (`UserClassFallback`) consults this to route
       # `Nominal[M].some_kernel_method` (where M is a module mixin like `PP::ObjectMixin`) through the
       # `Nominal[Object]` fallback, because every concrete includer of M sees Kernel / Object instance
       # methods as part of its own ancestor chain.

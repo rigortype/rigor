@@ -149,6 +149,9 @@ module Rigor
       module CGIFolding
         def self?.try_dispatch: (CallContext context) -> (Type::Constant | nil)
       end
+      module CompositeReceiver
+        def self?.try_dispatch: (CallContext context) -> Type::t?
+      end
       module ConstantFolding
         def self?.try_dispatch: (CallContext context) -> untyped
       end
@@ -156,6 +159,9 @@ module Rigor
         def self?.try_dispatch: (CallContext context) -> untyped
       end
       module DependencySource
+        def self?.try_dispatch: (CallContext context) -> (Type::Dynamic | nil)
+      end
+      module DiscoveredMethod
         def self?.try_dispatch: (CallContext context) -> (Type::Dynamic | nil)
       end
       module FileFolding
@@ -235,6 +241,9 @@ module Rigor
       end
       module URIFolding
         def self?.try_dispatch: (CallContext context) -> (Type::Constant | Type::Tuple | nil)
+      end
+      module UserClassFallback
+        def self?.try_dispatch: (CallContext context) -> untyped
       end
     end
 

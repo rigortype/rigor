@@ -64,4 +64,17 @@ RSpec.describe Rigor::Inference::MethodDispatcher::UniversalObjectDispatch do
       expect(dispatch(:upcase)).to be_nil
     end
   end
+
+  # What holds the tier in `MethodDispatcher`'s `STUB_AND_UNIVERSAL_TIERS`: no other tier answers a `Dynamic` receiver.
+  describe "through MethodDispatcher.dispatch" do
+    def ask(method_name)
+      Rigor::Inference::MethodDispatcher.dispatch(receiver_type: untyped, method_name: method_name, arg_types: [],
+                                                  environment: Rigor::Environment.default)
+    end
+
+    it "answers a selector of the table, and nothing for one it leaves out" do
+      expect(ask(:nil?)).to eq(bool)
+      expect(ask(:upcase)).to be_nil
+    end
+  end
 end

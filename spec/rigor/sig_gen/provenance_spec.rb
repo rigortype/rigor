@@ -440,7 +440,11 @@ SIG_PROVENANCE_PARAMETER_ONLY = {
   # way, and sig-gen renders no return for `PluginContribution` or `SyntheticMethodDispatch`
   # (`sig.skipped.untyped-return`). The other two, `DependencySource` and `ProjectPatched`, declare the
   # `Type::Dynamic | nil` sig-gen generates and are earned.
-  "sig/rigor/inference.rbs" => { unmarked: 13, marked: 0 },
+  # +1 (#3345, ADR-116 WD12 D3): of the last three tiers moved, sig-gen renders no return for `UserClassFallback`
+  # (`sig.skipped.untyped-return`: it answers what `RbsDispatch.try_dispatch` answers, itself a row here). The other
+  # two declare the return sig-gen generates and are earned: `DiscoveredMethod` `Type::Dynamic | nil`, and
+  # `CompositeReceiver` every member of `Type::t` or nil, declared `Type::t?`.
+  "sig/rigor/inference.rbs" => { unmarked: 14, marked: 0 },
   # Both rows were marked `unrenderable` rows before the class existed.
   "sig/rigor/scope.rbs" => { unmarked: 0, marked: 2 }
 }.freeze
@@ -454,11 +458,11 @@ SIG_PROVENANCE_PARAMETER_ONLY_MARKED = [
 ].freeze
 
 # #3335 — method declarations whose parameter list was compared with a recorded `def` on the tree this pin was taken
-# from (1069 on 2026-11-19 after #3345's eight `try_dispatch` declarations for the tiers moved out of
-# `method_dispatcher.rb` in two batches, every one fitting). A floor, not an exact pin, because every new declaration
+# from (1072 on 2026-11-19 after #3345's eleven `try_dispatch` declarations for the tiers moved out of
+# `method_dispatcher.rb` in three batches, every one fitting). A floor, not an exact pin, because every new declaration
 # of a `def` raises it: raise it when the count grows, and lower it only with the reason in the commit body (a deleted
 # declaration, or a `def` the pairing stopped finding, which is the case this floor exists to catch).
-SIG_PARAMETER_SHAPE_COMPARED_FLOOR = 1069
+SIG_PARAMETER_SHAPE_COMPARED_FLOOR = 1072
 
 module SigProvenanceSpecHelpers
   # The hard-rule failure for unmarked `tighter_return` rows. A row whose declared return is the bare `untyped` claims

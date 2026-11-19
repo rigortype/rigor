@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require_relative "../reflection"
-require_relative "../typing_state"
 require_relative "../type"
 require_relative "dynamic_origin"
 require_relative "flow_tracer"
@@ -46,7 +44,9 @@ require_relative "method_dispatcher/plugin_contribution"
 require_relative "method_dispatcher/synthetic_method_dispatch"
 require_relative "method_dispatcher/project_patched"
 require_relative "method_dispatcher/dependency_source"
-require_relative "../run_scoped_slots"
+require_relative "method_dispatcher/discovered_method"
+require_relative "method_dispatcher/user_class_fallback"
+require_relative "method_dispatcher/composite_receiver"
 
 module Rigor
   module Inference
@@ -107,7 +107,7 @@ module Rigor
 
       # `plugin_typed_sink` is internal bookkeeping for the composite-receiver tier below: when it is an
       # Array, an answering plugin tier PUSHES the call node instead of recording it on the scope, and
-      # the tier commits the buffer only if it goes on to answer. See {#try_composite_receiver}.
+      # the tier commits the buffer only if it goes on to answer. See {CompositeReceiver}.
       def resolve(receiver_type:, method_name:, arg_types:, # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/ParameterLists
                   block_type: nil, environment: nil,
                   call_node: nil, scope: nil, plugin_typed_sink: nil, skip_project_patched: false)
@@ -124,8 +124,8 @@ module Rigor
         end
 
         # Build the call context once and thread it — unchanged — through every tier
-        # (`_DispatchTier#try_dispatch`). The dispatcher's own private fallback tiers still read
-        # the positional locals below; only the tier modules consume the context object.
+        # (`_DispatchTier#try_dispatch`). Every tier reads the context; the positional locals are read
+        # below only by what `resolve` records after an answer.
         context = CallContext.build(
           receiver: receiver_type, method_name: method_name, args: arg_types,
           block_type: block_type, environment: environment,
@@ -186,14 +186,12 @@ module Rigor
         # `() -> String?` when the documented return is `non-empty-string | nil`) get the
         # tightened type without modifying the vendored `ruby/rbs` submodule. The override table
         # lives in `Rigor::Builtins::StaticReturnRefinements::OVERRIDES`.
-        bundled_override = first_tier_answer(BUNDLED_OVERRIDE_TIERS, context)
-        return bundled_override if bundled_override
-
+        #
         # `Foo.instance` for a class that includes the stdlib `Singleton` mixin. Ruby grows that method through
         # an `included` hook and the upstream RBS leaves `Singleton::SingletonClassMethods` empty, so nothing
         # below can answer it. See {SingletonMixinDispatch} for why the value matters more than the site count.
-        singleton_mixin = SingletonMixinDispatch.try_dispatch(context)
-        return singleton_mixin if singleton_mixin
+        bundled_override = first_tier_answer(BUNDLED_OVERRIDE_TIERS, context)
+        return bundled_override if bundled_override
 
         rbs_result = RbsDispatch.try_dispatch(context)
         if rbs_result
@@ -238,7 +236,7 @@ module Rigor
           return dep_source_result
         end
 
-        # v0.1.3 — discovered-method dispatch tier. When the receiver class has no RBS BUT
+        # v0.1.3 — discovered-method dispatch tier ({DiscoveredMethod}). When the receiver class has no RBS BUT
         # scope_indexer recorded `def method_name` for that class (or singleton), the call
         # dispatches to `Dynamic[top]` rather than falling through to the user-class fallback.
         # Sits below RBS / dependency-source so authoritative signatures still win. The
@@ -246,7 +244,7 @@ module Rigor
         # `alias_method`; the `discovered_method?` consult here closes the fail-soft-event hot
         # spot on implicit-self calls (`sibling_private(...)`) inside `lib/rigor/`'s own
         # internals (analyser private helpers don't have RBS).
-        discovered_result = try_discovered_method(receiver_type, method_name, scope)
+        discovered_result = DiscoveredMethod.try_dispatch(context)
         if discovered_result
           # ADR-82 WD2/WD3 — the call resolved to a discovered user method but its return could not be
           # inferred (bare `def`, untyped-parameter chain). Record it as an inference gap, not the
@@ -278,26 +276,24 @@ module Rigor
         # against it would otherwise mis-fire `call.undefined-method`. Resolve it to
         # `Dynamic[Top]` instead — the same no-false-positive contract as the dependency-source
         # tier. Sits below every real resolution tier so a genuine signature always wins.
-        stub_result = first_tier_answer(STUB_TIERS, context)
-        return stub_result if stub_result
-
+        #
         # The receiver-independent `BasicObject` / `Object` / `Kernel` selectors, for a receiver no tier
         # above could name. `x.nil?` is `bool` whatever `x` is; without this tier it was `Dynamic[Top]`
         # like every other call on an untyped receiver. Sits here, below every real resolution tier, so a
         # nameable receiver always answers from its own signature first — this only ever replaces a
         # `Dynamic[Top]` the typer was about to produce. See {UniversalObjectDispatch} for the table and
         # for the selectors deliberately left out of it.
-        universal_result = UniversalObjectDispatch.try_dispatch(context)
-        return universal_result if universal_result
+        stub_or_universal = first_tier_answer(STUB_AND_UNIVERSAL_TIERS, context)
+        return stub_or_universal if stub_or_universal
 
-        # Slice 7 phase 10 — user-class ancestor fallback. When the receiver is `Nominal[T]` or
+        # Slice 7 phase 10 — user-class ancestor fallback ({UserClassFallback}). When the receiver is `Nominal[T]` or
         # `Singleton[T]` for a class not in the RBS environment (typically a user-defined class),
         # retry the dispatch against the implicit ancestor: `Nominal[Object]` for instance
         # receivers and `Singleton[Object]` for singleton receivers. This resolves Kernel
         # intrinsics (`require`, `raise`, `puts`, ...) and Module/Class introspection
         # (`attr_reader`, `private`, ...) on user classes without requiring the user to author
         # their own RBS.
-        fallback_result = try_user_class_fallback(receiver_type, environment, call_node, context)
+        fallback_result = UserClassFallback.try_dispatch(context)
         # ADR-82 WD2/WD3 — a user-class receiver whose call resolved to the lenient ancestor fallback
         # with no inferable return. Same inference-gap provenance as the discovered-method tier, so a
         # downstream dispatch on this value is labeled honestly rather than `unsupported_syntax`.
@@ -309,8 +305,8 @@ module Rigor
         # Issue #1101 — composite-receiver projection, the last tier. Every tier above needs a
         # receiver it can name; a `Union` or a `Difference` is not one, so a composite receiver whose
         # members WOULD each resolve still lands `Dynamic[top]`. Retry per projected member through
-        # this same chain. See {#try_composite_receiver} for the projection rule and why it sits here.
-        try_composite_receiver(context)
+        # this same chain. See {CompositeReceiver} for the projection rule and why it sits here.
+        first_tier_answer(COMPOSITE_TIERS, context)
       end
 
       # The `nil` part of an optional count dispatches as the no-argument call, the rest as written; a count
@@ -330,7 +326,7 @@ module Rigor
       # ADR-100 WD4 — records the transitive `-> void` provenance when the called method is a
       # discovered project `def` whose {VoidTailSummary} chain ends in an author-declared `-> void`
       # leaf on the same owner. Guards cheapest-first: the internal dispatcher callers nil `scope` /
-      # `call_node` out; the receiver must project through {#discovered_method_lookup}
+      # `call_node` out; the receiver must project through {DiscoveredMethod.discovered_method_lookup}
       # (`Nominal` / `Singleton` only — unions and `Dynamic` receivers stay out); and the
       # `discovered_method?` pre-filter (two pure hash reads) keeps the hot path at ~zero cost —
       # only a call that provably targets a discovered def of the right kind resolves the node and
@@ -341,7 +337,7 @@ module Rigor
         return if scope.nil? || call_node.nil?
         return unless call_node.is_a?(Prism::CallNode)
 
-        class_name, kind = discovered_method_lookup(receiver_type)
+        class_name, kind = DiscoveredMethod.discovered_method_lookup(receiver_type)
         return if class_name.nil?
         return unless scope.discovered_method?(class_name, method_name, kind)
 
@@ -356,61 +352,6 @@ module Rigor
         origin = VoidTailSummary.new(scope).origin_for(def_node, class_name, kind)
         scope.record_void_origin(call_node, origin) if origin
       end
-
-      # v0.1.3 — discovered-method dispatch tier. `scope` carries the `discovered_methods` table
-      # built once per program by `ScopeIndexer` (a `Hash[String, Hash[Symbol, :instance |
-      # :singleton]]`). When the receiver names a discovered class AND the requested method is
-      # recorded for that class's appropriate kind, return `Type::Combinator.untyped` — the
-      # dispatcher cannot infer a more precise return type from the bare `def` shape, but the
-      # call site stops being a fail-soft hot spot.
-      #
-      # Returns `nil` when scope / receiver class is unavailable, when the method is not in the
-      # discovered table, OR when `discovered_def_nodes` carries a re-typable body for the method
-      # (so the downstream `ExpressionTyper#try_user_method_inference` tier can re-type the body
-      # for a precise return type rather than collapsing to `Dynamic[top]` here).
-      #
-      # The tier does NOT gate on `rbs_class_known?`. RBS dispatch already had its turn upstream
-      # and returned `nil` (otherwise we wouldn't be here). When RBS knows the class but the
-      # particular method is missing from the sig — common for internal helpers and for
-      # auto-generated stubs that emit `class X` without enumerating every method — falling
-      # through to the user-class fallback would mistakenly fire `call.undefined-method`.
-      # Honoring the discovered table here keeps the sibling-private call resolution working
-      # under partial RBS coverage.
-      def try_discovered_method(receiver_type, method_name, scope)
-        return nil if scope.nil?
-
-        class_name, kind = discovered_method_lookup(receiver_type)
-        return nil if class_name.nil?
-        return nil unless scope.discovered_method?(class_name, method_name, kind)
-        # Decline when a re-typable body is recorded for the method, so the downstream
-        # `ExpressionTyper` inference tier can fold a precise return instead of collapsing to
-        # `Dynamic[top]` here — instance bodies via `user_def_for`, singleton bodies (`def
-        # self.x` / `module_function`) via `singleton_def_for` (module-singleton call
-        # resolution, ADR-57 follow-up).
-        return nil if kind == :instance && scope.user_def_for(class_name, method_name)
-        return nil if kind == :singleton && scope.singleton_def_for(class_name, method_name)
-
-        Type::Combinator.untyped
-      end
-
-      # Resolves the `(class_name, kind)` pair scope_indexer keys its `discovered_methods` table
-      # on. `Nominal[X]` looks up instance methods on X; `Singleton[X]` looks up singleton
-      # methods on X. Other carriers return `[nil, nil]` so the tier declines.
-      def discovered_method_lookup(receiver_type)
-        # #525 — the ADR-48 member carriers name their class too: a `Line = Struct.new(...) do ... end`
-        # value is a StructInstance whose block-def methods are discovered under "Line".
-        case receiver_type
-        when Type::Nominal, Type::StructInstance, Type::DataInstance
-          [receiver_type.class_name, :instance]
-        when Type::Singleton, Type::StructClass, Type::DataClass
-          [receiver_type.class_name, :singleton]
-        else NO_DISCOVERED_LOOKUP
-        end
-      end
-
-      # The shared "no discovered-method key" pair; callers destructure it (#775).
-      NO_DISCOVERED_LOOKUP = [nil, nil].freeze
-      private_constant :NO_DISCOVERED_LOOKUP
 
       # Issue #963 item 2 — the MEMBERSHIP half of the two plugin tiers, for #618's own-method veto.
       #
@@ -496,14 +437,24 @@ module Rigor
       # The tiers `resolve` asks through an array outside the precise band, each where its comment in `resolve`
       # says. A tier is in an array when nothing in `resolve` follows its answer; one whose answer `resolve`
       # follows with a record on the scope or the reporter stays a call there.
-      BUNDLED_OVERRIDE_TIERS = Ractor.make_shareable([HktBuiltinReturn, StaticRefinement].freeze)
+      #
+      # What Rigor bundles ahead of the RBS answer: the two override tables, then the `instance` the stdlib
+      # `Singleton` mixin grows and its upstream RBS leaves undeclared.
+      BUNDLED_OVERRIDE_TIERS = Ractor.make_shareable([
+        HktBuiltinReturn, StaticRefinement, SingletonMixinDispatch
+      ].freeze)
       private_constant :BUNDLED_OVERRIDE_TIERS
 
       SYNTHETIC_TIERS = Ractor.make_shareable([SyntheticMethodDispatch].freeze)
       private_constant :SYNTHETIC_TIERS
 
-      STUB_TIERS = Ractor.make_shareable([SynthesizedStub].freeze)
-      private_constant :STUB_TIERS
+      # The two answers for a receiver that has no signature of its own to read: a type Rigor invented, then a
+      # `Dynamic`.
+      STUB_AND_UNIVERSAL_TIERS = Ractor.make_shareable([SynthesizedStub, UniversalObjectDispatch].freeze)
+      private_constant :STUB_AND_UNIVERSAL_TIERS
+
+      COMPOSITE_TIERS = Ractor.make_shareable([CompositeReceiver].freeze)
+      private_constant :COMPOSITE_TIERS
 
       # Asks the tiers of one array in order and answers the first answer, or nil when every tier declines.
       #
@@ -621,301 +572,6 @@ module Rigor
         return nil unless KernelDispatch.kernel_owned_call?(context)
 
         KernelDispatch.try_dispatch(context)
-      end
-
-      def try_user_class_fallback(receiver_type, environment, call_node, context)
-        return nil if environment.nil?
-
-        fallback_receiver = user_class_fallback_receiver(receiver_type, environment)
-        return nil if fallback_receiver.nil?
-        return nil if declared_by_external_ancestor?(receiver_type, environment, context)
-        return nil if project_singleton_definer?(receiver_type, context)
-
-        # Preserve the ORIGINAL receiver type as the `self` substitution so `Kernel#dup: () ->
-        # self` and other `self`-returning methods route through Object's RBS while still
-        # returning the caller's type rather than `Object`. Without this, `base = self.dup`
-        # inside a `Bundler::URI::Generic` instance method types `base` as `Object` because
-        # `Bundler::URI::Generic` is not in RBS and the fallback's `self` resolves to Object.
-        #
-        # `public_only:` — when the call has an EXPLICIT, non-`self` receiver
-        # (`Favourite.select(...)`), suppress the private `Object`/`Kernel`/`Class` methods the
-        # fallback would otherwise resolve. Ruby raises `NoMethodError` for a private method
-        # called with an explicit receiver, so resolving `Favourite.select` to the private
-        # `Kernel#select` (`-> Array[String]`) is a confidently-wrong type. Implicit-self /
-        # `self.`-receiver calls (`puts`, `raise`, `require`) keep resolving — those are the
-        # fallback's intended targets.
-        RbsDispatch.try_dispatch(
-          context.with(
-            receiver: fallback_receiver,
-            self_type_override: receiver_type,
-            public_only: ProjectPatched.explicit_non_self_receiver?(call_node),
-            call_node: nil, scope: nil
-          )
-        )
-      end
-
-      # Issue #2196 — a project class whose ancestry reaches a core or stdlib class before `Object` (`class FL <
-      # Array`) answers a name that class declares from that class, not from `Object` / `Kernel`: Ruby dispatches
-      # `select { … }` on an `FL` to `Array#select`, never to the private `Kernel#select` (`-> Array[String]`). The
-      # ancestor tiers decline such a name where they cannot type it (`RbsDispatch#returns_the_walked_ancestry?`),
-      # and the `Object` fallback then fabricated `Kernel#select`'s answer, so `fields.detect { |f| f.errors }` read
-      # `f` as `String`. The fallback declines the name instead, which leaves the call `Dynamic[top]`.
-      # {ExternalAncestorResolution.resolve} answers nil for a name only `Object`, `Kernel` or `BasicObject` declares,
-      # so `puts` and `raise` keep resolving.
-      def declared_by_external_ancestor?(receiver_type, environment, context)
-        return false unless receiver_type.is_a?(Type::Nominal)
-
-        scope = context.scope
-        return false if scope.nil?
-
-        class_name = receiver_type.class_name
-        method_name = context.method_name
-        if MemoAudit.enabled? && MemoAudit.suspended?
-          return external_ancestor_declares?(class_name, method_name, scope,
-                                             environment)
-        end
-
-        memo = external_ancestor_memo(scope, environment)
-        key = [class_name, method_name]
-        if memo.key?(key)
-          return MemoAudit.check("user class fallback external ancestor", memo[key], class_name, method_name) do
-            external_ancestor_declares?(class_name, method_name, scope, environment)
-          end
-        end
-
-        memo[key] = MemoAudit.key_audit("user class fallback external ancestor") do
-          external_ancestor_declares?(class_name, method_name, scope, environment)
-        end
-      end
-
-      def external_ancestor_declares?(class_name, method_name, scope, environment)
-        !ExternalAncestorResolution.resolve(class_name, method_name, :instance,
-                                            scope: scope, environment: environment, record_dependencies: false).nil?
-      end
-
-      # Issue #2284 — a class object whose singleton chain holds a project definer of the name (its own `def
-      # self.name`, one a project superclass wrote, an `extend`ed module's `def name`) answers from that definer,
-      # not from `Module#name` / `Class#…` on the `Singleton[Object]` fallback: Ruby's singleton ancestry puts
-      # every project entry ahead of `Class`. The fallback declines so the typer's singleton-body inference
-      # answers the definer's return, or `Dynamic` where the slot is contested and the def may not be the one
-      # that runs.
-      #
-      # The chain walk files the class edge of every entry it passes, so it runs only for a name some project file
-      # defines at all ({BlockCallTiming.project_defines_anywhere?}, which files the `defines:<name>` edge either way,
-      # #1459). Without it every class-body `private` / `attr_reader` call on a project class would depend on its
-      # whole ancestry. The by-name answer is memoised per discovery index; the edge is filed on every call.
-      def project_singleton_definer?(receiver_type, context)
-        return false unless receiver_type.is_a?(Type::Singleton)
-
-        scope = context.scope
-        return false if scope.nil?
-        return false unless project_defines_name?(scope, context.method_name)
-
-        !scope.singleton_def_through_ancestors(receiver_type.class_name, context.method_name).last.nil?
-      end
-
-      def project_defines_name?(scope, method_name)
-        if MemoAudit.enabled? && MemoAudit.suspended?
-          return BlockCallTiming.project_defines_anywhere?(method_name,
-                                                           scope)
-        end
-
-        memo = defines_name_memo(scope)
-        if memo.key?(method_name)
-          Analysis::DependencyRecorder.read_missing(:defines, method_name) if Analysis::DependencyRecorder.active?
-          return MemoAudit.check("user class fallback defines name", memo[method_name], method_name) do
-            BlockCallTiming.project_defines_anywhere?(method_name, scope)
-          end
-        end
-
-        memo[method_name] = MemoAudit.key_audit("user class fallback defines name") do
-          BlockCallTiming.project_defines_anywhere?(method_name, scope)
-        end
-      end
-
-      # ADR-129 WD1 — a run-scoped Memo: one slot keyed on the identity of the discovery index and the environment,
-      # the only inputs the name table's answers read.
-      DEFINES_NAME_MEMO = TypingState.memo(
-        :user_class_fallback_defines_name,
-        run_scoped: true, audit: "user class fallback defines name",
-        reason: "one [discovery, environment, names] slot keyed on the identities of the discovery " \
-                "index and the environment; each name's answer reads only them"
-      )
-      private_constant :DEFINES_NAME_MEMO
-
-      # One slot per discovery index and environment, as {#external_ancestor_memo} keeps its own: the answer reads
-      # only the frozen discovery tables and the environment's `pre_eval:` patches.
-      def defines_name_memo(scope)
-        discovery = scope.discovery
-        environment = scope.environment
-        state = TypingState.current
-        slot = state[DEFINES_NAME_MEMO]
-        unless slot && slot[0].equal?(discovery) && slot[1].equal?(environment)
-          slot = [discovery, environment, {}]
-          state[DEFINES_NAME_MEMO] = slot
-        end
-        slot[2]
-      end
-
-      # ADR-129 WD1 — a run-scoped Memo, keyed as {DEFINES_NAME_MEMO} is.
-      EXTERNAL_ANCESTOR_MEMO = TypingState.memo(
-        :user_class_fallback_external_ancestor,
-        run_scoped: true, audit: "user class fallback external ancestor",
-        reason: "one [discovery, environment, answers] slot keyed on the identities of the " \
-                "discovery index and the RBS environment, the only inputs the walk reads"
-      )
-      private_constant :EXTERNAL_ANCESTOR_MEMO
-
-      # One slot per discovery index and environment, as `RbsDispatch#ancestor_memo_slot` keeps its own: the answer
-      # reads only the frozen discovery tables and the RBS environment, and its walk is withheld from dependency
-      # recording, so it may be served again for the same pair.
-      def external_ancestor_memo(scope, environment)
-        discovery = scope.discovery
-        state = TypingState.current
-        slot = state[EXTERNAL_ANCESTOR_MEMO]
-        unless slot && slot[0].equal?(discovery) && slot[1].equal?(environment)
-          slot = [discovery, environment, {}]
-          state[EXTERNAL_ANCESTOR_MEMO] = slot
-        end
-        slot[2]
-      end
-
-      def user_class_fallback_receiver(receiver_type, environment)
-        case receiver_type
-        when Type::Nominal
-          # Modules: even when RBS knows the module, an instance method on a mixin-only module
-          # (e.g. `PP::ObjectMixin`) observes Kernel / Object methods through every concrete
-          # includer's ancestor chain. Route through the `Nominal[Object]` fallback so
-          # `self.inspect` / `self.respond_to?` / `self.class` resolve cleanly when the module
-          # itself does not declare them.
-          known = Rigor::Reflection.rbs_class_known?(receiver_type.class_name, environment: environment)
-          return environment.nominal_for_name("Object") if !known || environment.rbs_module?(receiver_type.class_name)
-
-          nil
-        when Type::Singleton
-          return nil if Rigor::Reflection.rbs_class_known?(receiver_type.class_name, environment: environment)
-
-          environment.singleton_for_name("Class")
-        end
-      end
-
-      # Issue #1101 — the composite-receiver projection tier, the LAST thing `resolve` tries.
-      #
-      # Every tier above needs a receiver it can *name*: `receiver_descriptor`, the discovered-method
-      # lookup, the dependency-source and synthesized-stub tiers and the user-class fallback all switch
-      # on `Nominal` / `Singleton` / a member carrier. A `Union` or a `Difference` is none of those, so a
-      # composite receiver whose members would each resolve perfectly well still fell through the whole
-      # chain and landed `Dynamic[top]`.
-      #
-      # `RbsDispatch` already distributes over a `Union` (and erases a `Difference` to its base, #533),
-      # but it does so INSIDE one tier, so a member that needs a LOWER tier — a user class with no RBS,
-      # a discovered `def`, an opt-in gem — makes the whole union decline. That was the corpus shape before
-      # #2430: rigor-actionpack typed `params[:k]` as the bare `ActionController::Parameters | nil` union, the
-      # `Parameters` arm resolved only through the user-class fallback, and so `params[:k].present?` / `#==`
-      # / `#blank?` / `#to_s` read opaque on every Rails app. Measured by toggling this file alone: the
-      # named-pair census drained 137 sites on redmine and 56 on mastodon, and `rigor check` reported the
-      # same diagnostics on both arms across eight survey targets. The plugin now answers a `Dynamic`
-      # carrier, which this projection does not reach, so those off-chain calls read `Dynamic[top]` until
-      # the carrier is projected here too (#2448).
-      #
-      # **Why the bottom and not next to `RbsDispatch`.** Sitting here, the tier can only ever replace a
-      # `Dynamic[top]` the typer was about to produce — the same ADR-5 argument {UniversalObjectDispatch}
-      # makes. Hoisting the projection above `RbsDispatch` would change answers that resolve today, which
-      # is a different change with a different measurement.
-      #
-      # **The projection rule** (`receiver_projection` below; the normative statement lives in
-      # [`inference-engine.md`](docs/internal-spec/inference-engine.md) § "Composite receivers"):
-      #
-      # - `Union[A, B, …]` projects to its members. Each is dispatched through this same chain and the
-      #   results are unioned; if ANY member declines, the whole tier declines. Never a partial answer —
-      #   a union whose members disagree about whether the method exists is exactly the case where an
-      #   answer would be a guess.
-      # - `Difference[base, nil]` projects to `base` with its nil-valued members removed. Removing `nil`
-      #   from a receiver cannot change method resolution at all: `NilClass` is nobody's ancestor, so
-      #   every remaining inhabitant looks a method up exactly as a plain `base` inhabitant does, and the
-      #   carrier is value-set-equal to the projection. This is `T.must(x)` (rigor-sorbet's
-      #   `strip_nil`), which builds `Difference[inferred(x), Constant[nil]]` — over a `T?` local that
-      #   base IS a union, which is why the two arms compose rather than being separate features.
-      # - Any other `Difference` DECLINES. `A − B` for a real `B` is a claim about which inhabitants
-      #   survive, and the projection has nowhere to put it: dispatching on `A` re-admits exactly the
-      #   overrides `B` contributed, and over a union base (`(String | Integer) − Integer` is Strings
-      #   only) it re-admits a member the difference eliminated and unions in its answer — a WIDER type
-      #   than today's decline, on a shape no corpus target produces. Subtracting a class from a union
-      #   needs an algebra the `Difference` carrier does not have (it removes a value set, not a member),
-      #   so the honest answer is to keep declining until something demands it. `RbsDispatch`'s #533
-      #   erasure is untouched and still answers these for an RBS-known base.
-      #
-      # `self` binds to the PROJECTED receiver, not to the composite: the projection is the exact set of
-      # inhabitants that can reach the method, so a `-> self` method (`dup`, `itself`, `tap`) answers per
-      # member and the union reassembles them — `(String | Symbol)#itself` is `String | Symbol`. Nothing is
-      # lost on the `Difference` arm because the projection is value-set-equal to the carrier there. This
-      # falls out of re-entering `resolve` rather than needing a `self_type_override`.
-      def try_composite_receiver(context)
-        members = receiver_projection(context.receiver)
-        return nil if members.nil? || members.size > COMPOSITE_PROJECTION_MEMBERS
-
-        plugin_typed = []
-        results = members.map do |member|
-          resolve(
-            receiver_type: member, method_name: context.method_name, arg_types: context.args,
-            block_type: context.block_type, environment: context.environment,
-            call_node: context.call_node, scope: context.scope, plugin_typed_sink: plugin_typed
-          )
-        end
-        return nil if results.any?(&:nil?)
-
-        plugin_typed.uniq.each { |node| context.scope&.record_plugin_typed_call(node) }
-        Type::Combinator.union(*results)
-      end
-
-      # An upper bound on the fan-out, because this tier re-runs the FULL dispatch chain per member.
-      # Real unions are two or three members wide; a receiver wider than this is a join the engine has
-      # already lost precision on, and paying N chain walks to union N answers is not worth it.
-      COMPOSITE_PROJECTION_MEMBERS = 8
-      private_constant :COMPOSITE_PROJECTION_MEMBERS
-
-      # The receivers each member of a composite carrier is dispatched as, or nil when the carrier is not
-      # projectable. Every member returned MUST itself be non-composite: that is what bounds the re-entry
-      # into `resolve` at one level, by construction rather than by a counter — the nested call reaches
-      # this tier with a receiver it declines immediately. A normalized `Union` never holds a `Union`, so
-      # the shapes the guard turns away are a `Difference` over a `Difference` (`T.must(T.must(x))`) and a
-      # `Union` holding one (`c ? T.must(y) : Bar.new`, which normalizes to `(A - nil) | Bar`). Both
-      # decline exactly as they did before this tier existed; neither appears in the survey corpus.
-      def receiver_projection(receiver)
-        members =
-          case receiver
-          when Type::Union then receiver.members
-          when Type::Difference then difference_projection(receiver)
-          end
-        return nil if members.nil? || members.empty?
-        return nil if members.any? { |member| member.is_a?(Type::Union) || member.is_a?(Type::Difference) }
-
-        members
-      end
-
-      # `Difference[base, nil]` projects to `base` minus its nil-valued members; every other difference
-      # declines. The nil filter runs over a scalar base as well as a union one, so the rule stays total:
-      # `Combinator.difference` does not normalize `NilClass - nil` (or `nil - nil`) to `Bot`, and this
-      # tier must not project `[NilClass]` and answer a NilClass method for a carrier with no inhabitant.
-      # Nothing observable turns on it today — `RbsDispatch`'s #533 erasure sits above this tier and
-      # already answers a nil-only base from the base's own descriptor — which is why the guard is here
-      # rather than in `Combinator`, where it would be a normalization change with its own blast radius.
-      def difference_projection(difference)
-        return nil unless nil_valued_type?(difference.removed)
-
-        base = difference.base
-        members = base.is_a?(Type::Union) ? base.members : [base]
-        retained = members.reject { |member| nil_valued_type?(member) }
-        return nil if retained.empty?
-
-        retained
-      end
-
-      # `nil` as either carrier spells it: the value-pinned `Constant[nil]` the engine normally produces,
-      # and the `Nominal[NilClass]` a widened or RBS-sourced position carries.
-      def nil_valued_type?(type)
-        (type.is_a?(Type::Constant) && type.value.nil?) ||
-          (type.is_a?(Type::Nominal) && type.class_name == "NilClass")
       end
 
       # Returns the positional block parameter types declared by the receiving method's selected

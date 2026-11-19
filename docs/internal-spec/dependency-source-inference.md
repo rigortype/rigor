@@ -325,7 +325,7 @@ RbsDispatch.try_dispatch                              ── RBS / RBS::Inline /
                                                          ↓ (no contract)
 DependencySource.try_dispatch                         ── ADR-10 (this tier)
                                                          ↓ (no entry)
-try_user_class_fallback                               ── Kernel / Module intrinsics
+UserClassFallback.try_dispatch                        ── Kernel / Module intrinsics
                                                          ↓
 call.undefined-method                                 ── final
 ```

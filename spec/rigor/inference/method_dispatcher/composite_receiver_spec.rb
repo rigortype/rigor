@@ -120,4 +120,123 @@ RSpec.describe "MethodDispatcher composite-receiver projection" do
       expect(dispatch(comb.union(*members.first(8)), :to_s)).to eq(comb.nominal_of("String"))
     end
   end
+
+  # The tier asked directly (ADR-116 WD12): `MethodDispatcher.resolve`, its one call back into the dispatcher, is
+  # stubbed, so these examples say what the tier passes to each re-entry and what it does with the answers. The
+  # groups above ask the real chain.
+  describe "CompositeReceiver.try_dispatch" do
+    let(:tier) { Rigor::Inference::MethodDispatcher::CompositeReceiver }
+    let(:dispatcher) { Rigor::Inference::MethodDispatcher }
+    let(:node) { Prism.parse("x.to_s").value.statements.body.first }
+    let(:string) { comb.nominal_of("String") }
+
+    def site(receiver, **rest) = cc(receiver: receiver, method_name: :to_s, args: [], **rest)
+
+    it "re-enters MethodDispatcher.resolve once per member, with the site's fields and one sink for all of them" do
+      asked = []
+      allow(dispatcher).to receive(:resolve) { |**keywords| asked << keywords and string }
+      scope = instance_double(Rigor::Scope, record_plugin_typed_call: nil)
+      environment = instance_double(Rigor::Environment)
+      block = comb.nominal_of("Proc")
+      context = cc(receiver: comb.union(rbs_less, nil_constant), method_name: :fetch, args: [string],
+                   block_type: block, environment: environment, call_node: node, scope: scope)
+
+      tier.try_dispatch(context)
+
+      site_fields = { method_name: :fetch, arg_types: [string], block_type: block, environment: environment,
+                      call_node: node, scope: scope }
+      expect(asked.map { |keywords| keywords.except(:plugin_typed_sink) })
+        .to eq(context.receiver.members.map { |member| { receiver_type: member, **site_fields } })
+      expect(asked.map { |keywords| keywords[:plugin_typed_sink] }).to all(equal(asked.first[:plugin_typed_sink]))
+      expect(asked.first[:plugin_typed_sink]).to eq([])
+    end
+
+    it "answers the union of what the members answer" do
+      answers = { rbs_less => string, other_rbs_less => comb.nominal_of("Symbol") }
+      allow(dispatcher).to receive(:resolve) { |**keywords| answers.fetch(keywords[:receiver_type]) }
+
+      expect(tier.try_dispatch(site(comb.union(rbs_less, other_rbs_less))))
+        .to eq(comb.union(string, comb.nominal_of("Symbol")))
+    end
+
+    it "commits what the members buffered to the scope, once a node, when every member answers" do
+      allow(dispatcher).to receive(:resolve) { |**keywords| keywords[:plugin_typed_sink] << node and string }
+      scope = instance_double(Rigor::Scope, record_plugin_typed_call: nil)
+
+      expect(tier.try_dispatch(site(comb.union(rbs_less, other_rbs_less), scope: scope))).to eq(string)
+      expect(scope).to have_received(:record_plugin_typed_call).with(node).once
+    end
+
+    it "declines, committing nothing, when a member declines" do
+      allow(dispatcher).to receive(:resolve) do |**keywords|
+        keywords[:plugin_typed_sink] << node
+        string if keywords[:receiver_type] == rbs_less
+      end
+      scope = instance_double(Rigor::Scope, record_plugin_typed_call: nil)
+
+      expect(tier.try_dispatch(site(comb.union(rbs_less, other_rbs_less), scope: scope))).to be_nil
+      expect(scope).not_to have_received(:record_plugin_typed_call)
+    end
+
+    it "answers a site without a scope, where a buffered record has nowhere to go" do
+      allow(dispatcher).to receive(:resolve) { |**keywords| keywords[:plugin_typed_sink] << node and string }
+
+      expect(tier.try_dispatch(site(comb.union(rbs_less, other_rbs_less)))).to eq(string)
+    end
+
+    it "declines a receiver it does not project, and one wider than the cap, without re-entering" do
+      allow(dispatcher).to receive(:resolve)
+      nine = comb.union(*(1..9).map { |i| comb.nominal_of("WidgetKind#{i}") })
+
+      expect(tier.try_dispatch(site(rbs_less))).to be_nil
+      expect(tier.try_dispatch(site(comb.untyped))).to be_nil
+      expect(tier.try_dispatch(site(nine))).to be_nil
+      expect(dispatcher).not_to have_received(:resolve)
+    end
+  end
+
+  describe "CompositeReceiver.receiver_projection" do
+    let(:tier) { Rigor::Inference::MethodDispatcher::CompositeReceiver }
+
+    def without_nil(base) = Rigor::Type::Difference.new(base, nil_constant)
+
+    it "projects a union to its members and a nil removal to the base without its nil-valued members" do
+      union = comb.union(rbs_less, other_rbs_less)
+      nilable = comb.union(rbs_less, nil_constant, comb.nominal_of("NilClass"))
+
+      expect(tier.receiver_projection(union)).to eq(union.members)
+      expect(tier.receiver_projection(without_nil(rbs_less))).to eq([rbs_less])
+      expect(tier.receiver_projection(without_nil(nilable))).to eq([rbs_less])
+      expect(tier.receiver_projection(Rigor::Type::Difference.new(rbs_less, comb.nominal_of("NilClass"))))
+        .to eq([rbs_less])
+    end
+
+    it "projects nothing for a scalar, a removal that is not nil, and a base the removal empties" do
+      expect(tier.receiver_projection(rbs_less)).to be_nil
+      expect(tier.receiver_projection(comb.untyped)).to be_nil
+      expect(tier.receiver_projection(Rigor::Type::Difference.new(rbs_less, other_rbs_less))).to be_nil
+      expect(tier.receiver_projection(without_nil(nil_constant))).to be_nil
+      expect(tier.difference_projection(without_nil(comb.nominal_of("NilClass")))).to be_nil
+    end
+
+    # What bounds the re-entry at one level: the nested call would otherwise project again. `Combinator.union`
+    # never builds a union that holds one, so the last carrier is built by hand.
+    it "projects nothing when a member is itself composite" do
+      nested = without_nil(without_nil(rbs_less))
+      holding = Rigor::Type::Union.new([without_nil(rbs_less), other_rbs_less])
+      unflattened = Rigor::Type::Union.new([comb.union(rbs_less, other_rbs_less), nil_constant])
+
+      expect(tier.receiver_projection(nested)).to be_nil
+      expect(tier.receiver_projection(holding)).to be_nil
+      expect(tier.receiver_projection(unflattened)).to be_nil
+    end
+
+    it "reads nil as the constant and as the NilClass nominal, and nothing else" do
+      expect(tier.nil_valued_type?(nil_constant)).to be(true)
+      expect(tier.nil_valued_type?(comb.nominal_of("NilClass"))).to be(true)
+      expect(tier.nil_valued_type?(comb.constant_of(false))).to be(false)
+      expect(tier.nil_valued_type?(rbs_less)).to be(false)
+      expect(tier.nil_valued_type?(comb.singleton_of("NilClass"))).to be(false)
+    end
+  end
 end

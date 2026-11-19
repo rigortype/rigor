@@ -879,7 +879,7 @@ module Rigor
     end
 
     # Returns true when the RBS environment carries the named declaration as a Module (not a Class). Used by
-    # the `user_class_fallback_receiver` tier to detect a module-mixin receiver (e.g. `PP::ObjectMixin`) so
+    # the user-class fallback tier (`UserClassFallback`) to detect a module-mixin receiver (e.g. `PP::ObjectMixin`) so
     # the dispatcher can route unresolved method calls through the `Nominal[Object]` fallback — every
     # concrete includer of M honours Kernel / Object instance methods through its own ancestor chain.
     def rbs_module?(name)

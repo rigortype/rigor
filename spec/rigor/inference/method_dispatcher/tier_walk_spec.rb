@@ -3,9 +3,9 @@
 require "spec_helper"
 
 # `MethodDispatcher.first_tier_answer`, the walk behind every tier array (`PRECISE_TIERS_HEAD`, `PRECISE_TIERS_TAIL`,
-# `BUNDLED_OVERRIDE_TIERS`, `STUB_TIERS`). The last example is why it is a `while` loop: a `return` out of an `each`
-# block allocates one object per answering call on Ruby 4.0.5, and these arrays answer about 170,000 dispatches in
-# one `rigor check lib`.
+# `BUNDLED_OVERRIDE_TIERS`, `SYNTHETIC_TIERS`, `STUB_AND_UNIVERSAL_TIERS`, `COMPOSITE_TIERS`). The last example is why
+# it is a `while` loop: a `return` out of an `each` block allocates one object per answering call on Ruby 4.0.5, and
+# these arrays answer about 300,000 dispatches in one `rigor check lib`.
 # rubocop:disable RSpec/SpecFilePathFormat
 RSpec.describe Rigor::Inference::MethodDispatcher, ".first_tier_answer" do
   # rubocop:enable RSpec/SpecFilePathFormat

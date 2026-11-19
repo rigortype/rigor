@@ -204,7 +204,7 @@ module Rigor
         # that the block's return type references to it (Slice 6 phase C sub-phase 2).
         #
         # `self_type_override`, when set, is the substitution for `Bases::Self` in the method's return type.
-        # `MethodDispatcher#try_user_class_fallback` uses it to preserve the ORIGINAL receiver as the
+        # `UserClassFallback.try_dispatch` uses it to preserve the ORIGINAL receiver as the
         # substitute for `self` even though the dispatch is routed through `Nominal[Object]` — so that
         # `Bundler::URI::Generic.dup` (which resolves through the `Object` fallback because
         # `Bundler::URI::Generic` lacks RBS) returns `Bundler::URI::Generic` per `Kernel#dup: () -> self`
@@ -2177,7 +2177,7 @@ module Rigor
           #
           # 1. `scope` && `call_node` present, the same evidence surface {#record_void_recovery} reads.
           #    DIAGNOSED, not assumed: that fixture's `p(1)` reaches here through
-          #    `MethodDispatcher#try_user_class_fallback`, which dispatches with `scope: nil, call_node:
+          #    `UserClassFallback.try_dispatch`, which dispatches with `scope: nil, call_node:
           #    nil` — so the presence gate alone already declines every call routed through the Object /
           #    Kernel ancestor fallback, the path a class with no RBS of its own always takes.
           # 2. The explicit redefinition probe, in the shape `KernelDispatch#user_redefined?` established.

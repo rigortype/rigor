@@ -298,7 +298,9 @@ output looks right, but it acted on the wrong input or measured the wrong thing.
   before building arms by hand, and pass the merge base as `--base`: `origin/master` charges a branch with every
   engine change merged since it was cut. For a question it cannot answer (another corpus, a CPU profile), build
   arms as it does: `git archive` each engine's `lib data plugins`, and run from the repository root so the
-  bundle resolves.
+  bundle resolves. It is not steady to a few hundred objects: five runs of one base engine over `lib` spanned
+  about 15,000 objects of 201 million (2026-11-19, #3364). For a change expected near zero, run it three times
+  and report the range, not one delta.
 - **Wall is decided on CI Linux, not here.** The "Engine wall A/B" workflow (`engine-wall.yml`,
   `tool/engine_wall_ab.rb`) alternates two engines in ABBA order off this host and reports whether their
   ranges separate beyond chance: two runs per arm separate a third of the time with no difference at all, so
@@ -343,7 +345,12 @@ output looks right, but it acted on the wrong input or measured the wrong thing.
 - **Hot-path idioms that allocate.** `reduce`/`inject` with a block (not with a Symbol) allocates even over an empty
   Array (guard with `empty?` or use `each`); `when *CONST` copies the array on every evaluation; a
   `return` out of a `rigor_each_child` block allocates once per frame it unwinds, which goes
-  quadratic when a caller re-asks the scan at every level (write `found ||= scan?(child)` instead). A
+  quadratic when a caller re-asks the scan at every level (write `found ||= scan?(child)` instead).
+  The same holds for a `return` out of a plain `each` block on Ruby 4.0.5: one object per answering
+  call. Walking `MethodDispatcher`'s tier arrays that way cost about 170,000 objects per `lib` check,
+  and an index walk with `while` removed them (#3364). A copy method taking `**changes` (`CallContext#with`)
+  allocate the keyword Hash as well as the copy, so a hot re-entry builds with a positional
+  constructor instead (#3366). A
   docstring's "allocation-free" holds only if `GC.stat(:total_allocated_objects)` says so on a deep
   synthetic input.
 - **A zero diagnostic diff does not mean the change did nothing.** A change to overload or facet
@@ -386,7 +393,9 @@ base=$(git merge-base HEAD origin/master) && rm -rf tmp/ratchet-base && mkdir -p
   bundle exec exe/rigor coverage --config .rigor.gates.yml --format json lib > tmp/ratchet-head.json
 ```
 
-The failure message prints the same command. Run it inside the Flake: two scans, each as long as `make coverage`. A merge base older than #3356 has no call-site fields, so only precision compares there. Then:
+Until #3362 is fixed, build the head arm from `git archive HEAD` the same way. Scanned from the checkout, the head
+picks up untracked and ignored files the base arm lacks, and a row such as `lsp_command.rb` moves on PRs that never
+touched it. The failure message prints the same command. Run it inside the Flake: two scans, each as long as `make coverage`. A merge base older than #3356 has no call-site fields, so only precision compares there. Then:
 
 1. If the delta is the change's own, declare in `sig/` what it left untyped. `rigor sig-gen --print PATH` proposes
    it.

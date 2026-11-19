@@ -232,7 +232,27 @@ number. The script's header has the design and its limits, including why claims 
    origin/<branch>` before its next commit. Do it only while the lane has pushed everything;
    otherwise the push rejects or the branches diverge. Rebasing first makes the push
    non-fast-forward.
-8. **File the review's scope expansion** as issues outside the milestone, but only what was
+8. **Run a restructuring campaign as a chain of slices.** This is how ADR-116 WD12 (#3345, seven PRs
+   in two days) ran, and it is the brief for WD9/WD10 (#3346):
+   - Design in two independent passes before any code. First the strongest model consults and returns
+     the interface. Then a second model critiques it blind: give it the code, not the consult's
+     conclusion. WD12's critique overturned four calls: an adapter phase of thin delegators, rung
+     reads that added `untyped` call sites, slice order, and two slices that recreated a rejected
+     shape. Land the synthesis as an ADR amendment with an approval-queue entry, as its own PR.
+   - Order the slices so that stateless pure moves come first. They carry no design risk, and the
+     budget they free makes the seam slices small: WD12's dispatcher moves took `method_dispatcher.rb`
+     from 1,880 to 603 lines before the first seam slice.
+   - Start the next slice's lane while the previous PR is in CI. Branch it from that PR's head, and
+     have the lane rebase onto `origin/master` after the merge and before its first push, never as a
+     stacked PR.
+   - Fold a review's nits into the next slice's brief instead of spending a full CI run on them.
+   - Ask each lane to end its hand-back with what the next slice needs from it. Settle its open
+     points in the next brief.
+   - Each slice that claims no behaviour change reports the same gates: body identity, byte-identical
+     output at two worker counts, `TypingState.slots` under every load path, the allocation A/B, the
+     ratchet delta, the sig provenance pins, the path-listing gate files and a mutation table. Both
+     the gates and the order are in #3346's comment of 2026-11-20.
+9. **File the review's scope expansion** as issues outside the milestone, but only what was
    reproduced: a finding the reviewer ran (a command and its output, or a mutation that left the
    specs green) becomes an issue. One the reviewer only read off the code, or marked unverified,
    stays a comment on the PR until someone reproduces it, and the report's `Not reproduced` line

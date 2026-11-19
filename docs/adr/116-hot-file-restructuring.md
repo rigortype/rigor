@@ -496,12 +496,13 @@ named exception row, which #3358's fix deletes. The splat index read is a second
 not a fourth entry: it asks `OverridingDef`'s gate (`overriding_own_def?`, answering `dynamic_top`)
 in place of the rung, then the dispatcher, because a splat index has no positional argument types
 for the rung to bind, and the spec checks that sequence against an exception row that says so, so a
-later change to it fails. A place that asks one rung is not an order and is not checked:
+later change to it fails. The row names the typer's `overriding_own_def?` until S8, and
+`OverridingDef`'s gate entry after. A place that asks one rung is not an order and is not checked:
 `own_send_type`, which asks user-method inference alone, and the calls that only dispatch
 (`attribute_compound_read_type`, `call_operator_write_type_for` and the 11 other call sites of
 `MethodDispatcher.dispatch` in `lib/`).
 
-**A rung module.** A rung becomes a module under `call_ladder/` with the one entry
+**A rung module.** A rung becomes a module under `call_ladder/` whose entry is
 `try_call(site, typer)`, in the pull request that moves its body and not before. The entry is not
 named `try_dispatch`: a tier takes the site alone and must not type anything.
 
@@ -529,6 +530,12 @@ named `try_dispatch`: a tier takes the site alone and must not type anything.
   it hides). A rung that needs a fifth callback stays in the typer and is named with that count.
   `CallLadder::PORT`, the spec that checks a rung's calls against it and the spec that restricts
   the re-entry points' callers are created in the first rung slice, S6.
+- *A second entry.* A rung module may expose a second named entry when a caller outside the rung
+  asks part of it with arguments that differ from the site's. Each is named here, and there are
+  two. `UserMethod.infer` takes its arguments as positionals; `OverridingDef` and the receiver's own
+  `send` (`own_send_type`) ask it with their own arguments in place of the site's.
+  `OverridingDef.overriding_own_def?` is that rung's gate, which the typer's `splat_index_read_type`
+  asks. S8 moves the gate with the rung, so it is neither copied nor a `PORT` member.
 
 **The dispatcher.** Its twelve private tiers become eleven `try_dispatch(context)` modules under
 `method_dispatcher/`: plugin contribution, HKT builtin return, static refinement, synthetic method,
@@ -538,8 +545,9 @@ the pure-move rule applies unchanged.
 
 - *Project-patched stays one module.* It is asked twice, for the receiver's own class and through
   its ancestors, and is one function today; the module keeps the `through_ancestors:` parameter.
-- *Where a module is asked.* One with no bookkeeping after its answer joins a tier array, as
-  `PRECISE_TIERS_HEAD` and `PRECISE_TIERS_TAIL` are today. One whose answer `resolve` follows with
+- *Where a module is asked.* One with no bookkeeping after its answer joins an array at its own
+  position (a new one where straight-line calls with bookkeeping surround it); `PRECISE_TIERS_HEAD`
+  and `PRECISE_TIERS_TAIL` are such arrays today. One whose answer `resolve` follows with
   bookkeeping (the plugin-typed sink, the RBS boundary cross, the origin of a `Dynamic` answer)
   stays a straight-line call in `resolve`, in order.
 - *`dispatch_site`.* After the moves, `MethodDispatcher.dispatch_site(context)` takes a site its
@@ -583,6 +591,7 @@ figures.
    sub-ladder asks user-method and project-singleton inference, so it follows both and needs no
    temporary `PORT` member.
 8. **S8 — `OverridingDef` and `TopLevelDef`** (about 12 methods, 90 code lines).
+   `overriding_own_def?` moves with `OverridingDef` as its second entry.
 9. **S4 — `Refined`** (12 methods, 107 code lines), only with a plan for the self-typing ratchet.
    Its re-entry per union member may stay in the typer.
 

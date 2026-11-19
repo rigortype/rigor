@@ -7,14 +7,14 @@ module Rigor
   module Inference
     module MethodDispatcher
       # The plugin contribution tier (ADR-2 § "Flow Contribution Bundle", v0.1.1 Track 2 slice 7): the return type
-      # the loaded plugins' gated `dynamic_return` rules contribute for one call, merged. `MethodDispatcher.resolve`
-      # asks it ahead of `RbsDispatch` and records its answer on the scope, so it is a call there and a member of no
-      # tier array.
+      # the loaded plugins' gated `dynamic_return` rules contribute for one call, merged.
+      # `MethodDispatcher.resolve_site` asks it ahead of `RbsDispatch` and records its answer on the scope, so it is
+      # a call there and a member of no tier array.
       module PluginContribution
         module_function
 
-        # The tier, as `resolve` asks it: the merged contribution for the site's call node, scope and receiver. It
-        # declines a site without a call node or a scope, which is every dispatch the engine makes for itself (a
+        # The tier, as `resolve_site` asks it: the merged contribution for the site's call node, scope and receiver.
+        # It declines a site without a call node or a scope, which is every dispatch the engine makes for itself (a
         # per-element block fold, an alias target).
         def try_dispatch(context)
           merged_return_type(context.call_node, context.scope, context.receiver)

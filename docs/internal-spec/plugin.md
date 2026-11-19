@@ -614,7 +614,7 @@ the block carries logic and runs through `instance_exec`:
   - **A `dynamic_return` answer takes precedence over the RBS return,
     silently** ([ADR-2](../adr/2-extension-api.md) § "Amendment
     2026-09-26 — a `dynamic_return` answer outranks the RBS return",
-    issue #700). `MethodDispatcher#resolve` consults the plugin tier
+    issue #700). `MethodDispatcher#resolve_site` consults the plugin tier
     after the precision tiers (`MethodFolding.try_backward`,
     `dispatch_precise_tiers`) and ahead of every RBS-backed tier, ending
     in `RbsDispatch.try_dispatch`. `PluginContribution.try_dispatch` collects
@@ -648,7 +648,7 @@ the block carries logic and runs through `instance_exec`:
       `dynamic_return`. Until #1413 lands, nothing checks an override.
   - **A `dynamic_return` answer suppresses `call.undefined-method` at
     that call site** (issue #653). The tier sits above `RbsDispatch` in
-    `MethodDispatcher#resolve`, so when a plugin answers, the receiver's
+    `MethodDispatcher#resolve_site`, so when a plugin answers, the receiver's
     RBS never dispatched the call and the type at the site is the
     plugin's; the existence check MUST NOT then read that same RBS to
     prove the call undefined. The dispatcher records each answered call

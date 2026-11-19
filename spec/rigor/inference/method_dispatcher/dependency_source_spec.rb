@@ -3,8 +3,8 @@
 require "spec_helper"
 
 # The dependency-source tier asked directly, on a real `DependencySourceInference::Index`. It reads the receiver,
-# the selector and the environment of the context and nothing else. That `MethodDispatcher.resolve` asks it, and the
-# origin it records after an answer, is `method_dispatcher_spec.rb`'s "dependency-source inference tier".
+# the selector and the environment of the context and nothing else. That `MethodDispatcher.resolve_site` asks it,
+# and the origin it records after an answer, is `method_dispatcher_spec.rb`'s "dependency-source inference tier".
 RSpec.describe Rigor::Inference::MethodDispatcher::DependencySource do
   let(:untyped) { Rigor::Type::Combinator.untyped }
   let(:widget) { Rigor::Type::Combinator.nominal_of("FakeLib::Widget") }
@@ -122,8 +122,8 @@ RSpec.describe Rigor::Inference::MethodDispatcher::DependencySource do
     end
   end
 
-  # The second entry: the boundary-cross record `MethodDispatcher.resolve` makes after an RBS answer reads the
-  # receiver's class the same way.
+  # The second entry: the boundary-cross record `MethodDispatcher.resolve_site` makes after an RBS answer reads
+  # the receiver's class the same way.
   describe ".dep_source_class_name" do
     it "names the class of an instance and of a class object, and nothing else" do
       expect(described_class.dep_source_class_name(widget)).to eq("FakeLib::Widget")

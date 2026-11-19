@@ -425,7 +425,7 @@ module Rigor
         # (recorded by `MethodDispatcher` on `Scope#plugin_typed_calls` during the typing pass, exactly the
         # way `Scope#void_origins` is recorded and consumed).
         #
-        # Why the rule declines. The plugin tier sits ABOVE `RbsDispatch` in `MethodDispatcher#resolve`, so
+        # Why the rule declines. The plugin tier sits ABOVE `RbsDispatch` in `MethodDispatcher#resolve_site`, so
         # a plugin answer means the RBS never dispatched the call: the type at the site is the plugin's.
         # Reading that same receiver's RBS afterwards to prove the call undefined puts the two subsystems in
         # direct contradiction on one line of one run — the plugin says `Rails.logger` is an

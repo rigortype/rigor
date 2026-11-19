@@ -2,10 +2,10 @@
 
 require "spec_helper"
 
-# The project-patched tier asked directly, on a real `ProjectPatchedMethods` registry. `MethodDispatcher.resolve`
-# asks it twice, and what it records after each answer and where each question sits among the other tiers is
-# `method_dispatcher_spec.rb`'s ("project-side patched-method tier", "a `pre_eval:` alias …", "a `pre_eval:` patch on
-# an ancestor"); the registry's own lookups are `project_patched_methods_spec.rb`'s.
+# The project-patched tier asked directly, on a real `ProjectPatchedMethods` registry.
+# `MethodDispatcher.resolve_site` asks it twice, and what it records after each answer and where each question sits
+# among the other tiers is `method_dispatcher_spec.rb`'s ("project-side patched-method tier", "a `pre_eval:` alias …",
+# "a `pre_eval:` patch on an ancestor"); the registry's own lookups are `project_patched_methods_spec.rb`'s.
 RSpec.describe Rigor::Inference::MethodDispatcher::ProjectPatched do
   let(:untyped) { Rigor::Type::Combinator.untyped }
   let(:integer) { Rigor::Type::Combinator.nominal_of("Integer") }
@@ -116,7 +116,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::ProjectPatched do
     end
   end
 
-  # Issue #1708 — the second question `resolve` asks, below the tiers that answer the receiver's own class.
+  # Issue #1708 — the second question `resolve_site` asks, below the tiers that answer the receiver's own class.
   describe ".try_dispatch through the ancestors" do
     def through(receiver, name, environment, scope = Rigor::Scope.empty(environment: environment))
       described_class.try_dispatch(site(receiver, name, environment, scope: scope), through_ancestors: true)

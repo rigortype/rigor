@@ -2,13 +2,13 @@
 
 require "spec_helper"
 
-# Issue #1101 — `Scope#plugin_typed_calls` is the one recording in `MethodDispatcher#resolve` that is
+# Issue #1101 — `Scope#plugin_typed_calls` is the one recording in `MethodDispatcher#resolve_site` that is
 # SET-ONLY: the table has no removal, and `UndefinedMethod.call_site_exempt?` / `WrongArity.source_arity_envelope` read
 # it as an exemption from `call.undefined-method` and `call.wrong-arity`. The composite-receiver tier
 # re-enters `resolve` once per projected member, so a member a plugin answers beside a member that
 # declines would leave the node marked plugin-typed for a call this dispatcher never typed.
 #
-# The tier therefore BUFFERS the record and commits it only when it answers. Everything else `resolve`
+# The tier therefore BUFFERS the record and commits it only when it answers. Everything else `resolve_site`
 # records is `record_dynamic_origin`, which is last-wins and overwritten by the caller's fail-soft
 # widening, so it needs no such care.
 #

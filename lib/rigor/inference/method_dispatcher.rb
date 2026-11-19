@@ -57,7 +57,7 @@ module Rigor
     # blunt "I don't know" signal: callers (`ExpressionTyper`, `StatementEvaluator`, `GuardRebinding`) own the fail-soft
     # fallback and decide whether to record a `FallbackTracer` event.
     #
-    # Tier order is documented inline in `resolve`; the precise-tier group is built from
+    # Tier order is documented inline in `resolve_site`; the precise-tier group is built from
     # `PRECISE_TIERS_HEAD`, `STDLIB_SINGLETON_FOLDERS`, and `PRECISE_TIERS_TAIL`. `ShapeDispatch`
     # runs above {RbsDispatch} so a precise per-position/per-key answer wins over the projected
     # `Array#[]`/`Hash#fetch` RBS answer.
@@ -81,11 +81,28 @@ module Rigor
       def dispatch(receiver_type:, method_name:, arg_types:,
                    block_type: nil, environment: nil,
                    call_node: nil, scope: nil)
-        result = resolve(
-          receiver_type: receiver_type, method_name: method_name, arg_types: arg_types,
-          block_type: block_type, environment: environment,
-          call_node: call_node, scope: scope
+        dispatch_site(
+          CallContext.build(
+            receiver: receiver_type, method_name: method_name, args: arg_types,
+            block_type: block_type, environment: environment,
+            call_node: call_node, scope: scope
+          )
         )
+      end
+
+      # `dispatch` for a caller that already holds the call's context, the *site* (ADR-116 WD12): it answers
+      # what `dispatch` answers for the seven fields `dispatch` takes, and makes the same two records. `dispatch`
+      # is this entry behind one `CallContext.build`, so the two cannot differ.
+      #
+      # The site is `CallContext.build`'s for those seven fields. `self_type_override` and `public_only` are
+      # what a tier sets on a context it derives; the tiers read them from a site as from any context, and
+      # the paths that dispatch again (the optional count, an alias target, a composite receiver's members)
+      # go through `resolve`, which builds its context without them.
+      #
+      # @param context — the site, a `CallContext`.
+      # @return inferred result type, or `nil` for "no rule".
+      def dispatch_site(context)
+        result = resolve_site(context)
         # ADR-100 WD4 — the transitive-void consult, HERE in the wrapper rather than in any result
         # tier: which tier answers the intermediate's call depends on where the leaf's RBS came from
         # (`RbsDispatch` on the ADR-93 synthesized `untyped` skeleton, or the post-dispatch
@@ -93,28 +110,58 @@ module Rigor
         # are correct types that must not change. Recording is therefore result-independent and
         # type-blind; a statement-position record stays inert because the collector only reads value
         # positions.
-        record_transitive_void_origin(receiver_type, method_name, call_node, scope)
+        record_transitive_void_origin(context.receiver, context.method_name, context.call_node, context.scope)
         # `rigor trace` — record the dispatch outcome (resolved type, or the fail-soft `nil` the
         # caller widens to `Dynamic[Top]`).
         if FlowTracer.active?
           FlowTracer.dispatch(
-            receiver: receiver_type, method_name: method_name, args: arg_types,
-            result: result, location: call_node&.location
+            receiver: context.receiver, method_name: context.method_name, args: context.args,
+            result: result, location: context.call_node&.location
           )
         end
         result
       end
 
-      # `plugin_typed_sink` is internal bookkeeping for the composite-receiver tier below: when it is an
-      # Array, an answering plugin tier PUSHES the call node instead of recording it on the scope, and
-      # the tier commits the buffer only if it goes on to answer. See {CompositeReceiver}.
-      def resolve(receiver_type:, method_name:, arg_types:, # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity, Metrics/ParameterLists
+      # The tier ladder without `dispatch`'s two records: what a tier that dispatches again calls
+      # ({ProjectPatched}'s alias target, {CompositeReceiver}'s members), and what {#resolve_nil_count} calls for
+      # each part of an optional count. It builds the context and hands it to {#resolve_site}; it checks nothing
+      # itself, so the nil-receiver guard, the optional-count split and the order are written once, there.
+      #
+      # The two flags are a re-entry's, not the call's, which is why they are parameters here and not fields of
+      # the context. `plugin_typed_sink` is internal bookkeeping for the composite-receiver tier below: when it
+      # is an Array, an answering plugin tier PUSHES the call node instead of recording it on the scope, and
+      # the tier commits the buffer only if it goes on to answer. See {CompositeReceiver}. `skip_project_patched`
+      # turns the project-patched tier's two questions off; see {ProjectPatched.project_patched_alias_target}.
+      def resolve(receiver_type:, method_name:, arg_types:, # rubocop:disable Metrics/ParameterLists
                   block_type: nil, environment: nil,
                   call_node: nil, scope: nil, plugin_typed_sink: nil, skip_project_patched: false)
+        resolve_site(
+          CallContext.build(
+            receiver: receiver_type, method_name: method_name, args: arg_types,
+            block_type: block_type, environment: environment,
+            call_node: call_node, scope: scope
+          ),
+          plugin_typed_sink: plugin_typed_sink, skip_project_patched: skip_project_patched
+        )
+      end
+
+      # The one place the ladder is written: the nil-receiver guard, the optional-count split, then the tiers in
+      # order. `dispatch_site` and `resolve` both end here, each with a context built once; that context is
+      # threaded — unchanged — through every tier (`_DispatchTier#try_dispatch`). Every tier reads the context;
+      # the locals bound from it are read below only by the guard, the split and what this method records after
+      # an answer.
+      def resolve_site(context, plugin_typed_sink: nil, skip_project_patched: false) # rubocop:disable Metrics/AbcSize, Metrics/MethodLength, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+        receiver_type = context.receiver
         return nil if receiver_type.nil?
 
+        method_name = context.method_name
+        block_type = context.block_type
+        environment = context.environment
+        call_node = context.call_node
+        scope = context.scope
+
         # Issue #1393 — a `nil` count on `min` / `max` / `min_by` / `max_by` is the no-count call.
-        nil_count = OptionalCount.split(receiver_type, method_name, arg_types, block: !block_type.nil?)
+        nil_count = OptionalCount.split(receiver_type, method_name, context.args, block: !block_type.nil?)
         if nil_count
           return resolve_nil_count(nil_count.first, receiver_type: receiver_type, method_name: method_name,
                                                     block_type: block_type, environment: environment,
@@ -122,15 +169,6 @@ module Rigor
                                                     plugin_typed_sink: plugin_typed_sink,
                                                     skip_project_patched: skip_project_patched)
         end
-
-        # Build the call context once and thread it — unchanged — through every tier
-        # (`_DispatchTier#try_dispatch`). Every tier reads the context; the positional locals are read
-        # below only by what `resolve` records after an answer.
-        context = CallContext.build(
-          receiver: receiver_type, method_name: method_name, args: arg_types,
-          block_type: block_type, environment: environment,
-          call_node: call_node, scope: scope
-        )
 
         bound_method_result = MethodFolding.try_backward(context)
         return bound_method_result if bound_method_result
@@ -361,7 +399,7 @@ module Rigor
       # reader. The veto asked neither tier, so a top-level `def name` bound ahead of the member and
       # typed the read as the def's `nil` — #618's false positive at a source the veto could not see.
       #
-      # The question is asked HERE, of the same two tiers `resolve` consults and in the same order, rather
+      # The question is asked HERE, of the same two tiers `resolve_site` consults and in the same order, rather
       # than reconstructed in the veto: a name this reports as answered is a name the dispatch really would
       # resolve, and no plugin knowledge moves into the engine's veto. The tiers are the gated
       # `dynamic_return` walk and the ADR-16 synthetic-method index (Tier C `heredoc_templates` emissions and
@@ -434,9 +472,9 @@ module Rigor
         rbs_result.respond_to?(:describe) ? rbs_result.describe : rbs_result.inspect
       end
 
-      # The tiers `resolve` asks through an array outside the precise band, each where its comment in `resolve`
-      # says. A tier is in an array when nothing in `resolve` follows its answer; one whose answer `resolve`
-      # follows with a record on the scope or the reporter stays a call there.
+      # The tiers `resolve_site` asks through an array outside the precise band, each where its comment in
+      # `resolve_site` says. A tier is in an array when nothing in `resolve_site` follows its answer; one whose
+      # answer `resolve_site` follows with a record on the scope or the reporter stays a call there.
       #
       # What Rigor bundles ahead of the RBS answer: the two override tables, then the `instance` the stdlib
       # `Singleton` mixin grows and its upstream RBS leaves undeclared.
@@ -476,7 +514,7 @@ module Rigor
 
       # Runs the precision tiers in order and returns the first non-nil answer. Each tier owns its own receiver/argument
       # shape checks; a tier that does not recognise the receiver returns nil so the next tier
-      # can try. The RBS tier sits below this chain and is invoked by `resolve`.
+      # can try. The RBS tier sits below this chain and is invoked by `resolve_site`.
       #
       # The precise-tier folders, consulted in order via the uniform `_DispatchTier` interface
       # (`try_dispatch(CallContext) -> Type?`). Order is significant: MetaIntrospection answers `class` and

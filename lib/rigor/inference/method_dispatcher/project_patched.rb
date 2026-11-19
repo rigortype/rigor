@@ -10,10 +10,10 @@ module Rigor
   module Inference
     module MethodDispatcher
       # The project-patched tier (ADR-17): a method a `pre_eval:` file patches onto a class answers from the
-      # `ProjectPatchedMethods` registry the environment carries. `MethodDispatcher.resolve` asks it twice, for the
-      # receiver's own class below the synthetic-method tier and, with `through_ancestors: true`, for the receiver's
-      # ancestors below the discovered-method tier. It records the origin of each answer, so both are calls there and
-      # members of no tier array.
+      # `ProjectPatchedMethods` registry the environment carries. `MethodDispatcher.resolve_site` asks it twice, for
+      # the receiver's own class below the synthetic-method tier and, with `through_ancestors: true`, for the
+      # receiver's ancestors below the discovered-method tier. It records the origin of each answer, so both are
+      # calls there and members of no tier array.
       #
       # An alias whose old name no patch binds re-enters `MethodDispatcher.resolve` ({#project_patched_alias_target}),
       # the module's one call back into the dispatcher. {#explicit_non_self_receiver?} is a second entry: the

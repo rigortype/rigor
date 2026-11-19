@@ -3,9 +3,9 @@
 require "spec_helper"
 
 # The plugin contribution tier asked directly, with doubles for the registry and its plugins so that each gate is
-# seen by what it lets through. That `MethodDispatcher.resolve` asks the tier, and what it records after an answer, is
-# `method_dispatcher_spec.rb`'s "plugin dynamic_return contribution tier"; real plugins through the registry are
-# `spec/rigor/plugin/contribution_index_spec.rb`'s.
+# seen by what it lets through. That `MethodDispatcher.resolve_site` asks the tier, and what it records after an
+# answer, is `method_dispatcher_spec.rb`'s "plugin dynamic_return contribution tier"; real plugins through the
+# registry are `spec/rigor/plugin/contribution_index_spec.rb`'s.
 RSpec.describe Rigor::Inference::MethodDispatcher::PluginContribution do
   let(:call_node) { Prism.parse("recv.foo").value.statements.body.first }
   let(:receiver) { Rigor::Type::Combinator.nominal_of("Widget") }

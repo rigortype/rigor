@@ -306,6 +306,12 @@ SIG_PROVENANCE_RESIDUE = {
   # declared `initialize` types the nine parameters, so the seven readers with a declared type render it from the
   # ivar `initialize` assigns (`synthetic_source`, a `Data` member, before). `call_node` and `scope` are declared
   # `untyped` and stay residue, as `unrenderable`.
+  # 0 net (#3345, ADR-116 WD12 S1). `MethodDispatcher.resolve_site` is declared `-> Type::t?` and is `unrenderable`:
+  # it holds the tier ladder `resolve` held, and sig-gen renders no return for a body that answers what
+  # `RbsDispatch.try_dispatch` answers (`sig.skipped.untyped-return`). `MethodDispatcher.dispatch` leaves
+  # `unrenderable` for `parameter_intent`: its body is now a call of the declared `dispatch_site`, whose own body
+  # returns `resolve_site`'s declared answer, so sig-gen renders both. The unrenderable row moved to the method the
+  # ladder moved to.
   "sig/rigor/inference.rbs" => 68,
   "sig/rigor/inference/builtins/method_catalog.rbs" => 1,
   "sig/rigor/inference/void_origin.rbs" => 5,
@@ -458,11 +464,12 @@ SIG_PROVENANCE_PARAMETER_ONLY_MARKED = [
 ].freeze
 
 # #3335 — method declarations whose parameter list was compared with a recorded `def` on the tree this pin was taken
-# from (1072 on 2026-11-19 after #3345's eleven `try_dispatch` declarations for the tiers moved out of
-# `method_dispatcher.rb` in three batches, every one fitting). A floor, not an exact pin, because every new declaration
-# of a `def` raises it: raise it when the count grows, and lower it only with the reason in the commit body (a deleted
-# declaration, or a `def` the pairing stopped finding, which is the case this floor exists to catch).
-SIG_PARAMETER_SHAPE_COMPARED_FLOOR = 1072
+# from (1074 on 2026-11-20 after #3345's eleven `try_dispatch` declarations for the tiers moved out of
+# `method_dispatcher.rb` in three batches and its `dispatch_site` and `resolve_site`, every one fitting). A floor, not
+# an exact pin, because every new declaration of a `def` raises it: raise it when the count grows, and lower it only
+# with the reason in the commit body (a deleted declaration, or a `def` the pairing stopped finding, which is the case
+# this floor exists to catch).
+SIG_PARAMETER_SHAPE_COMPARED_FLOOR = 1074
 
 module SigProvenanceSpecHelpers
   # The hard-rule failure for unmarked `tighter_return` rows. A row whose declared return is the bare `untyped` claims

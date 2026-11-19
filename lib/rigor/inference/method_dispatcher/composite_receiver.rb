@@ -7,7 +7,8 @@ module Rigor
     module MethodDispatcher
       # The composite-receiver tier (issue #1101): a `Union` or a nil-removing `Difference` receiver is dispatched
       # once per projected member through the whole of `MethodDispatcher.resolve`, and the answers are unioned. It is
-      # the last tier `resolve` asks, through `COMPOSITE_TIERS`, and nothing in `resolve` follows its answer.
+      # the last tier `resolve_site` asks, through `COMPOSITE_TIERS`, and nothing in `resolve_site` follows its
+      # answer.
       #
       # The re-entry into `MethodDispatcher.resolve` is the module's one call back into the dispatcher. It passes a
       # `plugin_typed_sink:`, so a plugin tier that answers a member buffers its plugin-typed record there, and this
@@ -15,7 +16,7 @@ module Rigor
       module CompositeReceiver
         module_function
 
-        # Issue #1101 — the composite-receiver projection tier, the LAST thing `resolve` tries.
+        # Issue #1101 — the composite-receiver projection tier, the LAST thing `resolve_site` tries.
         #
         # Every tier above needs a receiver it can *name*: `receiver_descriptor`, the discovered-method
         # lookup, the dependency-source and synthesized-stub tiers and the user-class fallback all switch
@@ -71,6 +72,10 @@ module Rigor
           return nil if members.nil? || members.size > COMPOSITE_PROJECTION_MEMBERS
 
           plugin_typed = []
+          # Each member goes through `resolve`, which builds its context from the site's seven call fields, and not
+          # through `resolve_site(context.with(receiver: member))`: `with` allocates a keyword Hash beside the
+          # context, one more object for every member, and it would carry a `self_type_override` over where `self`
+          # binds to the projected member (above).
           results = members.map do |member|
             MethodDispatcher.resolve(
               receiver_type: member, method_name: context.method_name, arg_types: context.args,

@@ -106,6 +106,14 @@ RSpec.describe "bin/verify-changed spec selection" do
     end
   end
 
+  it "selects both specs of the call ladder's pin for a change to the reader they share" do
+    specs, uncovered = selection_for("spec/support/call_ladder_pin.rb")
+
+    expect(specs).to contain_exactly("spec/rigor/inference/call_ladder_spec.rb",
+                                     "spec/rigor/inference/expression_typer/call_ladder_spec.rb")
+    expect(uncovered).to eq(["spec/support/call_ladder_pin.rb"])
+  end
+
   it "selects few specs for one fixture's demo.rb, by its directory" do
     specs, uncovered = selection_for("spec/integration/fixtures/block_content_ivar_capture/demo.rb")
     expect(uncovered).to be_empty
@@ -555,6 +563,15 @@ RSpec.describe "bin/verify-changed spec selection" do
                              spec/rigor/inference/statement_evaluator_spec.rb])
       full, = selection_for(engine_path)
       expect(full).to include("spec/rigor/inference/statement_evaluator_spec.rb", *drift)
+    end
+
+    # The call ladder's pin (ADR-116 WD12) sits in the typer's mirror directory so that an edit to the ladder
+    # runs it in the edit loop. Unpriced, it cost the default and the time budget left it out.
+    it "keeps the call ladder's pin for an edit to the typer" do
+      quick, = selection_for("lib/rigor/inference/expression_typer.rb", quick: true)
+
+      expect(quick).to include("spec/rigor/inference/expression_typer/call_ladder_spec.rb",
+                               "spec/rigor/inference/expression_typer_spec.rb")
     end
 
     it "omits the incremental not-re-checked specs that a dependency-recording edit adds by default" do

@@ -12,7 +12,7 @@ diff. **Amended 2026-11-17** after a re-measurement: criterion C4 and slices WD8
 moves; the slices not yet started are separate design tasks
 ([below](#landing-point-2026-11-18--the-pure-moves-are-done-the-rest-is-design)). **Amended 2026-11-19**
 with WD12's interface, the first of those designs: the call-typing order as one declared ladder
-([below](#amendment-2026-11-19--wd12s-interface-3345)). None of its code has moved.
+([below](#amendment-2026-11-19--wd12s-interface-3345)).
 
 Grounding: [`docs/notes/20260923-hot-file-churn-audit.md`](../notes/20260923-hot-file-churn-audit.md)
 (the 60-day churn, growth and co-change measurement, and the mechanisms M1–M6 cited below); its

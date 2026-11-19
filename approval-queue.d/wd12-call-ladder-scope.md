@@ -30,10 +30,10 @@ For the scope:
 - **A seam for the per-node typers as well.** The table's values would change from method names to module functions.
   That removes the one-line delegators #3319's review objected to and keeps every entry. The rows are the interface,
   and each row hides one short body: `LeafNodes` was 29 entries for 30 methods. Any second hop per node is paid on
-  `type_of`, which ran 3,682,018 times in one check of `lib/rigor/inference`. Nothing drifts today that a declaration would fix.
-  `PRISM_DISPATCH` is 136 rows naming 60 handlers in one place, and 2 of the 113 merges that touched the file in two
-  months changed a row. `Constants` and `ControlFlow` went back because of the callbacks they needed, and a different
-  table shape does not remove those.
+  `type_of`, which ran 3,682,018 times in one check of `lib/rigor/inference`. Nothing drifts today that a
+  declaration would fix. `PRISM_DISPATCH` is 136 rows naming 60 handlers in one place, and 2 of the 113 merges that
+  touched the file in two months changed a row. `Constants` and `ControlFlow` went back because of the callbacks
+  they needed, and a different table shape does not remove those.
 - **The call-typing ladder only.** The order a call is typed in is written out three times in the typer, and the
   copies have drifted (#3358). One table and a spec that holds the code to it end that, and the rungs behind single
   entries can then leave the file. The cost is that the title's promise is not met. The 52 methods of the three

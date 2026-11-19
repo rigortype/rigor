@@ -730,6 +730,37 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
         expect(ask(nominal_string, :encoding, environment)).to eq(Rigor::Type::Combinator.nominal_of("Encoding"))
       end
 
+      # A registry of one plugin whose `dynamic_return` answers `Symbol` for each of `methods`, on any receiver.
+      def contributing(*methods)
+        plugin_class = Class.new(Rigor::Plugin::Base) do
+          manifest(id: "override-contributor", version: "0.1.0")
+          dynamic_return(methods: methods) { |_call_node, _scope| Rigor::Type::Combinator.nominal_of("Symbol") }
+        end
+        stub_const("FakeOverrideContributorPlugin", plugin_class)
+        services = Rigor::Plugin::Services.new(reflection: Rigor::Reflection, type: Rigor::Type::Combinator,
+                                               configuration: Rigor::Configuration.new)
+        Rigor::Plugin::Registry.new(plugins: [plugin_class.new(services: services, config: {})])
+      end
+
+      # A plugin that understands a call answers ahead of what Rigor bundles for it: the HKT table (`JSON.parse`) and
+      # the static refinements (`Kernel.__dir__`) alike. Without a site no plugin is asked and the override answers.
+      it "asks a plugin ahead of the bundled HKT and static-refinement overrides" do
+        environment = environment_with(plugin_registry: contributing(:parse, :__dir__))
+        scope = Rigor::Scope.empty(environment: environment)
+        at = ->(source) { { call_node: Prism.parse(source).value.statements.body.first, scope: scope } }
+        parse = { receiver_type: Rigor::Type::Combinator.singleton_of("JSON"), method_name: :parse,
+                  arg_types: [nominal_string], environment: environment }
+        dir = { receiver_type: Rigor::Type::Combinator.singleton_of("Kernel"), method_name: :__dir__, arg_types: [],
+                environment: environment }
+
+        expect(described_class.dispatch(**parse, **at.call("JSON.parse(s)"))).to eq(symbol)
+        expect(described_class.dispatch(**dir, **at.call("Kernel.__dir__"))).to eq(symbol)
+        expect(described_class.dispatch(**parse)).to have_attributes(uri: :"json::value")
+        expect(described_class.dispatch(**dir))
+          .to eq(Rigor::Type::Combinator.union(Rigor::Type::Combinator.non_empty_string,
+                                               Rigor::Type::Combinator.constant_of(nil)))
+      end
+
       it "asks RBS ahead of the synthetic-method index" do
         environment = environment_with(synthetic_method_index: synthetic_index("String", :encoding, "Symbol"))
 

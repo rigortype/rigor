@@ -2,9 +2,10 @@
 
 # Issue #2884 — an explicit `def self.new` in a project or gem signature decides the type of `X.new`.
 #
-# `MethodDispatcher#meta_new` answers every `Singleton[X].new` before the RBS tier runs, and answered `Nominal[X]`
-# once its curated lifts declined, so `class X; def self.new: () -> Y; end` still typed `X.new` as `X` and fired
-# `call.undefined-method` on the `Y` it returns (`email_address` declares `def self.new: (...) -> Address`).
+# `MethodDispatcher::MetaIntrospection.meta_new` answers every `Singleton[X].new` before the RBS tier runs, and
+# answered `Nominal[X]` once its curated lifts declined, so `class X; def self.new: () -> Y; end` still typed
+# `X.new` as `X` and fired `call.undefined-method` on the `Y` it returns (`email_address` declares
+# `def self.new: (...) -> Address`).
 # `MethodDispatcher::DeclaredConstructor` now answers before that fallback, for a declaration outside the `rbs`
 # gem's core and stdlib trees only: core's `Data.new: () -> bot`, `Ractor.new: … -> Ractor` and stdlib's
 # `Tempfile.new` must not reach a project subclass.

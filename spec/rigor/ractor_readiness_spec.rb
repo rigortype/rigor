@@ -321,8 +321,8 @@ RSpec.describe "Ractor readiness", :ractor_readiness do
     # result is a precision divergence (`Constant<Pathname>` under sequential, `Nominal[Pathname]` under pool), which
     # then surfaces downstream as a spurious `call.argument-type-mismatch` diagnostic. Surfaced on GitLab FOSS via
     # `lib/gitlab/mail_room.rb:17`.
-    it "MethodDispatcher::CONSTANT_CONSTRUCTORS is Ractor.shareable? (Proc values + outer Hash)" do
-      table = Rigor::Inference::MethodDispatcher.const_get(:CONSTANT_CONSTRUCTORS)
+    it "MethodDispatcher::MetaIntrospection::CONSTANT_CONSTRUCTORS is Ractor.shareable? (Proc values + outer Hash)" do
+      table = Rigor::Inference::MethodDispatcher::MetaIntrospection.const_get(:CONSTANT_CONSTRUCTORS)
       expect(shareable?(table)).to be(true)
     end
   end

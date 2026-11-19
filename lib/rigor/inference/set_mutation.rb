@@ -18,7 +18,7 @@ module Rigor
     # this module answers end at the typed Set #2290 builds for a non-constant literal — `Set[E | Dynamic[top]]`:
     #
     # - a constant-folded `Constant[Set]` widens to that carrier, its members' value pins dropped
-    #   ({MethodDispatcher.array_new_element}) and joined with the `Dynamic[top]` floor;
+    #   ({MethodDispatcher::MetaIntrospection.array_new_element}) and joined with the `Dynamic[top]` floor;
     # - a typed `Set` whose element already carries a gradual arm re-grows the way
     #   {MutationRejoin.regrowable_carrier?} lets an `Array` / `Hash` re-grow;
     # - a PRECISE `Set[String]` (an RBS return such as `Array#to_set`) re-grows too (issue #2361), as a precise
@@ -182,7 +182,7 @@ module Rigor
       # A stored member's value pin and literal shape are dropped, as an `Array.new` fill's are: the set holds the
       # object, and the program keeps a reference to it.
       def widened_member(type)
-        MethodDispatcher.array_new_element(type)
+        MethodDispatcher::MetaIntrospection.array_new_element(type)
       end
     end
   end

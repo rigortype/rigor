@@ -94,7 +94,7 @@ module Rigor
         def typed_set(types)
           return nil if types.empty?
 
-          members = types.map { |t| MethodDispatcher.array_new_element(t) }
+          members = types.map { |t| MetaIntrospection.array_new_element(t) }
           Type::Combinator.nominal_of("Set", type_args: [Type::Combinator.union(*members, Type::Combinator.untyped)])
         end
 

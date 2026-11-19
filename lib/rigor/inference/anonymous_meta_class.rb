@@ -17,7 +17,7 @@ module Rigor
     # return) there was no name, so the body fell through to the enclosing — usually top-level — scope. Two
     # false positives followed on correct code: `attr_reader` became a `call.unresolved-toplevel` warning
     # (`Scope#toplevel?` is `self_type.nil?`), and the class itself typed as the bare `Singleton[Object]`
-    # `MethodDispatcher#class_new_lift` hands back, taking `Object`'s zero-arity `new` with it.
+    # `MethodDispatcher::MetaIntrospection.class_new_lift` hands back, taking `Object`'s zero-arity `new` with it.
     #
     # This module supplies the missing name: a per-call-site synthetic one, spelled so that no Ruby constant
     # path can collide with it in the discovery tables, and stable across the index pass and the dispatch

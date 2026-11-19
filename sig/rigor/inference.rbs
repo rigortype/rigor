@@ -161,6 +161,9 @@ module Rigor
       module HashTransformKeysFolding
         def self?.try_dispatch: (CallContext context) -> Type::t?
       end
+      module HktBuiltinReturn
+        def self?.try_dispatch: (CallContext context) -> untyped
+      end
       module JSONFolding
         def self?.try_dispatch: (CallContext context) -> (Type::Nominal | nil)
       end
@@ -172,6 +175,9 @@ module Rigor
       end
       module MathFolding
         def self?.try_dispatch: (CallContext context) -> (Type::Constant | Type::FloatRange | Type::Tuple | nil)
+      end
+      module MetaIntrospection
+        def self?.try_dispatch: (CallContext context) -> untyped
       end
       module ProcessFolding
         def self?.try_dispatch: (CallContext context) -> untyped
@@ -200,8 +206,14 @@ module Rigor
       module SingletonMixinDispatch
         def self?.try_dispatch: (CallContext context) -> (Type::Nominal | nil)
       end
+      module StaticRefinement
+        def self?.try_dispatch: (CallContext context) -> untyped
+      end
       module StructFolding
         def self?.try_dispatch: (CallContext context) -> untyped
+      end
+      module SynthesizedStub
+        def self?.try_dispatch: (CallContext context) -> (Type::Dynamic | nil)
       end
       module TimeFolding
         def self?.try_dispatch: (CallContext context) -> (Type::Constant | nil)

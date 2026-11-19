@@ -2,7 +2,7 @@
 
 # Issue #784 — the design's own proof, through a REAL `Runner`. `Environment#hkt_registry` is a shared,
 # memoised build first demanded from inside a file's analysis (the dispatcher's Singleton-receiver HKT
-# builtin tier, `MethodDispatcher#try_hkt_builtin_return`); before the seam in `Environment#hkt_registry`
+# builtin tier, `MethodDispatcher::HktBuiltinReturn`); before the seam in `Environment#hkt_registry`
 # a raise there landed in every file's `analyze_body` rescue and the run came back as N identical
 # `internal analyzer error` rows with nothing saying the analyzer never ran (issue #776). The seam rescues
 # at `Environment#hkt_registry`, records the failure, and degrades to the pre-scan registry so analysis

@@ -344,4 +344,26 @@ RSpec.describe Rigor::Inference::MethodDispatcher do # rubocop:disable RSpec/Spe
       end
     end
   end
+
+  # ADR-116 WD12 — the tier is a module of its own; these ask its entry directly with a `CallContext`.
+  describe "HktBuiltinReturn.try_dispatch" do
+    def tier(receiver, environment)
+      Rigor::Inference::MethodDispatcher::HktBuiltinReturn.try_dispatch(
+        cc(receiver: receiver, method_name: :parse, args: [Rigor::Type::Combinator.nominal_of(String)],
+           environment: environment)
+      )
+    end
+
+    it "answers what the dispatcher answers for JSON.parse" do
+      expect(tier(json_singleton, environment)).to be_a(Rigor::Type::Union).and eq(dispatch(:parse))
+    end
+
+    it "declines an instance receiver" do
+      expect(tier(Rigor::Type::Combinator.nominal_of(JSON), environment)).to be_nil
+    end
+
+    it "declines without an environment" do
+      expect(tier(json_singleton, nil)).to be_nil
+    end
+  end
 end

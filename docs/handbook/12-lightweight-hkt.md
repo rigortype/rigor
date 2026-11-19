@@ -303,7 +303,7 @@ menu names the slice that addresses it.
 | Body-string grammar parser | [`lib/rigor/inference/hkt_body_parser.rb`](../../lib/rigor/inference/hkt_body_parser.rb) |
 | Directive parser (`hkt_register` / `hkt_define`) | [`lib/rigor/rbs_extended/hkt_directives.rb`](../../lib/rigor/rbs_extended/hkt_directives.rb) |
 | Bundled `json::value` + `METHOD_RETURN_OVERRIDES` | [`lib/rigor/builtins/hkt_builtins.rb`](../../lib/rigor/builtins/hkt_builtins.rb) |
-| Dispatcher tier | [`lib/rigor/inference/method_dispatcher.rb`](../../lib/rigor/inference/method_dispatcher.rb) (`try_hkt_builtin_return`) |
+| Dispatcher tier | [`lib/rigor/inference/method_dispatcher/hkt_builtin_return.rb`](../../lib/rigor/inference/method_dispatcher/hkt_builtin_return.rb) (`HktBuiltinReturn.try_dispatch`) |
 | Environment integration | [`lib/rigor/environment.rb`](../../lib/rigor/environment.rb) (`#hkt_registry` + `HktRegistryHolder`) |
 | RBS scan | [`lib/rigor/environment/rbs_loader.rb`](../../lib/rigor/environment/rbs_loader.rb) (`each_class_decl_annotation`) |
 

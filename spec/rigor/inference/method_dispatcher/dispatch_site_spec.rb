@@ -316,6 +316,104 @@ RSpec.describe Rigor::Inference::MethodDispatcher, ".dispatch_site" do
     end
   end
 
+  # ADR-116 WD12 — a site is `CallContext.build`'s for the seven fields of a call. `self_type_override` and
+  # `public_only` belong to a tier, which sets them on a context it derives for the RBS-backed tier, the one
+  # reader, and nothing outside the dispatcher's directory sets either. The dispatcher does not check a site for
+  # them; the last two examples are why a site must not set one: it would not be answered as a call with that
+  # property.
+  #
+  # ADR-132 WD3, not landed, makes visibility a field of the call. The slice that lets a site set `public_only`
+  # threads it through the re-entries and the fallback, and changes these examples with the rule.
+  describe "a site's two other fields" do
+    def root = File.expand_path("../../../..", __dir__)
+    def dispatcher_directory = "lib/rigor/inference/method_dispatcher/"
+    def other_fields = %i[self_type_override public_only]
+    def integer = comb.nominal_of("Integer")
+
+    # The two fields `call` sets on a context: as keywords of `CallContext.build` or of a `with`, or positionally
+    # through `CallContext.new`, which sets every field.
+    def fields_set_by(call)
+      on_context = context_class?(call.receiver)
+      return other_fields if on_context && call.name == :new
+      return [] unless (on_context && call.name == :build) || call.name == :with
+
+      keywords = (call.arguments&.arguments || []).grep(Prism::KeywordHashNode).flat_map(&:elements)
+      keywords.grep(Prism::AssocNode).map { |pair| pair.key.slice.delete_suffix(":").to_sym } & other_fields
+    end
+
+    def context_class?(receiver)
+      [Prism::ConstantReadNode, Prism::ConstantPathNode].include?(receiver.class) &&
+        receiver.slice.end_with?("CallContext")
+    end
+
+    # The two fields `call` reads off a context: a call of the field's reader on anything.
+    def fields_read_by(call) = call.receiver && call.arguments.nil? ? [call.name] & other_fields : []
+
+    # The fields the calls of `source` set (`:set`) or read (`:read`).
+    def fields_in(source, use)
+      found = []
+      pending = [Prism.parse(source).value]
+      while (node = pending.shift)
+        found.concat(use == :set ? fields_set_by(node) : fields_read_by(node)) if node.is_a?(Prism::CallNode)
+        pending.concat(node.compact_child_nodes)
+      end
+      found.uniq
+    end
+
+    # `path => fields` for every file of the engine, the plugins and the examples that sets, or reads, one.
+    def files(use)
+      paths = Dir.glob(%w[lib/**/*.rb plugins/*/lib/**/*.rb examples/*/lib/**/*.rb], base: root).sort
+      paths.filter_map do |path|
+        source = File.read(File.join(root, path))
+        fields = source.match?(/self_type_override|public_only|CallContext/) ? fields_in(source, use) : []
+        [path, fields] unless fields.empty?
+      end.to_h
+    end
+
+    def answer(receiver, method_name, **fields)
+      dispatcher.dispatch_site(
+        cc(receiver: receiver, method_name: method_name, args: [], environment: environment, **fields)
+      )
+    end
+
+    it "are set by a dispatcher tier and by nothing outside the dispatcher's directory" do
+      inside, outside = files(:set).partition { |path, _fields| path.start_with?(dispatcher_directory) }.map(&:to_h)
+
+      expect(outside).to eq({})
+      expect(inside).to include("#{dispatcher_directory}user_class_fallback.rb" => other_fields)
+      expect(fields_in("site.with(public_only: true); CallContext.new(a, b); Other.build(public_only: 1)", :set))
+        .to eq(%i[public_only self_type_override])
+    end
+
+    it "are read by the RBS-backed tier and by no other" do
+      expect(files(:read)).to eq("#{dispatcher_directory}rbs_dispatch.rb" => other_fields)
+      expect(fields_in("context.public_only; site.self_type_override; public_only = 1; public_only", :read))
+        .to eq(other_fields.reverse)
+    end
+
+    it "are taken by neither keyword entry, so a call the dispatcher dispatches again is built without them" do
+      call = { receiver_type: string, method_name: :dup, arg_types: [], environment: environment }
+
+      expect { dispatcher.dispatch(**call, public_only: true) }.to raise_error(ArgumentError, /public_only/)
+      expect { dispatcher.resolve(**call, self_type_override: integer) }
+        .to raise_error(ArgumentError, /self_type_override/)
+      expect(dispatcher.dispatch(**call)).to eq(string)
+    end
+
+    it "would make a site public-only for the receiver's own RBS lookup, not through a re-entry or the fallback" do
+      expect(answer(string, :puts)).to eq(nil_constant)
+      expect(answer(string, :puts, public_only: true)).to be_nil
+      expect(answer(comb.union(string, integer), :puts, public_only: true)).to eq(nil_constant)
+      expect(answer(rbs_less, :puts, public_only: true)).to eq(nil_constant)
+    end
+
+    it "would bind `self` for the RBS lookup alone, where the fallback binds the receiver it was given" do
+      expect(answer(string, :dup)).to eq(string)
+      expect(answer(string, :dup, self_type_override: integer)).to eq(integer)
+      expect(answer(rbs_less, :dup, self_type_override: integer)).to eq(rbs_less)
+    end
+  end
+
   describe "allocations" do
     # The counter is the process's, so the least of three windows is the calls' own cost even when another thread
     # allocates during one of them.

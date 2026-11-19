@@ -94,10 +94,12 @@ module Rigor
       # what `dispatch` answers for the seven fields `dispatch` takes, and makes the same two records. `dispatch`
       # is this entry behind one `CallContext.build`, so the two cannot differ.
       #
-      # The site is `CallContext.build`'s for those seven fields. `self_type_override` and `public_only` are
-      # what a tier sets on a context it derives; the tiers read them from a site as from any context, and
-      # the paths that dispatch again (the optional count, an alias target, a composite receiver's members)
-      # go through `resolve`, which builds its context without them.
+      # The site is `CallContext.build`'s for those seven fields, and leaves the other two at their defaults:
+      # `self_type_override` and `public_only` are what a tier sets on a context it derives for {RbsDispatch},
+      # the one tier that reads them. Nothing here checks a site for them, and a site that set one would not be
+      # answered as a call with that property: {UserClassFallback} replaces both, and a call dispatched again is
+      # built without them, through `resolve` (the optional count, an alias target, a composite receiver's
+      # members) or through `dispatch` ({MethodFolding.try_backward}, {ReduceFolding}'s operator).
       #
       # @param context — the site, a `CallContext`.
       # @return inferred result type, or `nil` for "no rule".

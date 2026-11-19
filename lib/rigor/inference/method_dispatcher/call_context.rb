@@ -4,9 +4,9 @@ module Rigor
   module Inference
     module MethodDispatcher
       # Immutable value object carrying everything a dispatch tier needs to fold a single call site. Built
-      # once per `MethodDispatcher.dispatch` and threaded — unchanged — through every tier, replacing the
-      # `(receiver:, method_name:, args:, …)` keyword quartet that each tier used to redeclare (several
-      # needing a Metrics/ParameterLists rubocop exemption).
+      # once per `MethodDispatcher.dispatch` or `resolve`, or by the caller of `dispatch_site`, and threaded —
+      # unchanged — through every tier, replacing the `(receiver:, method_name:, args:, …)` keyword quartet
+      # that each tier used to redeclare (several needing a Metrics/ParameterLists rubocop exemption).
       #
       # Every tier satisfies one interface — `try_dispatch(CallContext) -> Rigor::Type?` (the `_DispatchTier`
       # RBS interface). Pure tiers (the singleton folders, ConstantFolding, ShapeDispatch, …) read only

@@ -339,6 +339,7 @@ module Rigor
       # the tiers a plain `c[k]` takes, in the same order — the own-`def` override check, the dispatcher's
       # node- and scope-gated tiers, then the project `def` inference a dispatch miss falls to — so a project
       # `[]` with no signature answers from its body instead of the whole write degrading to `Dynamic[top]`.
+      # They are the `index_read` entry of {CallLadder::RUNGS}, less the refined rung of a plain `c[k]` (#3358).
       #
       # A plugin `dynamic_return` rule written for `[]` still does not answer this read. Its `methods:` gate
       # matches `call_node.name`, which an index write does not have, and the shipped rules decline any node
@@ -1243,6 +1244,7 @@ module Rigor
       # that takes that branch. So the body tiers decline under a splat, as `try_literal_send` does, and only
       # the signature-driven dispatch answers. An own `def` overriding an inherited declaration still outranks
       # that declaration; with its body unreadable, it answers `Dynamic[top]`.
+      # {CallLadder::EXCEPTIONS} holds this sequence as `splat_index_read`.
       def splat_index_read_type(node, receiver, arg_types)
         return dynamic_top if overriding_own_def?(receiver, :[])
 
@@ -1742,6 +1744,9 @@ module Rigor
         block_return_type_for(node, receiver, []).is_a?(Type::Bot)
       end
 
+      # The call ladder. Its rungs are asked in the order {CallLadder::RUNGS} declares (`call_ladder.rb`), and
+      # `spec/rigor/inference/call_ladder_spec.rb` fails a rung asked here with no row, or out of the rows' order:
+      # a new rung is a row there and its call here. {#dispatch_miss_result} holds the rungs below the dispatcher.
       def call_result_type_for(node, receiver_override: nil)
         narrowed = indexed_narrowing_for(node)
         return narrowed if narrowed
@@ -2092,8 +2097,8 @@ module Rigor
         end
       end
 
-      # The post-dispatch tiers for a call `MethodDispatcher` could not answer, in their historical
-      # order; extracted from {#call_result_type_for} whole.
+      # The rungs below the dispatcher, for a call `MethodDispatcher` could not answer: {#call_result_type_for}
+      # continues here, in the order of {CallLadder::RUNGS}.
       def dispatch_miss_result(node, receiver, arg_types, block_type = nil)
         # v0.0.2 #5 — inter-procedural inference for user-defined methods. When dispatch misses but the
         # receiver is a user class with a `def` body, re-type the body with the call's argument types bound
@@ -2401,11 +2406,12 @@ module Rigor
 
       # Issue #533 — `x.send(:selector, args)` with a LITERAL symbol is statically `x.selector(args)`:
       # the private-boundary idiom (protobuf's `send(:get_file_descriptor)` at 84 sites) resolves through
-      # the same dispatch + project-inference tiers as the direct call would. `send` legitimately crosses
-      # visibility, so no public-only gate applies (`public_send` is treated identically — typing the
-      # success path of a call that would raise on a private method is ADR-5 optimism). Declines: a
-      # non-literal selector, a splat / forwarded tail (positional correspondence unknown), or a block at
-      # the call site (block forwarding is out of this slice).
+      # the same dispatch + project-inference tiers as the direct call would (the `send_target` entry of
+      # {CallLadder::RUNGS}). `send` legitimately crosses visibility, so no public-only gate applies
+      # (`public_send` is treated identically — typing the success path of a call that would raise on a
+      # private method is ADR-5 optimism). Declines: a non-literal selector, a splat / forwarded tail
+      # (positional correspondence unknown), or a block at the call site (block forwarding is out of this
+      # slice).
       #
       # Issue #3080 — `send` reads as its target only where the receiver's `send` is `Kernel#send`
       # ({GenuineSend.type?}). A class with its own `send` (`def send(message, flags)`, `UDPSocket#send`, a project

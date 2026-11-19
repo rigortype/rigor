@@ -126,6 +126,7 @@ module Rigor
         attr_reader public_only: bool
 
         def self.build: (receiver: Type::t?, method_name: Symbol, args: Array[Type::t], ?block_type: Type::t?, ?environment: Environment?, ?call_node: untyped, ?scope: untyped, ?self_type_override: Type::t?, ?public_only: bool) -> CallContext
+        def initialize: (Type::t? receiver, Symbol method_name, Array[Type::t] args, Type::t? block_type, Environment? environment, untyped call_node, untyped scope, Type::t? self_type_override, bool public_only) -> void
         def with: (**untyped) -> CallContext
       end
 

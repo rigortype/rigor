@@ -301,7 +301,12 @@ SIG_PROVENANCE_RESIDUE = {
   # `parameter_intent` (return equivalent, parameters narrower): `narrow_class`, `narrow_not_class`, `narrow_equal`,
   # `narrow_not_equal`, `narrow_falsey`, `narrow_nil` and `narrow_not_refinement`, since the helpers their bodies call
   # are now typed module functions rather than private singleton methods sig-gen declines.
-  "sig/rigor/inference.rbs" => 76,
+  # -8 (#3345, ADR-116 WD12 S0). `MethodDispatcher::CallContext` is a plain class, no longer a `Data`. Its `with` has a
+  # source `def` whose return sig-gen generates (`runtime_defined`, inherited from `Data`, before), and its newly
+  # declared `initialize` types the nine parameters, so the seven readers with a declared type render it from the
+  # ivar `initialize` assigns (`synthetic_source`, a `Data` member, before). `call_node` and `scope` are declared
+  # `untyped` and stay residue, as `unrenderable`.
+  "sig/rigor/inference.rbs" => 68,
   "sig/rigor/inference/builtins/method_catalog.rbs" => 1,
   "sig/rigor/inference/void_origin.rbs" => 5,
   "sig/rigor/plugin.rbs" => 3,
@@ -441,10 +446,11 @@ SIG_PROVENANCE_PARAMETER_ONLY_MARKED = [
 ].freeze
 
 # #3335 — method declarations whose parameter list was compared with a recorded `def` on the tree this pin was taken
-# from (1059 on 2026-11-19 after #3315, every one fitting). A floor, not an exact pin, because every new declaration
-# of a `def` raises it: raise it when the count grows, and lower it only with the reason in the commit body (a deleted
-# declaration, or a `def` the pairing stopped finding, which is the case this floor exists to catch).
-SIG_PARAMETER_SHAPE_COMPARED_FLOOR = 1059
+# from (1061 on 2026-11-19 after #3345's `CallContext#initialize` and `#with`, every one fitting). A floor, not an
+# exact pin, because every new declaration of a `def` raises it: raise it when the count grows, and lower it only with
+# the reason in the commit body (a deleted declaration, or a `def` the pairing stopped finding, which is the case this
+# floor exists to catch).
+SIG_PARAMETER_SHAPE_COMPARED_FLOOR = 1061
 
 module SigProvenanceSpecHelpers
   # The hard-rule failure for unmarked `tighter_return` rows. A row whose declared return is the bare `untyped` claims

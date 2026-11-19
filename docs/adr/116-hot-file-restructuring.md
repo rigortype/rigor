@@ -492,10 +492,14 @@ A spec reads the typer's code with Prism and fails unless the rung calls appear 
 in the subsets, that the table declares. It covers every place where the typer writes a sequence of
 two or more rungs: `call_result_type_for` with `dispatch_miss_result`, `implicit_index_read_type`,
 `splat_index_read_type` and the sub-ladder in `try_literal_send`. The index read's missing rung is a
-named exception row, which #3358's fix deletes. A place that asks one rung is not an order and is
-not checked: `own_send_type`, which asks user-method inference alone, and the calls that only
-dispatch (`attribute_compound_read_type`, `call_operator_write_type_for` and the 11 other call
-sites of `MethodDispatcher.dispatch` in `lib/`).
+named exception row, which #3358's fix deletes. The splat index read is a second named exception,
+not a fourth entry: it asks `OverridingDef`'s gate (`overriding_own_def?`, answering `dynamic_top`)
+in place of the rung, then the dispatcher, because a splat index has no positional argument types
+for the rung to bind, and the spec checks that sequence against an exception row that says so, so a
+later change to it fails. A place that asks one rung is not an order and is not checked:
+`own_send_type`, which asks user-method inference alone, and the calls that only dispatch
+(`attribute_compound_read_type`, `call_operator_write_type_for` and the 11 other call sites of
+`MethodDispatcher.dispatch` in `lib/`).
 
 **A rung module.** A rung becomes a module under `call_ladder/` with the one entry
 `try_call(site, typer)`, in the pull request that moves its body and not before. The entry is not

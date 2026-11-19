@@ -671,8 +671,9 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
       end
     end
 
-    # Where each tier is asked is written once, in `resolve`. Each example gives two neighbouring tiers the same call
-    # and says which answers (ADR-16 WD13 for RBS over synthesis, ADR-17 § "Inference contract" for a patch's place).
+    # Where each tier is asked is written once, in `resolve_site`. Each example gives two neighbouring tiers the same
+    # call and says which answers (ADR-16 WD13 for RBS over synthesis, ADR-17 § "Inference contract" for a patch's
+    # place).
     describe "the order of the plugin, RBS, synthetic-method, project-patched and dependency-source tiers" do
       let(:symbol) { Rigor::Type::Combinator.nominal_of("Symbol") }
       let(:widget) { Rigor::Type::Combinator.nominal_of("FakeLib::Widget") }

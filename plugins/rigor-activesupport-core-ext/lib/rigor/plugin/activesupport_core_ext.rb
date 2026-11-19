@@ -95,7 +95,7 @@ module Rigor
       # yet, not because RBS still cannot express it. `Duration`'s real surface is `method_missing`-forwarded
       # to the wrapped numeric plus `ago` / `since` / `from_now` / `until` / `before` / `after` / `in_*` /
       # `iso8601` and every `Numeric` operator, so "omits a member" is guaranteed. The contribution tier sits ABOVE
-      # `RbsDispatch` (`MethodDispatcher#resolve`), so declaring the multiplier in RBS and typing it here
+      # `RbsDispatch` (`MethodDispatcher#resolve_site`), so declaring the multiplier in RBS and typing it here
       # is not a contradiction: the RBS declaration is what makes `1.day` resolve at all, and this supplies
       # the answer the declaration deliberately withholds.
       #

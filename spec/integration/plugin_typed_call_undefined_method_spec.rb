@@ -3,7 +3,7 @@
 # Issue #653 — a call whose return type came from a plugin's `dynamic_return` MUST NOT also be reported
 # `call.undefined-method` against the receiver's RBS.
 #
-# The plugin tier sits ABOVE `RbsDispatch` in `MethodDispatcher#resolve`, so when a plugin answers, the RBS
+# The plugin tier sits ABOVE `RbsDispatch` in `MethodDispatcher#resolve_site`, so when a plugin answers, the RBS
 # never had a turn: the engine typed the site from the plugin. Reading the same receiver's RBS afterwards to
 # prove the call "undefined" contradicts the type the engine itself assigned, on the same line of the same
 # run. It also creates a perverse incentive — before this fix, ADDING a four-line partial `sig/` for a class

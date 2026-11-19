@@ -7,11 +7,11 @@ module Rigor
     module MethodDispatcher
       # The discovered-method tier (v0.1.3, ADR-24): a call to a method the project's own source defines, on a class
       # the scope's `discovered_methods` table records, answers `Dynamic[top]` where no body is there to re-type.
-      # `MethodDispatcher.resolve` asks it below the dependency-source tier and records the origin of a `Dynamic`
-      # answer, so it is a call there and a member of no tier array.
+      # `MethodDispatcher.resolve_site` asks it below the dependency-source tier and records the origin of a
+      # `Dynamic` answer, so it is a call there and a member of no tier array.
       #
       # {#discovered_method_lookup} is a second entry: `MethodDispatcher.record_transitive_void_origin`, which
-      # `dispatch` runs after `resolve`, keys the same table the same way.
+      # `dispatch_site` runs after `resolve_site`, keys the same table the same way.
       module DiscoveredMethod
         module_function
 

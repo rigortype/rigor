@@ -111,6 +111,9 @@ module Rigor
 
     module MethodDispatcher
       def self?.dispatch: (receiver_type: Type::t?, method_name: Symbol, arg_types: Array[Type::t], ?block_type: Type::t?, ?environment: Environment?) -> Type::t?
+      # `dispatch` for a caller that built the `CallContext` itself, and the tier ladder both entries end in (ADR-116 WD12).
+      def self?.dispatch_site: (CallContext context) -> Type::t?
+      def self?.resolve_site: (CallContext context, ?plugin_typed_sink: Array[untyped]?, ?skip_project_patched: bool) -> Type::t?
       def self?.expected_block_param_types: (receiver_type: Type::t?, method_name: Symbol, arg_types: Array[Type::t], ?environment: Environment?) -> Array[Type::t]
 
       # Immutable value object threaded through every dispatch tier.

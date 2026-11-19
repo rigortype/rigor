@@ -4,7 +4,7 @@ require "spec_helper"
 
 # The user-class ancestor fallback asked directly, on the default environment and on scopes whose discovery tables
 # are written by hand. It reads the receiver, the selector, the environment, the call node and the scope of the
-# context. That `MethodDispatcher.resolve` asks it, and the origin it records after a `Dynamic` answer, is
+# context. That `MethodDispatcher.resolve_site` asks it, and the origin it records after a `Dynamic` answer, is
 # `method_dispatcher_spec.rb`'s ("user-class fallback for module-mixin receivers", "private-method suppression on the
 # explicit-receiver fallback") and `composite_receiver_spec.rb`'s positive control; the two declines on a scope are
 # measured end to end in `spec/integration/singleton_override_of_module_method_spec.rb` and

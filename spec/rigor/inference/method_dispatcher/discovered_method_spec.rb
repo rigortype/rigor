@@ -3,9 +3,9 @@
 require "spec_helper"
 
 # The discovered-method tier asked directly, on a real scope whose discovery tables are written by hand. It reads the
-# receiver, the selector and the scope of the context and nothing else. That `MethodDispatcher.resolve` asks it, and
-# where among the other tiers, is `method_dispatcher_spec.rb`'s "the order of the … tiers"; the last group here is
-# what holds the tier's two callers to it.
+# receiver, the selector and the scope of the context and nothing else. That `MethodDispatcher.resolve_site` asks
+# it, and where among the other tiers, is `method_dispatcher_spec.rb`'s "the order of the … tiers"; the last group
+# here is what holds the tier's two callers to it.
 RSpec.describe Rigor::Inference::MethodDispatcher::DiscoveredMethod do
   let(:untyped) { Rigor::Type::Combinator.untyped }
   let(:widget) { Rigor::Type::Combinator.nominal_of("Widget") }
@@ -131,7 +131,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::DiscoveredMethod do
     let(:dispatcher) { Rigor::Inference::MethodDispatcher }
     let(:call_node) { Prism.parse("widget.render").value.statements.body.first }
 
-    it "is the tier `resolve` asks for a class RBS does not know, and the origin of its answer is recorded" do
+    it "is the tier `resolve_site` asks for a class RBS does not know, and the origin of its answer is recorded" do
       scope = scope_defining({ "Widget" => { render: :instance } })
 
       answer = dispatcher.dispatch(receiver_type: widget, method_name: :render, arg_types: [],

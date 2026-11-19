@@ -15,7 +15,7 @@
 # `undefined method 'upcase' for nil` on working Rails code — #618's false positive, at a source the veto
 # had no way to ask about.
 #
-# The fix asks the two tiers `MethodDispatcher#resolve` itself consults — the gated `dynamic_return` walk
+# The fix asks the two tiers `MethodDispatcher#resolve_site` itself consults — the gated `dynamic_return` walk
 # and the ADR-16 synthetic-method index — through `MethodDispatcher.plugin_member_answers?`, so a name the
 # veto reports as answered is a name the dispatch really would resolve, and no plugin knowledge moves into
 # the engine's veto. `ExpressionTyper#plugin_member_answers?` keeps #618's confidence gate unchanged: a

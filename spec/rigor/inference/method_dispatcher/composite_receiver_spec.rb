@@ -2,7 +2,7 @@
 
 require "spec_helper"
 
-# Issue #1101 — the composite-receiver projection tier at the bottom of `MethodDispatcher#resolve`.
+# Issue #1101 — the composite-receiver projection tier at the bottom of `MethodDispatcher#resolve_site`.
 #
 # Every tier above it needs a receiver it can NAME, so a `Union` or a `Difference` whose members would
 # each resolve still fell through the whole chain and landed `Dynamic[top]`. The corpus shape is

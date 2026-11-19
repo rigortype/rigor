@@ -18,9 +18,9 @@ module Rigor
     module MethodDispatcher
       # The user-class ancestor fallback (Slice 7 phase 10): a receiver Rigor knows by name but not by RBS is retried
       # against `Object` (an instance, or an instance of an RBS-known module) or `Class` (a class object), so `puts`,
-      # `raise` and `attr_reader` resolve on a class the project wrote without a signature. `MethodDispatcher.resolve`
-      # asks it behind every other tier that reads the receiver's class and records the origin of a `Dynamic` answer,
-      # so it is a call there and a member of no tier array.
+      # `raise` and `attr_reader` resolve on a class the project wrote without a signature.
+      # `MethodDispatcher.resolve_site` asks it behind every other tier that reads the receiver's class and records
+      # the origin of a `Dynamic` answer, so it is a call there and a member of no tier array.
       #
       # It declines where Ruby would not reach `Object` first: a name a core or stdlib ancestor of the class declares
       # (#2196), and a class object whose singleton chain holds a project definer of the name (#2284). On an explicit

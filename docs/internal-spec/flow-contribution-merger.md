@@ -164,7 +164,7 @@ The four parallel carriers translate to / from `Fact`:
 | 3    | anything else            | Unknown — reported but treated as the lowest tier. |
 
 Tier 0 names the authority of accepted RBS, but the RBS return type
-is not a merge input: `MethodDispatcher#resolve` consults the plugin
+is not a merge input: `MethodDispatcher#resolve_site` consults the plugin
 tier ahead of `RbsDispatch`, so when a plugin's `dynamic_return`
 answers, the merged plugin answer is the call's type and the RBS
 return is never consulted

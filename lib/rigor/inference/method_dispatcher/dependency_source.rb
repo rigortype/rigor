@@ -7,11 +7,11 @@ module Rigor
     module MethodDispatcher
       # The dependency-source tier (ADR-10): a method an opt-in gem's source defines answers `Dynamic` from the
       # `Analysis::DependencySourceInference::Index` the environment carries, below every signature and above the
-      # discovered-method tier. `MethodDispatcher.resolve` records the origin of its answer, so it is a call there and
-      # a member of no tier array.
+      # discovered-method tier. `MethodDispatcher.resolve_site` records the origin of its answer, so it is a call
+      # there and a member of no tier array.
       #
-      # {#dep_source_class_name} is a second entry: the boundary-cross record `resolve` makes after an RBS answer
-      # reads the receiver's class the same way.
+      # {#dep_source_class_name} is a second entry: the boundary-cross record `resolve_site` makes after an RBS
+      # answer reads the receiver's class the same way.
       module DependencySource
         module_function
 

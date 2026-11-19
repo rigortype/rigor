@@ -184,10 +184,8 @@ module Rigor
         # `() -> String?` when the documented return is `non-empty-string | nil`) get the
         # tightened type without modifying the vendored `ruby/rbs` submodule. The override table
         # lives in `Rigor::Builtins::StaticReturnRefinements::OVERRIDES`.
-        BUNDLED_OVERRIDE_TIERS.each do |tier|
-          result = tier.try_dispatch(context)
-          return result if result
-        end
+        bundled_override = first_tier_answer(BUNDLED_OVERRIDE_TIERS, context)
+        return bundled_override if bundled_override
 
         # `Foo.instance` for a class that includes the stdlib `Singleton` mixin. Ruby grows that method through
         # an `included` hook and the upstream RBS leaves `Singleton::SingletonClassMethods` empty, so nothing
@@ -286,10 +284,8 @@ module Rigor
         # against it would otherwise mis-fire `call.undefined-method`. Resolve it to
         # `Dynamic[Top]` instead — the same no-false-positive contract as the dependency-source
         # tier. Sits below every real resolution tier so a genuine signature always wins.
-        STUB_TIERS.each do |tier|
-          result = tier.try_dispatch(context)
-          return result if result
-        end
+        stub_result = first_tier_answer(STUB_TIERS, context)
+        return stub_result if stub_result
 
         # The receiver-independent `BasicObject` / `Object` / `Kernel` selectors, for a receiver no tier
         # above could name. `x.nil?` is `bool` whatever `x` is; without this tier it was `Dynamic[Top]`
@@ -842,6 +838,24 @@ module Rigor
       STUB_TIERS = Ractor.make_shareable([SynthesizedStub].freeze)
       private_constant :STUB_TIERS
 
+      # Asks the tiers of one array in order and answers the first answer, or nil when every tier declines.
+      #
+      # The walk is a `while` loop on purpose. On Ruby 4.0.5 a `return` out of an `each` block allocates one object
+      # for every call that answers (a call that declines allocates none), so `tiers.each { |tier| ... return result }`
+      # cost an object per dispatch a tier array answered: 171,897 in one `rigor check lib` while the four arrays were
+      # walked that way (#3345). Keep the index walk; an `each`, a `find` or an `each_with_index` brings them back.
+      def first_tier_answer(tiers, context)
+        index = 0
+        count = tiers.size
+        while index < count
+          result = tiers[index].try_dispatch(context)
+          return result if result
+
+          index += 1
+        end
+        nil
+      end
+
       # Runs the precision tiers in order and returns the first non-nil answer. Each tier owns its own receiver/argument
       # shape checks; a tier that does not recognise the receiver returns nil so the next tier
       # can try. The RBS tier sits below this chain and is invoked by `resolve`.
@@ -903,10 +917,8 @@ module Rigor
         struct_result = StructFolding.try_dispatch(context)
         return struct_result if struct_result
 
-        PRECISE_TIERS_HEAD.each do |tier|
-          result = tier.try_dispatch(context)
-          return result if result
-        end
+        head_result = first_tier_answer(PRECISE_TIERS_HEAD, context)
+        return head_result if head_result
 
         folder_result = dispatch_receiver_keyed_folder(context)
         return folder_result if folder_result
@@ -914,11 +926,7 @@ module Rigor
         kernel_result = dispatch_kernel_intrinsic(context)
         return kernel_result if kernel_result
 
-        PRECISE_TIERS_TAIL.each do |tier|
-          result = tier.try_dispatch(context)
-          return result if result
-        end
-        nil
+        first_tier_answer(PRECISE_TIERS_TAIL, context)
       end
 
       # The folders the receiver's class selects, at most one per call: a stdlib singleton folder, or for a

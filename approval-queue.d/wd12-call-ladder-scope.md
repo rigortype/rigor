@@ -50,8 +50,8 @@ For the rung moves, the design listed seven slices. Two fit badly:
 - `Unresolved` (slice S9): 6 methods and 71 code lines, and the move makes `fallback_for` public.
 
 Moving them makes those rows modules like the rest. Leaving them means their three rows name a typer method, so "a
-rung is one file and one row" has named exceptions. The counts are from a syntactic call graph, not from doing the
-move.
+rung is one file under `call_ladder/`" has named exceptions. The counts are from a syntactic call graph, not from
+doing the move.
 
 ## Decision
 

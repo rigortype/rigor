@@ -491,9 +491,10 @@ named `try_dispatch`: a tier takes the site alone and must not type anything.
 - *`typer` is the frame.* The rung receives the walking `ExpressionTyper`, which already exists, so
   nothing is allocated for it. It calls only the names in `CallLadder::PORT`; a spec checks every
   call a rung makes on the typer against that list, `send` included. It reads the scope as
-  `typer.scope`, which `sig/` declares `-> Scope`. `CallContext#scope` is `untyped` there, and
-  reading it would add `Dynamic` call sites against the self-typing ratchet. `sig/` declares
-  `typer` as `ExpressionTyper`, and declares each `try_call`.
+  `typer.scope`: the first rung slice makes `ExpressionTyper#scope` public and a `PORT` member, and
+  `sig/` already declares it `-> Scope`. `CallContext#scope` is `untyped` there, and reading it
+  would add `Dynamic` call sites against the self-typing ratchet. `sig/` declares `typer` as
+  `ExpressionTyper`, and declares each `try_call`.
 - *`site` is the call.* It is built once per site with `CallContext.build`, the one place the field
   list is enumerated. A literal `send`'s target is a site of its own: the inner name and arguments,
   no block. The index read's `call_node` is the write node, so a rung takes the method name from
@@ -501,10 +502,11 @@ named `try_dispatch`: a tier takes the site alone and must not type anything.
 - *Two invariants.* `site.scope` equals `typer.scope`: where a typer is swapped
   (`rebound_operand_typer`, `typer_under`), the site is rebuilt. And the `TypingState` slots pushed
   and popped during the walk are read where they are used, never captured into a site.
-- *Re-entry.* The typer methods a rung calls back (`call_result_type_for`,
-  `call_dispatch_type_for`, `infer_user_method_return`, …) become public and `@api private`, each
-  in the slice whose rung first needs it. A spec restricts their callers to `call_ladder/`: the
-  typer's cursor is valid only inside a `type_of` walk.
+- *Re-entry.* The typer methods a rung calls back into (`call_result_type_for`,
+  `call_dispatch_type_for`, `infer_user_method_return`, …) become public in the slice whose rung
+  first needs them. Every `PORT` member a slice makes public is `@api private`, `scope` included. A
+  spec restricts callers of the re-entry points to `call_ladder/`: the typer's cursor is valid only
+  inside a `type_of` walk.
 
 **The dispatcher.** Its twelve private tiers become `try_dispatch(context)` modules under
 `method_dispatcher/`: plugin contribution, HKT builtin return, static refinement, synthetic method,
@@ -572,13 +574,10 @@ methods call back 8 of block typing's, the cluster #3359 decides.
   the code map, and the internal spec where it names a moved method;
 - an independent review, and landing within the day.
 
-*Done when:* a new call-typing rung is one file and one row, with no edit to
-`expression_typer.rb`; no call-typing order is written out twice without the pin spec checking it;
-and every rung left in the typer is named with its reason.
-
-*Open:* the slices above leave the typer's ladder as hand-written code that the spec holds to the
-table, so a new rung still adds its call there and they do not reach the first clause alone.
-Whether a later slice replaces that code with a walk over the rows is not decided here.
+*Done when:* a new call-typing rung is one file under `call_ladder/`, one row in `RUNGS`, and one
+call in the typer's ladder, which the pin spec rejects if it disagrees with the row; no call-typing
+order is written out without the pin spec checking it; and every rung left in the typer is named
+with its reason.
 
 ### Filed outside WD12
 
@@ -605,6 +604,7 @@ Whether a later slice replaces that code with a walk over the rows is not decide
 | Split the hot files to make the specs fast (2026-11-17) | Rejected as a goal | `scope_indexer.rb` alone has 53 `require_relative` lines, so a module split out of it still loads the engine, and the time is in runner-style examples. C4 and the quick tier address the loop; the splits address locality. |
 | A `typer` field on `CallContext`, so that every rung is a `try_dispatch(context)` tier (2026-11-19) | Rejected | Every dispatcher tier, and every other caller of `MethodDispatcher.dispatch`, would get a way to recurse into typing. The dispatcher must not touch the tracer (`docs/internal-spec/inference-engine.md` § "Method Dispatch Boundary"), and a field makes that unenforceable. |
 | A port or frame object handed to each rung (2026-11-19) | Rejected | One more object per ladder entry (1,058,027 on the census run), or a second long-lived object whose lifetime must match the typer's. The typer already exists; `PORT` and its spec make what a rung sees of it narrow. |
+| The typer walks `RUNGS` at run time (`CallLadder.answer`) (2026-11-19) | Rejected | The self-check types a straight-line call to a declared `try_call`, and reads `rungs[index]` as `Dynamic`. The order-pin spec gives the same single declaration without a megamorphic call on the hot path. |
 | Wrap each rung in an adapter onto its typer method before any body moves (2026-11-19) | Rejected | Ten three-line adapters that `send` into the typer are an indirection layer with nothing behind it, which is why `LeafNodes` went back in #3319. The order-pin spec gives the one declaration without them, and makes nothing public. |
 
 ## Consequences

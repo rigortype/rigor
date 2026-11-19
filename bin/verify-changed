@@ -372,7 +372,10 @@ ancestry_walker_spec=spec/rigor/scope/ancestry_walker_detection_spec.rb
 # The call ladder's order pin (ADR-116 WD12) runs from two specs, one mirroring
 # the tables (lib/rigor/inference/call_ladder.rb) and one in the typer's mirror
 # directory, so an edit to either side selects it. Both read the typer through
-# spec/support/call_ladder_pin.rb, which mirrors neither.
+# spec/support/call_ladder_pin.rb, which mirrors neither. The pin also reads
+# the typer's modules under expression_typer/ and the rung modules under
+# call_ladder/, whose own mirrors are other specs, so a change to either
+# directory selects both by path, in both tiers.
 call_ladder_specs=(
   spec/rigor/inference/call_ladder_spec.rb
   spec/rigor/inference/expression_typer/call_ladder_spec.rb
@@ -427,6 +430,11 @@ for path in ${changed[@]+"${changed[@]}"}; do
     plugins/*/lib/*)
       for spec in "${declaration_fact_specs[@]}"; do add_spec "$spec"; done
       add_spec "$ancestry_walker_spec"
+      ;;
+  esac
+  case "$path" in
+    lib/rigor/inference/expression_typer/* | lib/rigor/inference/call_ladder/*)
+      for spec in "${call_ladder_specs[@]}"; do add_spec "$spec"; done
       ;;
   esac
   case "$path" in

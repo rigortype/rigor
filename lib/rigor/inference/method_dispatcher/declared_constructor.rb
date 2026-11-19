@@ -11,7 +11,7 @@ module Rigor
     module MethodDispatcher
       # Issue #2884 — `X.new` through a `def self.new` that a project, gem or collection signature declares on `X` or
       # on an ancestor of `X`. RBS models a constructor that answers another class this way (`email_address` declares
-      # `def self.new: (...) -> Address` on `EmailAddress`), and `MethodDispatcher#meta_new` answered `Nominal[X]` for
+      # `def self.new: (...) -> Address` on `EmailAddress`), and `MetaIntrospection.meta_new` answered `Nominal[X]` for
       # every `Singleton[X].new` before any RBS tier ran. `meta_new` asks this module only after its curated lifts
       # (`Array`, `Set`, `Hash`, `Struct`, `Class.new`, …) have declined, and keeps its `Nominal[X]` answer whenever
       # this one is nil.

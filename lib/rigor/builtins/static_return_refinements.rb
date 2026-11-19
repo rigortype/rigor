@@ -259,7 +259,7 @@ module Rigor
 
       # @return the candidate owner class names for a bare method-name
       #   lookup. Empty when no override names this method. Consulted on every dispatch
-      #   (`try_static_refinement`).
+      #   (`MethodDispatcher::StaticRefinement.try_dispatch`).
       def self.owners_for(method_name)
         OWNERS_BY_METHOD[method_name.to_sym] || NO_OWNERS
       end

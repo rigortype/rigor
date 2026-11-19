@@ -332,7 +332,7 @@ module Rigor
             return nil unless SET_UNION_ALGEBRA.include?(method_name) && args.size == 1
 
             receiver = nominal.type_args.size == 1 ? nominal.type_args.first : Type::Combinator.untyped
-            added = Inference::SetMutation.element_types(args.first).map { |t| MethodDispatcher.array_new_element(t) }
+            added = Inference::SetMutation.element_types(args.first).map { |t| MetaIntrospection.array_new_element(t) }
             Type::Combinator.nominal_of("Set", type_args: [Type::Combinator.union(receiver, *added)])
           end
 

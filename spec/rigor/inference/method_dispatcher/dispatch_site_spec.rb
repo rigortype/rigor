@@ -324,38 +324,68 @@ RSpec.describe Rigor::Inference::MethodDispatcher, ".dispatch_site" do
   #
   # ADR-132 WD3, not landed, makes visibility a field of the call. The slice that lets a site set `public_only`
   # threads it through the re-entries and the fallback, and changes these examples with the rule.
+  #
+  # The first two examples read the code, and know a context by how it is spelled: the `CallContext` class, a
+  # context built or derived in place, a local assigned one in the same file, and anything named `context` or
+  # `site` (`base_context`, `@site`). Another value with a field of the same name is not one: ADR-132's
+  # `Invocation` has a `public_only` of its own. A context held under another name is not seen.
   describe "a site's two other fields" do
     def root = File.expand_path("../../../..", __dir__)
     def dispatcher_directory = "lib/rigor/inference/method_dispatcher/"
     def other_fields = %i[self_type_override public_only]
     def integer = comb.nominal_of("Integer")
 
-    # The two fields `call` sets on a context: as keywords of `CallContext.build` or of a `with`, or positionally
-    # through `CallContext.new`, which sets every field.
-    def fields_set_by(call)
-      on_context = context_class?(call.receiver)
-      return other_fields if on_context && call.name == :new
-      return [] unless (on_context && call.name == :build) || call.name == :with
+    # The two fields `call` sets on a context: as keywords of `CallContext.build` or of a context's `with`, or
+    # positionally through `CallContext.new`, which sets every field.
+    def fields_set_by(call, held)
+      return [] unless context?(call.receiver, held)
+      return other_fields if call.name == :new
+      return [] unless %i[build with].include?(call.name)
 
       keywords = (call.arguments&.arguments || []).grep(Prism::KeywordHashNode).flat_map(&:elements)
       keywords.grep(Prism::AssocNode).map { |pair| pair.key.slice.delete_suffix(":").to_sym } & other_fields
     end
 
-    def context_class?(receiver)
-      [Prism::ConstantReadNode, Prism::ConstantPathNode].include?(receiver.class) &&
-        receiver.slice.end_with?("CallContext")
+    # The two fields `call` reads off a context: a call of the field's reader on one.
+    def fields_read_by(call, held)
+      call.arguments.nil? && context?(call.receiver, held) ? [call.name] & other_fields : []
     end
 
-    # The two fields `call` reads off a context: a call of the field's reader on anything.
-    def fields_read_by(call) = call.receiver && call.arguments.nil? ? [call.name] & other_fields : []
+    # Whether `node` is a context, or the class of one, as far as its spelling says. `held` is the locals the
+    # file assigns a context to.
+    def context?(node, held)
+      case node
+      when Prism::ConstantReadNode, Prism::ConstantPathNode then node.slice.end_with?("CallContext")
+      when Prism::LocalVariableReadNode, Prism::InstanceVariableReadNode
+        held.include?(node.name) || context_name?(node.name)
+      when Prism::CallNode
+        made = %i[build new with].include?(node.name)
+        made ? context?(node.receiver, held) : node.receiver.nil? && context_name?(node.name)
+      else false
+      end
+    end
 
-    # The fields the calls of `source` set (`:set`) or read (`:read`).
-    def fields_in(source, use)
-      found = []
+    def context_name?(name) = name.to_s.match?(/(?:\A|_|@)(?:context|site)\z/)
+
+    def each_node(source)
       pending = [Prism.parse(source).value]
       while (node = pending.shift)
-        found.concat(use == :set ? fields_set_by(node) : fields_read_by(node)) if node.is_a?(Prism::CallNode)
+        yield node
         pending.concat(node.compact_child_nodes)
+      end
+    end
+
+    # The fields the calls of `source` set (`:set`) or read (`:read`) on a context.
+    def fields_in(source, use)
+      held = []
+      each_node(source) do |node|
+        held << node.name if node.is_a?(Prism::LocalVariableWriteNode) && context?(node.value, held)
+      end
+      found = []
+      each_node(source) do |node|
+        next unless node.is_a?(Prism::CallNode)
+
+        found.concat(use == :set ? fields_set_by(node, held) : fields_read_by(node, held))
       end
       found.uniq
     end
@@ -383,12 +413,28 @@ RSpec.describe Rigor::Inference::MethodDispatcher, ".dispatch_site" do
       expect(inside).to include("#{dispatcher_directory}user_class_fallback.rb" => other_fields)
       expect(fields_in("site.with(public_only: true); CallContext.new(a, b); Other.build(public_only: 1)", :set))
         .to eq(%i[public_only self_type_override])
+      expect(fields_in("held = MethodDispatcher::CallContext.build(receiver: r); held.with(public_only: true)", :set))
+        .to eq(%i[public_only])
     end
 
     it "are read by the RBS-backed tier and by no other" do
       expect(files(:read)).to eq("#{dispatcher_directory}rbs_dispatch.rb" => other_fields)
-      expect(fields_in("context.public_only; site.self_type_override; public_only = 1; public_only", :read))
+      expect(fields_in("context.public_only; @site.self_type_override; public_only = 1; public_only", :read))
         .to eq(other_fields.reverse)
+    end
+
+    it "are a context's: a field of the same name on another value is neither set nor read" do
+      invocation = <<~RUBY
+        Invocation = Data.define(:node, :public_only)
+        inv = Invocation.new(node, true)
+        inv.public_only
+        inv.with(public_only: true)
+        ReflectiveCall.build(node, public_only: inv.public_only)
+      RUBY
+
+      expect(fields_in(invocation, :set)).to eq([])
+      expect(fields_in(invocation, :read)).to eq([])
+      expect(fields_in(invocation.gsub("inv", "site"), :read)).to eq(%i[public_only])
     end
 
     it "are taken by neither keyword entry, so a call the dispatcher dispatches again is built without them" do

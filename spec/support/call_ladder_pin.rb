@@ -18,10 +18,10 @@ module CallLadderPin
   # A sequence the spec holds: an entry's own methods (`exception` nil), or a branch an exception row names.
   Place = Data.define(:name, :entry, :exception)
 
-  # One value a method can answer with. `node` is the call, or what stands where the reading wanted one. `site`
-  # orders the answers: the offset of the `return` argument or last expression the method answers it from, then
-  # the side of each `||` on the way down to it. `guard` is the predicate of the `if` the answer stands directly
-  # under (`return x if test`, or `x if test` in last position), when it stands under one.
+  # One value a method can answer with. `node` is the call, or the node that stands where the reading wanted a
+  # call. `site` orders the answers: the offset of the `return` argument or last expression the method answers it
+  # from, then the side of each `||` on the way down to it. `guard` is the predicate of the `if` the answer stands
+  # directly under (`return x if test`, or `x if test` in last position), when it stands under one.
   Answer = Data.define(:node, :site, :guard)
 
   module_function
@@ -113,7 +113,8 @@ module CallLadderPin
       Prism::LocalVariableOperatorWriteNode
     ].freeze
 
-    def self.of(def_node) = new(def_node).list
+    # In the order the method answers from them.
+    attr_reader :list
 
     def initialize(def_node)
       @body = def_node.body
@@ -126,16 +127,13 @@ module CallLadderPin
       returns(@body, nil)
       last = @body.is_a?(Prism::StatementsNode) ? @body.body.last : @body
       terminals(last, [last.location.start_offset], nil) if last
+      @list = @found.sort_by { |answer| [answer.site, answer.node.location.start_offset] }.uniq(&:node)
     end
 
-    # In the order the method answers them. An entry whose node is the Symbol `:order` leads the list when the
-    # calls are not written in that order: a rung asked ahead of the one above it has still run first.
-    def list
-      answered = @found.sort_by { |answer| [answer.site, answer.node.location.start_offset] }.uniq(&:node)
-      asked = answered.sort_by { |answer| answer.node.location.start_offset }
-      return answered if answered.map(&:node) == asked.map(&:node)
-
-      [Answer.new(node: :order, site: [], guard: nil), *answered]
+    # Whether the method writes its calls in another order than it answers from them. A rung asked ahead of the
+    # one above it has still run first, whichever answer is returned first.
+    def out_of_order?
+      list.map(&:node) != list.sort_by { |answer| answer.node.location.start_offset }.map(&:node)
     end
 
     private
@@ -242,7 +240,7 @@ module CallLadderPin
         definition = definition_of(home, name)
         next [] if definition.nil?
 
-        answers = Answers.of(definition).map(&:node)
+        answers = Answers.new(definition).list.map(&:node)
         hidden = rung_calls(definition, home).reject { |call, _rung| answers.any? { |node| node.equal?(call) } }
         hidden.map { |_call, rung| [home, name, rung.name] }
       end
@@ -306,12 +304,15 @@ module CallLadderPin
       definition = definition_of(entry.home, name)
       return [[:missing, "#{entry.home} has no single method #{name}"]] if definition.nil?
 
-      Answers.of(definition).flat_map { |answer| item(answer, entry, exception, [*expanding, name]) }
+      answers = Answers.new(definition)
+      sequence = answers.list.flat_map { |answer| item(answer, entry, exception, [*expanding, name]) }
+      return sequence unless answers.out_of_order?
+
+      [[:order, "#{name} asks rungs in one order and answers from them in another"], *sequence]
     end
 
     def item(answer, entry, exception, expanding)
       node = answer.node
-      return [[:order, "#{expanding.last} asks rungs in one order and answers from them in another"]] if node == :order
       return [[:unreadable, "#{node.type} at line #{node.location.start_line}"]] unless call?(node)
 
       rung = rung_of(node, entry.home)

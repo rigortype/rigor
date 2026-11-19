@@ -2171,7 +2171,7 @@ module Rigor
       # Issue #522 — the honest cause for a call the tiers exhausted. When the receiver's class HAS a
       # discovered project def for the method, the miss is a return the engine could not infer (the
       # discovered-method tier deliberately declined in favor of body inference, which then declined too —
-      # `MethodDispatcher#try_discovered_method`'s decline arms), which is ADR-82's
+      # `MethodDispatcher::DiscoveredMethod.try_dispatch`'s decline arms), which is ADR-82's
       # `INFERRED_RETURN_UNTYPED`, not "unsupported syntax". Without this, every service-object `#call`
       # whose body defeats inference reports to `coverage --protection` as a syntax gap. The generic cause
       # stays for genuinely unresolved names (framework DSL sends, methods no scanned file defines).

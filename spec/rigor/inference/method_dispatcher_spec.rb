@@ -897,7 +897,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
 
       it "routes Nominal[<core module>].inspect through Nominal[Object]" do
         # Comparable is a real RBS module that does not declare `inspect` itself. With the module-mixin fallback in
-        # `user_class_fallback_receiver`, the dispatcher retries against Nominal[Object] and resolves Kernel#inspect.
+        # `UserClassFallback`, the dispatcher retries against Nominal[Object] and resolves Kernel#inspect.
         result = described_class.dispatch(
           receiver_type: Rigor::Type::Combinator.nominal_of("Comparable"),
           method_name: :inspect, arg_types: [], environment: env

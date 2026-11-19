@@ -122,7 +122,9 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
   def dispatcher_files
     %w[
       lib/rigor/inference/method_dispatcher.rb
+      lib/rigor/inference/method_dispatcher/composite_receiver.rb
       lib/rigor/inference/method_dispatcher/dependency_source.rb
+      lib/rigor/inference/method_dispatcher/discovered_method.rb
       lib/rigor/inference/method_dispatcher/hkt_builtin_return.rb
       lib/rigor/inference/method_dispatcher/interface_shape.rb
       lib/rigor/inference/method_dispatcher/meta_introspection.rb
@@ -132,6 +134,7 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       lib/rigor/inference/method_dispatcher/static_refinement.rb
       lib/rigor/inference/method_dispatcher/synthesized_stub.rb
       lib/rigor/inference/method_dispatcher/synthetic_method_dispatch.rb
+      lib/rigor/inference/method_dispatcher/user_class_fallback.rb
     ]
   end
 

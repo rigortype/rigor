@@ -106,6 +106,41 @@ RSpec.describe "bin/verify-changed spec selection" do
     end
   end
 
+  it "selects both specs of the call ladder's pin for a change to the reader they share" do
+    specs, uncovered = selection_for("spec/support/call_ladder_pin.rb")
+
+    expect(specs).to contain_exactly("spec/rigor/inference/call_ladder_spec.rb",
+                                     "spec/rigor/inference/expression_typer/call_ladder_spec.rb")
+    expect(uncovered).to eq(["spec/support/call_ladder_pin.rb"])
+  end
+
+  # The pin reads the typer's modules under `expression_typer/` and the rung modules under `call_ladder/`
+  # (`CallLadderPin.sources`), and a file there mirrors a spec of its own, not one that runs the pin.
+  describe "the call ladder's pin, for a file it reads" do
+    let(:pin) do
+      %w[spec/rigor/inference/call_ladder_spec.rb spec/rigor/inference/expression_typer/call_ladder_spec.rb]
+    end
+
+    it "is selected for a module of the typer, in both tiers, beside the module's own spec" do
+      quick, = selection_for("lib/rigor/inference/expression_typer/writes.rb", quick: true)
+      full, = selection_for("lib/rigor/inference/expression_typer/writes.rb")
+
+      expect(quick).to contain_exactly("spec/rigor/inference/expression_typer/writes_spec.rb", *pin)
+      expect(full).to include("spec/rigor/inference/expression_typer/writes_spec.rb", *pin)
+    end
+
+    it "is selected for a rung module, in both tiers, and not for a file elsewhere under inference/" do
+      quick, = selection_for("lib/rigor/inference/call_ladder/user_method.rb", quick: true)
+      full, = selection_for("lib/rigor/inference/call_ladder/user_method.rb")
+      elsewhere, = selection_for("lib/rigor/inference/method_dispatcher/call_context.rb", quick: true)
+
+      expect(quick).to match_array(pin)
+      expect(full).to include(*pin)
+      expect(elsewhere).not_to include(*pin)
+      expect(elsewhere).to include("spec/rigor/inference/method_dispatcher/call_context_spec.rb")
+    end
+  end
+
   it "selects few specs for one fixture's demo.rb, by its directory" do
     specs, uncovered = selection_for("spec/integration/fixtures/block_content_ivar_capture/demo.rb")
     expect(uncovered).to be_empty
@@ -555,6 +590,15 @@ RSpec.describe "bin/verify-changed spec selection" do
                              spec/rigor/inference/statement_evaluator_spec.rb])
       full, = selection_for(engine_path)
       expect(full).to include("spec/rigor/inference/statement_evaluator_spec.rb", *drift)
+    end
+
+    # The call ladder's pin (ADR-116 WD12) sits in the typer's mirror directory so that an edit to the ladder
+    # runs it in the edit loop. Unpriced, it cost the default and the time budget left it out.
+    it "keeps the call ladder's pin for an edit to the typer" do
+      quick, = selection_for("lib/rigor/inference/expression_typer.rb", quick: true)
+
+      expect(quick).to include("spec/rigor/inference/expression_typer/call_ladder_spec.rb",
+                               "spec/rigor/inference/expression_typer_spec.rb")
     end
 
     it "omits the incremental not-re-checked specs that a dependency-recording edit adds by default" do

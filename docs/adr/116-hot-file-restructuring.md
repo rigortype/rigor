@@ -502,6 +502,14 @@ later change to it fails. The row names the typer's `overriding_own_def?` until 
 (`attribute_compound_read_type`, `call_operator_write_type_for` and the 11 other call sites of
 `MethodDispatcher.dispatch` in `lib/`).
 
+> **Note, 2026-11-20** ([#3367](https://github.com/rigortype/rigor/pull/3367)). An exception row is one of
+> two kinds. *Drift* is a rung an entry should ask and leaves out: the row names its issue, and that
+> issue's fix deletes the row, as #3358's does. *Design* is the splat index read. Recording newly
+> found drift is not an amendment to this section, and S2′ recorded three more rows that way
+> ([#3368](https://github.com/rigortype/rigor/issues/3368),
+> [#3369](https://github.com/rigortype/rigor/issues/3369),
+> [#3370](https://github.com/rigortype/rigor/issues/3370)). A second design row is one.
+
 **A rung module.** A rung becomes a module under `call_ladder/` whose entry is
 `try_call(site, typer)`, in the pull request that moves its body and not before. The entry is not
 named `try_dispatch`: a tier takes the site alone and must not type anything.

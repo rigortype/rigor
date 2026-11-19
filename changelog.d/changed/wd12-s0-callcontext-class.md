@@ -1,0 +1,2 @@
+- **[rigor check]** `rigor check` allocates about 3% fewer objects on a codebase the size of Rigor's own, with every diagnostic unchanged. ([#3361](https://github.com/rigortype/rigor/pull/3361))
+  - The context built for each method call is now a plain frozen object; as a `Data` it took two more allocations per call.

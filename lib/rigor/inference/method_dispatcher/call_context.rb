@@ -46,6 +46,9 @@ module Rigor
 
         # Keyword factory with nil/false defaults for the optional context fields, so a caller that only has
         # the call quartet (the common precise-tier path) need not spell out the rest.
+        #
+        # This is the single place a caller enumerates the call-context field list — the whole point of the
+        # value object is to absorb the wide keyword list the tiers used to each redeclare.
         def self.build(receiver:, method_name:, args:, # rubocop:disable Metrics/ParameterLists
                        block_type: nil, environment: nil, call_node: nil,
                        scope: nil, self_type_override: nil, public_only: false)

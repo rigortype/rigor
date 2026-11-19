@@ -85,6 +85,12 @@ RSpec.describe Rigor::Inference::MethodDispatcher::CallContext do
     expect(ctx).to eq(described_class.build(receiver: :recv, method_name: :m, args: []))
   end
 
+  it "stays frozen when duplicated" do
+    ctx = described_class.build(receiver: :recv, method_name: :m, args: [])
+
+    expect(ctx.dup).to be_frozen.and eq(ctx)
+  end
+
   describe "value equality" do
     let(:fields) { [:recv, :m, [:a], :blk, :env, :node, :scope, :so, true] }
 
@@ -98,8 +104,27 @@ RSpec.describe Rigor::Inference::MethodDispatcher::CallContext do
       end
     end
 
+    it "is not `eql?` to a context that differs in any one field" do
+      base = described_class.new(*fields)
+
+      fields.each_index do |index|
+        other = described_class.new(*fields.dup.tap { |copy| copy[index] = :different })
+
+        expect(base).not_to eql(other), "field #{index} was not compared"
+      end
+    end
+
     it "is not equal to something that is not a context" do
       expect(described_class.new(*fields)).not_to eq(fields)
+    end
+
+    it "keeps an instance of a subclass apart from a base instance with the same fields" do
+      base = described_class.new(*fields)
+      other = Class.new(described_class).new(*fields)
+
+      expect([base == other, other == base]).to eq([false, false])
+      expect([base.eql?(other), other.eql?(base)]).to eq([false, false])
+      expect(other.hash).not_to eq(base.hash)
     end
 
     it "finds an equal context as a Hash key" do

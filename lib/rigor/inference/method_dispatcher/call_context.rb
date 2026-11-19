@@ -77,6 +77,12 @@ module Rigor
           freeze
         end
 
+        # `dup` skips `initialize`, so the copy is frozen here, as a `Data`'s copy is.
+        def initialize_copy(source)
+          super
+          freeze
+        end
+
         # A fresh context with the named fields replaced. It takes any keyword and raises `ArgumentError` for
         # one that names no field, as `Data#with` did.
         def with(**changes)
@@ -102,8 +108,9 @@ module Rigor
           other.instance_of?(self.class) && fields.eql?(other.fields)
         end
 
+        # Seeded with the class, as `eql?` compares it.
         def hash
-          fields.hash
+          [self.class, fields].hash
         end
 
         protected

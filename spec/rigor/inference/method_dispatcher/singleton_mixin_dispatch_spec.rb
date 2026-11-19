@@ -51,4 +51,17 @@ RSpec.describe Rigor::Inference::MethodDispatcher::SingletonMixinDispatch do
   it "declines without a scope — the internal dispatcher callers thread none" do
     expect(described_class.try_dispatch(cc(receiver: registry, method_name: :instance, args: []))).to be_nil
   end
+
+  # What holds the tier in `MethodDispatcher`'s `BUNDLED_OVERRIDE_TIERS`: no other tier answers the call.
+  it "is asked by MethodDispatcher.dispatch" do
+    ask = lambda do |includes|
+      Rigor::Inference::MethodDispatcher.dispatch(
+        receiver_type: registry, method_name: :instance, arg_types: [], environment: Rigor::Environment.default,
+        scope: scope_with(includes: includes)
+      )
+    end
+
+    expect(ask.call({ "Registry" => ["Singleton"] })).to eq(Rigor::Type::Combinator.nominal_of("Registry"))
+    expect(ask.call({})).to be_nil
+  end
 end

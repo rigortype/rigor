@@ -18,7 +18,8 @@ module Rigor
       #
       # **Where it sits.** After every real tier has declined, so a receiver Rigor can name always resolves
       # through RBS first — `"".frozen?` is answered by `String`'s signature, not by this table. It only ever
-      # replaces a `Dynamic[Top]` that the engine was about to produce anyway.
+      # replaces a `Dynamic[Top]` that the engine was about to produce anyway. Its place in the order is
+      # `MethodDispatcher`'s `STUB_AND_UNIVERSAL_TIERS`, behind the synthesized-stub tier.
       #
       # **What is deliberately NOT here**, each measured rather than argued (same note):
       #

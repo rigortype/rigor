@@ -186,14 +186,12 @@ module Rigor
         # `() -> String?` when the documented return is `non-empty-string | nil`) get the
         # tightened type without modifying the vendored `ruby/rbs` submodule. The override table
         # lives in `Rigor::Builtins::StaticReturnRefinements::OVERRIDES`.
-        bundled_override = first_tier_answer(BUNDLED_OVERRIDE_TIERS, context)
-        return bundled_override if bundled_override
-
+        #
         # `Foo.instance` for a class that includes the stdlib `Singleton` mixin. Ruby grows that method through
         # an `included` hook and the upstream RBS leaves `Singleton::SingletonClassMethods` empty, so nothing
         # below can answer it. See {SingletonMixinDispatch} for why the value matters more than the site count.
-        singleton_mixin = SingletonMixinDispatch.try_dispatch(context)
-        return singleton_mixin if singleton_mixin
+        bundled_override = first_tier_answer(BUNDLED_OVERRIDE_TIERS, context)
+        return bundled_override if bundled_override
 
         rbs_result = RbsDispatch.try_dispatch(context)
         if rbs_result
@@ -278,17 +276,15 @@ module Rigor
         # against it would otherwise mis-fire `call.undefined-method`. Resolve it to
         # `Dynamic[Top]` instead — the same no-false-positive contract as the dependency-source
         # tier. Sits below every real resolution tier so a genuine signature always wins.
-        stub_result = first_tier_answer(STUB_TIERS, context)
-        return stub_result if stub_result
-
+        #
         # The receiver-independent `BasicObject` / `Object` / `Kernel` selectors, for a receiver no tier
         # above could name. `x.nil?` is `bool` whatever `x` is; without this tier it was `Dynamic[Top]`
         # like every other call on an untyped receiver. Sits here, below every real resolution tier, so a
         # nameable receiver always answers from its own signature first — this only ever replaces a
         # `Dynamic[Top]` the typer was about to produce. See {UniversalObjectDispatch} for the table and
         # for the selectors deliberately left out of it.
-        universal_result = UniversalObjectDispatch.try_dispatch(context)
-        return universal_result if universal_result
+        stub_or_universal = first_tier_answer(STUB_AND_UNIVERSAL_TIERS, context)
+        return stub_or_universal if stub_or_universal
 
         # Slice 7 phase 10 — user-class ancestor fallback ({UserClassFallback}). When the receiver is `Nominal[T]` or
         # `Singleton[T]` for a class not in the RBS environment (typically a user-defined class),
@@ -441,14 +437,21 @@ module Rigor
       # The tiers `resolve` asks through an array outside the precise band, each where its comment in `resolve`
       # says. A tier is in an array when nothing in `resolve` follows its answer; one whose answer `resolve`
       # follows with a record on the scope or the reporter stays a call there.
-      BUNDLED_OVERRIDE_TIERS = Ractor.make_shareable([HktBuiltinReturn, StaticRefinement].freeze)
+      #
+      # What Rigor bundles ahead of the RBS answer: the two override tables, then the `instance` the stdlib
+      # `Singleton` mixin grows and its upstream RBS leaves undeclared.
+      BUNDLED_OVERRIDE_TIERS = Ractor.make_shareable([
+        HktBuiltinReturn, StaticRefinement, SingletonMixinDispatch
+      ].freeze)
       private_constant :BUNDLED_OVERRIDE_TIERS
 
       SYNTHETIC_TIERS = Ractor.make_shareable([SyntheticMethodDispatch].freeze)
       private_constant :SYNTHETIC_TIERS
 
-      STUB_TIERS = Ractor.make_shareable([SynthesizedStub].freeze)
-      private_constant :STUB_TIERS
+      # The two answers for a receiver that has no signature of its own to read: a type Rigor invented, then a
+      # `Dynamic`.
+      STUB_AND_UNIVERSAL_TIERS = Ractor.make_shareable([SynthesizedStub, UniversalObjectDispatch].freeze)
+      private_constant :STUB_AND_UNIVERSAL_TIERS
 
       COMPOSITE_TIERS = Ractor.make_shareable([CompositeReceiver].freeze)
       private_constant :COMPOSITE_TIERS

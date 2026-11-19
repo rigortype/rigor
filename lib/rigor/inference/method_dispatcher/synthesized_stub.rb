@@ -7,7 +7,7 @@ module Rigor
     module MethodDispatcher
       # The synthesized-stub tier (ADR-5 robustness): a call on a type Rigor invented so that a project signature
       # would build answers `Dynamic[Top]` instead of falling through to `call.undefined-method`. Its place in the
-      # order is `MethodDispatcher`'s `STUB_TIERS`.
+      # order is `MethodDispatcher`'s `STUB_AND_UNIVERSAL_TIERS`.
       module SynthesizedStub
         module_function
 

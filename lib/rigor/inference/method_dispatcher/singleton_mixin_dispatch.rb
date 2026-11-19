@@ -23,6 +23,9 @@ module Rigor
       # {includes_singleton_mixin?}: when the included name resolves to a project-declared top-level `Singleton`,
       # the tier declines, because then the name means something else entirely (a nested `M::Singleton` is read as
       # the stdlib mixin; see that method).
+      #
+      # Its place in the order is `MethodDispatcher`'s `BUNDLED_OVERRIDE_TIERS`, the last of them, ahead of
+      # `RbsDispatch`.
       module SingletonMixinDispatch
         MIXIN_NAMES = Ractor.make_shareable(Set["Singleton", "::Singleton"])
         private_constant :MIXIN_NAMES

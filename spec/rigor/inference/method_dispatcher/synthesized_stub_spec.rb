@@ -5,7 +5,8 @@ require "tmpdir"
 
 # The synthesized-stub tier asked directly. It reads the receiver and the environment's RBS loader and nothing else
 # of the context. The last example asks it through the dispatcher on a real environment, which is what holds it in
-# `MethodDispatcher`'s `STUB_TIERS`: `runner_spec.rb`'s synthesized-stub example passes with the tier removed.
+# `MethodDispatcher`'s `STUB_AND_UNIVERSAL_TIERS`: `runner_spec.rb`'s synthesized-stub example passes with the tier
+# removed.
 RSpec.describe Rigor::Inference::MethodDispatcher::SynthesizedStub do
   def environment_with(loader)
     instance_double(Rigor::Environment, rbs_loader: loader)

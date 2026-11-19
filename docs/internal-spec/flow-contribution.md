@@ -16,7 +16,7 @@ plugin-authored bundle hook with the narrow `dynamic_return`
 DSLs, and ADR-52 WD3 deleted the underlying `flow_contribution_for`
 hook outright. A plugin's `dynamic_return` result is wrapped into
 a `FlowContribution` *by the engine*
-(`MethodDispatcher#collect_gated_contributions`) before it reaches
+(`MethodDispatcher::PluginContribution.collect_gated_contributions`) before it reaches
 the merger; the bundle is therefore an analyzer-internal carrier
 for the merge tiers, not a plugin-author surface.
 

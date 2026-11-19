@@ -50,9 +50,10 @@ module Rigor
       # method's name (a single `"\#{name}"` placeholder gets interpolated with the literal symbol argument at
       # `symbol_arg_position`). The synthetic method's return type is the `returns_from_arg:` lookup when it
       # resolves, else a non-empty `returns:` string (`SyntheticMethodScanner#resolve_emit_return_type`); the
-      # dispatcher turns it into a nominal type through `MethodDispatcher#promote_via_return_type` when the
-      # environment knows the class. With neither, an `"untyped"` / `"void"` placeholder, or an unknown class, the
-      # method answers `Dynamic[Top]`. Resolution through ADR-13's `Plugin::TypeNodeResolver` is not wired.
+      # dispatcher turns it into a nominal type through
+      # `MethodDispatcher::SyntheticMethodDispatch.promote_via_return_type` when the environment knows the class.
+      # With neither, an `"untyped"` / `"void"` placeholder, or an unknown class, the method answers `Dynamic[Top]`.
+      # Resolution through ADR-13's `Plugin::TypeNodeResolver` is not wired.
       #
       # Engine wiring: `Inference::SyntheticMethodScanner` (slice 2b, `synthetic_method_scanner.rb`) consumes
       # `manifest.heredoc_templates`. Worked consumers: `plugins/rigor-dry-struct/` and

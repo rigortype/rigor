@@ -8,7 +8,7 @@ require "rigor/inference/synthetic_method_index"
 
 # ADR-16 slice 6a-TierB — precision promotion for Tier B emissions.
 # When a SyntheticMethod records its `origin_module` in provenance,
-# the dispatcher's `try_synthetic_method` tier redispatches the
+# the dispatcher's synthetic-method tier redispatches the
 # call on `Nominal[origin_module]` via `RbsDispatch.try_dispatch`.
 # This promotes Tier B's slice-2b/3b floor `Dynamic[T]` to the
 # module's authored RBS return type.

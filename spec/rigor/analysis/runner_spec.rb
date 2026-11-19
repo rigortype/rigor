@@ -301,7 +301,7 @@ RSpec.describe Rigor::Analysis::Runner do
 
     it "respects the per-receiver plugin veto (ADR-10 5a)" do
       # When a plugin declares manifest(owns_receivers: [...]) and the dispatcher's receiver IS owned by the plugin,
-      # try_dependency_source must decline so the plugin contribution stays authoritative.
+      # the dependency-source tier must decline so the plugin contribution stays authoritative.
       Rigor::Plugin.unregister!
       owner = Class.new(Rigor::Plugin::Base) do
         manifest(id: "owns-fake-node", version: "0.1.0", owns_receivers: ["Prism::FakeOwnedNode"])
@@ -326,10 +326,10 @@ RSpec.describe Rigor::Analysis::Runner do
         dependency_source_index: runner.dependency_source_index,
         libraries: [], signature_paths: nil, cache_store: nil
       )
-      dispatcher = Object.new.extend(Rigor::Inference::MethodDispatcher)
+      tier = Rigor::Inference::MethodDispatcher::DependencySource
 
-      expect(dispatcher.send(:plugin_owns_receiver?, "Prism::FakeOwnedNode", env)).to be(true)
-      expect(dispatcher.send(:plugin_owns_receiver?, "Prism::SomeOtherClass", env)).to be(false)
+      expect(tier.plugin_owns_receiver?("Prism::FakeOwnedNode", env)).to be(true)
+      expect(tier.plugin_owns_receiver?("Prism::SomeOtherClass", env)).to be(false)
     end
 
     it "surfaces a config-conflict mode disagreement as `dynamic.dependency-source.config-conflict`" do
@@ -1084,7 +1084,7 @@ RSpec.describe Rigor::Analysis::Runner do
         end
       end
 
-      # Regression: the dispatcher's `try_project_patched_method` tier resolved the call's TYPE through the registry,
+      # Regression: the dispatcher's project-patched tier resolved the call's TYPE through the registry,
       # but `CheckRules::UndefinedMethod.diagnostic` ran an independent "does this method exist?" probe that ignored the
       # registry — so a patched method on a concretely-typed receiver (`Nominal[String]` / `Constant["hello"]`) would
       # type correctly yet still fire `call.undefined-method`. The fix consults the registry in CheckRules at the same

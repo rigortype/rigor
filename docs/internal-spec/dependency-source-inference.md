@@ -75,7 +75,7 @@ mirrors the parser.
 
 The dispatcher tier in v0.1.3 implements both `when_missing` and
 `full` identically — both flow through the same
-`try_dependency_source` site. Mode-distinguishing behaviour at
+`MethodDispatcher::DependencySource.try_dispatch` site. Mode-distinguishing behaviour at
 the dispatcher (e.g. `full` overriding RBS, RBS-conflict
 diagnostics) is queued for a follow-up slice; the configuration
 surface is fixed now so consumers can express the eventual
@@ -323,14 +323,14 @@ constant-folding tier
 shape / kernel / iterator / block-folding precision tiers
 RbsDispatch.try_dispatch                              ── RBS / RBS::Inline / stub / plugin
                                                          ↓ (no contract)
-try_dependency_source(receiver_type, method_name)     ── ADR-10 (this tier)
+DependencySource.try_dispatch                         ── ADR-10 (this tier)
                                                          ↓ (no entry)
 try_user_class_fallback                               ── Kernel / Module intrinsics
                                                          ↓
 call.undefined-method                                 ── final
 ```
 
-`try_dependency_source` returns `Type::Combinator.untyped` (i.e.
+`DependencySource.try_dispatch` returns `Type::Combinator.untyped` (i.e.
 `Dynamic[top]`) when the receiver carries a `Type::Nominal` /
 `Type::Singleton` whose class name + method name match a catalog
 entry. The tier sits **strictly below plugins**: plugin
@@ -340,7 +340,7 @@ authored contracts; gem-source inference is opportunistic).
 Slice 2b-ii deliberately stops at `Dynamic[top]`. Per-method
 return-type precision (i.e. `Dynamic[T]` with a non-`top` static
 facet) is queued for a later slice and does not yet surface
-through the `try_dependency_source` envelope. The current
+through the `DependencySource.try_dispatch` envelope. The current
 visible payoff is the absence of `call.undefined-method` on
 opt-in-gem method calls whose receivers Rigor can recognise by
 `Nominal[T]` (typically because the user authored an RBS

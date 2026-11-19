@@ -105,7 +105,7 @@ pre-ADR-18 floor). The fallback is silent — no diagnostic.
   The per-library survey lists five emit rows for dry-struct;
   slice 2c stops at the reader. The other four rows need either
   RBS-level shape synthesis (not yet a substrate primitive) or
-  additional dispatch hooks beyond `try_synthetic_method`.
+  additional dispatch hooks beyond the synthetic-method tier.
 - **Nested-block form** (`attribute :details do ... end`) that
   mints `Address::Details` as a sibling `Dry::Struct` subclass.
   Needs Tier A + Tier C composition + const_set emission;

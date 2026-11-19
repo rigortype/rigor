@@ -671,6 +671,99 @@ RSpec.describe Rigor::Inference::MethodDispatcher do
       end
     end
 
+    # Where each tier is asked is written once, in `resolve`. Each example gives two neighbouring tiers the same call
+    # and says which answers (ADR-16 WD13 for RBS over synthesis, ADR-17 § "Inference contract" for a patch's place).
+    describe "the order of the plugin, RBS, synthetic-method, project-patched and dependency-source tiers" do
+      let(:symbol) { Rigor::Type::Combinator.nominal_of("Symbol") }
+      let(:widget) { Rigor::Type::Combinator.nominal_of("FakeLib::Widget") }
+
+      def environment_with(**parts)
+        Rigor::Environment.new(rbs_loader: Rigor::Environment::RbsLoader.default, **parts)
+      end
+
+      def synthetic_index(class_name, name, return_type)
+        Rigor::Inference::SyntheticMethodIndex.new(
+          entries: [Rigor::Inference::SyntheticMethod.new(class_name: class_name, method_name: name,
+                                                          return_type: return_type)]
+        )
+      end
+
+      def patches(class_name, name, value)
+        Rigor::Inference::ProjectPatchedMethods.new(
+          entries: [Rigor::Inference::ProjectPatchedMethods::Entry.new(
+            class_name: class_name, method_name: name, kind: :instance, source_path: "ext.rb", source_line: 1,
+            return_type: Rigor::Type::Combinator.constant_of(value)
+          )]
+        )
+      end
+
+      def catalog(class_name, name, value)
+        inference = Rigor::Analysis::DependencySourceInference
+        gem = inference::GemResolver::Resolved.new(gem_name: "fake", version: "1.0.0", gem_dir: "/fake",
+                                                   mode: :when_missing, roots: %w[lib])
+        entry = inference::Walker::CatalogEntry.new(kind: :instance,
+                                                    return_type: Rigor::Type::Combinator.constant_of(value))
+        inference::Index.new(resolved_gems: [gem], method_catalog: { [class_name, name] => entry })
+      end
+
+      def dynamic(value) = Rigor::Type::Combinator.dynamic(Rigor::Type::Combinator.constant_of(value))
+
+      def ask(receiver, name, environment, **site)
+        described_class.dispatch(receiver_type: receiver, method_name: name, arg_types: [], environment: environment,
+                                 **site)
+      end
+
+      it "asks a plugin ahead of RBS" do
+        plugin_class = Class.new(Rigor::Plugin::Base) do
+          manifest(id: "encoding-contributor", version: "0.1.0")
+          dynamic_return(methods: [:encoding]) { |_call_node, _scope| Rigor::Type::Combinator.nominal_of("Symbol") }
+        end
+        stub_const("FakeEncodingContributorPlugin", plugin_class)
+        services = Rigor::Plugin::Services.new(reflection: Rigor::Reflection, type: Rigor::Type::Combinator,
+                                               configuration: Rigor::Configuration.new)
+        registry = Rigor::Plugin::Registry.new(plugins: [plugin_class.new(services: services, config: {})])
+        environment = environment_with(plugin_registry: registry)
+        site = { call_node: Prism.parse("s.encoding").value.statements.body.first,
+                 scope: Rigor::Scope.empty(environment: environment) }
+
+        expect(ask(nominal_string, :encoding, environment, **site)).to eq(symbol)
+        expect(ask(nominal_string, :encoding, environment)).to eq(Rigor::Type::Combinator.nominal_of("Encoding"))
+      end
+
+      it "asks RBS ahead of the synthetic-method index" do
+        environment = environment_with(synthetic_method_index: synthetic_index("String", :encoding, "Symbol"))
+
+        expect(ask(nominal_string, :encoding, environment)).to eq(Rigor::Type::Combinator.nominal_of("Encoding"))
+      end
+
+      it "asks the synthetic-method index ahead of a `pre_eval:` patch" do
+        environment = environment_with(synthetic_method_index: synthetic_index("FakeLib::Widget", :owner, "Symbol"),
+                                       project_patched_methods: patches("FakeLib::Widget", :owner, :patched))
+
+        expect(ask(widget, :owner, environment)).to eq(symbol)
+      end
+
+      it "asks a `pre_eval:` patch ahead of the dependency-source catalog" do
+        environment = environment_with(project_patched_methods: patches("FakeLib::Widget", :render, :patched),
+                                       dependency_source_index: catalog("FakeLib::Widget", :render, :catalogued))
+
+        expect(ask(widget, :render, environment)).to eq(dynamic(:patched))
+      end
+
+      it "asks the dependency-source catalog ahead of the discovered-method table" do
+        environment = environment_with(dependency_source_index: catalog("FakeLib::Widget", :render, :catalogued))
+        empty = Rigor::Scope.empty(environment: environment)
+        index = empty.discovery
+        scope = empty.with_discovery(
+          index.with(discovered_methods: { "FakeLib::Widget" => { render: :instance } },
+                     possible_discovered_methods: index.possible_discovered_methods)
+        )
+
+        expect(ask(widget, :render, environment, scope: scope)).to eq(dynamic(:catalogued))
+        expect(ask(widget, :render, environment_with, scope: scope)).to eq(dynamic_top)
+      end
+    end
+
     describe "boundary-cross recording on RBS dispatch (ADR-10 slice 5c)" do
       let(:reporter) { Rigor::Analysis::DependencySourceInference::BoundaryCrossReporter.new }
 

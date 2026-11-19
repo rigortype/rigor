@@ -8,7 +8,8 @@
 # (`sig/rigor/plugin/interfaces.rbs`), a concrete Prism node class, a
 # `Rigor::Type::t` or a core type, instead of `untyped`. A hook's `scope`
 # is non-nil where every engine call site passes one: the per-file hooks
-# receive the seeded `Scope.empty(...)`, `MethodDispatcher#try_plugin_contribution`
+# receive the seeded `Scope.empty(...)`,
+# `MethodDispatcher::PluginContribution.merged_return_type`
 # returns before consulting a plugin when its scope is nil, and
 # `StatementEvaluator#apply_plugin_assertions` has already read its own. The
 # existing `scope.nil?` guards in plugin source stay valid either way.

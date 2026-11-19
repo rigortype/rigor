@@ -17,8 +17,9 @@ require "tmpdir"
 #
 # So a rung out of order, a rung left out, a rung its row does not give the entry and a call that has no row
 # each fail, and so does an exception row that goes while the code it excuses stays. Two more hold the rest of
-# the file to the tables: a place's method asks a rung only where it answers with it, and no other method asks
-# two or more different rungs. A method that asks one rung is not an order and is not held.
+# the files read to the tables: a place's method asks a rung only where it answers with it, and no other method
+# asks the ladder for two or more different things, a rung or a method a place is written in. A method that asks
+# for one is not an order and is not held. A failure says which edit settles it ({CallLadderPin::Advice}).
 #
 # Every spelling the reading matches comes from a row. The examples under "the reading" prove that on a small
 # typer and tables of their own, so that a rung whose body moves edits its row in `call_ladder.rb` and nothing
@@ -26,10 +27,15 @@ require "tmpdir"
 #
 # What the reading cannot see. In what a place answers with, every call has to be declared, so a rung asked there
 # through `send`, a `Method` object or a local alias of its module fails as a call with no row. The two checks on
-# the rest of the file know a rung by its spelling alone and miss one asked that way: where a method does not
-# answer with it, and as the second rung of a method outside the places. A sequence written in a file that is
-# neither the typer nor a rung module under `call_ladder/` is not read at all. A place written in a shape the
-# reading does not follow (`&&`, `case`, `rescue`, a multiple assignment) fails as unreadable; it does not pass.
+# the rest of the files know a rung by its spelling alone and miss one asked that way: where a method does not
+# answer with it, and as the second rung of a method outside the places. The files read are the typer, the
+# modules under `expression_typer/` and the rung modules under `call_ladder/`; a sequence written anywhere else
+# is not read at all. A place written in a shape the reading does not follow (`&&`, `case`, `rescue`, a multiple
+# assignment) fails as unreadable; it does not pass.
+#
+# Two parts of the reader have no example, because taking either out only makes the reading stricter: answers
+# are listed once each (`uniq`), where a local returned from two places would otherwise repeat its call and fail
+# the comparison, and a `return` inside a lambda is not read, where reading it would add an answer to declare.
 RSpec.describe Rigor::Inference::CallLadder do
   def ladder = described_class
   def rung(name) = ladder::RUNGS.find { |row| row.name == name }
@@ -57,12 +63,22 @@ RSpec.describe Rigor::Inference::CallLadder do
       expect(elsewhere.map(&:in_typer_because)).to all(be_nil)
     end
 
-    it "except only what ADR-116 names, each row for rungs its entry asks, with its reason" do
-      expect(ladder::EXCEPTIONS.map(&:name) - %i[index_read_without_refined splat_index_read]).to eq([])
+    # Drift is a defect: its row names the issue whose fix deletes it, and a newly found one needs no more than
+    # that. A row with no issue is a design, and ADR-116 names the one there is.
+    it "except by drift recorded against an issue, or by the one design ADR-116 names" do
+      drift, design = ladder::EXCEPTIONS.partition(&:issue)
+
+      expect(design.map(&:name) - %i[splat_index_read]).to eq([])
+      expect(drift.map(&:issue)).to all(be_an(Integer).and(be_positive))
+    end
+
+    it "except only rungs the row's entry asks, each row with something excepted and its reason" do
       ladder::EXCEPTIONS.each do |row|
         asked = ladder::RUNGS.select { |candidate| candidate.asked_by.include?(row.entry) }.map(&:name)
+        excepted = row.omits + row.gates.map(&:rung)
 
-        expect(asked).to include(*row.omits, *row.gates.map(&:rung))
+        expect(excepted).not_to be_empty
+        expect(asked).to include(*excepted)
         expect(row.because).to match(/\S/)
       end
     end
@@ -204,9 +220,10 @@ RSpec.describe Rigor::Inference::CallLadder do
       gate = ladder::Gate.new(rung: :overriding_def, ask: :overriding_own_def?, answer: :dynamic_top)
       [
         ladder::ExceptionRow.new(name: :index_read_without_refined, entry: :index_read, written_in: nil,
-                                 omits: %i[refined], gates: [], because: "drift"),
+                                 omits: %i[refined], gates: [], issue: 3358, because: "drift"),
         ladder::ExceptionRow.new(name: :splat_index_read, entry: :index_read, written_in: :splat_index_read_type,
-                                 omits: %i[user_method project_singleton], gates: [gate], because: "no arguments")
+                                 omits: %i[user_method project_singleton], gates: [gate], issue: nil,
+                                 because: "no arguments")
       ]
     end
 
@@ -337,6 +354,15 @@ RSpec.describe Rigor::Inference::CallLadder do
       expect(read(source).stray_sequences).to eq([["ExpressionTyper", :elsewhere, %i[dispatcher user_method]]])
     end
 
+    it "counts a method a place is written in as something asked of the ladder: a rung and a continuation astray" do
+      fifth = "  def fifth(node)\n    try_overriding_def_dispatch(node) || dispatch_miss_result(node)\n  end\n"
+      again = "  def again(node)\n    call_result_type_for(node) || call_result_type_for(nil)\n  end\n"
+      source = edit(typer, /^end\n\z/, "#{fifth}#{again}end\n")
+
+      expect(read(source).stray_sequences)
+        .to eq([["ExpressionTyper", :fifth, %i[overriding_def dispatch_miss_result]]])
+    end
+
     describe "of the dispatcher" do
       it "reads either of its entries, under any written path, and through a method that only wraps one" do
         site = edit(typer, "result = MethodDispatcher.dispatch(node)",
@@ -395,6 +421,13 @@ RSpec.describe Rigor::Inference::CallLadder do
         expect(failing(gated)).to eq([:splat_index_read])
         expect(written(read(untested))[:splat_index_read].first).to eq([:undeclared, "dynamic_top"])
       end
+
+      it "reads a gate by its own name: the same answer under another test is no gate" do
+        other = edit(typer, "dynamic_top if overriding_own_def?(node)\n\n", "dynamic_top if splat_arguments?(node)\n\n")
+
+        expect(written(read(typer))[:splat_index_read].first).to eq(%i[gate overriding_def])
+        expect(written(read(other))[:splat_index_read].first).to eq([:undeclared, "dynamic_top"])
+      end
     end
 
     describe "of a sequence that has moved into a rung module" do
@@ -439,15 +472,19 @@ RSpec.describe Rigor::Inference::CallLadder do
         expect(reading.method_counts).to include("CallLadder::LiteralSend" => 1)
       end
 
-      it "names a rung module's file by its constant, and reads every such file beside the typer" do
+      it "names a module's file by its constant, and reads the typer's modules and the rung modules beside it" do
+        writes = "module Rigor::Inference::ExpressionTyper::Writes\nend\n"
         Dir.mktmpdir do |root|
           directory = File.join(root, CallLadderPin::LIB)
-          FileUtils.mkdir_p(File.join(directory, "call_ladder"))
+          %w[call_ladder expression_typer].each { |name| FileUtils.mkdir_p(File.join(directory, name)) }
           File.write(File.join(directory, "expression_typer.rb"), moved_typer)
+          File.write(File.join(directory, "expression_typer/writes.rb"), writes)
           File.write(File.join(directory, "call_ladder/literal_send.rb"), literal_send)
 
-          expect(CallLadderPin.sources(root))
-            .to eq("ExpressionTyper" => moved_typer, "CallLadder::LiteralSend" => literal_send)
+          expect(CallLadderPin.sources(root)).to eq(
+            "ExpressionTyper" => moved_typer, "ExpressionTyper::Writes" => writes,
+            "CallLadder::LiteralSend" => literal_send
+          )
         end
         expect(CallLadderPin.home_of("lib/rigor/inference/call_ladder/project_singleton.rb"))
           .to eq("CallLadder::ProjectSingleton")
@@ -473,6 +510,78 @@ RSpec.describe Rigor::Inference::CallLadder do
 
         expect(failing(fixed, exceptions: without(:index_read_without_refined))).to eq([])
         expect(failing(fixed)).to eq(%i[index_read splat_index_read])
+      end
+    end
+
+    describe "of a failure" do
+      def advice(source, name, **tables)
+        reading = read(source, **tables)
+        CallLadderPin::Advice.place(reading, reading.places.find { |place| place.name == name })
+      end
+
+      it "says nothing of a place whose code and tables agree, and shows both sequences of one that does not" do
+        dropped = edit(typer, " || try_user_method_inference(args)", "")
+
+        expect(read(typer).places.map { |place| advice(typer, place.name) }).to all(be_nil)
+        expect(advice(dropped, :send_target)).to include(
+          "The `send_target` sequence (ExpressionTyper: try_literal_send)",
+          "code asks:   own_send_type (ahead), dispatcher, project_singleton",
+          "tables give: own_send_type (ahead), dispatcher, user_method, project_singleton"
+        )
+      end
+
+      it "names the ways out for a call with no row, and that `ahead` cannot take a call on another receiver" do
+        shortcut = "    plugin = try_plugin_shortcut(node)\n    return plugin if plugin\n\n"
+        added = edit(typer, "    refined = try_refined_dispatch", "#{shortcut}    refined = try_refined_dispatch")
+        qualified = edit(typer, "\n    unresolved_call_result(node)\n",
+                         "\n    unresolved_call_result(node) || Fallback.untyped\n")
+
+        expect(advice(added, :call)).to include(
+          "`try_plugin_shortcut` can answer here", "add its row to RUNGS", "with `call` in `asked_by`",
+          "`written_in` of ENTRIES' `call`", "that entry's `ahead`"
+        )
+        expect(advice(qualified, :call)).to include("`Fallback.untyped` can answer here", "cannot be listed")
+      end
+
+      it "names the rung a place leaves out, how its row spells the ask, and the exception row a defect needs" do
+        dropped = edit(typer, " || try_user_method_inference(args)", "")
+        undispatched = edit(typer, "MethodDispatcher.dispatch(args) || ", "")
+
+        expect(advice(dropped, :send_target)).to include(
+          "`user_method` is not asked here", "gives it to `send_target`", "`try_user_method_inference(…)`",
+          "add a row to EXCEPTIONS that omits it and names the issue"
+        )
+        expect(advice(undispatched, :send_target)).to include("`MethodDispatcher.dispatch_site(…)`")
+      end
+
+      it "names the exception row to delete, with its issue, once the code asks the rung the row omits" do
+        ahead = "    refined = try_refined_dispatch(node)\n    return refined if refined\n"
+        fixed = edit(typer, "    return splat_index_read_type(node)", "#{ahead}    return splat_index_read_type(node)")
+
+        expect(advice(fixed, :index_read)).to include(
+          "`refined` is asked here", "the exception row `index_read_without_refined`", "(#3358)", "delete that row"
+        )
+      end
+
+      it "tells a rung its row does not give the entry from one asked in another order, or through no gate" do
+        added = edit(typer, "    try_overriding_def_dispatch(node) ||", "    try_local_def_dispatch(node) ||")
+        swapped = swap(typer, "try_user_method_inference(args)", "try_project_singleton_inference(args)")
+        ungated = edit(typer, "return dynamic_top if overriding_own_def?(node)", "return dynamic_top")
+
+        expect(advice(added, :index_read)).to include("`top_level_def` is asked here", "Add `index_read` to the row")
+        expect(advice(swapped, :send_target)).to include("another order than the rows of RUNGS")
+        expect(advice(ungated, :splat_index_read))
+          .to include("test `overriding_own_def?` and answer `dynamic_top`", "`dynamic_top` can answer here")
+      end
+
+      it "says what a place's method may do with a rung, and what a sequence outside the places needs" do
+        returns = swap(typer, "return refined if refined", "return literal_send if literal_send")
+        hidden = CallLadderPin::Advice.hidden([["ExpressionTyper", :dispatch_miss_result, :user_method]])
+        strays = CallLadderPin::Advice.strays([["ExpressionTyper", :fifth, %i[overriding_def dispatch_miss_result]]])
+
+        expect(advice(returns, :call)).to include("directly above its `return x if x`")
+        expect(hidden).to include("ExpressionTyper#dispatch_miss_result asks `user_method`", "only as an answer")
+        expect(strays).to include("ExpressionTyper#fifth asks overriding_def, dispatch_miss_result", "`written_in`")
       end
     end
   end

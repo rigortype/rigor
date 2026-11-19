@@ -33,10 +33,11 @@ module CallLadderPin
                 sources: sources(root))
   end
 
-  # `home => source` for every file a place can be written in: the typer, and each rung module under
-  # `call_ladder/` (there is none before the first rung's body moves).
+  # `home => source` for every file a sequence can be written in: the typer, the modules moved out of it under
+  # `expression_typer/`, and each rung module under `call_ladder/` (there is none before the first rung's body
+  # moves).
   def sources(root)
-    paths = ["#{LIB}/expression_typer.rb"] + Dir.glob("#{LIB}/call_ladder/*.rb", base: root)
+    paths = ["#{LIB}/expression_typer.rb"] + Dir.glob("#{LIB}/{expression_typer,call_ladder}/*.rb", base: root)
     paths.sort.to_h { |path| [home_of(path), File.read(File.join(root, path))] }
   end
 
@@ -246,20 +247,28 @@ module CallLadderPin
       end
     end
 
-    # `[home, method, rungs]` for each method outside the places that asks two or more different rungs: a
-    # sequence the tables do not hold.
+    # `[home, method, asks]` for each method outside the places that asks the ladder for two or more different
+    # things: a sequence the tables do not hold. A rung counts by its name, and so does a method a place is
+    # written in, since a continuation is the rungs it holds.
     def stray_sequences
       methods = @defs.flat_map { |home, by_name| by_name.flat_map { |name, found| found.map { [home, name, it] } } }
       methods.filter_map do |home, name, definition|
         next if place_methods.include?([home, name])
 
-        names = rung_calls(definition, home).map { |_call, rung| rung.name }.uniq
-        [home, name, names] if names.size > 1
+        asks = ladder_asks(definition, home).uniq
+        [home, name, asks] if asks.size > 1
       end
     end
 
     # How many methods the reading found in each source: a reading of no code holds nothing.
     def method_counts = @defs.transform_values { |by_name| by_name.sum { |_name, found| found.size } }
+
+    def rung(name) = @rungs.find { |row| row.name == name }
+
+    # The exception rows `place` is held to: the ones over its whole entry, and its own when it is a branch.
+    def exceptions_over(place)
+      @exceptions.select { |row| row.entry == place.entry.name && row.written_in.nil? } + [place.exception].compact
+    end
 
     private
 
@@ -278,11 +287,6 @@ module CallLadderPin
     end
 
     def branches(entry) = @exceptions.select { |row| row.entry == entry.name && row.written_in }
-
-    # The exception rows `place` is held to: the ones over its whole entry, and its own when it is a branch.
-    def exceptions_over(place)
-      @exceptions.select { |row| row.entry == place.entry.name && row.written_in.nil? } + [place.exception].compact
-    end
 
     # A branch is where a sequence leaves its method, not something it asks.
     def without_branches(sequence) = sequence.reject { |item| item.first == :branch }
@@ -341,8 +345,8 @@ module CallLadderPin
 
     # Whether `guard`, the predicate a `return` stands under, is the gate of `row`, spelled at its rung's home.
     def tested?(guard, row, file_home)
-      rung = @rungs.find { |candidate| candidate.name == row.rung }
-      call?(guard) && guard.name == row.ask && !rung.nil? && at_home?(guard.receiver, rung.home, file_home)
+      gated = rung(row.rung)
+      call?(guard) && guard.name == row.ask && !gated.nil? && at_home?(guard.receiver, gated.home, file_home)
     end
 
     # The rung `call` asks, read from `file_home`'s file: by one of the rung's own spellings, or through a method
@@ -383,6 +387,142 @@ module CallLadderPin
       end
       found
     end
+
+    # What `definition` asks of the ladder, call by call: a rung, by its name, or a method a place of this file is
+    # written in, by the method's.
+    def ladder_asks(definition, home)
+      found = []
+      CallLadderPin.each_node(definition.body) do |node|
+        next unless call?(node)
+
+        rung = rung_of(node, home)
+        place = node.receiver.nil? && place_methods.include?([home, node.name])
+        found << (rung ? rung.name : node.name) if rung || place
+      end
+      found
+    end
+  end
+
+  # What a failure of the pin tells its reader to do. Each difference between a place's code and its tables gets
+  # a line that names the edit which settles it, in the code or in `lib/rigor/inference/call_ladder.rb`.
+  module Advice
+    TABLES = "CallLadder (lib/rigor/inference/call_ladder.rb)"
+    SHAPES = "a `return`, the last expression, `||`, parentheses, `if` / `else` and the locals they read"
+
+    module_function
+
+    # The message for `place`, or nil when its code and its tables agree.
+    def place(reading, place)
+      expected = reading.expected(place)
+      written = reading.written(place)
+      return nil if written == expected
+
+      lines = (written - expected).map { |item| unexpected(item, reading, place) } +
+              (expected - written).map { |item| absent(item, reading, place) }
+      lines << reordered if lines.empty?
+      [heading(place, written, expected), *lines.map { |line| "- #{line}" }].join("\n")
+    end
+
+    def heading(place, written, expected)
+      methods = place.exception&.written_in || place.entry.written_in.join(", ")
+      "The `#{place.name}` sequence (#{place.entry.home}: #{methods}) is not the one #{TABLES} gives it.\n  " \
+        "code asks:   #{written.map { |item| label(item) }.join(', ')}\n  " \
+        "tables give: #{expected.map { |item| label(item) }.join(', ')}"
+    end
+
+    def label((kind, name))
+      { rung: name.to_s, gate: "#{name} (through its gate)", ahead: "#{name} (ahead)",
+        undeclared: "#{name} (no row)" }.fetch(kind) { "(#{kind}: #{name})" }
+    end
+
+    # Something the code answers with that the tables do not give the place.
+    def unexpected((kind, name), reading, place)
+      case kind
+      when :rung, :gate then not_given(kind, name, reading, place)
+      when :undeclared then undeclared(name, place)
+      when :unreadable
+        "The reading cannot follow #{name}. It follows #{SHAPES}. Write the answer in one of those shapes, or " \
+        "teach `CallLadderPin::Answers` the new one."
+      when :order
+        "#{name}. Keep each `x = rung(…)` directly above its `return x if x`: a rung asked early has already run."
+      else "#{name}. Correct `written_in` (or `home`) in #{TABLES}."
+      end
+    end
+
+    def not_given(kind, name, reading, place)
+      rows = reading.exceptions_over(place)
+      omitting = rows.find { |row| row.omits.include?(name) }
+      return omitted(name, omitting) if omitting
+      return gate_mismatch(kind, name) if kind == :gate || rows.flat_map(&:gates).any? { |gate| gate.rung == name }
+
+      "`#{name}` is asked here, and its row in RUNGS does not give it to `#{place.entry.name}`. Add " \
+        "`#{place.entry.name}` to the row's `asked_by`, or take the call out."
+    end
+
+    def omitted(name, row)
+      issue = " (##{row.issue})" if row.issue
+      "`#{name}` is asked here, and the exception row `#{row.name}` says this place leaves it out#{issue}. If the " \
+        "code is right, delete that row."
+    end
+
+    def gate_mismatch(kind, name)
+      "`#{name}` is asked #{kind == :gate ? 'through its gate' : 'as the rung'} here, and the exception rows over " \
+        "this place say the opposite. Change the code, or the row's `gates`."
+    end
+
+    def undeclared(name, place)
+      entry = place.entry
+      "`#{name}` can answer here, and the tables do not know it. If it is a rung, add its row to RUNGS at its " \
+        "position, with `#{entry.name}` in `asked_by`. If the sequence continues in it, add it to `written_in` of " \
+        "ENTRIES' `#{entry.name}`. If it answers ahead of the ladder and is no rung, add it to that entry's `ahead`. " \
+        "`ahead` takes the name of a method of #{entry.home}'s own file called with no receiver, so an answer on " \
+        "another receiver (`Type::Combinator.untyped`) cannot be listed: give it a method there, or keep it out of " \
+        "what the place answers with."
+    end
+
+    # Something the tables give the place that its code does not answer with.
+    def absent((kind, name), reading, place)
+      entry = place.entry
+      case kind
+      when :ahead then "`#{name}` no longer answers ahead of the ladder here. Take it out of the entry's `ahead`."
+      when :gate
+        gate = reading.exceptions_over(place).flat_map(&:gates).find { |row| row.rung == name }
+        "`#{name}` is to be asked through its gate here: test `#{gate.ask}` and answer `#{gate.answer}` where it holds."
+      else
+        "`#{name}` is not asked here, and its row in RUNGS gives it to `#{entry.name}`. Ask it, as " \
+        "`#{spelling(reading.rung(name), entry)}`, at its place in the rows' order. If leaving it out is a defect " \
+        "to fix later, add a row to EXCEPTIONS that omits it and names the issue. If `#{entry.name}` should not " \
+        "ask it, take the entry out of the row's `asked_by`."
+      end
+    end
+
+    def spelling(rung, entry)
+      rung.home == entry.home ? "#{rung.asked_as.first}(…)" : "#{rung.home}.#{rung.asked_as.last}(…)"
+    end
+
+    def reordered
+      "The same answers come in another order than the rows of RUNGS. Reorder the code. If the order itself is " \
+        "to change, reorder the rows, with docs/internal-spec/inference-engine.md § \"The call ladder\"."
+    end
+
+    # The message for the rungs {Reading#hidden_asks} found.
+    def hidden(found)
+      found.map do |home, name, rung|
+        "#{home}##{name} asks `#{rung}` where it does not answer with it (a condition, an argument, a dropped " \
+          "value). A place asks a rung only as an answer: `x = rung(…)` above `return x if x`, or a side of the " \
+          "last `||`."
+      end.join("\n")
+    end
+
+    # The message for the sequences {Reading#stray_sequences} found.
+    def strays(found)
+      found.map do |home, name, asks|
+        "#{home}##{name} asks #{asks.join(', ')}: a sequence outside the places #{TABLES} names. If it continues " \
+          "an entry's sequence, add it to that entry's `written_in`. If it is a sequence of its own, it needs an " \
+          "entry in ENTRIES (or an exception row with `written_in`) and the rows' `asked_by`. Otherwise ask one " \
+          "thing of the ladder there."
+      end.join("\n")
+    end
   end
 end
 
@@ -391,22 +531,28 @@ end
 RSpec.shared_examples "the call ladder the tables declare" do
   let(:reading) { CallLadderPin.reading }
 
-  def sequences(kind) = reading.places.to_h { |place| [place.name, reading.public_send(kind, place)] }
-
   it "is read in four places: the methods of each entry, and the branch a splat index read takes" do
     expect(reading.places.map(&:name)).to eq(%i[call index_read splat_index_read send_target])
     expect(reading.method_counts.fetch("ExpressionTyper")).to be > 100
   end
 
   it "answers in each place from what the tables give it, in their order, and from nothing else" do
-    expect(sequences(:written)).to eq(sequences(:expected))
+    aggregate_failures do
+      reading.places.each do |place|
+        expect(reading.written(place)).to eq(reading.expected(place)), CallLadderPin::Advice.place(reading, place)
+      end
+    end
   end
 
   it "asks a rung in those methods only where it answers with it" do
-    expect(reading.hidden_asks).to eq([])
+    hidden = reading.hidden_asks
+
+    expect(hidden).to eq([]), CallLadderPin::Advice.hidden(hidden)
   end
 
   it "writes no sequence of two or more rungs anywhere else" do
-    expect(reading.stray_sequences).to eq([])
+    strays = reading.stray_sequences
+
+    expect(strays).to eq([]), CallLadderPin::Advice.strays(strays)
   end
 end

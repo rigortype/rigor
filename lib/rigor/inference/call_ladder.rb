@@ -23,7 +23,8 @@ module Rigor
       # One way the typer asks the ladder. `home` is the constant, as written from `Rigor::Inference`, whose file
       # holds the entry's sequence, and `written_in` the methods there: the first starts the sequence, and each
       # later one continues it from where an earlier one calls it. `ahead` names what may answer in those
-      # methods before the first rung is asked. Those are not rungs, and nothing else there may answer.
+      # methods before the first rung is asked: methods of `home`, called with no receiver. Those are not rungs,
+      # and nothing else there may answer.
       Entry = Data.define(:name, :home, :written_in, :ahead)
 
       # One rung. `asked_by` is the entries that ask it. `home` and `asked_as` spell the ask: a method of `home`,
@@ -36,7 +37,11 @@ module Rigor
       # own methods and for every branch of them. With one it is a branch: a method the entry's first method
       # returns through, held to what the entry asks ahead of that return and then to the entry's rungs less
       # `omits`, each rung named in `gates` asked through its gate.
-      ExceptionRow = Data.define(:name, :entry, :written_in, :omits, :gates, :because)
+      #
+      # A row is one of two kinds. Drift is a rung the entry should ask and does not: a defect, recorded against
+      # `issue`, whose fix asks the rung and deletes the row. Design has no issue and stays; ADR-116 names the one
+      # there is, and another needs an amendment to it. Newly found drift needs only its row and its issue.
+      ExceptionRow = Data.define(:name, :entry, :written_in, :omits, :gates, :issue, :because)
 
       # A rung asked through its gate: the branch tests `ask`, a second entry at the rung's home, and answers
       # `answer` where it holds, in place of asking the rung.
@@ -58,8 +63,10 @@ module Rigor
         ]
       )
 
-      # The rungs, in the order they are asked. `send_target` does not ask `refined`: a literal `send` of a name
-      # refined in effect is answered by the `refined` rung of the call, which sits above `literal_send`.
+      # The rungs, in the order they are asked. `asked_by` is what each entry should ask: where the code leaves a
+      # rung out by mistake, the row still names the entry and {EXCEPTIONS} holds the gap against its issue.
+      # `send_target` does not ask `refined` by design: a literal `send` of a name refined in effect is answered
+      # by the `refined` rung of the call, which sits above `literal_send`.
       RUNGS = Ractor.make_shareable(
         [
           Rung.new(name: :refined, asked_by: %i[call index_read], home: TYPER,
@@ -68,14 +75,14 @@ module Rigor
           Rung.new(name: :literal_send, asked_by: %i[call], home: TYPER,
                    asked_as: %i[try_literal_send],
                    in_typer_because: "S7 moves it, after the two rungs its own sequence asks"),
-          Rung.new(name: :top_level_def, asked_by: %i[call], home: TYPER,
+          Rung.new(name: :top_level_def, asked_by: %i[call send_target], home: TYPER,
                    asked_as: %i[try_local_def_dispatch],
                    in_typer_because: "S8 moves it"),
           Rung.new(name: :receiver_block_folds, asked_by: %i[call], home: TYPER,
                    asked_as: %i[try_receiver_block_folds],
                    in_typer_because: "stays: its methods call back eight of block typing's, the cluster #3359 " \
                                      "decides."),
-          Rung.new(name: :overriding_def, asked_by: %i[call index_read], home: TYPER,
+          Rung.new(name: :overriding_def, asked_by: %i[call index_read send_target], home: TYPER,
                    asked_as: %i[try_overriding_def_dispatch],
                    in_typer_because: "S8 moves it, with its gate `overriding_own_def?`"),
           # Two spellings until every entry builds its site once: `dispatch` takes the call's fields as keywords,
@@ -92,7 +99,7 @@ module Rigor
                    asked_as: %i[inherit_receiver_origin],
                    in_typer_because: "stays: S3 was dropped. With `non_nil_retry` it is 28 code lines, and the move " \
                                      "would make `call_dispatch_type_for` public to hide them."),
-          Rung.new(name: :non_nil_retry, asked_by: %i[call], home: TYPER,
+          Rung.new(name: :non_nil_retry, asked_by: %i[call index_read], home: TYPER,
                    asked_as: %i[try_non_nil_receiver_retry],
                    in_typer_because: "stays: S3 was dropped, as for `dynamic_receiver`"),
           Rung.new(name: :unresolved, asked_by: %i[call], home: TYPER,
@@ -106,16 +113,34 @@ module Rigor
         [
           ExceptionRow.new(
             name: :index_read_without_refined, entry: :index_read, written_in: nil, omits: %i[refined], gates: [],
-            because: "drift, not design: `h[:a] += v` ignores a refinement of `[]` that `h[:a]` honours. " \
-                     "The fix of #3358 asks the rung and deletes this row."
+            issue: 3358,
+            because: "`h[:a] += v` ignores a refinement of `[]` that `h[:a]` honours. The splat branch is held to " \
+                     "what the entry asks ahead of it, so the fix asks the rung once, above the return into it."
+          ),
+          ExceptionRow.new(
+            name: :index_read_without_non_nil_retry, entry: :index_read, written_in: nil, omits: %i[non_nil_retry],
+            gates: [], issue: 3370,
+            because: "`h[:a] += 1` on a receiver that may be nil reads `Dynamic[top]` where `h[:a]` reads the member."
           ),
           ExceptionRow.new(
             name: :splat_index_read, entry: :index_read, written_in: :splat_index_read_type,
             omits: %i[user_method project_singleton],
-            gates: [Gate.new(rung: :overriding_def, ask: :overriding_own_def?, answer: :dynamic_top)],
+            gates: [Gate.new(rung: :overriding_def, ask: :overriding_own_def?, answer: :dynamic_top)], issue: nil,
             because: "a splat index (`c[*keys] += v`) leaves no positional argument types to bind to a body, so " \
                      "the rungs that type a body are not asked: the own-`def` rung is asked through its gate " \
                      "and answers `Dynamic[top]`, and only the dispatcher follows."
+          ),
+          ExceptionRow.new(
+            name: :send_target_without_top_level_def, entry: :send_target, written_in: nil, omits: %i[top_level_def],
+            gates: [], issue: 3369,
+            because: "`send(:name, …)` on implicit `self` reads the RBS method of that name where `name(…)` reads " \
+                     "the project's top-level `def`."
+          ),
+          ExceptionRow.new(
+            name: :send_target_without_overriding_def, entry: :send_target, written_in: nil,
+            omits: %i[overriding_def], gates: [], issue: 3368,
+            because: "`x.send(:name)` reads a declaration a project ancestor wrote where `x.name` reads the " \
+                     "receiver's own `def`."
           )
         ]
       )

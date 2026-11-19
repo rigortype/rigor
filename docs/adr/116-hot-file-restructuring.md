@@ -437,16 +437,22 @@ the *site* is the `CallContext` of one call.
 At `master` `bc791f6d9`. A *static census* figure is read from a syntactic call graph of the class;
 a call made through a local alias would escape it.
 
-- **Who answers.** One `--workers=0` check of `lib/rigor/inference` entered the ladder 1,058,027
-  times. What runs ahead of the dispatcher answered 0.58% of the entries, indexed narrowing 0.47%
-  among them; the dispatcher answered 45.09% and the rungs behind it 54.33%.
+- **Who answers.** One `--workers=0` check of `lib/rigor/inference` typed 1,058,027 calls. Indexed
+  narrowing answered 0.47% of them ahead of the ladder. The rungs ahead of the dispatcher answered
+  0.11%, the dispatcher 45.09% and the rungs behind it 54.33%.
 - **The order changes rarely and is copied by hand.** Of the 113 first-parent merges that touched
   `expression_typer.rb` from 2026-09-19 to 2026-11-17, 3 edited the order in `call_result_type_for`
   (#1747, #1811 and #1836, all for [ADR-121](121-ruby-refinement-typing.md)). The typer writes the
-  order three times: for a call (`call_result_type_for`, continued in `dispatch_miss_result`), for
-  the read of `c[k] += v` (`implicit_index_read_type`) and for a literal `send`'s target
-  (`try_literal_send`). The copies have drifted. The index read leaves out refined dispatch, so
-  `h[:a]` honours a refinement of `[]` and `h[:a] += v` does not (probed; #3358).
+  order in full once, for a call (`call_result_type_for`, continued in `dispatch_miss_result`), and
+  writes three shorter copies of it:
+  - the read of `c[k] += v` (`implicit_index_read_type`): overriding def, dispatcher, user method,
+    project singleton;
+  - the same read under a splat index (`splat_index_read_type`): the overriding-def check, then the
+    dispatcher;
+  - a literal `send`'s target (`try_literal_send`): dispatcher, user method, project singleton.
+
+  The copies have drifted. The index read leaves out refined dispatch, so `h[:a]` honours a
+  refinement of `[]` and `h[:a] += v` does not (probed; #3358).
 - **What a rung reads.** Every argument the ten rungs around the dispatcher take is a `CallContext`
   field. Beyond those they read the typer: `type_of`, body inference (which reads the node being
   typed), re-entry into the ladder with another receiver, and the fallback that records on the tracer.
@@ -462,8 +468,9 @@ a call made through a local alias would escape it.
 The order is rarely edited, so the table is not there to save edits. It ends the drift between the
 hand-made copies, and it gives the next rung a home outside a file that is 8 lines under its budget.
 
-**Scope.** WD12 is the call-typing order: the typer's rungs and the dispatcher's tiers, each
-declared as rows. Three neighbours are outside it.
+**Scope.** WD12 is the call-typing order. The typer's rungs are declared as rows, the dispatcher
+one of them; the dispatcher's interior order stays `MethodDispatcher`'s own. Three neighbours are
+outside it.
 
 - *The per-node typers get no seam*, although #3345 is titled for them. `PRISM_DISPATCH` is already
   their one declaration, so C1's test does not fire. A module of them is all entries (`LeafNodes`
@@ -478,11 +485,17 @@ declared as rows. Three neighbours are outside it.
 **One declaration, and a spec that holds the code to it.**
 `Rigor::Inference::CallLadder::RUNGS`, in `lib/rigor/inference/call_ladder.rb`, is plain frozen
 data: one row per rung, in order, with the entries that ask it (`call`, `index_read`,
-`send_target`). No method is generated from it. A spec reads the typer's code with Prism
-(`call_result_type_for`, `dispatch_miss_result`, `implicit_index_read_type` and the sub-ladder in
-`try_literal_send`) and fails unless the rung calls appear in the order, and in the subsets, that
-the table declares. The index read's missing rung is a named exception row, which #3358's fix
-deletes. No rung is wrapped in an adapter to fit the table.
+`send_target`). The dispatcher is one row, asked by all three; its interior order is not in
+`RUNGS`. No method is generated from the table, and no rung is wrapped in an adapter to fit it.
+
+A spec reads the typer's code with Prism and fails unless the rung calls appear in the order, and
+in the subsets, that the table declares. It covers every place where the typer writes a sequence of
+two or more rungs: `call_result_type_for` with `dispatch_miss_result`, `implicit_index_read_type`,
+`splat_index_read_type` and the sub-ladder in `try_literal_send`. The index read's missing rung is a
+named exception row, which #3358's fix deletes. A place that asks one rung is not an order and is
+not checked: `own_send_type`, which asks user-method inference alone, and the calls that only
+dispatch (`attribute_compound_read_type`, `call_operator_write_type_for` and the 11 other call
+sites of `MethodDispatcher.dispatch` in `lib/`).
 
 **A rung module.** A rung becomes a module under `call_ladder/` with the one entry
 `try_call(site, typer)`, in the pull request that moves its body and not before. The entry is not
@@ -507,23 +520,33 @@ named `try_dispatch`: a tier takes the site alone and must not type anything.
   first needs them. Every `PORT` member a slice makes public is `@api private`, `scope` included. A
   spec restricts callers of the re-entry points to `call_ladder/`: the typer's cursor is valid only
   inside a `type_of` walk.
+- *What may move.* A rung moves only when it meets the #3318 cut-off (it writes no typer ivar and
+  calls back at most four typer methods) and the deletion test (its interface is smaller than what
+  it hides). A rung that needs a fifth callback stays in the typer and is named with that count.
+  `CallLadder::PORT`, the spec that checks a rung's calls against it and the spec that restricts
+  the re-entry points' callers are created in the first rung slice, S6.
 
-**The dispatcher.** Its twelve private tiers become `try_dispatch(context)` modules under
+**The dispatcher.** Its twelve private tiers become eleven `try_dispatch(context)` modules under
 `method_dispatcher/`: plugin contribution, HKT builtin return, static refinement, synthetic method,
-project-patched (own class, then ancestors), dependency source, discovered method, synthesized
-stub, user-class ancestor fallback, meta introspection and composite receiver. They are stateless
-`module_function` code, so the pure-move rule applies unchanged. Every tier is then a module with
-one entry, and `resolve` reads as the dispatcher's rows in order. What it does after a tier answers
-stays there: the plugin-typed sink, the origin of a `Dynamic` answer, the boundary cross. After the
-moves, `MethodDispatcher.dispatch_site(context)` takes a site its caller built;
-`resolve` builds the context and delegates to `resolve_site`, so no pre-check is copied. The moves
-come first because they free the file's budget, and `dispatch_site` raises none.
+project-patched, dependency source, discovered method, synthesized stub, user-class ancestor
+fallback, meta introspection and composite receiver. They are stateless `module_function` code, so
+the pure-move rule applies unchanged.
+
+- *Project-patched stays one module.* It is asked twice, for the receiver's own class and through
+  its ancestors, and is one function today; the module keeps the `through_ancestors:` parameter.
+- *Where a module is asked.* One with no bookkeeping after its answer joins a tier array, as
+  `PRECISE_TIERS_HEAD` and `PRECISE_TIERS_TAIL` are today. One whose answer `resolve` follows with
+  bookkeeping (the plugin-typed sink, the RBS boundary cross, the origin of a `Dynamic` answer)
+  stays a straight-line call in `resolve`, in order.
+- *`dispatch_site`.* After the moves, `MethodDispatcher.dispatch_site(context)` takes a site its
+  caller built; `resolve` builds the context and delegates to `resolve_site`, so no pre-check is
+  copied. The moves come first because they free the file's budget, and `dispatch_site` raises none.
 
 **State, for `ExpressionTyper` only.** Its state is four kinds, and each reaches a rung one way.
 
 | Kind | In the typer | How a rung gets it |
 | --- | --- | --- |
-| Frame identity | `@scope`, `@tracer`, `@operand_types`: assigned in `initialize`, inherited by a derived typer | The typer itself: three of them are the walker. |
+| Frame identity | `@scope`, `@tracer`, `@operand_types`: assigned in `initialize`, inherited by a derived typer | The three are the typer's frame identity, so a collaborator that needs all three takes the typer. |
 | Cursor | `@typing_node`: rewritten by `type_of`, also set in `initialize` and copied into a derived typer | Through the typer, never as a value. The index read enters on a fresh typer whose cursor is unset, while its site's node is the write node. |
 | Ambient `TypingState` | Memos, which are caches; `YIELD_VALUE`, `FORWARDED_ARGS`, `THREADED_BLOCK_BODY` and `INFERENCE_GUARD`, which are cursors | Read at the point of use. |
 | Per-site values | Receiver, method name, arguments, block type | One `CallContext`, built once. |
@@ -534,23 +557,29 @@ like a fifth.
 
 ### Slices, in order
 
-Each slice has an id for its pull requests to cite. The ids are not consecutive: S2′ replaces a
-first S2 that wrapped every rung in an adapter, and two slices are dropped. The method and line
-counts are static census figures.
+Each slice has an id for its pull requests to cite. The ids are neither consecutive nor in numeric
+order: S2′ replaces a first S2 that wrapped every rung in an adapter, two slices are dropped, and
+the rung moves are ordered by what each calls. The method and line counts are static census
+figures.
 
 1. **S0 — `CallContext` becomes a plain frozen class.** Independent of the rest. As a `Data` a
    build costs about 2.3 objects more: 109,006,674 allocations against 105,955,562 on
-   `lib/rigor/inference` (−2.80%), output identical.
-2. **D1–Dn — the dispatcher's twelve private tiers become modules**, in two or three pure-move pull
-   requests.
-3. **S1 — `dispatch_site`.**
+   `lib/rigor/inference` (−2.80%), output identical. `docs/internal-spec/inference-engine.md`
+   § "Dispatch tier contract" calls the context "a `Data`" and changes with it.
+2. **D1–Dn — the dispatcher's twelve private tiers become eleven modules**, in two or three
+   pure-move pull requests.
+3. **S1 — `dispatch_site`.** The same section's "`dispatch` MUST build the context once" gains
+   `dispatch_site`.
 4. **S2′ — `call_ladder.rb`: `RUNGS` and the order-pin spec.** No rung moves, and nothing becomes
-   public.
-5. **S6 and S7 — `UserMethod`** (10 methods, 104 code lines) **and `LiteralSend`** (3 methods, 31
-   code lines), the first rung modules.
-6. **S5 — `ProjectSingleton`** (23 methods, 206 code lines), and **S8 — `OverridingDef` and
-   `TopLevelDef`** (about 12 methods, 90 code lines).
-7. **S4 — `Refined`** (12 methods, 107 code lines), only with a plan for the self-typing ratchet.
+   public. The code map's "Method dispatch" and "A dispatch tier" rows, which say where a tier that
+   must win before RBS or run only on a miss belongs, point at `RUNGS` and the pin spec.
+5. **S6 — `UserMethod`** (10 methods, 104 code lines), the first rung module.
+6. **S5 — `ProjectSingleton`** (23 methods, 206 code lines).
+7. **S7 — `LiteralSend`** (3 methods, 31 code lines), which may ride in S5's pull request. Its
+   sub-ladder asks user-method and project-singleton inference, so it follows both and needs no
+   temporary `PORT` member.
+8. **S8 — `OverridingDef` and `TopLevelDef`** (about 12 methods, 90 code lines).
+9. **S4 — `Refined`** (12 methods, 107 code lines), only with a plan for the self-typing ratchet.
    Its re-entry per union member may stay in the typer.
 
 **Dropped.** S3 (`DynamicReceiver` and `NonNilRetry`: 3 methods, 28 code lines) and S9
@@ -576,8 +605,8 @@ methods call back 8 of block typing's, the cluster #3359 decides.
 
 *Done when:* a new call-typing rung is one file under `call_ladder/`, one row in `RUNGS`, and one
 call in the typer's ladder, which the pin spec rejects if it disagrees with the row; no call-typing
-order is written out without the pin spec checking it; and every rung left in the typer is named
-with its reason.
+order, a sequence of two or more rungs, is written out twice without the pin spec checking it; and
+every rung left in the typer is named with its reason.
 
 ### Filed outside WD12
 
@@ -603,7 +632,7 @@ with its reason.
 | A new top-down module design for the whole of `lib/rigor/` (2026-11-17) | Rejected | The measured faults are local: three files, one missing hook point, one misnamed namespace, one inverted dependency. A global re-layout would move the files that are already well placed and well mirrored (`type/`, `cache/`, `plugin/`), and collide with every open branch. |
 | Split the hot files to make the specs fast (2026-11-17) | Rejected as a goal | `scope_indexer.rb` alone has 53 `require_relative` lines, so a module split out of it still loads the engine, and the time is in runner-style examples. C4 and the quick tier address the loop; the splits address locality. |
 | A `typer` field on `CallContext`, so that every rung is a `try_dispatch(context)` tier (2026-11-19) | Rejected | Every dispatcher tier, and every other caller of `MethodDispatcher.dispatch`, would get a way to recurse into typing. The dispatcher must not touch the tracer (`docs/internal-spec/inference-engine.md` § "Method Dispatch Boundary"), and a field makes that unenforceable. |
-| A port or frame object handed to each rung (2026-11-19) | Rejected | One more object per ladder entry (1,058,027 on the census run), or a second long-lived object whose lifetime must match the typer's. The typer already exists; `PORT` and its spec make what a rung sees of it narrow. |
+| A port or frame object handed to each rung (2026-11-19) | Rejected | One more object for each call that reaches the ladder (nearly all of the census run's 1,058,027), or a second long-lived object whose lifetime must match the typer's. The typer already exists; `PORT` and its spec make what a rung sees of it narrow. |
 | The typer walks `RUNGS` at run time (`CallLadder.answer`) (2026-11-19) | Rejected | The self-check types a straight-line call to a declared `try_call`, and reads `rungs[index]` as `Dynamic`. The order-pin spec gives the same single declaration without a megamorphic call on the hot path. |
 | Wrap each rung in an adapter onto its typer method before any body moves (2026-11-19) | Rejected | Ten three-line adapters that `send` into the typer are an indirection layer with nothing behind it, which is why `LeafNodes` went back in #3319. The order-pin spec gives the one declaration without them, and makes nothing public. |
 

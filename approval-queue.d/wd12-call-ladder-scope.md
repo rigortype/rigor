@@ -34,11 +34,11 @@ For the scope:
   declaration would fix. `PRISM_DISPATCH` is 136 rows naming 60 handlers in one place, and 2 of the 113 merges that
   touched the file in two months changed a row. `Constants` and `ControlFlow` went back because of the callbacks
   they needed, and a different table shape does not remove those.
-- **The call-typing ladder only.** The order a call is typed in is written out three times in the typer, and the
-  copies have drifted (#3358). One table and a spec that holds the code to it end that, and the rungs behind single
-  entries can then leave the file. The cost is that the title's promise is not met. The 52 methods of the three
-  modules #3319 moved back stay in the class with no seam planned, and the per-node typers' part of the file took 16
-  of the 113 merges.
+- **The call-typing ladder only.** The typer writes the order a call is typed in once in full and as three shorter
+  copies, and the copies have drifted (#3358). One table and a spec that holds the code to it end that, and the
+  rungs behind single entries can then leave the file. The cost is that the title's promise is not met. The 52
+  methods of the three modules #3319 moved back stay in the class with no seam planned, and the per-node typers'
+  part of the file took 16 of the 113 merges.
 - **Wait for #3344.** The issue says to reuse #3344's answer on how the evaluator's state divides into values, if
   that comes first. Waiting leaves the copied order drifting, in a file 8 lines under its budget, for a design with
   no date.
@@ -55,9 +55,11 @@ doing the move.
 
 ## Decision
 
-#3345 is answered as the call-typing ladder: the typer's rungs and the dispatcher's tier order. The per-node typers
-get no seam. `PRISM_DISPATCH` stays as it is, and the three modules #3319 moved back stay in the class. Slices S3 and
-S9 are dropped: those three rungs stay in the typer, and their rows in the table say why.
+#3345 is answered as the call-typing ladder: the typer's rungs declared in one table, with the dispatcher as one
+row, and the dispatcher's private tiers moved into modules. The per-node typers get no seam. `PRISM_DISPATCH` stays
+as it is, and the three modules #3319 moved back stay in the class. Slices S3 and S9 are dropped: those three rungs
+stay in the typer, and their rows in the table say why. `ReceiverBlockFolds` stays in the typer too, until #3359
+decides the block-typing cluster its methods call back into.
 
 The precedent is ADR-116's own criteria as accepted on 2026-09-23. C1's test asks whether adding a member takes edits
 in two or more files that each list the kind. For a per-node typer it does not, because the table is the one list. C3

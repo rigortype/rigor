@@ -29,7 +29,7 @@ module Rigor
           method_name = context.method_name
           arg_types = context.args
           case method_name
-          when :class then meta_class(receiver_type, context&.environment)
+          when :class then meta_class(receiver_type, context.environment)
           when :new then meta_new(receiver_type, arg_types, context)
           end
         end

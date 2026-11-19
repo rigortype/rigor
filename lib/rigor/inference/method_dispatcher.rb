@@ -3,8 +3,6 @@
 require_relative "../reflection"
 require_relative "../typing_state"
 require_relative "../type"
-require_relative "../flow_contribution"
-require_relative "../flow_contribution/merger"
 require_relative "dynamic_origin"
 require_relative "flow_tracer"
 require_relative "void_tail_summary"
@@ -44,6 +42,10 @@ require_relative "method_dispatcher/meta_introspection"
 require_relative "method_dispatcher/hkt_builtin_return"
 require_relative "method_dispatcher/static_refinement"
 require_relative "method_dispatcher/synthesized_stub"
+require_relative "method_dispatcher/plugin_contribution"
+require_relative "method_dispatcher/synthetic_method_dispatch"
+require_relative "method_dispatcher/project_patched"
+require_relative "method_dispatcher/dependency_source"
 require_relative "../run_scoped_slots"
 
 module Rigor
@@ -136,13 +138,13 @@ module Rigor
         precise = dispatch_precise_tiers(context)
         return precise if precise
 
-        # v0.1.1 Track 2 slice 7 — plugin return-type contribution tier. Sits ahead of
+        # v0.1.1 Track 2 slice 7 — plugin return-type contribution tier ({PluginContribution}). Sits ahead of
         # `RbsDispatch` so a plugin that understands a domain-specific dispatch (e.g. an
         # `ActiveRecord::Base.find` returning `Nominal[<resolved model>]`) wins over the
         # RBS-projected envelope. Only consults the registry when both `call_node` and `scope`
         # are supplied — the dispatcher's own internal callers (per-element block fold, etc.)
         # skip this tier.
-        plugin_result = try_plugin_contribution(call_node, scope, receiver_type)
+        plugin_result = PluginContribution.try_dispatch(context)
         if plugin_result
           # Issue #653 — this tier answering is what makes the site's type the plugin's rather than the
           # RBS's, and `call.undefined-method` reads that record instead of re-deciding from the receiver's
@@ -177,17 +179,15 @@ module Rigor
         # `Dynamic[Top]`. The table that populates this tier lives in
         # `Rigor::Builtins::HktBuiltins::METHOD_RETURN_OVERRIDES`; plugin-supplied per-method
         # overrides are out of scope for slice 3 and continue to flow through the
-        # `try_plugin_contribution` tier above.
+        # {PluginContribution} tier above.
         #
         # Rigor-bundled static refinement tier ({StaticRefinement}). Sits between HKT and RBS so stdlib methods whose
         # upstream RBS is broader than the documented behaviour (e.g. `Kernel#__dir__` declared
         # `() -> String?` when the documented return is `non-empty-string | nil`) get the
         # tightened type without modifying the vendored `ruby/rbs` submodule. The override table
         # lives in `Rigor::Builtins::StaticReturnRefinements::OVERRIDES`.
-        BUNDLED_OVERRIDE_TIERS.each do |tier|
-          result = tier.try_dispatch(context)
-          return result if result
-        end
+        bundled_override = first_tier_answer(BUNDLED_OVERRIDE_TIERS, context)
+        return bundled_override if bundled_override
 
         # `Foo.instance` for a class that includes the stdlib `Singleton` mixin. Ruby grows that method through
         # an `included` hook and the upstream RBS leaves `Singleton::SingletonClassMethods` empty, so nothing
@@ -204,41 +204,35 @@ module Rigor
           return rbs_result
         end
 
-        # ADR-16 Tier B / Tier C — synthetic-method tier. Sits BELOW RBS dispatch (per WD13:
+        # ADR-16 Tier B / Tier C — synthetic-method tier ({SyntheticMethodDispatch}). Sits BELOW RBS dispatch (per WD13:
         # user-authored RBS overrides substrate synthesis) and ABOVE the dependency-source
         # inference tier so a plugin's declared emit table beats the generic gem-source fallback
         # for the same class. Slice 6a-TierB (origin_module dispatch) lands precise return types
         # for Tier B emissions; Tier C emissions return their manifest `return_type` when the environment
         # names that class (slice 6b), and `Dynamic[T]` otherwise.
-        synthetic_result = try_synthetic_method(
-          receiver_type, method_name, arg_types, block_type, environment
-        )
+        synthetic_result = first_tier_answer(SYNTHETIC_TIERS, context)
         return synthetic_result if synthetic_result
 
-        # ADR-17 slice 2 — project-side patched-method tier. Sits BELOW the substrate / plugin
+        # ADR-17 slice 2 — project-side patched-method tier ({ProjectPatched}). Sits BELOW the substrate / plugin
         # tiers and ABOVE dependency-source inference per ADR-17 § "Inference contract". When
         # the user's `pre_eval:` list named a file that re-opens a class (e.g.,
         # `lib/core_ext/string_extensions.rb` declaring `class String; def to_url; end; end`),
         # the pre-pass populated `ProjectPatchedMethods` with the `(class, method, kind)` triple;
         # this tier surfaces it as `Dynamic[top]` so the patched call resolves cross-file without
         # `call.undefined-method`.
-        patched_result =
-          unless skip_project_patched
-            try_project_patched_method(receiver_type, method_name, arg_types, block_type, environment,
-                                       call_node: call_node, scope: scope)
-          end
+        patched_result = ProjectPatched.try_dispatch(context) unless skip_project_patched
         if patched_result
           scope&.record_dynamic_origin(call_node, DynamicOrigin::EXTERNAL_GEM_WITHOUT_RBS)
           return patched_result
         end
 
-        # ADR-10 slice 2b-ii — dependency-source inference tier. Sits BELOW RBS dispatch (RBS /
+        # ADR-10 slice 2b-ii — dependency-source inference tier ({DependencySource}). Sits BELOW RBS dispatch (RBS /
         # RBS::Inline / generated stubs / plugin contracts always win) and ABOVE the user-class
         # fallback so a method defined in an opt-in gem stops emitting `call.undefined-method`
         # even when no signature contract resolves. Returns `Dynamic[top]` — slice 2b-ii
         # deliberately stops at the dynamic-origin envelope; per-method return-type precision is
         # queued for a later slice.
-        dep_source_result = try_dependency_source(receiver_type, method_name, environment)
+        dep_source_result = DependencySource.try_dispatch(context)
         if dep_source_result
           scope&.record_dynamic_origin(call_node, DynamicOrigin::EXTERNAL_GEM_WITHOUT_RBS)
           return dep_source_result
@@ -267,13 +261,11 @@ module Rigor
         # `module Enumerable; def sum_by`). Below the RBS tier, whose decline means no nearer RBS declares the
         # method, and below the tiers that answer the receiver's own patch or a gem catalogue entry. A nearer
         # `def` in the project's source (on an RBS-known receiver, which the discovered-method tier leaves to
-        # user-method inference) stops the walk: see {#project_source_defines?}. That probe reads the scope's def
-        # index, so a single-file scope (`type-of`, `annotate`, an LSP buffer) cannot see a `def` in another file.
+        # user-method inference) stops the walk: see {ProjectPatched.project_source_defines?}. That probe reads the
+        # scope's def index, so a single-file scope (`type-of`, `annotate`, an LSP buffer) cannot see a `def` in
+        # another file.
         ancestor_patched =
-          if !skip_project_patched && scope
-            try_project_patched_method(receiver_type, method_name, arg_types, block_type, environment,
-                                       call_node: call_node, scope: scope, through_ancestors: true)
-          end
+          (ProjectPatched.try_dispatch(context, through_ancestors: true) if !skip_project_patched && scope)
         if ancestor_patched
           scope&.record_dynamic_origin(call_node, DynamicOrigin::EXTERNAL_GEM_WITHOUT_RBS)
           return ancestor_patched
@@ -286,10 +278,8 @@ module Rigor
         # against it would otherwise mis-fire `call.undefined-method`. Resolve it to
         # `Dynamic[Top]` instead — the same no-false-positive contract as the dependency-source
         # tier. Sits below every real resolution tier so a genuine signature always wins.
-        STUB_TIERS.each do |tier|
-          result = tier.try_dispatch(context)
-          return result if result
-        end
+        stub_result = first_tier_answer(STUB_TIERS, context)
+        return stub_result if stub_result
 
         # The receiver-independent `BasicObject` / `Object` / `Kernel` selectors, for a receiver no tier
         # above could name. `x.nil?` is `bool` whatever `x` is; without this tier it was `Dynamic[Top]`
@@ -344,7 +334,7 @@ module Rigor
       # (`Nominal` / `Singleton` only — unions and `Dynamic` receivers stay out); and the
       # `discovered_method?` pre-filter (two pure hash reads) keeps the hot path at ~zero cost —
       # only a call that provably targets a discovered def of the right kind resolves the node and
-      # consults the summary. The `Prism::CallNode` guard mirrors `collect_plugin_contributions`:
+      # consults the summary. The `Prism::CallNode` guard mirrors `PluginContribution.collect_plugin_contributions`:
       # the `&:symbol` block path dispatches with the `Prism::BlockArgumentNode` itself, which is
       # never a collector value position, so recording on it would be dead weight.
       def record_transitive_void_origin(receiver_type, method_name, call_node, scope)
@@ -422,26 +412,6 @@ module Rigor
       NO_DISCOVERED_LOOKUP = [nil, nil].freeze
       private_constant :NO_DISCOVERED_LOOKUP
 
-      # ADR-2 § "Flow Contribution Bundle" / v0.1.1 Track 2 slice 7; ADR-52 WD3 — consults each
-      # loaded plugin's gated `dynamic_return` rules, wraps the contributed types as
-      # `FlowContribution` bundles, merges them through `FlowContribution::Merger`, and returns
-      # the merged `return_type` slot (or nil when no plugin contributed a return type).
-      #
-      # Plugins whose hook raises have their contribution silently dropped for this call so the
-      # dispatch chain keeps moving — the run-level diagnostic envelope (per ADR-2 § "Plugin
-      # Trust and I/O Policy") is owned by `Analysis::Runner#plugin_emitted_diagnostics`.
-      def try_plugin_contribution(call_node, scope, receiver_type)
-        return nil if call_node.nil? || scope.nil?
-
-        registry = scope.environment&.plugin_registry
-        return nil if registry.nil? || registry.empty?
-
-        contributions = collect_plugin_contributions(registry, call_node, scope, receiver_type)
-        return nil if contributions.empty?
-
-        FlowContribution::Merger.merge(contributions).return_type
-      end
-
       # Issue #963 item 2 — the MEMBERSHIP half of the two plugin tiers, for #618's own-method veto.
       #
       # `ExpressionTyper#try_local_def_dispatch` has to decide whether the call's own `self` answers the
@@ -463,228 +433,9 @@ module Rigor
       # produced a candidate, which needs a project top-level `def` of the same name.
       def plugin_member_answers?(call_node:, scope:, receiver_type:, method_name:)
         return false if receiver_type.nil?
-        return true unless try_plugin_contribution(call_node, scope, receiver_type).nil?
+        return true unless PluginContribution.merged_return_type(call_node, scope, receiver_type).nil?
 
-        synthetic_method_member?(receiver_type, method_name, scope&.environment)
-      end
-
-      # The synthetic-method half of {#plugin_member_answers?} — the same `(class_name, method_name, kind)`
-      # probe {#try_synthetic_method} makes, without the return-type promotion the veto has no use for.
-      def synthetic_method_member?(receiver_type, method_name, environment)
-        index = environment&.synthetic_method_index
-        return false if index.nil? || index.empty?
-
-        class_name = synthetic_method_class_name(receiver_type)
-        return false if class_name.nil?
-
-        matches = if receiver_type.is_a?(Type::Singleton)
-                    index.lookup_singleton(class_name, method_name)
-                  else
-                    index.lookup_instance(class_name, method_name)
-                  end
-        !matches.empty?
-      rescue StandardError
-        false
-      end
-
-      # ADR-16 synthetic-method tier. Slice 2b shipped the floor — a match short-circuits at the
-      # right precedence (above dep-source / discovered / user-class-fallback; below RBS) and
-      # returns `Dynamic[T]`. Slice 6 (precision promotion):
-      # - Tier B path (slice 6a, `provenance[:origin_module]` recorded by the slice-3b scanner):
-      #   redispatch on `Nominal[origin_module]` via `RbsDispatch` so the module's authored RBS
-      #   return type wins. Devise's `valid_password?` returns `bool`, not `Dynamic[T]`.
-      # - Tier C path (slice 6b, plain `return_type:` string from the manifest's emit table):
-      #   look up `environment.nominal_for_name(return_type)` so `attribute :avatar,
-      #   Types::String` emits a synthetic reader returning
-      #   `Nominal[ActiveStorage::Attached::One]` (when the class is in RBS). Unparameterised
-      #   class names only — parameterised forms (`Array[String]`, `Hash[K, V]`) and
-      #   plugin-supplied utility-type names (`Pick<T, K>`) require routing through the full
-      #   ADR-13 `Plugin::TypeNodeResolver` chain, which slice 6 does not yet wire in (the
-      #   resolver chain is consulted only for `%a{rigor:v1:…}` payloads as of ADR-13 slice 3).
-      def try_synthetic_method(receiver_type, method_name, arg_types, block_type, environment)
-        index = environment&.synthetic_method_index
-        return nil if index.nil? || index.empty?
-
-        class_name = synthetic_method_class_name(receiver_type)
-        return nil if class_name.nil?
-
-        matches = case receiver_type
-                  when Type::Singleton then index.lookup_singleton(class_name, method_name)
-                  else index.lookup_instance(class_name, method_name)
-                  end
-        return nil if matches.empty?
-
-        promoted = promote_synthetic_match(matches, method_name, arg_types, block_type, environment)
-        promoted || Type::Combinator.untyped
-      end
-
-      # First non-nil promotion wins. Tier B (origin_module) and Tier C (return_type nominal
-      # lookup) are tried in the same registration-order pass per WD11 first-wins — the slice-3b
-      # scanner sets `origin_module` for Tier B entries and leaves it absent for Tier C, so the
-      # two paths self-route per match.
-      def promote_synthetic_match(matches, method_name, arg_types, block_type, environment)
-        return nil if environment.nil?
-
-        matches.each do |synthetic|
-          promoted =
-            promote_via_origin_module(synthetic, method_name, arg_types, block_type, environment) ||
-            promote_via_return_type(synthetic, environment)
-          return promoted if promoted
-        end
-        nil
-      end
-
-      # Slice 6a-TierB. For Tier B emissions (origin_module recorded in provenance), redispatch
-      # the call on the included module's `Nominal[...]` type via `RbsDispatch`. Returns nil when
-      # the SyntheticMethod is not a Tier B entry or when the origin_module is not in the RBS
-      # env.
-      def promote_via_origin_module(synthetic, method_name, arg_types, block_type, environment)
-        module_name = synthetic.provenance[:origin_module]
-        return nil unless module_name
-
-        module_type = Type::Combinator.nominal_of(module_name)
-        RbsDispatch.try_dispatch(
-          CallContext.build(
-            receiver: module_type, method_name: method_name, args: arg_types,
-            environment: environment, block_type: block_type
-          )
-        )
-      end
-
-      # Slice 6b-TierC. For Tier C emissions, look up the manifest-declared `return_type:` string
-      # via `environment.nominal_for_name`. Skips the placeholder `"untyped"` (Tier B's
-      # record-but-do-not-resolve marker from the slice-3b scanner) and the `"void"` keyword
-      # (RBS-style absent return). Falls back to nil when the class is not in the env — caller
-      # then returns Dynamic[T].
-      TIER_C_PLACEHOLDER_RETURNS = %w[untyped void].freeze
-      private_constant :TIER_C_PLACEHOLDER_RETURNS
-
-      def promote_via_return_type(synthetic, environment)
-        return_type = synthetic.return_type
-        return nil if return_type.nil? || TIER_C_PLACEHOLDER_RETURNS.include?(return_type)
-
-        environment.nominal_for_name(return_type)
-      end
-
-      def synthetic_method_class_name(receiver_type)
-        case receiver_type
-        when Type::Nominal, Type::Singleton then receiver_type.class_name
-        end
-      end
-
-      # ADR-17 slice 2 — project-side patched-method tier. Slice 3a uses the registry's
-      # heuristic-extracted `return_type` (populated via the same
-      # `Analysis::DependencySourceInference::ReturnTypeHeuristic` the ADR-10 walker uses): a
-      # `def to_url; "hello"; end` patched onto `String` now resolves `s.to_url` to
-      # `Dynamic[Nominal[String]]` instead of the pre-3a `Dynamic[Top]`. Falls back to
-      # `Dynamic[Top]` when the heuristic declined (non-literal tail expression).
-      #
-      # `through_ancestors:` (issue #1708), with a scope, searches the receiver's ancestors as well, through
-      # {ProjectPatchedMethods#lookup_through_ancestors}, stopping at a nearer project-source `def`. A private or
-      # protected patch Ruby would not let the call reach ({ProjectPatchedMethods#callable?}) answers nothing, so
-      # `1.kp` on `module Kernel; private def kp` reads as the undefined call it is.
-      def try_project_patched_method(receiver_type, method_name, arg_types, block_type, environment, # rubocop:disable Metrics/ParameterLists
-                                     call_node: nil, scope: nil, through_ancestors: false)
-        registry = environment&.project_patched_methods
-        return nil if registry.nil? || registry.empty?
-
-        class_name = synthetic_method_class_name(receiver_type)
-        return nil if class_name.nil?
-
-        kind = receiver_type.is_a?(Type::Singleton) ? :singleton : :instance
-        entry = project_patched_entry(registry, class_name, method_name, kind, environment,
-                                      scope: scope, through_ancestors: through_ancestors)
-        return nil if entry.nil?
-
-        verdict = registry.callable?(entry, explicit: explicit_non_self_receiver?(call_node),
-                                            self_type: scope ? scope.self_type : :unknown,
-                                            rbs_loader: environment.rbs_loader)
-        return nil if verdict == false
-        return Type::Combinator.untyped if verdict.nil?
-        return Type::Combinator.dynamic(entry.return_type) if entry.return_type
-
-        aliased = project_patched_alias_target(entry, receiver_type, arg_types, block_type, environment)
-        aliased ? Type::Combinator.dynamic(aliased) : Type::Combinator.untyped
-      end
-
-      def project_patched_entry(registry, class_name, method_name, kind, environment, scope:, through_ancestors:)
-        return registry.lookup(class_name: class_name, method_name: method_name, kind: kind) unless through_ancestors
-
-        registry.lookup_through_ancestors(
-          class_name: class_name, method_name: method_name, kind: kind, rbs_loader: environment.rbs_loader,
-          source_defines: ->(owner, side) { project_source_defines?(scope, owner, method_name, side) }
-        )
-      end
-
-      # Issue #1708 — does the project's own source define `method_name` on `owner` (`side` as the ancestor walk
-      # reaches it), or on a module the project prepends to or includes into it? Ruby runs that `def` ahead of a
-      # patch on a farther ancestor: `class Integer; def nn = "s"` beats `class Object; def nn = nil` in a
-      # `pre_eval:` file. The owner's level of its {Scope::ResolutionChain} (its prepends, itself, its includes
-      # and their own mixins, or a class object's singleton and its extends) holds those definers; whether one
-      # of them defines the name does not depend on their order, so the chain is searched without settling it.
-      def project_source_defines?(scope, owner, method_name, side)
-        return false unless scope.known_user_class?(owner)
-
-        chain = Scope::ResolutionChain.for(scope, owner, side, :methods)
-        own_level_end = chain.level_starts[1] || chain.entries.size
-        found = chain.search(scope, 0, own_level_end) do |entry|
-          !entry.external? && source_def?(scope, entry.name, method_name, entry.side)
-        end
-        !found.nil?
-      end
-
-      def source_def?(scope, owner, method_name, side)
-        if side == :singleton
-          scope.discovered_method?(owner, method_name, :singleton) || !scope.singleton_def_for(owner, method_name).nil?
-        else
-          scope.discovered_method?(owner, method_name, :instance) || !scope.user_def_for(owner, method_name).nil?
-        end
-      end
-
-      # Issue #1702 — an alias in a `pre_eval:` patch whose old name no earlier patch binding defines
-      # (`alias old_plus +` on Integer, or `alias_method :orig_succ, :succ` ahead of the patch's own `def succ`)
-      # names the method the class had before the patch, so it answers what that method answers for the same
-      # arguments, behind the `Dynamic` every patched method carries. The re-entry skips this tier: a later patch
-      # `def` of the old name is not the body the alias copied, and the skip is also what ends an alias cycle. It
-      # carries no call node or scope, so it answers a type and records nothing at the call site.
-      def project_patched_alias_target(entry, receiver_type, arg_types, block_type, environment)
-        return nil if entry.alias_of.nil?
-
-        resolve(
-          receiver_type: receiver_type, method_name: entry.alias_of, arg_types: arg_types,
-          block_type: block_type, environment: environment, skip_project_patched: true
-        )
-      end
-
-      # ADR-10 slice 2b-ii. Consults the per-run `Analysis::DependencySourceInference::Index`
-      # carried by the environment for `(class_name, method_name)` observations harvested from
-      # opt-in gems' `roots:`. On a hit, returns `Combinator.untyped` so the call site carries
-      # the `Dynamic[top]` provenance (per ADR-10's "Inference contract": gem-source-inferred
-      # shapes never publish as ground-truth `T`). Returns `nil` when the environment carries no
-      # index, the index has no entry, or the receiver has no nominal class to look up.
-      def try_dependency_source(receiver_type, method_name, environment)
-        index = environment&.dependency_source_index
-        return nil if index.nil? || index.empty?
-
-        class_name = dep_source_class_name(receiver_type)
-        return nil if class_name.nil?
-
-        # ADR-10 5a — per-receiver plugin veto. When a registered plugin declares
-        # `manifest(owns_receivers: [<class>])` AND the call's receiver IS that class (or a
-        # subclass), decline and let plugins handle the call. Plugins that own a receiver are
-        # the authoritative source for that type; gem-source inference must not contribute
-        # behind their backs.
-        return nil if plugin_owns_receiver?(class_name, environment)
-
-        contribution = index.contribution_for(class_name: class_name, method_name: method_name)
-        return dependency_source_return_type(contribution) if contribution
-
-        # ADR-10 5b — β budget semantics. On a catalog miss, if the receiver class belongs to a
-        # budget-exceeded gem AND the user opted into `:dependency_silence`, return
-        # `Dynamic[top]` rather than falling through to the user-class fallback. The user-class
-        # fallback would otherwise emit `call.undefined-method` for methods Rigor's catalog
-        # couldn't reach because the walker hit its cap.
-        budget_silence_result(class_name, index, environment)
+        SyntheticMethodDispatch.synthetic_method_member?(receiver_type, method_name, scope&.environment)
       end
 
       # ADR-10 slice 5c — record a `dynamic.dependency-source.boundary-cross` event when RBS
@@ -718,16 +469,6 @@ module Rigor
         )
       end
 
-      # Maps a {DependencySourceInference::Walker::CatalogEntry} to the Type the dispatcher
-      # returns at the call site. When the heuristic recovered a static facet, wrap it in
-      # `Dynamic[T]` per ADR-10's gem-boundary contract; otherwise fall back to the
-      # pre-heuristic `Dynamic[top]`.
-      def dependency_source_return_type(contribution)
-        return Type::Combinator.untyped if contribution.return_type.nil?
-
-        Type::Combinator.dynamic(contribution.return_type)
-      end
-
       # Composite preflight for {#record_boundary_cross_if_applicable}. Returns the receiver
       # class name only when every prerequisite for emitting the diagnostic is satisfied
       # (environment carries an index + reporter, receiver is a nominal carrier, RBS-side result
@@ -739,7 +480,7 @@ module Rigor
         return nil if environment.boundary_cross_reporter.nil?
         return nil if rbs_result_untyped?(rbs_result)
 
-        dep_source_class_name(receiver_type)
+        DependencySource.dep_source_class_name(receiver_type)
       end
 
       def rbs_result_untyped?(rbs_result)
@@ -752,95 +493,35 @@ module Rigor
         rbs_result.respond_to?(:describe) ? rbs_result.describe : rbs_result.inspect
       end
 
-      def budget_silence_result(class_name, index, _environment)
-        return nil unless index.budget_overrun_strategy == :dependency_silence
-
-        owning_gem = index.gem_for(class_name)
-        return nil if owning_gem.nil?
-        return nil unless index.budget_exceeded.include?(owning_gem)
-
-        Type::Combinator.untyped
-      end
-
-      # ADR-52 WD1 — the per-dispatch plugins × owns_receivers × `class_ordering` walk moved into
-      # the compiled contribution table: the union is built once per registry (almost always
-      # empty → O(1) false) and per-class verdicts memoise per run.
-      def plugin_owns_receiver?(class_name, environment)
-        registry = environment&.plugin_registry
-        return false if registry.nil? || registry.empty?
-
-        registry.contribution_index.owns_receiver?(class_name, environment)
-      end
-
-      def dep_source_class_name(receiver_type)
-        case receiver_type
-        when Type::Nominal, Type::Singleton then receiver_type.class_name
-        end
-      end
-
-      # ADR-37 slice 2 / ADR-52 WD3 — gathers each plugin's return-type contribution from the
-      # gated `dynamic_return` DSL, wrapped as a return-only `FlowContribution` for the shared
-      # merger. (The legacy ungated `flow_contribution_for` escape valve was deleted once its
-      # five users migrated.)
-      EMPTY_CONTRIBUTIONS = [].freeze
-      private_constant :EMPTY_CONTRIBUTIONS
-
-      # Collects every plugin's flow / dynamic-return contribution for one call site. Three
-      # prunings keep this off the hot path on plugin-heavy projects (it was the #1 allocation
-      # site and a top CPU cost):
-      #
-      # 1. Only the plugins that *structurally* implement a per-call path are visited —
-      #    `registry.contribution_index.for_method_dispatch` is the registry-ordered subset
-      #    declaring a `dynamic_return`. Iterating the subset in registry order, and gating each
-      #    path by membership, yields the exact same contributions in the same order as visiting
-      #    every plugin would (a skipped plugin's call returns nil/[] anyway). The
-      #    receiver-class ancestry match still happens per dispatch inside `dynamic_return_type`.
-      # 2. Contributions accumulate lazily — allocate only when one actually appears, and share a
-      #    frozen empty array otherwise. The caller treats the result as read-only (`.empty?` /
-      #    `Merger.merge`).
-      # 3. ADR-52 WD1 — method-name gates compiled at registry build. The global gate makes the
-      #    common "no plugin cares about this call" case a single Set probe; the per-plugin gate
-      #    skips a plugin whose `dynamic_return` rules are all `methods:`-gated on other names. A
-      #    pruned consultation could only have returned nil, so contribution order and content
-      #    are unchanged.
-      def collect_plugin_contributions(registry, call_node, scope, receiver_type)
-        index = registry.contribution_index
-        relevant = index.for_method_dispatch
-        return EMPTY_CONTRIBUTIONS if relevant.empty?
-
-        # `call_node` is not always a CallNode — the `&:symbol` block path dispatches with the
-        # `Prism::BlockArgumentNode` itself (`ExpressionTyper#symbol_block_return_type`). A bare
-        # `.name` here raised, and the raise was silently absorbed by `block_return_type_for`'s
-        # rescue, nil-ing the block type and flipping `select(&:p)`-style calls onto their
-        # no-block Enumerator overloads (caught by the GitLab corpus gate).
-        name = call_node.respond_to?(:name) ? call_node.name : nil
-        return EMPTY_CONTRIBUTIONS unless index.dispatch_candidate?(name)
-
-        collect_gated_contributions(index, relevant, name, call_node, scope, receiver_type)
-      end
-
-      # The post-gate walk, in registry order — the same order the ungated walk used.
-      def collect_gated_contributions(index, relevant, name, call_node, scope, receiver_type)
-        result = nil
-        relevant.each do |plugin|
-          next unless index.dynamic_candidate_for?(plugin, name)
-
-          dynamic = plugin.dynamic_return_type(call_node: call_node, scope: scope, receiver_type: receiver_type)
-          (result ||= []) << FlowContribution.new(return_type: dynamic) if dynamic
-        rescue StandardError
-          next
-        end
-        result || EMPTY_CONTRIBUTIONS
-      end
-
       # The tiers `resolve` asks through an array outside the precise band, each where its comment in `resolve`
       # says. A tier is in an array when nothing in `resolve` follows its answer; one whose answer `resolve`
       # follows with a record on the scope or the reporter stays a call there.
       BUNDLED_OVERRIDE_TIERS = Ractor.make_shareable([HktBuiltinReturn, StaticRefinement].freeze)
       private_constant :BUNDLED_OVERRIDE_TIERS
 
+      SYNTHETIC_TIERS = Ractor.make_shareable([SyntheticMethodDispatch].freeze)
+      private_constant :SYNTHETIC_TIERS
+
       STUB_TIERS = Ractor.make_shareable([SynthesizedStub].freeze)
       private_constant :STUB_TIERS
+
+      # Asks the tiers of one array in order and answers the first answer, or nil when every tier declines.
+      #
+      # The walk is a `while` loop on purpose. On Ruby 4.0.5 a `return` out of an `each` block allocates one object
+      # for every call that answers (a call that declines allocates none), so `tiers.each { |tier| ... return result }`
+      # cost an object per dispatch a tier array answered: 171,897 in one `rigor check lib` while the four arrays were
+      # walked that way (#3345). Keep the index walk; an `each`, a `find` or an `each_with_index` brings them back.
+      def first_tier_answer(tiers, context)
+        index = 0
+        count = tiers.size
+        while index < count
+          result = tiers[index].try_dispatch(context)
+          return result if result
+
+          index += 1
+        end
+        nil
+      end
 
       # Runs the precision tiers in order and returns the first non-nil answer. Each tier owns its own receiver/argument
       # shape checks; a tier that does not recognise the receiver returns nil so the next tier
@@ -903,10 +584,8 @@ module Rigor
         struct_result = StructFolding.try_dispatch(context)
         return struct_result if struct_result
 
-        PRECISE_TIERS_HEAD.each do |tier|
-          result = tier.try_dispatch(context)
-          return result if result
-        end
+        head_result = first_tier_answer(PRECISE_TIERS_HEAD, context)
+        return head_result if head_result
 
         folder_result = dispatch_receiver_keyed_folder(context)
         return folder_result if folder_result
@@ -914,11 +593,7 @@ module Rigor
         kernel_result = dispatch_kernel_intrinsic(context)
         return kernel_result if kernel_result
 
-        PRECISE_TIERS_TAIL.each do |tier|
-          result = tier.try_dispatch(context)
-          return result if result
-        end
-        nil
+        first_tier_answer(PRECISE_TIERS_TAIL, context)
       end
 
       # The folders the receiver's class selects, at most one per call: a stdlib singleton folder, or for a
@@ -973,7 +648,7 @@ module Rigor
           context.with(
             receiver: fallback_receiver,
             self_type_override: receiver_type,
-            public_only: explicit_non_self_receiver?(call_node),
+            public_only: ProjectPatched.explicit_non_self_receiver?(call_node),
             call_node: nil, scope: nil
           )
         )
@@ -1103,21 +778,6 @@ module Rigor
           state[EXTERNAL_ANCESTOR_MEMO] = slot
         end
         slot[2]
-      end
-
-      # True when the call node carries an explicit receiver that is not the literal `self`.
-      # Such a call cannot legally dispatch to a private method, so the user-class fallback must
-      # skip private signatures rather than return a confidently-wrong type. Returns false for
-      # implicit-self calls and `self.`-receiver calls (both may legally reach a private method
-      # in modern Ruby), and false when no `call_node` is supplied (internal dispatcher callers).
-      def explicit_non_self_receiver?(call_node)
-        return false if call_node.nil?
-        return false unless call_node.respond_to?(:receiver)
-
-        receiver = call_node.receiver
-        return false if receiver.nil?
-
-        !receiver.is_a?(Prism::SelfNode)
       end
 
       def user_class_fallback_receiver(receiver_type, environment)

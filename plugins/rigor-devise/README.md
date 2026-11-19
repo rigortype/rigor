@@ -40,7 +40,8 @@ end
 No `diagnostics_for_file`, no AST walker, no plugin-side state.
 The substrate's slice-3b scanner walks `<X>.devise(:a, :b)` call
 sites; the `SyntheticMethodIndex` stores the per-method explosion;
-the dispatcher tier `try_synthetic_method` surfaces them below RBS
+the dispatcher's synthetic-method tier
+(`MethodDispatcher::SyntheticMethodDispatch`) surfaces them below RBS
 dispatch.
 
 ## What the plugin does
@@ -75,7 +76,7 @@ through the substrate tier — no more `call.undefined-method`.
 ## Return-type precision (slice 6a, landed)
 
 Tier B synthesis delivers both method-name resolution AND precise
-return-type recovery. The dispatcher's `try_synthetic_method` tier
+return-type recovery. The dispatcher's synthetic-method tier
 redispatches on `Nominal[origin_module]` via `RbsDispatch.try_dispatch`
 to recover the module's **authored RBS return** — so
 `user.valid_password?("pw")` is `bool`, not `Dynamic[T]`. The

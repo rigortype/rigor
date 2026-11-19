@@ -205,8 +205,8 @@ RSpec.describe Rigor::Plugin::ContributionIndex do
     it "returns no contributions through the global gate instead of raising" do
       registry = Rigor::Plugin::Registry.new(plugins: [build_plugin(gated_dynamic_class)])
 
-      contributions = Rigor::Inference::MethodDispatcher.send(
-        :collect_plugin_contributions, registry, block_argument_node, nil, nil
+      contributions = Rigor::Inference::MethodDispatcher::PluginContribution.collect_plugin_contributions(
+        registry, block_argument_node, nil, nil
       )
       expect(contributions).to eq([])
     end
@@ -214,8 +214,8 @@ RSpec.describe Rigor::Plugin::ContributionIndex do
     it "walks an ungated plugin without raising" do
       registry = Rigor::Plugin::Registry.new(plugins: [build_plugin(ungated_dynamic_class)])
 
-      contributions = Rigor::Inference::MethodDispatcher.send(
-        :collect_plugin_contributions, registry, block_argument_node, nil, nil
+      contributions = Rigor::Inference::MethodDispatcher::PluginContribution.collect_plugin_contributions(
+        registry, block_argument_node, nil, nil
       )
       expect(contributions).to eq([])
     end

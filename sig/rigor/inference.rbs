@@ -155,6 +155,9 @@ module Rigor
       module DataFolding
         def self?.try_dispatch: (CallContext context) -> untyped
       end
+      module DependencySource
+        def self?.try_dispatch: (CallContext context) -> (Type::Dynamic | nil)
+      end
       module FileFolding
         def self?.try_dispatch: (CallContext context) -> (Type::Constant | Type::Tuple | nil)
       end
@@ -179,8 +182,14 @@ module Rigor
       module MetaIntrospection
         def self?.try_dispatch: (CallContext context) -> untyped
       end
+      module PluginContribution
+        def self?.try_dispatch: (CallContext context) -> untyped
+      end
       module ProcessFolding
         def self?.try_dispatch: (CallContext context) -> untyped
+      end
+      module ProjectPatched
+        def self?.try_dispatch: (CallContext context, ?through_ancestors: bool) -> (Type::Dynamic | nil)
       end
       module RandomFolding
         def self?.try_dispatch: (CallContext context) -> (Type::FloatRange | Type::IntegerRange | nil)
@@ -214,6 +223,9 @@ module Rigor
       end
       module SynthesizedStub
         def self?.try_dispatch: (CallContext context) -> (Type::Dynamic | nil)
+      end
+      module SyntheticMethodDispatch
+        def self?.try_dispatch: (CallContext context) -> untyped
       end
       module TimeFolding
         def self?.try_dispatch: (CallContext context) -> (Type::Constant | nil)

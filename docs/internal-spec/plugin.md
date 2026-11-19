@@ -617,7 +617,7 @@ the block carries logic and runs through `instance_exec`:
     issue #700). `MethodDispatcher#resolve` consults the plugin tier
     after the precision tiers (`MethodFolding.try_backward`,
     `dispatch_precise_tiers`) and ahead of every RBS-backed tier, ending
-    in `RbsDispatch.try_dispatch`. `try_plugin_contribution` collects
+    in `RbsDispatch.try_dispatch`. `PluginContribution.try_dispatch` collects
     every gated plugin's contribution for the call and returns
     `FlowContribution::Merger.merge(contributions).return_type`, the
     intersection of the answers (see

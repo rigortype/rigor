@@ -8,9 +8,9 @@ module Rigor
     # pre-pass (slice 2) from the user's `.rigor.yml` `pre_eval:` list.
     #
     # Each entry records one `def`, `alias` or `alias_method` declaration the pre-pass observed inside a class /
-    # module body. The dispatcher's `try_project_patched_method` tier consults this registry between the plugin
-    # tier and the dependency-source tier so project-side `lib/core_ext/string_extensions.rb` patches are visible
-    # to cross-file dispatch.
+    # module body. The dispatcher's project-patched tier (`MethodDispatcher::ProjectPatched`) consults this registry
+    # between the plugin tier and the dependency-source tier so project-side `lib/core_ext/string_extensions.rb`
+    # patches are visible to cross-file dispatch.
     #
     # The dispatcher answers `Dynamic[T]` (with a heuristic static facet) when `Entry#return_type` is
     # non-nil, or `Dynamic[Top]` when the heuristic declined (`nil`). See {Entry} for the per-field

@@ -40,7 +40,7 @@ require "prism"
 #
 # Stage 1 converts files a PR at a time; each conversion adds its files to {#covered_files}.
 RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
-  def covered_files = analysis_files + check_rules_files + inference_files + other_files
+  def covered_files = analysis_files + check_rules_files + inference_files + dispatcher_files + other_files
 
   def analysis_files
     %w[
@@ -99,12 +99,9 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       lib/rigor/inference/flow_tracer.rb
       lib/rigor/inference/key_presence_guard.rb
       lib/rigor/inference/loop_value_record.rb
-      lib/rigor/inference/method_dispatcher/interface_shape.rb
       lib/rigor/memo_audit.rb
-      lib/rigor/inference/method_dispatcher.rb lib/rigor/inference/method_dispatcher/hkt_builtin_return.rb
-      lib/rigor/inference/method_dispatcher/meta_introspection.rb lib/rigor/inference/method_dispatcher/rbs_dispatch.rb
-      lib/rigor/inference/method_dispatcher/static_refinement.rb lib/rigor/inference/project_method_ownership.rb
-      lib/rigor/inference/method_dispatcher/synthesized_stub.rb lib/rigor/inference/project_patched_scanner.rb
+      lib/rigor/inference/project_method_ownership.rb
+      lib/rigor/inference/project_patched_scanner.rb
       lib/rigor/inference/rbs_type_translator.rb
       lib/rigor/inference/refined_dispatch/constructed_class.rb
       lib/rigor/inference/refined_dispatch/own_method.rb
@@ -117,6 +114,20 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       lib/rigor/inference/statement_evaluator.rb lib/rigor/inference/statement_evaluator/pattern_bindings.rb
       lib/rigor/inference/toplevel_def_census.rb
       lib/rigor/inference/void_tail_summary.rb lib/rigor/inference/statement_evaluator/def_arguments_and_assertions.rb
+    ]
+  end
+
+  # `method_dispatcher.rb` and the tier modules under `method_dispatcher/`, one path a line, sorted. A tier ADR-116
+  # WD12 moves out of the dispatcher gets its row here, so code that leaves a covered file stays covered.
+  def dispatcher_files
+    %w[
+      lib/rigor/inference/method_dispatcher.rb
+      lib/rigor/inference/method_dispatcher/hkt_builtin_return.rb
+      lib/rigor/inference/method_dispatcher/interface_shape.rb
+      lib/rigor/inference/method_dispatcher/meta_introspection.rb
+      lib/rigor/inference/method_dispatcher/rbs_dispatch.rb
+      lib/rigor/inference/method_dispatcher/static_refinement.rb
+      lib/rigor/inference/method_dispatcher/synthesized_stub.rb
     ]
   end
 

@@ -14,8 +14,14 @@ module Rigor
       # consult the wider context.
       #
       # Derived call sites (the user-class fallback's `public_only` RBS retry, the Tier-B origin-module
-      # redispatch) use `Data#with` to copy the base context with the few fields that differ rather than
+      # redispatch) use `#with` to copy the base context with the few fields that differ rather than
       # rebuilding the quartet by hand.
+      #
+      # A plain class that freezes itself, not a `Data` (ADR-116 WD12): `Data.new` turns positional arguments
+      # into a keyword Hash before it calls `initialize`, so a `build` allocated three objects where this
+      # class allocates one, once per dispatch. What a `Data` gave and callers use is kept — the readers,
+      # `with`, value equality and frozen instances; `to_h`, `members` and `deconstruct_keys` had no caller
+      # and are gone.
       #
       # Fields:
       # - `receiver`            — the receiver `Rigor::Type` (nil short-circuits)
@@ -27,27 +33,81 @@ module Rigor
       # - `scope`               — the enclosing `Scope` (discovered methods, …)
       # - `self_type_override`  — receiver to attribute private dispatch to
       # - `public_only`         — suppress private-method resolution (explicit, non-self receiver)
-      CallContext = Data.define(
-        :receiver, :method_name, :args,
-        :block_type, :environment, :call_node, :scope,
-        :self_type_override, :public_only
-      ) do
+      class CallContext
+        attr_reader :receiver, :method_name, :args,
+                    :block_type, :environment, :call_node, :scope,
+                    :self_type_override, :public_only
+
+        # The field names, for `with` to check its keywords against.
+        FIELDS = %i[
+          receiver method_name args block_type environment call_node scope self_type_override public_only
+        ].freeze
+        private_constant :FIELDS
+
         # Keyword factory with nil/false defaults for the optional context fields, so a caller that only has
         # the call quartet (the common precise-tier path) need not spell out the rest.
-        #
-        # This is the single place the call-context field list is enumerated — the whole point of the value
-        # object is to absorb the wide keyword list the tiers used to each redeclare.
         def self.build(receiver:, method_name:, args:, # rubocop:disable Metrics/ParameterLists
                        block_type: nil, environment: nil, call_node: nil,
                        scope: nil, self_type_override: nil, public_only: false)
-          # Positional `new` (field-definition order) avoids the keyword hash a `new(receiver:, …)` call
-          # allocates — this runs once per dispatch and was a top allocation site. Order MUST track the
-          # `Data.define` field list above.
+          # This runs once per dispatch and was a top allocation site, so the fields go to `new` positionally:
+          # nothing but the context itself is allocated. Order MUST track `initialize`.
           new(
             receiver, method_name, args,
             block_type, environment, call_node, scope,
             self_type_override, public_only
           )
+        end
+
+        # Positional, in the order of the field list above.
+        def initialize(receiver, method_name, args, # rubocop:disable Metrics/ParameterLists
+                       block_type, environment, call_node, scope,
+                       self_type_override, public_only)
+          @receiver = receiver
+          @method_name = method_name
+          @args = args
+          @block_type = block_type
+          @environment = environment
+          @call_node = call_node
+          @scope = scope
+          @self_type_override = self_type_override
+          @public_only = public_only
+          freeze
+        end
+
+        # A fresh context with the named fields replaced. It takes any keyword and raises `ArgumentError` for
+        # one that names no field, as `Data#with` did.
+        def with(**changes)
+          changes.each_key do |name|
+            raise ArgumentError, "unknown keyword: #{name.inspect}" unless FIELDS.include?(name)
+          end
+
+          self.class.new(
+            changes.fetch(:receiver, @receiver), changes.fetch(:method_name, @method_name),
+            changes.fetch(:args, @args), changes.fetch(:block_type, @block_type),
+            changes.fetch(:environment, @environment), changes.fetch(:call_node, @call_node),
+            changes.fetch(:scope, @scope), changes.fetch(:self_type_override, @self_type_override),
+            changes.fetch(:public_only, @public_only)
+          )
+        end
+
+        # Two contexts of the same class are equal when every field is.
+        def ==(other)
+          other.instance_of?(self.class) && fields == other.fields
+        end
+
+        def eql?(other)
+          other.instance_of?(self.class) && fields.eql?(other.fields)
+        end
+
+        def hash
+          fields.hash
+        end
+
+        protected
+
+        def fields
+          [@receiver, @method_name, @args, @block_type, @environment, @call_node, @scope, @self_type_override,
+           @public_only]
         end
       end
     end

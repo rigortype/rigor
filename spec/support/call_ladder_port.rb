@@ -26,8 +26,37 @@ module CallLadderPort
   REFLECTIVE = %i[send __send__ public_send method public_method instance_method respond_to?].freeze
   # ADR-116, the #3318 cut-off: a rung calls back at most this many distinct typer methods, the scope read aside.
   CALLBACK_LIMIT = 4
+  # The classes that type code. A rung module that named one could build a typer of its own and type through it,
+  # past `PORT` and the cut-off.
+  TYPING_CLASSES = %i[ExpressionTyper StatementEvaluator].freeze
+  # The methods that type code on what they are called on: the typer's `return_type_for`, and every method of
+  # `Scope` that builds one of {TYPING_CLASSES} (`type_of`, `user_method_return`, `evaluate`; the spec reads
+  # `scope.rb` to keep this list whole). A rung module calls none of them on anything but its typer, where `PORT`
+  # decides.
+  TYPING_ENTRIES = %i[type_of return_type_for user_method_return evaluate].freeze
+  SCOPE_FILE = "lib/rigor/scope.rb"
 
   module_function
+
+  # The methods of `source` (`scope.rb`) whose body builds one of {TYPING_CLASSES} with `new`.
+  def typer_builders(source)
+    found = []
+    CallLadderPin.each_node(Prism.parse(source).value, defs: true) do |node|
+      next unless node.is_a?(Prism::DefNode)
+
+      builds = false
+      CallLadderPin.each_node(node.body) do |inner|
+        builds ||= inner.is_a?(Prism::CallNode) && inner.name == :new && typing_constant?(inner.receiver)
+      end
+      found << node.name if builds
+    end
+    found
+  end
+
+  # Whether `node` is a constant naming one of {TYPING_CLASSES}, written bare or as the last segment of a path.
+  def typing_constant?(node)
+    (node.is_a?(Prism::ConstantReadNode) || node.is_a?(Prism::ConstantPathNode)) && TYPING_CLASSES.include?(node.name)
+  end
 
   def ladder = Rigor::Inference::CallLadder
 
@@ -211,6 +240,23 @@ module CallLadderPort
       end
     end
 
+    # Where the module would type code itself rather than through its typer, as messages: a constant naming one of
+    # {TYPING_CLASSES}, and a call of one of {TYPING_ENTRIES} on anything but the local `typer` (a scope, `typer.scope`
+    # included), by name, through a reflective call that spells it, or as a `&:name` block.
+    def typing_bypasses
+      named = @nodes.select { |node| CallLadderPort.typing_constant?(node) }.map do |node|
+        "#{where(node)}: names `#{node.slice}`; a rung types only through its typer"
+      end
+      entered = @nodes.grep(Prism::CallNode).flat_map do |call|
+        [CallLadderPort.reached(call), CallLadderPort.block_symbol(call)].uniq.filter_map do |name|
+          next unless TYPING_ENTRIES.include?(name) && !typer?(call.receiver)
+
+          "#{where(call)}: calls `#{name}` on `#{call.receiver&.slice || 'self'}`; a rung types only through its typer"
+        end
+      end
+      named + entered
+    end
+
     # Why `name` is not a function of its arguments alone, as messages: it names a typer or a scope, calls
     # something with no receiver (a function of the module, a method of whatever `self` is), calls on `self` or on
     # a constant, or reads an instance, class or global variable.
@@ -333,6 +379,17 @@ RSpec.shared_examples "the port the tables declare" do
       typer only to a function of its own file whose parameter there is `typer` or to another rung's entry that is
       given one, and reads the scope as `typer.scope`. A rung that needs another typer method is over the cut-off of
       ADR-116 § "Amendment, 2026-11-19 — WD12's interface": it stays in the typer, and the list is not widened.
+    MESSAGE
+  end
+
+  it "is the only way a rung module types code: it names no typing class and enters no typing entry elsewhere" do
+    bypasses = files.values.flat_map(&:typing_bypasses)
+
+    expect(bypasses).to eq([]), <<~MESSAGE
+      #{bypasses.join("\n")}
+      A rung module types code only through the typer it is given, by what CallLadder::PORT lists. A typer it builds
+      (ExpressionTyper.new, StatementEvaluator.new) or a typing entry it calls on a scope (typer.scope.type_of,
+      scope.evaluate) would type past the port and past the cut-off of four callbacks.
     MESSAGE
   end
 

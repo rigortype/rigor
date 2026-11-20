@@ -17,6 +17,11 @@ require "spec_helper"
 # Anything else is the typer leaving the port: a local assigned from it, a collection holding it, a call that passes
 # it to a constant that is no rung. A scope is read as `typer.scope` and off nothing else.
 #
+# Nor does the module type code another way: it names no typing class (`CallLadderPort::TYPING_CLASSES`:
+# `ExpressionTyper`, `StatementEvaluator`), and calls no typing entry (`CallLadderPort::TYPING_ENTRIES`: the typer's
+# `return_type_for`, and each method of `Scope` that builds a typer, which the spec reads off `scope.rb`) on anything
+# but the local `typer`, `typer.scope` included. Either would type past `PORT` and the cut-off.
+#
 # Beside that, the tables are held to the code from both sides. A rung module exposes exactly its rung's `asked_as`
 # and the entries `CallLadder::SECOND_ENTRIES` names for it; every other function is hidden by `private_class_method`.
 # The rung's entry takes `(site, typer)`. A second entry that is not given the typer is a function of its arguments
@@ -29,7 +34,8 @@ require "spec_helper"
 # examples under "the reading" prove the rule on a rung module and tables of their own.
 #
 # What the reading cannot see. It knows the typer by the name of the local that holds it, so a typer reached another
-# way is not held: one a function builds, or one read off another object. It reads the files under `call_ladder/`
+# way is not held: one a function builds, or one read off another object. A typer built for the module by another
+# module it calls (`OperandWalk` builds one) is not seen either. It reads the files under `call_ladder/`
 # only. A call spelled through `send` on something that is not the local `typer` is a call on that other thing.
 RSpec.describe "The call ladder's port" do
   def ladder = Rigor::Inference::CallLadder
@@ -44,6 +50,15 @@ RSpec.describe "The call ladder's port" do
       expect(CallLadderPin.table_reads("PORT.include?(name); SECOND_ENTRIES", inside: true).size).to eq(2)
       expect(CallLadderPin.table_reads("CallLadder::REENTRY + CallLadder::DISPATCHER_INTERIOR").size).to eq(2)
       expect(CallLadderPin.engine_reads).to eq([])
+    end
+
+    # `CallLadderPort::TYPING_ENTRIES` is the port's list of what types code; a method `Scope` gains that builds a
+    # typer has to join it, or a rung module could type through that method on `typer.scope`.
+    it "knows each method of Scope that builds a typer as a typing entry" do
+      builders = CallLadderPort.typer_builders(File.read(File.join(CallLadderPort::ROOT, CallLadderPort::SCOPE_FILE)))
+
+      expect(builders).to include(:type_of, :user_method_return, :evaluate)
+      expect(CallLadderPort::TYPING_ENTRIES).to include(*builders)
     end
 
     it "names each second entry once, at a rung module, with its reason" do
@@ -152,6 +167,33 @@ RSpec.describe "The call ladder's port" do
       expect(read(source).foreign_scope_reads).to eq(
         ["CallLadder::Sample.infer (line 11): reads `site.scope`; a rung reads the scope as `typer.scope`"]
       )
+    end
+
+    # The probe #3371's review wrote: `PORT` holds what the module calls on its typer, and neither call below is one.
+    it "fails a rung that types past its typer: a typing class named, a typing entry called on a scope" do
+      probe = edit(rung, "found = lookup(name, typer.scope)",
+                   "found = typer.scope.type_of(receiver) || " \
+                   "Rigor::Inference::ExpressionTyper.new(scope: typer.scope).send(:dynamic_top)")
+
+      expect(breaches(probe) + read(probe).foreign_scope_reads).to eq([])
+      expect(read(probe).typing_bypasses).to eq(
+        ["CallLadder::Sample.infer (line 11): names `Rigor::Inference::ExpressionTyper`; a rung types only through " \
+         "its typer",
+         "CallLadder::Sample.infer (line 11): calls `type_of` on `typer.scope`; a rung types only through its typer"]
+      )
+    end
+
+    it "fails every typing entry on a scope, under any spelling, and every typing class, and passes the rest" do
+      lookup = "scope.user_def_for(\"C\", name)"
+      spelled = [
+        "scope.send(:evaluate, name)", "[scope].map(&:user_method_return)", "scope.return_type_for(name, nil, [])",
+        "type_of(name)", "StatementEvaluator.new(scope: scope)", "ExpressionTyper::Writes"
+      ]
+      bypasses = ->(to) { read(edit(rung, lookup, to)).typing_bypasses }
+
+      expect(spelled.map { |to| bypasses.call(to).size }).to eq([1, 1, 1, 1, 1, 1])
+      expect(read(rung).typing_bypasses).to eq([])
+      expect(bypasses.call("Type::Nominal.new(scope.user_def_for(name))")).to eq([])
     end
 
     it "reads what a module exposes off its `private_class_method`, and a name it hides with no definition" do

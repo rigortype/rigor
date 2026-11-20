@@ -34,15 +34,15 @@ sequence of two rungs.
 ## Decision
 
 The third, for second entries only. `CallLadderPin::Reading#ladder_asks` skips a call that only `second_entry_rung`
-resolves (not one `rung_of` resolves as the rung's own `asked_as`), when it names the rung whose home is the file's
-and that home is a rung module (`CallLadderPin::RUNG_HOME`, `CallLadder::`). A reading example builds a module that
-tests its own gate and asks one other rung (no stray), a function of it that chains its own `try_call` into two other
-rungs (a stray, the own entry counted), and a typer method that tests the module's gate and asks another rung (a
-stray). The mutation table in the PR removes the skip, the `CallLadder::` condition and the second-entries-only
-condition, and each fails an example; so does a helper chaining `TopLevelDef.try_call` into `OverridingDef.try_call`
-in `top_level_def.rb`. On this checkout no module but `CallLadder::OverridingDef` calls its own second entry beside
-another rung, and no result of the check changes for the rung modules that existed before. The review of #3374
-narrowed a first draft that skipped the rung's own entry too.
+resolves (not one `rung_of` resolves as the rung's own `asked_as`), when it names the rung whose home is the file's. A
+second entry's home is always a rung module (`port_spec.rb` fetches each one's file under `call_ladder/`), so the skip
+never reaches the typer. A reading example builds a module that tests its own gate and asks one other rung (no stray),
+a function of it that chains its own `try_call` into two other rungs (a stray, the own entry counted), and a typer
+method that tests the module's gate and asks another rung (a stray). The mutation table in the PR removes the skip,
+its own-home condition and the second-entries-only condition, and each fails an example; so does a helper chaining
+`TopLevelDef.try_call` into `OverridingDef.try_call` in `top_level_def.rb`. On this checkout no module but
+`CallLadder::OverridingDef` calls its own second entry beside another rung, and no result of the check changes for the
+rung modules that existed before. The review of #3374 narrowed a first draft that skipped the rung's own entry too.
 
 The precedent is the amendment's second entries: "a rung module may expose a second named entry when a caller
 outside the rung asks part of it", so inside the rung the same function is the rung's own code. S6's change to the
@@ -50,6 +50,6 @@ check (`wd12-s6-user-method-gate.md`, condition 4) is still in this queue, so it
 
 ## To undo
 
-Delete the `next if !direct && rung && own_rung?(rung, home)` line, `own_rung?` and the reading example, and read
+Delete the `next if !direct && rung && rung.home == home` line and the reading example, and read
 `rung = rung_of(node, home) || second_entry_rung(node, home)` again. The overriding-def rung's `try_call` then fails
 the check, and the rung would have to be split as in the first option.

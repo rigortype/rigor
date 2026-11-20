@@ -16,7 +16,7 @@ module CallLadderPort
   LIB = CallLadderPin::LIB
   TYPER_FILE = "#{LIB}/expression_typer.rb".freeze
   RUNG_DIRECTORY = "#{LIB}/call_ladder/".freeze
-  RUNG_HOME = CallLadderPin::RUNG_HOME
+  RUNG_HOME = "CallLadder::"
   # The files a re-entry point or the dispatcher's interior could be called from: the engine, the plugins and the
   # examples.
   ENGINE_GLOBS = %w[lib/**/*.rb plugins/*/lib/**/*.rb examples/*/lib/**/*.rb].freeze

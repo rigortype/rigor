@@ -13,8 +13,6 @@ require "rigor/inference/call_ladder"
 module CallLadderPin
   NAMESPACE = "Rigor::Inference"
   LIB = "lib/rigor/inference"
-  # The home of a rung module: a file under `call_ladder/`, read as `CallLadder::<Name>`.
-  RUNG_HOME = "CallLadder::"
   ROOT = File.expand_path("../..", __dir__)
 
   # A sequence the spec holds: an entry's own methods (`exception` nil), or a branch an exception row names.
@@ -398,7 +396,8 @@ module CallLadderPin
     # second entries is the rung at work, not an ask: the own-`def` rung tests its own gate and then asks user-method
     # inference once. The rung's own entry is still an ask there, so a function that chains it into another rung is a
     # sequence. What the module asks of any other rung counts, and in the typer, which holds several rungs, every rung
-    # counts.
+    # counts. A second entry's home is a rung module (the port spec fetches each one's file under `call_ladder/`), so a
+    # call resolved through one to the file's own home is in that module's file.
     def ladder_asks(definition, home)
       found = []
       CallLadderPin.each_node(definition.body) do |node|
@@ -406,16 +405,13 @@ module CallLadderPin
 
         direct = rung_of(node, home)
         rung = direct || second_entry_rung(node, home)
-        next if !direct && rung && own_rung?(rung, home)
+        next if !direct && rung && rung.home == home
 
         place = node.receiver.nil? && place_methods.include?([home, node.name])
         found << (rung ? rung.name : node.name) if rung || place
       end
       found
     end
-
-    # Whether `rung` is the one whose module `home` is.
-    def own_rung?(rung, home) = home.start_with?(RUNG_HOME) && rung.home == home
 
     # The rung whose module `call` asks through one of its second entries, spelled as a rung's own entry is: a
     # rung's gate and its positional entry are parts of that rung. Only the stray check reads this. A place's

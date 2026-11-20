@@ -8,9 +8,9 @@ require_relative "call_ladder_pin"
 # a rung module does with the typer it is given and what it exposes, and who calls the typer's re-entry points and the
 # dispatcher's interior. The rules, and what the reading cannot see, are in the two specs' headers.
 #
-# As in {CallLadderPin}, every name comes from a table of `Rigor::Inference::CallLadder`: `PORT`, `REENTRY`,
-# `SECOND_ENTRIES` and `DISPATCHER_INTERIOR`, and `RUNGS` for a rung's own entry. A rung slice edits the tables and
-# not this file.
+# As in {CallLadderPin}, every name comes from a table of `Rigor::Inference::CallLadder`: `PORT`, `PUBLIC_CALLBACKS`,
+# `REENTRY`, `SECOND_ENTRIES` and `DISPATCHER_INTERIOR`, and `RUNGS` for a rung's own entry. A rung slice edits the
+# tables and not this file.
 module CallLadderPort
   ROOT = CallLadderPin::ROOT
   LIB = CallLadderPin::LIB
@@ -26,6 +26,8 @@ module CallLadderPort
   REFLECTIVE = %i[send __send__ public_send method public_method instance_method respond_to?].freeze
   # ADR-116, the #3318 cut-off: a rung calls back at most this many distinct typer methods, the scope read aside.
   CALLBACK_LIMIT = 4
+  # What the frame is read through, and so no callback.
+  FRAME_READ = %i[scope].freeze
   # The classes that type code. A rung module that named one could build a typer of its own and type through it,
   # past `PORT` and the cut-off.
   TYPING_CLASSES = %i[ExpressionTyper StatementEvaluator].freeze
@@ -59,6 +61,10 @@ module CallLadderPort
   end
 
   def ladder = Rigor::Inference::CallLadder
+
+  # The typer methods a rung calls back, as the cut-off counts them: every name it calls on its typer but the scope
+  # read. A public callback counts as a re-entry point does.
+  def callbacks(typer_calls) = typer_calls - FRAME_READ
 
   # `home => RungFile` for every rung module of this checkout: each file under `call_ladder/`.
   def rung_files(root = ROOT)
@@ -395,20 +401,25 @@ RSpec.shared_examples "the port the tables declare" do
 
   it "has no member that no rung calls, and no rung that calls back more than four of them" do
     called = files.transform_values(&:typer_calls)
-    callbacks = called.transform_values { |names| (names - %i[scope]).size }
+    callbacks = called.transform_values { |names| CallLadderPort.callbacks(names).size }
 
     expect(ladder::PORT - called.values.flatten).to eq([])
     expect(callbacks.values).to all(be <= CallLadderPort::CALLBACK_LIMIT)
-    expect(ladder::PORT).to start_with(:scope).and include(*ladder::REENTRY)
+    expect(ladder::PORT).to eq([*CallLadderPort::FRAME_READ, *ladder::PUBLIC_CALLBACKS, *ladder::REENTRY])
+    expect(ladder::PUBLIC_CALLBACKS & ladder::REENTRY).to eq([])
   end
 
-  it "is public on the typer and marked `@api private`, the re-entry points made public in one statement" do
-    marked = ladder::PORT.select do |name|
+  # A public callback was public before any rung needed it, so it carries no mark and none is asked of it.
+  it "is public on the typer and marked `@api private` but for the public callbacks, the re-entry points made " \
+     "public in one statement" do
+    made_for_rungs = ladder::PORT - ladder::PUBLIC_CALLBACKS
+    marked = made_for_rungs.select do |name|
       CallLadderPort.comment_above(typer_source, name).to_s.include?("@api private")
     end
 
     expect(Rigor::Inference::ExpressionTyper.public_instance_methods(false)).to include(*ladder::PORT)
-    expect(marked).to eq(ladder::PORT)
+    expect(made_for_rungs).to eq([*CallLadderPort::FRAME_READ, *ladder::REENTRY])
+    expect(marked).to eq(made_for_rungs)
     expect(CallLadderPort.made_public(typer_source)).to eq(ladder::REENTRY)
   end
 

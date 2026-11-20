@@ -58,8 +58,8 @@ module CallLadderPin
     end
   end
 
-  # The order's three tables, and the four of the port (`spec/support/call_ladder_port.rb` reads those).
-  TABLES = %w[RUNGS ENTRIES EXCEPTIONS PORT REENTRY SECOND_ENTRIES DISPATCHER_INTERIOR].freeze
+  # The order's three tables, and the five of the port (`spec/support/call_ladder_port.rb` reads those).
+  TABLES = %w[RUNGS ENTRIES EXCEPTIONS PORT PUBLIC_CALLBACKS REENTRY SECOND_ENTRIES DISPATCHER_INTERIOR].freeze
 
   # What in `source` reads the tables: a `require` of their file, or one of them named. Inside `CallLadder`
   # (`inside`) a table can be named bare; elsewhere only `RUNGS` is a name no other constant of `lib/` has.

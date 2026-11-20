@@ -6,11 +6,11 @@ module Rigor
     #
     # `ExpressionTyper` types a call by asking a *ladder* of *rungs* in order, and the first that answers wins.
     # `MethodDispatcher` is one rung; what it asks inside itself are *tiers*, and their order is its own
-    # (`MethodDispatcher.resolve_site`). The typer writes the ladder in full for a call, and writes a shorter
-    # sequence for two other *entries*: the read a compound index write performs (`c[k] += v`) and the target of a
-    # literal `send`. Sequences copied by hand drift apart (#3358), so the order and each entry's subset are
-    # declared here, and `spec/rigor/inference/call_ladder_spec.rb` reads the code with Prism and fails unless
-    # every method that can answer from two or more rungs asks them as these tables say.
+    # (`MethodDispatcher.resolve_site`). The typer writes the ladder in full for a call, and a shorter sequence is
+    # written for two other *entries*: the read a compound index write performs (`c[k] += v`), in the typer, and the
+    # target of a literal `send`, in that rung's module. Sequences copied by hand drift apart (#3358), so the order
+    # and each entry's subset are declared here, and `spec/rigor/inference/call_ladder_spec.rb` reads the code with
+    # Prism and fails unless every method that can answer from two or more rungs asks them as these tables say.
     #
     # The engine does not load this file. The ladder stays straight-line code, no method is generated from the
     # tables and no rung is wrapped to fit them: ADR-116 rejects a table walked at run time, which would put a
@@ -24,7 +24,8 @@ module Rigor
     # may call on that typer is {PORT}, and what it exposes beside `try_call` is {SECOND_ENTRIES}:
     # `spec/rigor/inference/call_ladder/port_spec.rb` holds each rung module to both, and
     # `spec/rigor/inference/call_ladder/reentry_spec.rb` holds every other file away from {REENTRY} and the typer
-    # and the rungs away from {DISPATCHER_INTERIOR}.
+    # and the rungs away from {DISPATCHER_INTERIOR}. {PUBLIC_CALLBACKS} are in the port and under neither rule of
+    # the reentry spec.
     module CallLadder
       # One way the typer asks the ladder. `home` is the constant, as written from `Rigor::Inference`, whose file
       # holds the entry's sequence, and `written_in` the methods there: the first starts the sequence, and each
@@ -63,9 +64,11 @@ module Rigor
                     ahead: %i[indexed_narrowing_for]),
           # The `c[k]` read of `c[k] += v`. It answers nil when the ladder is exhausted, and its caller widens.
           Entry.new(name: :index_read, home: TYPER, written_in: %i[implicit_index_read_type], ahead: []),
-          # The target of `recv.send(:name, …)`: the sequence inside the `literal_send` rung. A receiver with a
-          # `send` of its own is answered ahead of it (`own_send_type`, which asks user-method inference alone).
-          Entry.new(name: :send_target, home: TYPER, written_in: %i[try_literal_send], ahead: %i[own_send_type])
+          # The target of `recv.send(:name, …)`: the sequence inside the `literal_send` rung, written in its module. A
+          # receiver with a `send` of its own is answered ahead of it (`own_send_type`, which asks user-method
+          # inference alone).
+          Entry.new(name: :send_target, home: "CallLadder::LiteralSend", written_in: %i[try_call],
+                    ahead: %i[own_send_type])
         ]
       )
 
@@ -78,9 +81,8 @@ module Rigor
           Rung.new(name: :refined, asked_by: %i[call index_read], home: TYPER,
                    asked_as: %i[try_refined_dispatch],
                    in_typer_because: "S4 moves it, and only with a plan for the self-typing ratchet"),
-          Rung.new(name: :literal_send, asked_by: %i[call], home: TYPER,
-                   asked_as: %i[try_literal_send],
-                   in_typer_because: "S7 moves it, after the two rungs its own sequence asks"),
+          Rung.new(name: :literal_send, asked_by: %i[call], home: "CallLadder::LiteralSend", asked_as: %i[try_call],
+                   in_typer_because: nil),
           Rung.new(name: :top_level_def, asked_by: %i[call send_target], home: TYPER,
                    asked_as: %i[try_local_def_dispatch],
                    in_typer_because: "S8 moves it"),
@@ -163,11 +165,20 @@ module Rigor
         ]
       )
 
+      # The typer's public callbacks: methods of `ExpressionTyper` a rung module may call on its typer that were public
+      # before any rung needed them, so that neither the `@api private` mark nor the re-entry rule applies. `type_of`
+      # is the typer's own entry, which the statement evaluator, the rules and the plugins call on typers of their own;
+      # a rung calls it to type a node of its call. A public callback counts toward the cut-off of four as a re-entry
+      # point does, so that a rung typing nodes through it is not cheaper to move than one calling back the typer's
+      # private code.
+      PUBLIC_CALLBACKS = Ractor.make_shareable(%i[type_of])
+
       # The port: every method of the typer a rung module may call on the `typer` it is given, `send` and the
       # other reflective calls being none of them. `scope` reads the frame's scope; a rung reads it there and never
-      # from its site, whose `scope` `sig/` leaves untyped. The rest are {REENTRY}. A rung that needs a fifth
-      # re-entry point of its own does not move (ADR-116, the #3318 cut-off): the list is not widened to fit one.
-      PORT = Ractor.make_shareable([:scope, *REENTRY])
+      # from its site, whose `scope` `sig/` leaves untyped. The rest are {PUBLIC_CALLBACKS} and {REENTRY}, and a rung
+      # calls back at most four of them. A rung that needs a fifth does not move (ADR-116, the #3318 cut-off): the
+      # list is not widened to fit one.
+      PORT = Ractor.make_shareable([:scope, *PUBLIC_CALLBACKS, *REENTRY])
 
       # A function a rung module exposes beside its rung's `asked_as`, for a caller that asks part of the rung with
       # arguments that are not a site's. `home` is the module, as a rung's `home` is. `given_typer` says whether the

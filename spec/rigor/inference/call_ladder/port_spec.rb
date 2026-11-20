@@ -27,8 +27,11 @@ require "spec_helper"
 # The rung's entry takes `(site, typer)`. A second entry that is not given the typer is a function of its arguments
 # alone: it takes neither a typer nor a scope, calls nothing with no receiver and nothing on `self` or on a constant,
 # and reads no instance, class or global variable. Every member of `PORT` is called by some rung, no rung calls back
-# more than four members beside `scope` (the #3318 cut-off), and each member is a public method of the typer marked
-# `@api private`, the re-entry points made public by the typer's one `public` statement.
+# more than four members beside `scope` (the #3318 cut-off), and each member is a public method of the typer. `PORT` is
+# `scope`, the public callbacks (`CallLadder::PUBLIC_CALLBACKS`) and the re-entry points (`CallLadder::REENTRY`). A
+# public callback (`type_of`) was public before any rung needed it: it counts toward the cut-off as a re-entry point
+# does, and is exempt from the rest. `scope` and each re-entry point are marked `@api private`, and the re-entry points
+# are made public by the typer's one `public` statement.
 #
 # Every name the reading matches comes from a table, so a rung slice edits `call_ladder.rb` and not this file. The
 # examples under "the reading" prove the rule on a rung module and tables of their own.
@@ -44,10 +47,13 @@ RSpec.describe "The call ladder's port" do
     it_behaves_like "the port the tables declare"
 
     it "is frozen with the tables beside it, and read by nothing under lib/" do
-      tables = [ladder::PORT, ladder::REENTRY, ladder::SECOND_ENTRIES, ladder::DISPATCHER_INTERIOR]
+      tables = [ladder::PORT, ladder::PUBLIC_CALLBACKS, ladder::REENTRY, ladder::SECOND_ENTRIES,
+                ladder::DISPATCHER_INTERIOR]
+
+      inside = CallLadderPin.table_reads("PORT.include?(name); SECOND_ENTRIES; PUBLIC_CALLBACKS", inside: true)
 
       expect(tables).to all(satisfy { |table| Ractor.shareable?(table) })
-      expect(CallLadderPin.table_reads("PORT.include?(name); SECOND_ENTRIES", inside: true).size).to eq(2)
+      expect(inside.size).to eq(3)
       expect(CallLadderPin.table_reads("CallLadder::REENTRY + CallLadder::DISPATCHER_INTERIOR").size).to eq(2)
       expect(CallLadderPin.engine_reads).to eq([])
     end
@@ -159,6 +165,15 @@ RSpec.describe "The call ladder's port" do
 
       expect([entry, full].map { |source| breaches(source) }).to eq([[], []])
       expect([gate, other].map { |source| breaches(source).size }).to eq([1, 1])
+    end
+
+    # ADR-116, the #3318 cut-off: a public callback is a fifth callback as a re-entry point would be.
+    it "counts a public callback toward the cut-off as it counts a re-entry point, and the scope read as neither" do
+      typed = edit(rung, "found = lookup(name, typer.scope)", "found = lookup(typer.type_of(name), typer.scope)")
+      reentry = %i[infer_user_method_return degrade_if_overridable]
+
+      expect(CallLadderPort.callbacks(read(rung).typer_calls)).to eq(reentry)
+      expect(CallLadderPort.callbacks(read(typed).typer_calls)).to eq([:type_of, *reentry])
     end
 
     it "fails a scope read off anything but the typer" do

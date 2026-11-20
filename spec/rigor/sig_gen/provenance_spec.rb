@@ -487,14 +487,14 @@ SIG_PROVENANCE_PARAMETER_ONLY_MARKED = [
 ].freeze
 
 # #3335 — method declarations whose parameter list was compared with a recorded `def` on the tree this pin was taken
-# from (1107 on 2026-11-20 after #3345's eleven `try_dispatch` declarations for the tiers moved out of
+# from (1109 on 2026-11-20 after #3345's eleven `try_dispatch` declarations for the tiers moved out of
 # `method_dispatcher.rb` in three batches, its `dispatch_site` and `resolve_site`, the fourteen of slice S6 (the eleven
-# declared functions of `CallLadder::UserMethod` and three typer methods of the call ladder's port) and the nineteen
-# declared functions of `CallLadder::ProjectSingleton` of slice S5, every one fitting). A floor, not an exact pin,
-# because every new declaration of a `def` raises it: raise it when the count grows, and lower it only with the reason
-# in the commit body (a deleted declaration, or a `def` the pairing stopped finding, which is the case this floor exists
-# to catch).
-SIG_PARAMETER_SHAPE_COMPARED_FLOOR = 1107
+# declared functions of `CallLadder::UserMethod` and three typer methods of the call ladder's port), the nineteen
+# declared functions of `CallLadder::ProjectSingleton` of slice S5 and the two of `CallLadder::LiteralSend` of slice S7,
+# every one fitting). A floor, not an exact pin, because every new declaration of a `def` raises it: raise it when the
+# count grows, and lower it only with the reason in the commit body (a deleted declaration, or a `def` the pairing
+# stopped finding, which is the case this floor exists to catch).
+SIG_PARAMETER_SHAPE_COMPARED_FLOOR = 1109
 
 module SigProvenanceSpecHelpers
   # The hard-rule failure for unmarked `tighter_return` rows. A row whose declared return is the bare `untyped` claims

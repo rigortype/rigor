@@ -60,6 +60,7 @@ require_relative "expression_typer/per_element_assemblers"
 require_relative "expression_typer/writes"
 require_relative "call_ladder/user_method"
 require_relative "call_ladder/project_singleton"
+require_relative "call_ladder/literal_send"
 
 module Rigor
   module Inference
@@ -1248,7 +1249,7 @@ module Rigor
       # A splat index (`c[*keys] += v`) leaves the read's arity to the splat's expansion, and the one untyped
       # argument standing in for it would bind positionally to a body written for several: `def [](*keys) =
       # keys.size` folded the read of `r[*[0, 1]] += 1` to `1` and drew an always-falsey `n == 3` on a program
-      # that takes that branch. So the body tiers decline under a splat, as `try_literal_send` does, and only
+      # that takes that branch. So the body tiers decline under a splat, as `CallLadder::LiteralSend` does, and only
       # the signature-driven dispatch answers. An own `def` overriding an inherited declaration still outranks
       # that declaration; with its body unreadable, it answers `Dynamic[top]` ({CallLadder::EXCEPTIONS}).
       def splat_index_read_type(node, receiver, arg_types)
@@ -1767,7 +1768,17 @@ module Rigor
         refined = try_refined_dispatch(node, receiver, arg_types, block_type)
         return refined if refined
 
-        literal_send = try_literal_send(node, receiver)
+        # ADR-116 WD12 — the call's site, built once and asked of every rung from here on that takes one.
+        site = MethodDispatcher::CallContext.build(
+          receiver: receiver,
+          method_name: node.name,
+          args: arg_types,
+          block_type: block_type,
+          environment: scope.environment,
+          call_node: node,
+          scope: scope
+        )
+        literal_send = CallLadder::LiteralSend.try_call(site, self)
         return literal_send if literal_send
 
         local_def_result = try_local_def_dispatch(node, receiver, arg_types, block_type)
@@ -1784,15 +1795,6 @@ module Rigor
         overriding_def = try_overriding_def_dispatch(node, receiver, arg_types)
         return overriding_def if overriding_def
 
-        site = MethodDispatcher::CallContext.build(
-          receiver: receiver,
-          method_name: node.name,
-          args: arg_types,
-          block_type: block_type,
-          environment: scope.environment,
-          call_node: node,
-          scope: scope
-        )
         result = MethodDispatcher.dispatch_site(site)
         return result if result
 
@@ -2397,64 +2399,6 @@ module Rigor
         return nil if rebound.equal?(scope)
 
         ExpressionTyper.new(scope: rebound, tracer: tracer, operand_types: @operand_types, typing_node: @typing_node)
-      end
-
-      # Issue #533 — `x.send(:selector, args)` with a LITERAL symbol is statically `x.selector(args)`:
-      # the private-boundary idiom (protobuf's `send(:get_file_descriptor)` at 84 sites) resolves through
-      # the same dispatch + project-inference tiers as the direct call would. `send` legitimately crosses
-      # visibility, so no public-only gate applies (`public_send` is treated identically — typing the
-      # success path of a call that would raise on a private method is ADR-5 optimism). Declines: a
-      # non-literal selector, a splat / forwarded tail (positional correspondence unknown), or a block at
-      # the call site (block forwarding is out of this slice). The sequence is `send_target` in {CallLadder::RUNGS}.
-      #
-      # Issue #3080 — `send` reads as its target only where the receiver's `send` is `Kernel#send`
-      # ({GenuineSend.type?}). A class with its own `send` (`def send(message, flags)`, `UDPSocket#send`, a project
-      # RBS `def send:`) is called like any other method. `__send__` and `public_send` are other methods and keep
-      # the reading.
-      LITERAL_SEND_SELECTORS = %i[send __send__ public_send].freeze
-      private_constant :LITERAL_SEND_SELECTORS
-
-      def try_literal_send(node, receiver)
-        args = literal_send_arguments(node)
-        return nil if args.nil?
-        return own_send_type(node, receiver, args) if node.name == :send && !GenuineSend.type?(receiver, scope)
-
-        rest = args[1..]
-        inner_name = args.first.unescaped.to_sym
-        inner_args = rest.map { |a| type_of(a) }
-        target = MethodDispatcher::CallContext.build(
-          receiver: receiver, method_name: inner_name, args: inner_args,
-          block_type: nil, environment: scope.environment, call_node: node, scope: scope
-        )
-        MethodDispatcher.dispatch_site(target) || CallLadder::UserMethod.try_call(target, self) ||
-          CallLadder::ProjectSingleton.try_call(target, self)
-      end
-
-      # The arguments of a literal-selector `send` / `__send__` / `public_send` call with no block and no splat or
-      # forwarded tail, or nil.
-      def literal_send_arguments(node)
-        return nil unless LITERAL_SEND_SELECTORS.include?(node.name)
-        return nil unless node.block.nil?
-
-        args = node.arguments&.arguments
-        return nil unless args && args.first.is_a?(Prism::SymbolNode)
-        return nil if args.any? { |a| a.is_a?(Prism::SplatNode) || a.is_a?(Prism::ForwardingArgumentsNode) }
-
-        args
-      end
-
-      # Issue #3080 — the receiver's own `send`. A project `def send` comes before `Kernel#send` in every chain that
-      # reaches it, so where the only declaration Ruby reaches is `Kernel#send` (or there is none) the body answers
-      # the call, ahead of the `Kernel#send` declaration the ordinary dispatch would read off `Object`. Where an RBS
-      # `def send:` reaches the receiver from the class itself or from an ancestor (an overload included), that
-      # declaration is the contract (its `void`, its return type), so nil hands the call to the ordinary dispatch,
-      # as for any other declared method. Nil too
-      # where no body can be read: a union or class-object receiver.
-      def own_send_type(node, receiver, args)
-        return nil unless CallLadder::UserMethod.user_inference_receiver?(receiver)
-        return nil unless GenuineSend.rbs_genuine?(receiver.class_name, :instance, scope)
-
-        CallLadder::UserMethod.infer(receiver, node, args.map { |a| type_of(a) }, node.name, nil, self)
       end
 
       CLASS_GRAPH_CACHE = TypingState.memo(

@@ -104,6 +104,11 @@ module Rigor
         def self?.entry_defines_without_def?: (untyped entry, Symbol name, Scope scope) -> untyped
         def self?.try_singleton_object_constant_inference: (Type::t? receiver, untyped call_node, Array[Type::t] arg_types, Symbol method_name, Type::t? block_type, ExpressionTyper typer) -> Type::t?
       end
+
+      module LiteralSend
+        def self?.try_call: (MethodDispatcher::CallContext site, ExpressionTyper typer) -> Type::t?
+        def self?.own_send_type: (untyped node, Type::t? receiver, Array[untyped] args, ExpressionTyper typer) -> Type::t?
+      end
     end
 
     class StatementEvaluator

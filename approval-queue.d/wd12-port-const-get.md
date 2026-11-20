@@ -13,7 +13,7 @@ The call ladder's port spec (`spec/rigor/inference/call_ladder/port_spec.rb`) ho
 ## Options and trade-offs
 
 - **Count a `const_get` whose literal argument names a typing class.** It keeps a rung free to use `const_get` for anything else. It misses a name the module builds (`const_get(name)`, `const_get("Expression#{x}")`), a qualified string unless the reader splits its path, and a walk in two steps (`Inference.const_get(:Expression…)`), so it closes the two probes and not the hole.
-- **Ban `const_get` in a rung module, whatever its argument.** It closes every spelling the reading can see: by name, through `send`, `method(:const_get)` or a `&:const_get` block, as the typing entries are already read. It costs a rung the call, which none of the four modules makes: a rung names the constants it uses, and a computed constant lookup has no place in typing a call.
+- **Ban `const_get` in a rung module, whatever its argument.** It closes every spelling the reading can see: by name, through `send`, `method(:const_get)` or a `&:const_get` block, as the typing entries are already read. A selector built at run time (`send(:"const_#{x}", n)`) is not seen, as for the typing entries. It costs a rung the call, which none of the four modules makes: a rung names the constants it uses, and a computed constant lookup has no place in typing a call.
 
 ## Decision
 

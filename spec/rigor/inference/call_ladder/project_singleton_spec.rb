@@ -31,6 +31,7 @@ RSpec.describe Rigor::Inference::CallLadder::ProjectSingleton do
       OBJ = Object.new
       class << OBJ
         def greet = "hi"
+        def yi = yield
       end
       Reg[:a] += 1
       Reg.label
@@ -39,6 +40,7 @@ RSpec.describe Rigor::Inference::CallLadder::ProjectSingleton do
       OBJ.greet
       Base.kind
       Reg.new.label
+      OBJ.yi { :b }
     RUBY
   end
   let(:statements) { program.statements.body }
@@ -74,6 +76,15 @@ RSpec.describe Rigor::Inference::CallLadder::ProjectSingleton do
 
       expect(answer(:each, statements[9], block_type: seen)).to eq(seen)
       expect(answer(:each, statements[9]).describe).not_to eq(":seen")
+    end
+
+    # The object-constant tier is handed the block type as the class-side tier is: `CONST.yi { :b }` is `:b`.
+    it "takes the block type from the site for a `class << CONST` body too" do
+      object = scope.type_of(statements[13].receiver)
+      b = combinator.constant_of(:b)
+
+      expect(answer(:yi, statements[13], receiver: object, block_type: b)).to eq(b)
+      expect(answer(:yi, statements[13], receiver: object).describe).not_to eq(":b")
     end
 
     it "types a call on a constant that holds an ordinary object from its `class << CONST` body" do

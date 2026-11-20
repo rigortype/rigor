@@ -44,7 +44,9 @@ require "spec_helper"
 # module it calls (`OperandWalk` builds one) is not seen either. It reads the files under `call_ladder/`
 # only. A call spelled through `send` on something that is not the local `typer` is a call on that other thing. A
 # typing class reached by a way that is neither a constant nor `const_get` (`eval`, `ObjectSpace`, a constant another
-# module hands over) is not seen.
+# module hands over) is not seen, and neither is a call whose selector is built at run time
+# (`Object.send(:"const_#{x}", n)`, `public_send(selector, n)`): a reflective call is read by its first argument only
+# where that is a literal symbol or string.
 RSpec.describe "The call ladder's port" do
   def ladder = Rigor::Inference::CallLadder
 
@@ -217,7 +219,7 @@ RSpec.describe "The call ladder's port" do
     end
 
     # The two probes #3371's second review round wrote: each names `ExpressionTyper` with no constant node for it.
-    it "fails `const_get` on anything, whatever it names and however it is spelled" do
+    it "fails `const_get` on anything, whatever it names: by name, through a literal reflective call, or as a block" do
       lookup = "scope.user_def_for(\"C\", name)"
       probes = [
         "Rigor::Inference.const_get(:ExpressionTyper).new(scope: scope)",

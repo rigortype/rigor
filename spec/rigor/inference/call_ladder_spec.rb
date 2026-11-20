@@ -20,9 +20,9 @@ require "tmpdir"
 # the files read to the tables: a place's method asks a rung only where it answers with it, and no other method
 # asks the ladder for two or more different things, a rung or a method a place is written in. There a rung is
 # asked by its own entry or by a second entry of its module (`CallLadder::SECOND_ENTRIES`: its gate, its
-# positional entry), except in that module's own file, which is the rung's body: the own-`def` rung tests its own
-# gate and asks user-method inference once. A method that asks for one is not an order and is not held. A failure
-# says which edit settles it ({CallLadderPin::Advice}).
+# positional entry), except a second entry called in that module's own file, which is the rung's body: the own-`def`
+# rung tests its own gate and asks user-method inference once. The rung's own entry is an ask everywhere. A method
+# that asks for one is not an order and is not held. A failure says which edit settles it ({CallLadderPin::Advice}).
 #
 # Every spelling the reading matches comes from a row. The examples under "the reading" prove that on a small
 # typer and tables of their own, so that a rung whose body moves edits its row in `call_ladder.rb` and nothing
@@ -449,9 +449,10 @@ RSpec.describe Rigor::Inference::CallLadder do
         expect(written(read(untested))[:splat_index_read].first).to eq([:undeclared, "dynamic_top"])
       end
 
-      # A rung module's file is its rung's body: there a call of the rung's own entry or second entry is the rung at
-      # work, and only what it asks of another rung is an ask. The typer holds several rungs, and every one counts.
-      it "reads a rung module's own entries in its file as its body, and what it asks of another rung as an ask" do
+      # A rung module's file is its rung's body: there a call of one of the rung's own second entries is the rung at
+      # work. Its own entry is still an ask, so chaining it into other rungs is a sequence. The typer holds several
+      # rungs, and every one counts.
+      it "reads a rung module's own second entries in its file as its body, and every other ask as an ask" do
         moved = rows(moved_rungs, :overriding_def, home: "CallLadder::OverridingDef", asked_as: %i[try_call])
         second = [ladder::SecondEntry.new(home: "CallLadder::OverridingDef", name: :overriding_own_def?,
                                           given_typer: true, because: "the gate"),
@@ -479,7 +480,7 @@ RSpec.describe Rigor::Inference::CallLadder do
 
         expect(reading.stray_sequences).to eq(
           [["ExpressionTyper", :elsewhere, %i[overriding_def user_method]],
-           ["CallLadder::OverridingDef", :astray, %i[user_method dispatcher]]]
+           ["CallLadder::OverridingDef", :astray, %i[overriding_def user_method dispatcher]]]
         )
       end
 

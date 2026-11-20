@@ -254,7 +254,7 @@ module CallLadderPin
     # `[home, method, asks]` for each method outside the places that asks the ladder for two or more different
     # things: a sequence the tables do not hold. A rung counts by its name, asked by its own entry or by a second
     # entry of its module, and so does a method a place is written in, since a continuation is the rungs it holds.
-    # In a rung module's own file its own rung is not asked but at work ({#ladder_asks}).
+    # In a rung module's own file a call of its own second entries is the rung at work, not an ask ({#ladder_asks}).
     def stray_sequences
       methods = @defs.flat_map { |home, by_name| by_name.flat_map { |name, found| found.map { [home, name, it] } } }
       methods.filter_map do |home, name, definition|
@@ -394,17 +394,19 @@ module CallLadderPin
     end
 
     # What `definition` asks of the ladder, call by call: a rung, by its name, or a method a place of this file is
-    # written in, by the method's. A rung module's file is its rung's body, so a call there of that rung's own entry
-    # or of one of its second entries is the rung at work, not an ask: the own-`def` rung tests its own gate and then
-    # asks user-method inference once. What the module asks of any other rung counts, and in the typer, which holds
-    # several rungs, every rung counts.
+    # written in, by the method's. A rung module's file is its rung's body, so a call there of one of that rung's own
+    # second entries is the rung at work, not an ask: the own-`def` rung tests its own gate and then asks user-method
+    # inference once. The rung's own entry is still an ask there, so a function that chains it into another rung is a
+    # sequence. What the module asks of any other rung counts, and in the typer, which holds several rungs, every rung
+    # counts.
     def ladder_asks(definition, home)
       found = []
       CallLadderPin.each_node(definition.body) do |node|
         next unless call?(node)
 
-        rung = rung_of(node, home) || second_entry_rung(node, home)
-        next if rung && own_rung?(rung, home)
+        direct = rung_of(node, home)
+        rung = direct || second_entry_rung(node, home)
+        next if !direct && rung && own_rung?(rung, home)
 
         place = node.receiver.nil? && place_methods.include?([home, node.name])
         found << (rung ? rung.name : node.name) if rung || place

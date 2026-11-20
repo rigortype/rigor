@@ -1,4 +1,4 @@
-# The order pin's stray check reads a rung module's own entries, in its own file, as the rung's body
+# The order pin's stray check reads a rung module's own second entries, in its own file, as the rung's body
 
 - **PR:** [#3374](https://github.com/rigortype/rigor/pull/3374)
 - **Issue:** [#3345](https://github.com/rigortype/rigor/issues/3345)
@@ -24,19 +24,25 @@ sequence of two rungs.
 - **List the module's `try_call` as a place**, an entry or an exception row with `written_in`. It is no sequence the
   tables could declare: the rung asks one other rung, and an exception row is for a sequence that departs from an
   entry's rows.
-- **Read a rung module's own entries in its own file as its body.** A rung module holds one rung, so a call there of
-  that rung's entry or of one of its second entries is the rung at work, not an ask of the ladder. What the module
-  asks of any other rung still counts, and a method there that asks two other rungs still fails. The typer holds
-  several rungs, so there every rung's call still counts, as before.
+- **Read a rung module's own second entries in its own file as its body.** A rung module holds one rung, so a call
+  there of one of that rung's second entries (its gate, its positional entry) is the rung at work, not an ask of the
+  ladder. The rung's own entry (`try_call`) is still an ask, so a helper that chains it into another rung still
+  fails, and so does a method that asks two other rungs. The typer holds several rungs, so there every rung's call
+  still counts, as before. Skipping the rung's own entry too would be wider than the case needs: a helper of any
+  rung module could then chain `try_call` into another rung unseen.
 
 ## Decision
 
-The third. `CallLadderPin::Reading#ladder_asks` skips a call of the rung whose home is the file's, where that home is a
-rung module (`CallLadderPin::RUNG_HOME`, `CallLadder::`). A reading example builds a module that tests its own gate
-and asks one other rung (no stray), a function of it that asks two other rungs (a stray), and a typer method that
-tests the module's gate and asks another rung (a stray). The mutation table in the PR removes the skip and the
-`CallLadder::` condition, and each fails an example. On this checkout no module but `CallLadder::OverridingDef` calls
-its own entry beside another rung, and no result of the check changes for the rung modules that existed before.
+The third, for second entries only. `CallLadderPin::Reading#ladder_asks` skips a call that only `second_entry_rung`
+resolves (not one `rung_of` resolves as the rung's own `asked_as`), when it names the rung whose home is the file's
+and that home is a rung module (`CallLadderPin::RUNG_HOME`, `CallLadder::`). A reading example builds a module that
+tests its own gate and asks one other rung (no stray), a function of it that chains its own `try_call` into two other
+rungs (a stray, the own entry counted), and a typer method that tests the module's gate and asks another rung (a
+stray). The mutation table in the PR removes the skip, the `CallLadder::` condition and the second-entries-only
+condition, and each fails an example; so does a helper chaining `TopLevelDef.try_call` into `OverridingDef.try_call`
+in `top_level_def.rb`. On this checkout no module but `CallLadder::OverridingDef` calls its own second entry beside
+another rung, and no result of the check changes for the rung modules that existed before. The review of #3374
+narrowed a first draft that skipped the rung's own entry too.
 
 The precedent is the amendment's second entries: "a rung module may expose a second named entry when a caller
 outside the rung asks part of it", so inside the rung the same function is the rung's own code. S6's change to the
@@ -44,5 +50,6 @@ check (`wd12-s6-user-method-gate.md`, condition 4) is still in this queue, so it
 
 ## To undo
 
-Delete the `next if rung && own_rung?(rung, home)` line, `own_rung?` and the reading example. The overriding-def
-rung's `try_call` then fails the check, and the rung would have to be split as in the first option.
+Delete the `next if !direct && rung && own_rung?(rung, home)` line, `own_rung?` and the reading example, and read
+`rung = rung_of(node, home) || second_entry_rung(node, home)` again. The overriding-def rung's `try_call` then fails
+the check, and the rung would have to be split as in the first option.

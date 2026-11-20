@@ -1,5 +1,7 @@
 # Feedback for the ZARD first draft from the `@extrbs` ruling
 
+> **Historical** (marked 2026-11-20): a one-off memo on the ZARD draft; its rulings now bind in ADR-112, ADR-113 and the lens spec. Superseded by [ADR-112](../adr/112-extrbs-comment-channel.md), [ADR-113](../adr/113-rigor-lens.md), [`internal-spec/lens.md`](../internal-spec/lens.md). Kept for the record; default `rg` skips it (see [the notes README](README.md#historical-notes)).
+
 Status: review memo, 2026-09-19. Written for the ZARD first draft. The binding decisions are
 [ADR-112](../adr/112-extrbs-comment-channel.md) and, once each lands,
 [`docs/type-specification/rbs-extended.md`](../type-specification/rbs-extended.md). Reviewed against

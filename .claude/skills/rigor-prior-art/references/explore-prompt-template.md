@@ -10,7 +10,9 @@ comparison, measurement, or decision concerning {TOPIC}, so the findings can
 be cited with file:line accuracy.
 
 Search these locations thoroughly:
-- docs/notes/ (survey/research notes; docs/notes/README.md is the index)
+- docs/notes/ (survey/research notes; docs/notes/README.md is the index). The root
+  `.ignore` hides notes under a `> **Historical**` banner from a plain `rg` or Grep:
+  search with `rg --no-ignore-dot <term> docs/` and treat those hits as superseded.
 - docs/adr/ (architecture decision records; docs/adr/README.md is the index)
 - docs/design/
 - docs/CHANGELOG-*.md and CHANGELOG.md  ← do not skip; per-feature

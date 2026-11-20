@@ -1,5 +1,7 @@
 # Upstream `ruby/rbs` PR — `Resolv::DNS` typeclass-narrowed return
 
+> **Historical** (marked 2026-11-20): a one-off handoff for an upstream PR; Rigor shipped its own `Resolv` overlay instead. Superseded by [`data/core_overlay/resolv.rbs`](../../data/core_overlay/resolv.rbs). Kept for the record; default `rg` skips it (see [the notes README](README.md#historical-notes)).
+
 Coordination handoff for the parallel `/Users/megurine/repo/ruby/rbs`
 session preparing the upstream PR. Mastodon analysis cycle (2026-05-28,
 789 → 2 errors) leaves one user-facing stdlib RBS gap that the upstream

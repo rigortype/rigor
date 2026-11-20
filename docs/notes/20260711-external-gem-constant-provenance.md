@@ -1,5 +1,7 @@
 # External-gem provenance: label the constant miss, not the dispatch
 
+> **Historical** (marked 2026-11-20): a WD9 design draft; ADR-82 WD9 now records the same decision in full. Superseded by [ADR-82](../adr/82-dynamic-provenance-wiring.md). Kept for the record; default `rg` skips it (see [the notes README](README.md#historical-notes)).
+
 Design note, 2026-07-11. The GitLab plan's **P2 item 7**
 ([`20260708-gitlab-type-coverage-improvement-plan.md`](20260708-gitlab-type-coverage-improvement-plan.md)),
 recorded as [ADR-82](../adr/82-dynamic-provenance-wiring.md) **WD9**.

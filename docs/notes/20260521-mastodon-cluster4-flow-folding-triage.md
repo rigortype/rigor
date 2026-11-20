@@ -1,5 +1,7 @@
 # Mastodon survey — Cluster 4 (flow-folding warnings) triage
 
+> **Historical** (marked 2026-11-20): its G1/G2 gaps were closed by `MutationWidening`, so the "stay queued" verdict is outdated; the 2026-08-31 audit picks up what remains. Superseded by [`lib/rigor/inference/mutation_widening.rb`](../../lib/rigor/inference/mutation_widening.rb), [the self-check audit](20260831-self-check-type-coverage-audit.md). Kept for the record; default `rg` skips it (see [the notes README](README.md#historical-notes)).
+
 **Date:** 2026-05-21. Closes the last untriaged cluster of the
 [`20260519-oss-library-survey.md`](20260519-oss-library-survey.md)
 Mastodon false-positive pass.

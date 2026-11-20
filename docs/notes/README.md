@@ -63,7 +63,7 @@ comparison) appears nowhere else in this index.
 | Date | Note |
 | --- | --- |
 | 2026-05-03 | [Steep 2.0 cross-check triage](20260503-steep-cross-check-triage.md) |
-| 2026-05-21 | [Mastodon survey — Cluster 4 (flow-folding warnings) triage](20260521-mastodon-cluster4-flow-folding-triage.md) |
+| 2026-05-21 | [Mastodon survey — Cluster 4 (flow-folding warnings) triage](20260521-mastodon-cluster4-flow-folding-triage.md) *(historical)* |
 | 2026-05-21 | [Mastodon v4.5.x regression sweep — baseline-drift over a release line](20260521-mastodon-v4.5-regression-sweep.md) |
 | 2026-05-21 | [Redmine 6.x regression sweep — baseline-drift over a release line](20260521-redmine-6.x-regression-sweep.md) |
 | 2026-05-21 | [Redmine per-commit detection probe — does Rigor catch real bugs?](20260521-redmine-per-commit-detection-probe.md) |
@@ -123,7 +123,7 @@ comparison) appears nowhere else in this index.
 | Date | Note |
 | --- | --- |
 | 2026-05-20 | [Ractor worker pool crash — CRuby concurrent-Ractor use-after-free](20260520-ractor-pool-cruby-uaf.md) |
-| 2026-05-28 | [Upstream `ruby/rbs` PR — `Resolv::DNS` typeclass-narrowed return](20260528-rbs-upstream-pr-resolv-typeclass.md) |
+| 2026-05-28 | [Upstream `ruby/rbs` PR — `Resolv::DNS` typeclass-narrowed return](20260528-rbs-upstream-pr-resolv-typeclass.md) *(historical)* |
 | 2026-06-03 | [Typing plugin files against the `Plugin::Base` contract — spike findings](20260603-plugin-contract-self-typing-spike.md) |
 | 2026-06-03 | [Session report — typing the plugin contract (the 6-commit landing)](20260603-plugin-contract-typing-session-report.md) |
 | 2026-07-30 | [`RBS::Rewriter` for the sig-gen writer's update path — evaluation](20260730-rbs-rewriter-sig-gen-writer-evaluation.md) |
@@ -142,7 +142,7 @@ comparison) appears nowhere else in this index.
 | 2026-06-13 | [プラグインインターフェイス最終レビュー — v1.0 凍結前の BC-break 機会監査](20260613-plugin-interface-bc-review.md) |
 | 2026-06-27 | [Corpus cold/warm re-profile — v0.2.6 new-bottleneck check](20260627-corpus-cold-warm-reprofile.md) |
 | 2026-07-18 | [CI テスト時間の伸び — 要因分解（instance gacha vs テスト増加 vs binpacker）、カテゴリ分割・有料runner の否定、md-only PR スキップの落としどころ](20260718-ci-test-time-growth-attribution.md) |
-| 2026-07-25 | [`rigor check lib` allocation attribution — 55% is a one-time RBS env build, the #101 rules are 0.24%](20260725-check-allocation-attribution.md) |
+| 2026-07-25 | [`rigor check lib` allocation attribution — 55% is a one-time RBS env build, the #101 rules are 0.24%](20260725-check-allocation-attribution.md) *(historical)* |
 | 2026-07-30 | [Referenced-type stub pass 1 — static detection agrees with the builder (−32.8% of a cold run), and two live stub-synthesis defects](20260730-stub-pass1-static-detection-evaluation.md) |
 | 2026-09-09 | [CI wall time 371s → 220s — the shard spread was never the partition; work pinned to one matrix arm, one file over the per-worker budget, and three traps a spec split springs](20260909-ci-wall-time-shard-rebalance.md) |
 | 2026-09-12 | [v0.3.9 release-gate `lib peak_rss_kb` attribution — +10.5% is transient peak, not retention, and diffuse across ~95 merges](20260912-v039-rss-attribution.md) |
@@ -179,3 +179,13 @@ comparison) appears nowhere else in this index.
 2. Open with a `Status:` line (e.g. *"research note, no design commitments."*) and
    name the Rigor version the observations were taken against.
 3. Add a row to the matching section above (or start a new section).
+
+## Historical notes
+
+A note whose content is spent — a plan that was executed or dropped, an audit whose fixes landed, a draft an ADR or spec now records, a measurement a later one replaced — is marked historical instead of moved, so every link to it keeps resolving. The same rule covers [`docs/design/`](../design/README.md).
+
+1. Put a banner on the line after the title: `> **Historical** (marked YYYY-MM-DD): <why it is spent>. Superseded by <link>.` Leave the original `Status:` line and the body as they were; it still says what kind of note this was. The banner is dated metadata added on top, so the note stays the frozen record [ADR-98](../adr/98-development-flow-document-roles.md) calls it.
+2. Add the path to the `# BEGIN historical` block of the root [`.ignore`](../../.ignore), sorted. A default `rg` then skips the file, as do the tools that read `.ignore` too (`ag`, VS Code search). git, links and `spec/docs/` are unaffected. Keep every such path inside that block: the spec below checks nothing else in `.ignore`, and refuses any other line naming `docs/notes/` or `docs/design/`.
+3. Append *(historical)* to its row in the index above, if it has one.
+
+[`spec/docs/historical_notes_spec.rb`](../../spec/docs/historical_notes_spec.rb) fails when a banner and the `.ignore` block disagree. To search the historical notes too, skip the `.ignore` rules and scope the path: `rg --no-ignore-dot <term> docs/` (`.gitignore` still applies). Mark a note historical only when an agent searching its topic today would be misled or would waste time on it; a decline whose rationale is still the latest word, the most recent measurement of something, or an open follow-up recorded nowhere else, stays. A later note that re-measures part of a note supersedes only that part.

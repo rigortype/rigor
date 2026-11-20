@@ -1,5 +1,7 @@
 # Template-engine / parser corpora survey (general-code Dynamic-fall + FP hunt)
 
+> **Historical** (marked 2026-11-20): its ranked T1/T2/T3 work all landed (`09ee108ab`, `e1b9a9f65`, `26fcb29a2`), and the same corpora were re-measured on 2026-09-01. Superseded by [corpus opacity attribution](20260901-corpus-opacity-attribution.md). Kept for the record; default `rg` skips it (see [the notes README](README.md#historical-notes)).
+
 2026-06-13. Read-only engine-behaviour survey across eight real-world
 template-engine and parser gems under
 `/Users/megurine/repo/ruby/rigor-survey/`. **No `lib/` (rigor) changes.**

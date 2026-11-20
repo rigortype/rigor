@@ -1,5 +1,7 @@
 # `rigor-tapioca`? — Tapioca DSL-RBI Coverage Investigation
 
+> **Historical** (marked 2026-11-20): its recommendation (no `rigor-tapioca`; close the gap in `rigor-sorbet`) landed as ADR-11 slice 8, which records the reasoning. Superseded by [ADR-11](../adr/11-sorbet-input-adapter.md). Kept for the record; default `rg` skips it (see [the notes README](../notes/README.md#historical-notes)).
+
 Status: **investigation, 2026-05-09.** Companion to
 [`20260509-rigor-tapioca-comparison.md`](20260509-rigor-tapioca-comparison.md).
 Asks whether a dedicated `rigor-tapioca` plugin is justified

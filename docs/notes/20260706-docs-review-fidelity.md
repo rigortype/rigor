@@ -1,5 +1,7 @@
 # Docs review — L1 fidelity cycle (manual operational chapters)
 
+> **Historical** (marked 2026-11-20): a docs-review ledger whose fixes landed in `0d87b52bc`. Kept for the record; default `rg` skips it (see [the notes README](README.md#historical-notes)).
+
 Status: review findings ledger (the [`rigor-docs-review`](../../.claude/skills/rigor-docs-review/SKILL.md)
 battery, L1 真 layer). 2026-07-06, Rigor v0.2.7 (`[Unreleased]`). This is the **first cycle** of the
 docs review battery — the L0 mechanical gate (`make docs-check`) was green going in.

@@ -1,5 +1,7 @@
 # L2 伝(a) — Ruby-only reader lens review (2026-07-11)
 
+> **Historical** (marked 2026-11-20): a Ruby-reader docs review whose fixes landed the same day in `2c8950650`. Kept for the record; default `rg` skips it (see [the notes README](README.md#historical-notes)).
+
 **Lens:** a working Ruby programmer who knows `String` / `Array` /
 `Hash` / `Data` as real classes, has hit `NoMethodError` on `nil`,
 but has **no type-declaration mental model** and conflates "type"

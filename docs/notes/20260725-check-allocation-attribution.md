@@ -1,5 +1,7 @@
 # `rigor check lib` allocation attribution — where the 32.4M actually live
 
+> **Historical** (marked 2026-11-20): v0.3.0 allocation numbers; the successor notes say its headline (54% in RBS environment build) no longer holds. Superseded by [v0.3.7 attribution](20260908-v037-allocation-regression-attribution.md), [v0.4.0 attribution](20260927-v040-engine-allocation-attribution.md). Kept for the record; default `rg` skips it (see [the notes README](README.md#historical-notes)).
+
 Status: measurement note, no design commitments. Observations taken against
 `master` @ `4c6b5912` (post-v0.3.0), macOS arm64, Ruby 4.0.5, `RIGOR_DISABLE_YJIT=1`,
 2026-07-25. Follow-up to [#207](https://github.com/rigortype/rigor/issues/207).

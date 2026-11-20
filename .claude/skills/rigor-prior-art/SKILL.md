@@ -34,7 +34,7 @@ repo (talks, comparisons, READMEs).
 | `AGENTS.md` ADR premises | A capped premise set (≤12) — topic and link, no status ([ADR-97](../../../docs/adr/97-adr-index-budgets.md)). | Which few ADRs bind every task. Never a source. |
 | `docs/notes/README.md` | Categorized note index: library surveys / coverage audits / regression sweeps / teeth / outside-research reviews / perf / meta. | Shortlisting notes by category. |
 | `docs/adr/*.md` | Full decisions: criteria, rejected alternatives, gate results. | The "why" behind a behaviour; what was *rejected* and why. |
-| `docs/notes/*.md` | What was observed, when, against which Rigor version. | Measurements, sweeps, adjudications. |
+| `docs/notes/*.md` | What was observed, when, against which Rigor version. | Measurements, sweeps, adjudications. A note under a `> **Historical**` banner is spent and listed in the root `.ignore`, so a default `rg` skips it; sweep with `rg --no-ignore-dot <term> docs/` to include it, and weigh it as superseded. |
 | `docs/CHANGELOG-*.md` + `CHANGELOG.md` | Per-feature landing narratives with spec/corpus evidence. | **Comparative evidence often lives ONLY here** — e.g. the `rbs_rails` coverage comparison and the ~20-methods-per-column contrast are in the 0.1.x archive, indexed nowhere else. Always include every archive. |
 | `docs/design/*.md` | Design plans that preceded ADRs. | Pre-decision context, roadmaps. |
 | `docs/handbook/`, `docs/manual/` | User-facing claims. | What Rigor *promises publicly* — the bar a new claim must clear. |
@@ -75,7 +75,7 @@ carry downstream — do not collapse the three into one list.
    メンテナンス / 陳腐化 …), tool aliases, and the *adjacent* tools a
    comparison would name (searching for `rbs_rails` should also sweep
    `Tapioca`, `gem_rbs_collection`, `orthoses`).
-3. **Sweep.** For a broad multi-tool/multi-theme sweep, or when the main
+3. **Sweep.** Search with `rg --no-ignore-dot`, scoped to the locations above: the root `.ignore` hides historical notes from a plain `rg` ([`docs/notes/README.md` § "Historical notes"](../../../docs/notes/README.md#historical-notes)), and a historical sweep needs them. For a broad multi-tool/multi-theme sweep, or when the main
    conversation's context is worth protecting, fill in
    [references/explore-prompt-template.md](references/explore-prompt-template.md)
    and hand it to one Explore subagent — the template encodes the location

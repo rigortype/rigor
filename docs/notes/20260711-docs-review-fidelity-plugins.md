@@ -1,5 +1,7 @@
 # L1 fidelity review — area C (plugins), 2026-07-11
 
+> **Historical** (marked 2026-11-20): its fidelity fixes were applied in PR #69 (`6ac28341d`). Kept for the record; default `rg` skips it (see [the notes README](README.md#historical-notes)).
+
 Reviewer: L1 fidelity lens (plugins). Scope: `docs/manual/07-plugins.md`,
 `docs/manual/plugins/*.md`, `docs/handbook/09-plugins.md`. Method: verify each
 user-facing plugin claim against the plugin **source** (not just CHANGELOG).

@@ -1,5 +1,7 @@
 # Docs audit — whole-tree link integrity (2026-07-11)
 
+> **Historical** (marked 2026-11-20): the gate extension landed in `322bd7ab6`, and the keep-archives-broken decision lives in the link-integrity spec. Superseded by [`spec/docs/link_integrity_spec.rb`](../../spec/docs/link_integrity_spec.rb). Kept for the record; default `rg` skips it (see [the notes README](README.md#historical-notes)).
+
 Part of the comprehensive "other docs" consistency audit (step 2 follow-up). The L0 `link_integrity_spec`
 previously covered only `docs/handbook/` + `docs/manual/`. Swept every relative markdown link across the
 whole `docs/` tree + top-level READMEs.

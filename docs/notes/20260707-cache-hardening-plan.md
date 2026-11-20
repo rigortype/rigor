@@ -1,5 +1,7 @@
 # Cache hardening / compaction — actionable plan
 
+> **Historical** (marked 2026-11-20): executed in PR #57; the mechanics now live in the cache internal spec and ADR-54. Superseded by [`internal-spec/cache.md`](../internal-spec/cache.md), [ADR-54](../adr/54-cache-slimming.md). Kept for the record; default `rg` skips it (see [the notes README](README.md#historical-notes)).
+
 **Status (2026-07-08): executed and landed via [PR #57](https://github.com/rigortype/rigor/pull/57)**
 (three commits) — phases 1–6 below are all complete (implementation, specs, docs,
 CHANGELOG, verification green). Only the "Deferred" section remains open, now

@@ -1,5 +1,7 @@
 # Docs review — L4 copyedit + convention-compliance lens (2026-07-11)
 
+> **Historical** (marked 2026-11-20): its copyedit fixes were applied in PR #69 (`127be6f1b`). Kept for the record; default `rg` skips it (see [the notes README](README.md#historical-notes)).
+
 Final layer of the `rigor-docs-review` battery. Surface-level only:
 English quality, the `interface` naming rule, cross-reference /
 terminology hygiene, link-text quality. Content decisions (fidelity,

@@ -1,5 +1,7 @@
 # `rigor-dry-validation` — slicing decision
 
+> **Historical** (marked 2026-11-20): the slice queue is done: dry-schema and dry-validation shipped, and ADR-12 records all five dry-rb plugins as shipped. Superseded by [ADR-12](../adr/12-dry-rb-packaging.md), [`plugins/rigor-dry-validation/README.md`](../../plugins/rigor-dry-validation/README.md). Kept for the record; default `rg` skips it (see [the notes README](../notes/README.md#historical-notes)).
+
 **Status:** Design note. Authored 2026-05-17 in the
 `rigor-dry-types` slice-4 commit. Decides the slice ordering for the
 next dry-rb adapter beyond `rigor-dry-types` and `rigor-dry-struct`

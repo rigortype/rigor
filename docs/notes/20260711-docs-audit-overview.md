@@ -1,5 +1,7 @@
 # Overview-docs fidelity audit — 2026-07-11
 
+> **Historical** (marked 2026-11-20): all three inaccuracies were fixed in `e6ea82018`. Kept for the record; default `rg` skips it (see [the notes README](README.md#historical-notes)).
+
 Fidelity lens over Rigor's user-facing **overview** docs (front door +
 one-pagers + catalogues), checked against the current tree on branch
 `docs/consistency-audit-0.2.9` (`Rigor::VERSION = 0.2.8`, `[Unreleased]`

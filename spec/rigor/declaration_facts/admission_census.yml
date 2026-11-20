@@ -314,7 +314,7 @@ members:
     reads:
     - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
-    - lib/rigor/inference/expression_typer.rb
+    - lib/rigor/inference/call_ladder/refined.rb
     - lib/rigor/inference/in_effect_refinements/scope_reads.rb
     - lib/rigor/inference/refined_dispatch.rb
     - lib/rigor/inference/refined_dispatch/constructed_class.rb
@@ -501,6 +501,7 @@ members:
   in_effect_refinements:
     reads:
     - lib/rigor/analysis/check_rules.rb
+    - lib/rigor/inference/call_ladder/refined.rb
     - lib/rigor/inference/expression_typer.rb
     - lib/rigor/inference/in_effect_refinements/scope_reads.rb
     - lib/rigor/inference/self_preserving_block.rb

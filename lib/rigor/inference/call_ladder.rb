@@ -78,9 +78,8 @@ module Rigor
       # by the `refined` rung of the call, which sits above `literal_send`.
       RUNGS = Ractor.make_shareable(
         [
-          Rung.new(name: :refined, asked_by: %i[call index_read], home: TYPER,
-                   asked_as: %i[try_refined_dispatch],
-                   in_typer_because: "S4 moves it, and only with a plan for the self-typing ratchet"),
+          Rung.new(name: :refined, asked_by: %i[call index_read], home: "CallLadder::Refined", asked_as: %i[try_call],
+                   in_typer_because: nil),
           Rung.new(name: :literal_send, asked_by: %i[call], home: "CallLadder::LiteralSend", asked_as: %i[try_call],
                    in_typer_because: nil),
           Rung.new(name: :top_level_def, asked_by: %i[call send_target], home: "CallLadder::TopLevelDef",
@@ -162,6 +161,7 @@ module Rigor
           infer_user_method_return
           degrade_if_overridable
           resolve_user_def_through_ancestors
+          call_result_type_for
         ]
       )
 

@@ -127,6 +127,20 @@ module Rigor
         def self?.overriding_own_def?: (Type::t? receiver, Symbol method_name, ExpressionTyper typer) -> bool
         def self?.project_declared_owner?: (untyped definition, Scope scope) -> bool
       end
+
+      module Refined
+        def self?.try_call: (MethodDispatcher::CallContext site, ExpressionTyper typer) -> Type::t?
+        def self?.refined_indirect_result: (untyped node, Type::t? receiver, Array[String | Symbol] list, Symbol method_name, Scope scope) -> Type::Dynamic?
+        def self?.literal_method_name_argument: (untyped node) -> Symbol?
+        def self?.symbol_block_argument: (untyped node) -> Symbol?
+        def self?.refined_name_for?: (Type::t? receiver, Symbol name, Array[String | Symbol] list, Scope scope) -> bool
+        def self?.opaque_refinement_span?: (untyped node, Array[String | Symbol] list, Scope scope) -> untyped
+        def self?.refined_receiver?: (Type::t? receiver) -> bool
+        def self?.refined_receiver_result: (untyped node, Type::t? receiver, Array[String | Symbol] list, Array[Type::t] arg_types, Type::t? block_type, Symbol method_name, ExpressionTyper typer) -> Type::t?
+        def self?.refined_member_result: (untyped node, Type::t? receiver, Array[String | Symbol] list, Array[Type::t] arg_types, Type::t? block_type, Symbol method_name, ExpressionTyper typer) -> Type::t?
+        def self?.refined_class_object_result: (untyped _node, Type::Singleton receiver, Array[String | Symbol] list, Array[Type::t] _arg_types, Type::t? _block_type, Symbol method_name, Scope scope) -> Type::Dynamic?
+        def self?.refined_body_return: (untyped winner, untyped call_node, Type::Nominal self_type, Array[Type::t] arg_types, Type::t? block_type, Symbol method_name, ExpressionTyper typer) -> Type::t?
+      end
     end
 
     class StatementEvaluator

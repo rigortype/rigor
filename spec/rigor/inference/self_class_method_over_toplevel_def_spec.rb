@@ -233,6 +233,41 @@ RSpec.describe "a class's own method beats a top-level def of the same name" do
     RUBY
   end
 
+  # A plain `def` another file writes on an RBS-declared class is one `discovered_methods` withholds (the ADR-17
+  # monkey-patch contract), so the discovery arm does not see `Base#text`; the `def` walk through the ancestors
+  # (`ExpressionTyper#resolve_user_def_through_ancestors`) does.
+  it "reads a def another file writes on an RBS-declared superclass" do
+    files = { "shadow.rb" => shadow_source, "base_ext.rb" => <<~BASE, "subject.rb" => <<~RUBY }
+      class Base
+        def text = "x"
+      end
+    BASE
+      class Kid < Base
+        def shout
+          text.upcase
+        end
+      end
+    RUBY
+
+    expect(messages_for(files, signatures: { "base.rbs" => "class Base\nend\n" }).grep(/upcase/)).to be_empty
+  end
+
+  it "reads a class method the project's own RBS declares on the class, inside a class method" do
+    signatures = { "class_side.rbs" => <<~RBS }
+      class ClassSide
+        def self.text: () -> String
+      end
+    RBS
+
+    expect(upcase_errors(<<~RUBY, signatures: signatures)).to be_empty
+      class ClassSide
+        def self.shout
+          text.upcase
+        end
+      end
+    RUBY
+  end
+
   # --- must still bind: the top-level def is still the answer where nothing else defines the name --------
   #
   # Each of these is the paired positive of the silences above: the same top-level `def text` returning nil,

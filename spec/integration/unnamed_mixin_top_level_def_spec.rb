@@ -2,12 +2,12 @@
 
 # Issue #2994 — a class whose instance-side chain mixes in a module no table names (`include(*MODS)`,
 # `ResolutionChain#unnamed_mixin?`, #2993) may answer any instance name from that module, ahead of `Object`'s private
-# top-level `def`. The #618 veto (`ExpressionTyper#instance_self_answers?`) reads the mark, so the top-level `def` does
-# not bind an implicit-self call there. On the class-object side, the `included` hook of a module in the splat runs with
-# the class as `base` and may extend it with anything, so the singleton chain carries an `:include_hook` open mark
-# (#2996) and `K.bar` declines instead of answering the superclass's `bar`. Every row's Ruby behaviour was witnessed on
-# Ruby 4.0.5: each quiet call returns "X", and each reported call raises `NoMethodError`. The literal-include rows are
-# controls: the veto and the binding stand there exactly as before.
+# top-level `def`. The #618 veto (`CallLadder::TopLevelDef.instance_self_answers?`) reads the mark, so the top-level
+# `def` does not bind an implicit-self call there. On the class-object side, the `included` hook of a module in the
+# splat runs with the class as `base` and may extend it with anything, so the singleton chain carries an
+# `:include_hook` open mark (#2996) and `K.bar` declines instead of answering the superclass's `bar`. Every row's Ruby
+# behaviour was witnessed on Ruby 4.0.5: each quiet call returns "X", and each reported call raises `NoMethodError`.
+# The literal-include rows are controls: the veto and the binding stand there exactly as before.
 
 require "spec_helper"
 require "fileutils"

@@ -395,7 +395,7 @@ module Rigor
 
       # Issue #963 item 2 — the MEMBERSHIP half of the two plugin tiers, for #618's own-method veto.
       #
-      # `ExpressionTyper#try_local_def_dispatch` has to decide whether the call's own `self` answers the
+      # `CallLadder::TopLevelDef.try_call` has to decide whether the call's own `self` answers the
       # name before a same-named top-level `def` may bind, and a plugin-supplied member is an answer Ruby
       # really dispatches to: a model's column reader, an association, a scope, a macro-synthesised
       # reader. The veto asked neither tier, so a top-level `def name` bound ahead of the member and

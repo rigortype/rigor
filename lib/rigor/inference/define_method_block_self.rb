@@ -13,7 +13,7 @@ module Rigor
     # receiving instance. A bare `text` inside the block therefore reaches `C`'s member / attr reader,
     # while `Singleton[C]` answers only `C`'s class methods.
     #
-    # The consequence #963 records is #618's veto going the wrong way: `ExpressionTyper#self_type_answers?`
+    # The consequence #963 records is #618's veto going the wrong way: `CallLadder::TopLevelDef.self_type_answers?`
     # asked the singleton side, found nothing, and let a same-named top-level `def text` bind ahead of the
     # reader — typing `text.upcase` inside `class Line < Struct.new(:text); define_method(:shout) { text.upcase }`
     # as the top-level def's `nil`. Narrowing the block body's `self_type` to `Nominal[C]` makes the

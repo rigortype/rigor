@@ -4,7 +4,7 @@ require "spec_helper"
 require "tmpdir"
 require "fileutils"
 
-# Issue #618 — `ExpressionTyper#try_local_def_dispatch` bound a same-named top-level `def` for EVERY
+# Issue #618 — `CallLadder::TopLevelDef.try_call` bound a same-named top-level `def` for EVERY
 # implicit-self call, ahead of the receiver class's own methods and whatever `scope.self_type` said. A
 # top-level `def` is a private method on `Object`, the last link of every MRO, so a class that carries the
 # name wins at runtime and the top-level body is never reached; binding it first inverted that. The issue's
@@ -13,7 +13,7 @@ require "fileutils"
 # `undefined method 'upcase' for nil` on correct Ruby — but the inversion covered every source of a method
 # name: `attr_reader`, an inherited `def`, an included module's `def`, an RBS declaration on the class.
 #
-# The veto is `ExpressionTyper#self_type_answers?`, and it is scoped to a `self` whose class is KNOWN. At
+# The veto is `CallLadder::TopLevelDef.self_type_answers?`, and it is scoped to a `self` whose class is KNOWN. At
 # genuine top level, and inside a block whose `self` is unmodelled, `scope.self_type` is nil and the
 # historical binding stands untouched — #316's / #319's territory, pinned by the must-still-bind half below
 # and by spec/rigor/analysis/toplevel_def_dsl_block_capture_spec.rb.
@@ -229,6 +229,41 @@ RSpec.describe "a class's own method beats a top-level def of the same name" do
         end
 
         SHOUTED = text.upcase
+      end
+    RUBY
+  end
+
+  # A plain `def` another file writes on an RBS-declared class is one `discovered_methods` withholds (the ADR-17
+  # monkey-patch contract), so the discovery arm does not see `Base#text`; the `def` walk through the ancestors
+  # (`ExpressionTyper#resolve_user_def_through_ancestors`) does.
+  it "reads a def another file writes on an RBS-declared superclass" do
+    files = { "shadow.rb" => shadow_source, "base_ext.rb" => <<~BASE, "subject.rb" => <<~RUBY }
+      class Base
+        def text = "x"
+      end
+    BASE
+      class Kid < Base
+        def shout
+          text.upcase
+        end
+      end
+    RUBY
+
+    expect(messages_for(files, signatures: { "base.rbs" => "class Base\nend\n" }).grep(/upcase/)).to be_empty
+  end
+
+  it "reads a class method the project's own RBS declares on the class, inside a class method" do
+    signatures = { "class_side.rbs" => <<~RBS }
+      class ClassSide
+        def self.text: () -> String
+      end
+    RBS
+
+    expect(upcase_errors(<<~RUBY, signatures: signatures)).to be_empty
+      class ClassSide
+        def self.shout
+          text.upcase
+        end
       end
     RUBY
   end

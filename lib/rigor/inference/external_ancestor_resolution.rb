@@ -14,7 +14,7 @@ module Rigor
     # gathers those as-written names breadth-first over the project ancestry; this module resolves each
     # group against the RBS environment and reports WHICH declaration answered, not merely that one did.
     #
-    # The logic existed twice before: `ExpressionTyper#rbs_ancestor_answers?` asked it as a boolean (the
+    # The logic existed twice before: `CallLadder::TopLevelDef.rbs_ancestor_answers?` asked it as a boolean (the
     # implicit-self binding veto of issue #633 / ADR-110), and the dispatch side of #527 needs the same
     # walk but wants the definition and its owner so it can dispatch there. Two copies of an MRO cut-off
     # rule is one copy too many, so the boolean is now `!resolve(...).nil?`.

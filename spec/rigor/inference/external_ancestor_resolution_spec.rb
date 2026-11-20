@@ -2,7 +2,7 @@
 
 # Issue #527 slice 0 — the extracted external-ancestor resolver.
 #
-# `ExpressionTyper#rbs_ancestor_answers?` asked this question as a boolean for the #633 / ADR-110
+# `CallLadder::TopLevelDef.rbs_ancestor_answers?` asks this question as a boolean for the #633 / ADR-110
 # implicit-self binding veto; the dispatch side of #527 asks the same walk for the definition it found
 # and the class it asked. This file pins the resolver's own contract — the `[definition, owner_name]`
 # shape, the `::Object` cut-off and the dependency-recording flag — so a later slice changing the

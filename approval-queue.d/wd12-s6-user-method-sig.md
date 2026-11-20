@@ -24,6 +24,8 @@ Slice S6 of ADR-116's WD12 amendment moves the user-method rung into `CallLadder
 
 The precedent is the amendment's own requirement that `sig/` type what a rung calls on its typer, together with the provenance gate's rule that a `parameter_only` row "makes no claim the gate cannot check" (`docs/agents/type-authoring.md`). S1 (#3366) made the same move for `dispatch_site` and `resolve_site`, but its entry is still in this queue, so it is only a sibling here, not a precedent.
 
+The class is `open-choice`, not `gate-row`. No residue pin moves up: `sig/rigor/inference.rbs` stays at 68. The two pins that move are the `parameter_only` count, a watched class that the gate's rule keeps out of the residue, and the parameter-shape floor, which every new declaration of a `def` raises. Neither is an allow-list row. What was chosen is which declarations to write, the question S1's entry also files as `open-choice`.
+
 ## To undo
 
 Delete the `infer_user_method_return` row: `return_type_for` goes back to `unrenderable`, and what the rung gets back reads `Dynamic`. Delete the two `parameter_only` rows: their parameters read `Dynamic`, and the pin goes back to 14. Lower the floor by the declarations removed. Later rung slices that call `infer_user_method_return` through `PORT` (S5's project-singleton inference among them) would lose the typed answer too.

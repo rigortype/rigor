@@ -25,7 +25,7 @@ Option A, ruled by the coordinator, on four conditions, each now held:
 
 1. The gate stays a pure predicate on its arguments, with no typer call and no `scope`. `CallLadder::SECOND_ENTRIES` records it with `given_typer: false`. `spec/rigor/inference/call_ladder/port_spec.rb` then requires it to be a function of its arguments alone, and `user_method_spec.rb` pins its arity of one. Inlining a typer call into it fails both (the PR's mutation table).
 2. Every other caller is re-pointed at the module constant, and no delegating wrapper is left on the typer.
-3. A dated note in ADR-116's amendment changes the rule from a count to a list: second entries are named there, not capped at two. It names this third one. `SECOND_ENTRIES` is the same list, as data.
+3. A dated note in ADR-116's amendment changes the rule from a count to a list: second entries are named there, not capped at two. The amendment's two (`UserMethod.infer`, and S8's `OverridingDef.overriding_own_def?`) become three. `SECOND_ENTRIES` holds, as data, the ones whose modules exist: two today, and S8 adds its row.
 4. The order pin's check that no method asks two or more different rungs now counts a call of a second entry as asking its rung, so a method that tests this gate and then asks another rung fails. The port spec holds the entry.
 
 The precedent is the amendment itself: a rung's gate that other code asks "moves with the rung, so it is neither copied nor a `PORT` member".

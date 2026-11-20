@@ -455,12 +455,13 @@ SIG_PROVENANCE_PARAMETER_ONLY = {
   # (`sig.skipped.untyped-return`: it answers what `RbsDispatch.try_dispatch` answers, itself a row here). The other
   # two declare the return sig-gen generates and are earned: `DiscoveredMethod` `Type::Dynamic | nil`, and
   # `CompositeReceiver` every member of `Type::t` or nil, declared `Type::t?`.
-  # +2 (#3345, ADR-116 WD12 S6): of the eleven functions of `CallLadder::UserMethod`, the first rung module, sig-gen
-  # renders no return for `resolve_typing_def_with_owner` (it answers what `MemoAudit.check` yields) or
-  # `definer_without_single_body?` (it answers `DiscoveryIndex` predicates, undeclared), both
-  # `sig.skipped.untyped-return`. Each declares its parameters so that the `typer` and the `scope` it is given read
-  # as `ExpressionTyper` and `Scope` inside it, which the self-typing ratchet counts: 36 precise expressions and 8
-  # call sites of `user_method.rb`, measured. The other nine declare the return sig-gen generates and are earned.
+  # +2 (#3345, ADR-116 WD12 S6): `CallLadder::UserMethod`, the first rung module, has twelve functions, and eleven
+  # are declared (`note_missing_class` is not). Of those, sig-gen renders no return for
+  # `resolve_typing_def_with_owner` (it answers what `MemoAudit.check` yields) or `definer_without_single_body?` (it
+  # answers `DiscoveryIndex` predicates, undeclared), both `sig.skipped.untyped-return`. Each declares its parameters
+  # so that the `typer` and the `scope` it is given read as `ExpressionTyper` and `Scope` inside it, which the
+  # self-typing ratchet counts: 36 precise expressions and 8 call sites of `user_method.rb`, measured. The other
+  # nine declared functions declare the return sig-gen generates and are earned.
   "sig/rigor/inference.rbs" => { unmarked: 16, marked: 0 },
   # Both rows were marked `unrenderable` rows before the class existed.
   "sig/rigor/scope.rbs" => { unmarked: 0, marked: 2 }
@@ -477,7 +478,7 @@ SIG_PROVENANCE_PARAMETER_ONLY_MARKED = [
 # #3335 — method declarations whose parameter list was compared with a recorded `def` on the tree this pin was taken
 # from (1088 on 2026-11-20 after #3345's eleven `try_dispatch` declarations for the tiers moved out of
 # `method_dispatcher.rb` in three batches, its `dispatch_site` and `resolve_site`, and the fourteen of slice S6: the
-# eleven functions of `CallLadder::UserMethod` and three typer methods of the call ladder's port, every one
+# eleven declared functions of `CallLadder::UserMethod` and three typer methods of the call ladder's port, every one
 # fitting). A floor, not an exact pin, because every new declaration of a `def` raises it: raise it when the count
 # grows, and lower it only with the reason in the commit body (a deleted declaration, or a `def` the pairing stopped
 # finding, which is the case this floor exists to catch).

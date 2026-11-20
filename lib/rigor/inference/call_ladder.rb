@@ -97,9 +97,8 @@ module Rigor
                    asked_as: %i[dispatch dispatch_site], in_typer_because: nil),
           Rung.new(name: :user_method, asked_by: %i[call index_read send_target], home: "CallLadder::UserMethod",
                    asked_as: %i[try_call], in_typer_because: nil),
-          Rung.new(name: :project_singleton, asked_by: %i[call index_read send_target], home: TYPER,
-                   asked_as: %i[try_project_singleton_inference],
-                   in_typer_because: "S5 moves it"),
+          Rung.new(name: :project_singleton, asked_by: %i[call index_read send_target],
+                   home: "CallLadder::ProjectSingleton", asked_as: %i[try_call], in_typer_because: nil),
           Rung.new(name: :dynamic_receiver, asked_by: %i[call], home: TYPER,
                    asked_as: %i[inherit_receiver_origin],
                    in_typer_because: "stays: S3 was dropped. With `non_nil_retry` it is 28 code lines, and the move " \

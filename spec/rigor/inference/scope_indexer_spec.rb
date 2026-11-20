@@ -447,7 +447,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     end
 
     # Module-singleton call resolution (ADR-57 follow-up) — singleton-side def-node table that
-    # `ExpressionTyper#try_singleton_method_inference` re-types against a `Singleton[X]` receiver.
+    # `CallLadder::ProjectSingleton.try_singleton_method_inference` re-types against a `Singleton[X]` receiver.
     it "records `def self.x` / `def Foo.x` / `class << self` singleton def-nodes" do
       program = parse(<<~RUBY)
         module Util

@@ -462,7 +462,18 @@ SIG_PROVENANCE_PARAMETER_ONLY = {
   # so that the `typer` and the `scope` it is given read as `ExpressionTyper` and `Scope` inside it, which the
   # self-typing ratchet counts: 36 precise expressions and 8 call sites of `user_method.rb`, measured. The other
   # nine declared functions declare the return sig-gen generates and are earned.
-  "sig/rigor/inference.rbs" => { unmarked: 16, marked: 0 },
+  # +12 (#3345, ADR-116 WD12 S5): `CallLadder::ProjectSingleton`, the second rung module, has twenty-three functions,
+  # and nineteen are declared. Seven declare the return sig-gen generates and are earned (`try_call`, its two tiers,
+  # `compute_singleton_def_with_owner`, `foreign_definer_behind_copy?`, `hidden_hook_definer?` and
+  # `dynamic_singleton_definer_ahead?`). For the other twelve sig-gen renders no return (`sig.skipped.untyped-return`:
+  # each answers what an undeclared `Scope::ResolutionChain`, `DiscoveryIndex` predicate or `MemoAudit.check` gives,
+  # or what another such function answers), and
+  # each declares its parameters so that the `scope` or `typer` it is given reads as `Scope` or `ExpressionTyper`
+  # inside it, which the self-typing ratchet counts: 98 precise expressions and 19 call sites of
+  # `project_singleton.rb`, measured with and without. The four functions whose parameters are all `untyped`
+  # (`unordered_prepend_definer?`, `answered_ahead?`, `level_start_of`, `own_singleton_index`) gain nothing from a
+  # declaration, measured, and are left undeclared.
+  "sig/rigor/inference.rbs" => { unmarked: 28, marked: 0 },
   # Both rows were marked `unrenderable` rows before the class existed.
   "sig/rigor/scope.rbs" => { unmarked: 0, marked: 2 }
 }.freeze
@@ -476,13 +487,14 @@ SIG_PROVENANCE_PARAMETER_ONLY_MARKED = [
 ].freeze
 
 # #3335 — method declarations whose parameter list was compared with a recorded `def` on the tree this pin was taken
-# from (1088 on 2026-11-20 after #3345's eleven `try_dispatch` declarations for the tiers moved out of
-# `method_dispatcher.rb` in three batches, its `dispatch_site` and `resolve_site`, and the fourteen of slice S6: the
-# eleven declared functions of `CallLadder::UserMethod` and three typer methods of the call ladder's port, every one
-# fitting). A floor, not an exact pin, because every new declaration of a `def` raises it: raise it when the count
-# grows, and lower it only with the reason in the commit body (a deleted declaration, or a `def` the pairing stopped
-# finding, which is the case this floor exists to catch).
-SIG_PARAMETER_SHAPE_COMPARED_FLOOR = 1088
+# from (1107 on 2026-11-20 after #3345's eleven `try_dispatch` declarations for the tiers moved out of
+# `method_dispatcher.rb` in three batches, its `dispatch_site` and `resolve_site`, the fourteen of slice S6 (the eleven
+# declared functions of `CallLadder::UserMethod` and three typer methods of the call ladder's port) and the nineteen
+# declared functions of `CallLadder::ProjectSingleton` of slice S5, every one fitting). A floor, not an exact pin,
+# because every new declaration of a `def` raises it: raise it when the count grows, and lower it only with the reason
+# in the commit body (a deleted declaration, or a `def` the pairing stopped finding, which is the case this floor exists
+# to catch).
+SIG_PARAMETER_SHAPE_COMPARED_FLOOR = 1107
 
 module SigProvenanceSpecHelpers
   # The hard-rule failure for unmarked `tighter_return` rows. A row whose declared return is the bare `untyped` claims

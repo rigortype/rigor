@@ -82,6 +82,28 @@ module Rigor
         def self?.definer_without_single_body?: (String owner, Symbol method_name, untyped node, Scope scope) -> untyped
         def self?.external_declares?: (Array[String] candidates, Symbol method_name, Scope scope) -> bool
       end
+
+      module ProjectSingleton
+        def self?.try_call: (MethodDispatcher::CallContext site, ExpressionTyper typer) -> Type::t?
+        def self?.try_singleton_method_inference: (Type::t? receiver, untyped call_node, Array[Type::t] arg_types, Symbol method_name, Type::t? block_type, ExpressionTyper typer) -> Type::t?
+        def self?.resolve_singleton_def_with_owner: (String class_name, Symbol method_name, ExpressionTyper typer) -> untyped
+        def self?.compute_singleton_def_with_owner: (String class_name, Symbol method_name, Scope scope) -> (Array[untyped] | [::Prism::DefNode, String] | [nil, nil])
+        def self?.unseen_definer_split?: (String class_name, Symbol method_name, untyped found, Scope scope) -> untyped
+        def self?.foreign_definer_behind_copy?: (Symbol method_name, untyped found, Scope scope) -> bool
+        def self?.hidden_hook_split?: (String class_name, Symbol method_name, untyped owner, Scope scope) -> untyped
+        def self?.hook_block_rival?: (String class_name, Symbol method_name, untyped owner, Scope scope) -> untyped
+        def self?.hidden_hook_definer?: (String class_name, Symbol method_name, untyped owner, Scope scope) -> bool
+        def self?.singleton_hook_order_split?: (String class_name, Symbol method_name, Scope scope) -> untyped
+        def self?.singleton_mixin_split?: (String class_name, Symbol method_name, untyped found, Scope scope) -> untyped
+        def self?.singleton_prepend_split?: (String class_name, Symbol method_name, untyped found, Scope scope) -> untyped
+        def self?.unnamed_singleton_mixin_split?: (String class_name, Symbol method_name, Scope scope) -> untyped
+        def self?.positioned_singleton_definer: (untyped chain, Symbol method_name, Scope scope, ?copies: bool) -> untyped
+        def self?.singleton_copy_head: (untyped owner, untyped node, Scope scope) -> untyped
+        def self?.dynamic_singleton_definer_ahead?: (String class_name, Symbol method_name, untyped owner, Scope scope) -> bool
+        def self?.inherited_hook_on_chain?: (untyped chain, String receiver_name, Scope scope) -> untyped
+        def self?.entry_defines_without_def?: (untyped entry, Symbol name, Scope scope) -> untyped
+        def self?.try_singleton_object_constant_inference: (Type::t? receiver, untyped call_node, Array[Type::t] arg_types, Symbol method_name, Type::t? block_type, ExpressionTyper typer) -> Type::t?
+      end
     end
 
     class StatementEvaluator

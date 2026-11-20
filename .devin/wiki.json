@@ -29,7 +29,7 @@
     },
     {
       "title": "Using Rigor",
-      "purpose": "Installation, configuration (.rigor.yml / .rigor.dist.yml), the CLI commands, diagnostics, baselines, CI, editor (LSP) and agent (MCP, bundled skills) integrations, as a user adopting Rigor sees them.",
+      "purpose": "Installation, configuration (.rigor.yml / .rigor.dist.yml), the CLI commands (including RBS generation with 'rigor sig-gen' and the 'rigor lens' declaration map with type provenance), diagnostics, baselines, CI, editor (LSP) and agent (MCP, bundled skills) integrations, as a user adopting Rigor sees them.",
       "parent": "Overview",
       "page_notes": [
         {
@@ -87,7 +87,7 @@
       "purpose": "Development setup through the Nix Flake, the targeted local validation and the CI gate, and the branch, pull-request and release flow.",
       "page_notes": [
         {
-          "content": "AGENTS.md is the contract: every command through 'nix develop --command <cmd>', 'make verify-quick' / 'make verify-changed' locally, never the full suite (CI runs it). The flow is in CONTRIBUTING.md and docs/agents/contribution-flow.md."
+          "content": "Run every development command through 'nix develop --command <cmd>'. Human contributors follow CONTRIBUTING.md; AI agents follow AGENTS.md, which prefers 'make verify-quick' / 'make verify-changed' locally and leaves the full suite to CI except where it names an exception. The branch and pull-request flow is in docs/agents/contribution-flow.md."
         }
       ]
     }

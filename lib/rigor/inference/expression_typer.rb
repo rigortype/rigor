@@ -59,6 +59,8 @@ require_relative "expression_typer/composites"
 require_relative "expression_typer/per_element_assemblers"
 require_relative "expression_typer/writes"
 require_relative "call_ladder/user_method"
+require_relative "call_ladder/project_singleton"
+require_relative "call_ladder/literal_send"
 
 module Rigor
   module Inference
@@ -354,7 +356,7 @@ module Rigor
 
         site = index_read_site(node, receiver, arg_types)
         MethodDispatcher.dispatch_site(site) || CallLadder::UserMethod.try_call(site, self) ||
-          try_project_singleton_inference(receiver, node, arg_types, method_name: :[])
+          CallLadder::ProjectSingleton.try_call(site, self)
       end
 
       # Issue #1889 — the type a block-form `inject` / `reduce` accumulator parameter holds across the block's runs,
@@ -1247,7 +1249,7 @@ module Rigor
       # A splat index (`c[*keys] += v`) leaves the read's arity to the splat's expansion, and the one untyped
       # argument standing in for it would bind positionally to a body written for several: `def [](*keys) =
       # keys.size` folded the read of `r[*[0, 1]] += 1` to `1` and drew an always-falsey `n == 3` on a program
-      # that takes that branch. So the body tiers decline under a splat, as `try_literal_send` does, and only
+      # that takes that branch. So the body tiers decline under a splat, as `CallLadder::LiteralSend` does, and only
       # the signature-driven dispatch answers. An own `def` overriding an inherited declaration still outranks
       # that declaration; with its body unreadable, it answers `Dynamic[top]` ({CallLadder::EXCEPTIONS}).
       def splat_index_read_type(node, receiver, arg_types)
@@ -1766,7 +1768,17 @@ module Rigor
         refined = try_refined_dispatch(node, receiver, arg_types, block_type)
         return refined if refined
 
-        literal_send = try_literal_send(node, receiver)
+        # ADR-116 WD12 — the call's site, built once and asked of every rung from here on that takes one.
+        site = MethodDispatcher::CallContext.build(
+          receiver: receiver,
+          method_name: node.name,
+          args: arg_types,
+          block_type: block_type,
+          environment: scope.environment,
+          call_node: node,
+          scope: scope
+        )
+        literal_send = CallLadder::LiteralSend.try_call(site, self)
         return literal_send if literal_send
 
         local_def_result = try_local_def_dispatch(node, receiver, arg_types, block_type)
@@ -1783,19 +1795,10 @@ module Rigor
         overriding_def = try_overriding_def_dispatch(node, receiver, arg_types)
         return overriding_def if overriding_def
 
-        site = MethodDispatcher::CallContext.build(
-          receiver: receiver,
-          method_name: node.name,
-          args: arg_types,
-          block_type: block_type,
-          environment: scope.environment,
-          call_node: node,
-          scope: scope
-        )
         result = MethodDispatcher.dispatch_site(site)
         return result if result
 
-        dispatch_miss_result(site, node, receiver, arg_types, block_type)
+        dispatch_miss_result(site, node, receiver)
       end
 
       # ADR-121 WD2 (issue #1664) — a call through an in-effect Ruby refinement, typed from the winning refine body
@@ -2105,7 +2108,7 @@ module Rigor
 
       # The rungs below the dispatcher, for a call `MethodDispatcher` could not answer: {#call_result_type_for}
       # continues here, in the order of {CallLadder::RUNGS}.
-      def dispatch_miss_result(site, node, receiver, arg_types, block_type)
+      def dispatch_miss_result(site, node, receiver)
         # v0.0.2 #5 — inter-procedural inference for user-defined methods. When dispatch misses but the
         # receiver is a user class with a `def` body, re-type the body with the call's argument types bound
         # and return the body's last-expression type.
@@ -2117,7 +2120,7 @@ module Rigor
         # `module_function` body, re-type that body with the call args bound. Sits after the RBS dispatch
         # tier, so foreign / RBS-known singletons (`Math.sqrt`) keep their catalog answer; only
         # project-defined singleton methods reach here.
-        singleton_inference = try_project_singleton_inference(receiver, node, arg_types, block_type: block_type)
+        singleton_inference = CallLadder::ProjectSingleton.try_call(site, self)
         return singleton_inference if singleton_inference
 
         # Dynamic-origin propagation: when the receiver is Dynamic[T] and no positive rule resolves the call,
@@ -2398,382 +2401,6 @@ module Rigor
         ExpressionTyper.new(scope: rebound, tracer: tracer, operand_types: @operand_types, typing_node: @typing_node)
       end
 
-      # Issue #533 — `x.send(:selector, args)` with a LITERAL symbol is statically `x.selector(args)`:
-      # the private-boundary idiom (protobuf's `send(:get_file_descriptor)` at 84 sites) resolves through
-      # the same dispatch + project-inference tiers as the direct call would. `send` legitimately crosses
-      # visibility, so no public-only gate applies (`public_send` is treated identically — typing the
-      # success path of a call that would raise on a private method is ADR-5 optimism). Declines: a
-      # non-literal selector, a splat / forwarded tail (positional correspondence unknown), or a block at
-      # the call site (block forwarding is out of this slice). The sequence is `send_target` in {CallLadder::RUNGS}.
-      #
-      # Issue #3080 — `send` reads as its target only where the receiver's `send` is `Kernel#send`
-      # ({GenuineSend.type?}). A class with its own `send` (`def send(message, flags)`, `UDPSocket#send`, a project
-      # RBS `def send:`) is called like any other method. `__send__` and `public_send` are other methods and keep
-      # the reading.
-      LITERAL_SEND_SELECTORS = %i[send __send__ public_send].freeze
-      private_constant :LITERAL_SEND_SELECTORS
-
-      def try_literal_send(node, receiver)
-        args = literal_send_arguments(node)
-        return nil if args.nil?
-        return own_send_type(node, receiver, args) if node.name == :send && !GenuineSend.type?(receiver, scope)
-
-        rest = args[1..]
-        inner_name = args.first.unescaped.to_sym
-        inner_args = rest.map { |a| type_of(a) }
-        target = MethodDispatcher::CallContext.build(
-          receiver: receiver, method_name: inner_name, args: inner_args,
-          block_type: nil, environment: scope.environment, call_node: node, scope: scope
-        )
-        MethodDispatcher.dispatch_site(target) || CallLadder::UserMethod.try_call(target, self) ||
-          try_project_singleton_inference(receiver, node, inner_args, method_name: inner_name)
-      end
-
-      # The arguments of a literal-selector `send` / `__send__` / `public_send` call with no block and no splat or
-      # forwarded tail, or nil.
-      def literal_send_arguments(node)
-        return nil unless LITERAL_SEND_SELECTORS.include?(node.name)
-        return nil unless node.block.nil?
-
-        args = node.arguments&.arguments
-        return nil unless args && args.first.is_a?(Prism::SymbolNode)
-        return nil if args.any? { |a| a.is_a?(Prism::SplatNode) || a.is_a?(Prism::ForwardingArgumentsNode) }
-
-        args
-      end
-
-      # Issue #3080 — the receiver's own `send`. A project `def send` comes before `Kernel#send` in every chain that
-      # reaches it, so where the only declaration Ruby reaches is `Kernel#send` (or there is none) the body answers
-      # the call, ahead of the `Kernel#send` declaration the ordinary dispatch would read off `Object`. Where an RBS
-      # `def send:` reaches the receiver from the class itself or from an ancestor (an overload included), that
-      # declaration is the contract (its `void`, its return type), so nil hands the call to the ordinary dispatch,
-      # as for any other declared method. Nil too
-      # where no body can be read: a union or class-object receiver.
-      def own_send_type(node, receiver, args)
-        return nil unless CallLadder::UserMethod.user_inference_receiver?(receiver)
-        return nil unless GenuineSend.rbs_genuine?(receiver.class_name, :instance, scope)
-
-        CallLadder::UserMethod.infer(receiver, node, args.map { |a| type_of(a) }, node.name, nil, self)
-      end
-
-      # Module-singleton call resolution (ADR-57 follow-up) — resolves `Foo.<name>` on a `Singleton[Foo]`
-      # receiver against `Foo`'s user-side singleton defs (`def self.x`, `def Foo.x`, a `class << self`
-      # body, or a `module_function` method) and re-types the body with the call's argument types bound.
-      # The body scope's `self_type` is the SAME `Singleton[Foo]` carrier, so an implicit-self call inside
-      # (`def self.via; helper(x); end`) re-enters this tier and resolves against the same singleton table
-      # — the symmetric counterpart of the instance-side ancestor walk.
-      #
-      # Issue #731 — resolution walks the SUPERCLASS chain, so a class method a base class defines answers
-      # on its subclasses (`class Plain < Base` with `def self.build` on `Base`: `Plain.build` was
-      # `Dynamic[top]` while `Plain.new.inst` resolved on the same fixture). Superclasses only, which is the
-      # whole shape of class-method inheritance — an `include`d module's `def self.x` is not callable on the
-      # includer, and `extend M` is already folded into the extender's own singleton entries by
-      # `ScopeIndexer`. A miss still degrades to `Dynamic[top]`, never a false resolution.
-      #
-      # The OWNER — not the receiver class — is what the overridable gate keys on, exactly as the instance
-      # side does: adopting `Base`'s literal return is unsound when a subclass redefines the method, and
-      # after this change the resolved body is routinely not the receiver's own.
-      def try_singleton_method_inference(receiver, call_node, arg_types, method_name: call_node.name,
-                                         block_type: nil)
-        return nil unless receiver.is_a?(Type::Singleton)
-
-        def_node, owner = resolve_singleton_def_with_owner(receiver.class_name, method_name)
-        return nil if def_node.nil?
-        # Issue #1936 — a contested slot holds a `def` a later definer may have replaced
-        # (`singleton_class.alias_method :x, :y` after `def self.x`), or one that may not have run: its body is not
-        # proven to be the method Ruby calls, so the call falls through to `Dynamic`.
-        return nil if scope.discovery.contested?(:discovered_singleton_def_nodes, [owner, method_name.to_sym])
-
-        arg_types, positionals_unknown = positional_correspondence(call_node, arg_types)
-        result = infer_user_method_return(def_node, receiver, arg_types, yield_type: block_type,
-                                                                         positionals_unknown: positionals_unknown)
-        return result if result.nil?
-
-        degrade_if_overridable(result, owner, method_name, :singleton)
-      rescue StandardError
-        nil
-      end
-
-      # The singleton twin of {#resolve_user_def_with_owner}. Memoised in a bucket nested under the
-      # SINGLETON def table's identity as well as the class-graph trio: `class_graph_buckets` keys on
-      # `discovered_def_nodes` / `discovered_superclasses` / `discovered_includes`, and this walk reads a
-      # fourth table those three do not imply. Keying on what the answer actually depends on is the #682
-      # lesson — a memo that outlives its inputs serves one scope's answer to another.
-      #
-      # It is the TYPING read only, so it also withholds (`[nil, nil]`, the call types `Dynamic`) where an external
-      # ancestor may answer ahead of the definer found (#1572: `extend M; extend Enumerable` makes `C.to_a`
-      # `Enumerable#to_a`, which the reader passes over). The existence reads keep the reader's own answer.
-      def resolve_singleton_def_with_owner(class_name, method_name)
-        by_singleton = (class_graph_buckets[:singleton_def] ||= {}.compare_by_identity)
-        cache = (by_singleton[scope.discovered_singleton_def_nodes] ||= {})
-        table = (cache[class_name.to_s] ||= {})
-        key = method_name.to_sym
-        if table.key?(key)
-          return MemoAudit.check("class graph singleton def", table[key], class_name, key) do
-            compute_singleton_def_with_owner(class_name, method_name)
-          end
-        end
-
-        table[key] = MemoAudit.key_audit("class graph singleton def") do
-          compute_singleton_def_with_owner(class_name, method_name)
-        end
-      end
-
-      def compute_singleton_def_with_owner(class_name, method_name)
-        found = scope.singleton_def_through_ancestors(class_name, method_name)
-        owner = found.last
-        found = [nil, nil] if owner && SingletonExternalAhead.withhold?(scope, class_name, method_name, owner)
-        found = [nil, nil] if found.last && dynamic_singleton_definer_ahead?(class_name, method_name, found.last)
-        found = [nil, nil] if found.last && singleton_hook_order_split?(class_name, method_name)
-        found = [nil, nil] if found.last && singleton_mixin_split?(class_name, method_name, found)
-        found = [nil, nil] if found.last && unseen_definer_split?(class_name, method_name, found)
-        found
-      end
-
-      # A definer no def table holds that Ruby may call instead of `found`: a hook-placed one, or a foreign `def C.x`.
-      def unseen_definer_split?(class_name, method_name, found)
-        hidden_hook_split?(class_name, method_name, found.last) || foreign_definer_behind_copy?(method_name, found)
-      end
-
-      # Issue #3155 — a `def C.x` outside C's body (in the extended module, another class or the file) defines C's
-      # own `x`, which no def table holds, only its object-singleton mark. A fold copy found on C may then be a
-      # body Ruby does not call, so the typing read withholds.
-      def foreign_definer_behind_copy?(method_name, found)
-        node, owner = found
-        return false unless singleton_copy_head(owner, node) != owner
-
-        SingletonHookDecline.foreign_singleton_definer?(scope, owner, method_name)
-      end
-
-      # The hook-placed definers a found singleton `def` may not be the one Ruby calls through.
-      def hidden_hook_split?(class_name, method_name, owner)
-        hidden_hook_definer?(class_name, method_name, owner) || hook_block_rival?(class_name, method_name, owner)
-      end
-
-      # Issue #3005 — a class object's own `def self.x` and a `def self.x` a concern's `included` block defines on it
-      # replace each other in the order the `def` and the `include` run, which the tables do not hold, so the typing
-      # read withholds when the answer is a class object's own `def` and its level's hook-block module defines the
-      # name too.
-      def hook_block_rival?(class_name, method_name, owner)
-        chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
-        index = chain.entries.index { |entry| !entry.external? && entry.side == :singleton && entry.name == owner }
-        !index.nil? && chain.hook_block_rival?(scope, index, method_name)
-      end
-
-      # Issue #1592 — a module a hook extends the class with may define the name private (`class_methods do private;
-      # def x`), which Ruby refuses on an explicit receiver. The visibility rule does not reach that module, so the
-      # typing read withholds rather than answer a call Ruby raises on. A module the class `extend`s itself is left to
-      # that rule.
-      def hidden_hook_definer?(class_name, method_name, owner)
-        visibility = scope.discovered_method_visibility(owner, method_name)
-        return false if visibility.nil? || visibility == :public
-
-        chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
-        return false unless chain.entries.any? { |entry| entry.name == owner && entry.side == :instance }
-
-        scope.singleton_extends_of(class_name).none? do |raw|
-          written = raw.delete_prefix("::")
-          owner == written || owner.end_with?("::#{written}")
-        end
-      end
-
-      # Issue #1592 — whether to withhold `method_name`'s class-side answer: a class object on the chain has
-      # hook-extended modules whose order against its own `extend`s is not a fact, and the orders give different
-      # definers (the retro world's against the chain's, or, with no retro world, the class objects' alone against
-      # the chain's). A `def` the extends fold copied onto a class object is read where Ruby finds it, at the extended
-      # module's own entry, since the copy sits ahead of every module in both orders.
-      def singleton_hook_order_split?(class_name, method_name)
-        chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
-        return false unless chain.hook_order_marked?
-
-        answer = positioned_singleton_definer(chain, method_name)
-        retro = chain.retro_world
-        return answer != positioned_singleton_definer(retro, method_name) if retro
-
-        answer != positioned_singleton_definer(chain, method_name, copies: true)
-      end
-
-      # Issues #2998 and #3020 — whether a singleton-side mixin of a class object on the chain may answer ahead of
-      # `found`: a named prepend master's order does not place, or a module no table names.
-      def singleton_mixin_split?(class_name, method_name, found)
-        singleton_prepend_split?(class_name, method_name, found) ||
-          unnamed_singleton_mixin_split?(class_name, method_name)
-      end
-
-      # Issue #2998 — whether to withhold the class-side answer `found` on a chain whose class objects have
-      # singleton-side prepends of their own: master's order, which a chain that does not stand answers, places no
-      # such prepend, so its definer may not be the one Ruby's order reaches first. A `def` the extends fold copied
-      # onto a class object is compared as its module's. A definer from a prepend region whose order is not a fact
-      # is withheld whichever order answers.
-      def singleton_prepend_split?(class_name, method_name, found)
-        chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
-        return false unless chain.singleton_prepend_marked?
-
-        answer = positioned_singleton_definer(chain, method_name)
-        return true if unordered_prepend_definer?(chain, answer)
-
-        node, owner = found
-        head = scope.singleton_def_for(owner, method_name).equal?(node) ? singleton_copy_head(owner, node) : owner
-        head != answer
-      end
-
-      # Whether `answer` is a module in the prepend region of a class object on the chain whose prepends have no known
-      # order: the entries between the start of that class's level and its own entry.
-      def unordered_prepend_definer?(chain, answer)
-        chain.prepend_order_nodes.any? do |node|
-          level = chain.level_classes.index(node)
-          next true if level.nil?
-
-          start = chain.level_starts[level]
-          own = chain.entries.index { |entry| entry.side == :singleton && entry.name == node }
-          next true if own.nil?
-
-          chain.entries[start...own].any? { |entry| entry.name == answer }
-        end
-      end
-
-      # Issue #3020 — whether to withhold the class-side answer on a chain whose class objects mix a module no table
-      # names into their singleton side, which may define the name. A prepend (`class << self; prepend(*MODS)`) sits
-      # ahead of the class object's own `def self.`, so a definer at or behind that class object's level is withheld;
-      # an `extend(*MODS)` or a `class << self` `include(*MODS)` sits right behind it, so a definer behind the class
-      # object's own entry is withheld and its own `def self.` still answers.
-      def unnamed_singleton_mixin_split?(class_name, method_name)
-        chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
-        prepends = chain.unnamed_prepend_nodes
-        extends = chain.unnamed_extend_nodes
-        return false if prepends.empty? && extends.empty?
-
-        answer = positioned_singleton_definer(chain, method_name)
-        prepends.any? { |node| !answered_ahead?(chain, answer, level_start_of(chain, node)) } ||
-          extends.any? { |node| !answered_ahead?(chain, answer, own_singleton_index(chain, node)&.succ) }
-      end
-
-      # Whether `answer` owns an entry before `stop` (nil when the position is unknown: never). A nil `answer` (no class
-      # object's own def) owns none.
-      def answered_ahead?(chain, answer, stop)
-        !stop.nil? && chain.entries[0...stop].any? { |entry| entry.name == answer }
-      end
-
-      def level_start_of(chain, node)
-        level = chain.level_classes.index(node)
-        level && chain.level_starts[level]
-      end
-
-      def own_singleton_index(chain, node)
-        chain.entries.index { |entry| entry.side == :singleton && entry.name == node }
-      end
-
-      # The owner of the first `def` of the name along the chain: a fold copy is skipped, or with `copies:` read as
-      # its module's, on the class objects alone (the answer master gives).
-      def positioned_singleton_definer(chain, method_name, copies: false)
-        chain.search(scope, side: copies ? :singleton : nil) do |entry|
-          next if entry.external?
-
-          name = entry.name
-          if entry.side == :singleton
-            node = scope.singleton_def_for(name, method_name)
-            next nil if node.nil?
-
-            head = singleton_copy_head(name, node)
-            copies ? head : (name if head == name)
-          elsif scope.user_def_for(name, method_name)
-            name
-          end
-        end
-      end
-
-      # The module a receiverless singleton `def` was written in when the extends fold copied it onto `owner`, else
-      # `owner`.
-      def singleton_copy_head(owner, node)
-        head = node.receiver.nil? ? scope.discovery.recorded_def_nesting(node)&.first : nil
-        head.nil? ? owner : head
-      end
-
-      SINGLETON_WILDCARD_SLOT = %i[singleton *].freeze
-      private_constant :SINGLETON_WILDCARD_SLOT
-
-      # Issue #2284 — a project entry nearer than the `def`'s owner on the singleton chain may define the name
-      # without a `def`, which the def tables do not hold: `class S < B; define_singleton_method(:x) { "s" }; end`
-      # calls S's block, not `B.x`. The farther `def` is then withheld and the call types `Dynamic`. A class's own
-      # singleton side is read from the visibility-contest census: `define_singleton_method(:x)`,
-      # `singleton_class.define_method(:x)` / `attr_*` and a computed name contest the entry's slot whether or not a
-      # `def` is recorded (#1984, #2013). An `extend`ed module's side is read from `discovered_methods`, which holds
-      # its `attr_*` and `define_method` rows, and the module's `def self.extended` hook may define any name on the
-      # extender, so it withholds too.
-      #
-      # An `inherited` hook anywhere on the chain past the receiver's own entry runs when the receiver's class is
-      # created and may define any singleton method on it (`def self.inherited(s) = s.define_singleton_method(:x)`),
-      # so a `def` the receiver only inherits is withheld then as well: a class's `def self.inherited`, or an
-      # `inherited` an extended module defines.
-      def dynamic_singleton_definer_ahead?(class_name, method_name, owner)
-        name = method_name.to_sym
-        chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
-        return true if class_name.to_s != owner.to_s && inherited_hook_on_chain?(chain, class_name.to_s)
-
-        chain.entries.each do |entry|
-          next if entry.external?
-          return false if entry.name == owner.to_s
-          return true if entry_defines_without_def?(entry, name)
-          # Issue #1592 — a hook of a module the class includes may have extended it with a module no table names.
-          return true if entry.side == :singleton && chain.hook_open_nodes.include?(entry.name)
-        end
-        false
-      end
-
-      def inherited_hook_on_chain?(chain, receiver_name)
-        chain.entries.any? do |entry|
-          next false if entry.external? || entry.name == receiver_name
-
-          if entry.side == :singleton
-            !scope.singleton_def_for(entry.name, :inherited).nil?
-          else
-            scope.discovered_method?(entry.name, :inherited, :instance)
-          end
-        end
-      end
-
-      def entry_defines_without_def?(entry, name)
-        unless entry.side == :singleton
-          return scope.discovered_method?(entry.name, name, :instance) ||
-                 !scope.singleton_def_for(entry.name, :extended).nil?
-        end
-
-        discovery = scope.discovery
-        # No edge of its own: `singleton_def_through_ancestors`' chain search filed every entry ahead of the owner.
-        discovery.contested?(:discovered_method_visibilities, [entry.name, [:singleton, name]]) ||
-          discovery.contested?(:discovered_method_visibilities, [entry.name, SINGLETON_WILDCARD_SLOT])
-      end
-
-      # The project-side singleton-method band: a `Foo.bar` call resolved against a `class << …` / `def self.…`
-      # body the project itself wrote. Which of the two tiers applies is decided by the receiver carrier —
-      # `Singleton[Foo]` when the constant names a class or module, `Nominal[…]` when it holds an ordinary
-      # object (#320) — so the two are mutually exclusive and consulting both is one resolution attempt.
-      def try_project_singleton_inference(receiver, call_node, arg_types, method_name: call_node.name,
-                                          block_type: nil)
-        kwargs = { method_name: method_name, block_type: block_type }
-        try_singleton_method_inference(receiver, call_node, arg_types, **kwargs) ||
-          try_singleton_object_constant_inference(receiver, call_node, arg_types, **kwargs)
-      end
-
-      # #320 — resolves a call whose receiver is a constant holding an ordinary object with a `class << Const`
-      # singleton body, re-typing that body with the call's argument types bound. `self` inside the body IS
-      # that object, so the receiver carrier is passed through unchanged. Own-constant only, and only for a
-      # name the project actually recorded — a miss degrades to today's `Dynamic[top]`, never a false
-      # resolution. `Singleton` receivers never reach here: {#try_singleton_method_inference} owns them.
-      def try_singleton_object_constant_inference(receiver, call_node, arg_types, method_name: call_node.name,
-                                                  block_type: nil)
-        return nil unless receiver.is_a?(Type::Nominal)
-
-        def_node = SingletonObjectConstant.def_node_for(call_node, receiver, method_name, scope)
-        return nil if def_node.nil?
-
-        arg_types, positionals_unknown = positional_correspondence(call_node, arg_types)
-        infer_user_method_return(def_node, receiver, arg_types, yield_type: block_type,
-                                                                positionals_unknown: positionals_unknown)
-      rescue StandardError
-        nil
-      end
-
       CLASS_GRAPH_CACHE = TypingState.memo(
         :class_graph_cache,
         run_scoped: true,
@@ -2827,7 +2454,7 @@ module Rigor
         unless slot && slot[0].equal?(discovery)
           # `self_pure` is issue #525's grant scan (identity-keyed by def node); it belongs here because it
           # is a pure function of the same frozen index — the sibling resolver it walks reads nothing else.
-          # `singleton_def` is added lazily by {#resolve_singleton_def_with_owner}.
+          # `singleton_def` is added lazily by {CallLadder::ProjectSingleton.resolve_singleton_def_with_owner}.
           slot = [discovery, fresh_class_graph_buckets]
           state[CLASS_GRAPH_CACHE] = slot
         end

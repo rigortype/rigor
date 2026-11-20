@@ -128,6 +128,10 @@ lib/rigor/environment/rbs_loader.rb:
   producers:
     Rigor::Environment::RbsLoader.each_declared_member: grandfathered
     Rigor::Environment::RbsLoader.member_visibility: grandfathered
+lib/rigor/inference/call_ladder/project_singleton.rb:
+  computes: the call ladder's project-singleton rung, a call on a class object or a constant's singleton object typed from the singleton def the project wrote (ADR-116 WD12)
+  producers:
+    Rigor::Inference::CallLadder::ProjectSingleton#hidden_hook_definer?: 'a consumer, not a declaration producer (#1592); it reads the recorded visibility of the module a hook extends the class with, and the class''s own extends through Scope#singleton_extends_of, to withhold a class-side answer Ruby refuses, and writes no table'
 lib/rigor/inference/captured_locals.rb:
   computes: the outer locals a block body can rebind
   producers:
@@ -162,7 +166,6 @@ lib/rigor/inference/expression_typer.rb:
   computes: the type a class or module expression evaluates to, and the barrier around a re-typed callee body
   producers:
     Rigor::Inference::ExpressionTyper: grandfathered
-    Rigor::Inference::ExpressionTyper#hidden_hook_definer?: 'a consumer, not a declaration producer (#1592); it reads the recorded visibility of the module a hook extends the class with, and the class''s own extends through Scope#singleton_extends_of, to withhold a class-side answer Ruby refuses, and writes no table'
     Rigor::Inference::ExpressionTyper#prefix_statement_jump_free?: grandfathered
     Rigor::Inference::ExpressionTyper#untraced_type_of: grandfathered
     Rigor::Inference::ExpressionTyper#yield_reachable?: grandfathered

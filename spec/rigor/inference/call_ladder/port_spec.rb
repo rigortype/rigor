@@ -20,15 +20,21 @@ require "spec_helper"
 # Nor does the module type code another way: it names no typing class (`CallLadderPort::TYPING_CLASSES`:
 # `ExpressionTyper`, `StatementEvaluator`), and calls no typing entry (`CallLadderPort::TYPING_ENTRIES`: the typer's
 # `return_type_for`, and each method of `Scope` that builds a typer, which the spec reads off `scope.rb`) on anything
-# but the local `typer`, `typer.scope` included. Either would type past `PORT` and the cut-off.
+# but the local `typer`, `typer.scope` included. Either would type past `PORT` and the cut-off. It calls no `const_get`
+# on anything (`CallLadderPort::CONSTANT_LOOKUPS`), whatever the argument: `Rigor::Inference.const_get(:ExpressionTyper)`
+# names a typing class with no constant node to see, and a name the module builds could name any. A rung names the
+# constants it uses.
 #
 # Beside that, the tables are held to the code from both sides. A rung module exposes exactly its rung's `asked_as`
 # and the entries `CallLadder::SECOND_ENTRIES` names for it; every other function is hidden by `private_class_method`.
 # The rung's entry takes `(site, typer)`. A second entry that is not given the typer is a function of its arguments
 # alone: it takes neither a typer nor a scope, calls nothing with no receiver and nothing on `self` or on a constant,
 # and reads no instance, class or global variable. Every member of `PORT` is called by some rung, no rung calls back
-# more than four members beside `scope` (the #3318 cut-off), and each member is a public method of the typer marked
-# `@api private`, the re-entry points made public by the typer's one `public` statement.
+# more than four members beside `scope` (the #3318 cut-off), and each member is a public method of the typer. `PORT` is
+# `scope`, the public callbacks (`CallLadder::PUBLIC_CALLBACKS`) and the re-entry points (`CallLadder::REENTRY`). A
+# public callback (`type_of`) was public before any rung needed it: it counts toward the cut-off as a re-entry point
+# does, and is exempt from the rest. `scope` and each re-entry point are marked `@api private`, and the re-entry points
+# are made public by the typer's one `public` statement.
 #
 # Every name the reading matches comes from a table, so a rung slice edits `call_ladder.rb` and not this file. The
 # examples under "the reading" prove the rule on a rung module and tables of their own.
@@ -36,7 +42,11 @@ require "spec_helper"
 # What the reading cannot see. It knows the typer by the name of the local that holds it, so a typer reached another
 # way is not held: one a function builds, or one read off another object. A typer built for the module by another
 # module it calls (`OperandWalk` builds one) is not seen either. It reads the files under `call_ladder/`
-# only. A call spelled through `send` on something that is not the local `typer` is a call on that other thing.
+# only. A call spelled through `send` on something that is not the local `typer` is a call on that other thing. A
+# typing class reached by a way that is neither a constant nor `const_get` (`eval`, `ObjectSpace`, a constant another
+# module hands over) is not seen, and neither is a call whose selector is built at run time
+# (`Object.send(:"const_#{x}", n)`, `public_send(selector, n)`): a reflective call is read by its first argument only
+# where that is a literal symbol or string.
 RSpec.describe "The call ladder's port" do
   def ladder = Rigor::Inference::CallLadder
 
@@ -44,10 +54,13 @@ RSpec.describe "The call ladder's port" do
     it_behaves_like "the port the tables declare"
 
     it "is frozen with the tables beside it, and read by nothing under lib/" do
-      tables = [ladder::PORT, ladder::REENTRY, ladder::SECOND_ENTRIES, ladder::DISPATCHER_INTERIOR]
+      tables = [ladder::PORT, ladder::PUBLIC_CALLBACKS, ladder::REENTRY, ladder::SECOND_ENTRIES,
+                ladder::DISPATCHER_INTERIOR]
+
+      inside = CallLadderPin.table_reads("PORT.include?(name); SECOND_ENTRIES; PUBLIC_CALLBACKS", inside: true)
 
       expect(tables).to all(satisfy { |table| Ractor.shareable?(table) })
-      expect(CallLadderPin.table_reads("PORT.include?(name); SECOND_ENTRIES", inside: true).size).to eq(2)
+      expect(inside.size).to eq(3)
       expect(CallLadderPin.table_reads("CallLadder::REENTRY + CallLadder::DISPATCHER_INTERIOR").size).to eq(2)
       expect(CallLadderPin.engine_reads).to eq([])
     end
@@ -161,6 +174,15 @@ RSpec.describe "The call ladder's port" do
       expect([gate, other].map { |source| breaches(source).size }).to eq([1, 1])
     end
 
+    # ADR-116, the #3318 cut-off: a public callback is a fifth callback as a re-entry point would be.
+    it "counts a public callback toward the cut-off as it counts a re-entry point, and the scope read as neither" do
+      typed = edit(rung, "found = lookup(name, typer.scope)", "found = lookup(typer.type_of(name), typer.scope)")
+      reentry = %i[infer_user_method_return degrade_if_overridable]
+
+      expect(CallLadderPort.callbacks(read(rung).typer_calls)).to eq(reentry)
+      expect(CallLadderPort.callbacks(read(typed).typer_calls)).to eq([:type_of, *reentry])
+    end
+
     it "fails a scope read off anything but the typer" do
       source = edit(rung, "lookup(name, typer.scope)", "lookup(name, site.scope)")
 
@@ -194,6 +216,25 @@ RSpec.describe "The call ladder's port" do
       expect(spelled.map { |to| bypasses.call(to).size }).to eq([1, 1, 1, 1, 1, 1])
       expect(read(rung).typing_bypasses).to eq([])
       expect(bypasses.call("Type::Nominal.new(scope.user_def_for(name))")).to eq([])
+    end
+
+    # The two probes #3371's second review round wrote: each names `ExpressionTyper` with no constant node for it.
+    it "fails `const_get` on anything, whatever it names: by name, through a literal reflective call, or as a block" do
+      lookup = "scope.user_def_for(\"C\", name)"
+      probes = [
+        "Rigor::Inference.const_get(:ExpressionTyper).new(scope: scope)",
+        "Object.const_get(\"Rigor::Inference::ExpressionTyper\").new(scope: scope)"
+      ]
+      spelled = ["Type.const_get(name)", "Object.send(:const_get, name)", "[name].map(&Object.method(:const_get))",
+                 "[Type].map(&:const_get)"]
+      bypasses = ->(to) { read(edit(rung, lookup, to)).typing_bypasses }
+
+      expect(bypasses.call(probes.first)).to eq(
+        ["CallLadder::Sample.lookup (line 19): calls `const_get`; a rung names the constants it uses, and types only " \
+         "through its typer"]
+      )
+      expect((probes + spelled).map { |to| bypasses.call(to).size }).to eq([1, 1, 1, 1, 1, 1])
+      expect(bypasses.call("Type.const_defined?(name) && Type::Nominal")).to eq([])
     end
 
     it "reads what a module exposes off its `private_class_method`, and a name it hides with no definition" do

@@ -16,8 +16,9 @@ require "spec_helper"
 # - no other file reaches one, and none is reached through a reflective call that spells its name (`send`,
 #   `public_send`, `method`, …) or as a `&:name` block.
 #
-# The names are held as names: a method of that name on any other object fails here too. `scope`, the port's other
-# member, is not a re-entry point and is not held; it reads the frame and runs nothing.
+# The names are held as names: a method of that name on any other object fails here too. The port's other members are
+# not re-entry points and are not held: `scope` reads the frame and runs nothing, and a public callback
+# (`CallLadder::PUBLIC_CALLBACKS`: `type_of`) is the typer's own entry, which any holder of a typer may call.
 #
 # The second rule is about the other direction. `CallLadder::DISPATCHER_INTERIOR` (`resolve`, `resolve_site`) is the
 # dispatcher's own: `resolve_site` is the tier ladder and `resolve` its keyword entry for a tier that dispatches

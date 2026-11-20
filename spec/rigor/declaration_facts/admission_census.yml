@@ -156,6 +156,7 @@ members:
     - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/block_call_timing.rb
+    - lib/rigor/inference/call_ladder/project_singleton.rb
     - lib/rigor/inference/expression_typer.rb
     - lib/rigor/inference/global_writer_reach.rb
     - lib/rigor/inference/method_dispatcher/process_folding.rb
@@ -182,6 +183,9 @@ members:
       - paired_copy
       lib/rigor/inference/block_call_timing.rb:
       - existence
+      lib/rigor/inference/call_ladder/project_singleton.rb:
+      - identity
+      - consults_contested
       lib/rigor/inference/expression_typer.rb:
       - identity
       - existence
@@ -220,8 +224,8 @@ members:
     - lib/rigor/analysis/check_rules/override_visibility.rb
     - lib/rigor/analysis/check_rules/visibility_mismatch.rb
     - lib/rigor/analysis/runner.rb
+    - lib/rigor/inference/call_ladder/project_singleton.rb
     - lib/rigor/inference/definer_resolution.rb
-    - lib/rigor/inference/expression_typer.rb
     copies:
     - lib/rigor/inference/project_seed_tables.rb
     justified:
@@ -235,9 +239,9 @@ members:
       - consults_contested
       lib/rigor/analysis/runner.rb:
       - paired_copy
-      lib/rigor/inference/definer_resolution.rb:
+      lib/rigor/inference/call_ladder/project_singleton.rb:
       - consults_contested
-      lib/rigor/inference/expression_typer.rb:
+      lib/rigor/inference/definer_resolution.rb:
       - consults_contested
   discovered_parameter_envelopes:
     reads:

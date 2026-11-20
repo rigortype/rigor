@@ -63,6 +63,7 @@ require_relative "call_ladder/project_singleton"
 require_relative "call_ladder/literal_send"
 require_relative "call_ladder/top_level_def"
 require_relative "call_ladder/overriding_def"
+require_relative "call_ladder/refined"
 
 module Rigor
   module Inference
@@ -521,7 +522,7 @@ module Rigor
       end
 
       # @api private — the scope this typer reads. Public only so a rung module of the call ladder can read it from
-      # the typer it is given ({CallLadder::PORT}, with the four methods made public at the end of this class).
+      # the typer it is given ({CallLadder::PORT}, with the methods made public at the end of this class).
       attr_reader :scope
 
       private
@@ -1524,6 +1525,9 @@ module Rigor
         block_return_type_for(node, receiver, []).is_a?(Type::Bot)
       end
 
+      # @api private — a member of {CallLadder::PORT}, made public at the end of this class: the refined rung
+      # ({CallLadder::Refined}) re-enters the ladder here for each member of a union receiver no refinement wins.
+      #
       # The call ladder: {CallLadder::RUNGS} (`call_ladder.rb`) declares this order, and its spec holds the code to it.
       def call_result_type_for(node, receiver_override: nil)
         narrowed = indexed_narrowing_for(node)
@@ -1538,10 +1542,7 @@ module Rigor
         # asks nothing further of dispatch. Off (the default) this is one integer read.
         Effects::Collector.record_call(node, receiver, scope) if Effects::Collector.active?
 
-        refined = try_refined_dispatch(node, receiver, arg_types, block_type)
-        return refined if refined
-
-        # ADR-116 WD12 — the call's site, built once and asked of every rung from here on that takes one.
+        # ADR-116 WD12 — the call's site, built once and asked of every rung that takes one.
         site = MethodDispatcher::CallContext.build(
           receiver: receiver,
           method_name: node.name,
@@ -1551,6 +1552,9 @@ module Rigor
           call_node: node,
           scope: scope
         )
+        refined = CallLadder::Refined.try_call(site, self)
+        return refined if refined
+
         literal_send = CallLadder::LiteralSend.try_call(site, self)
         return literal_send if literal_send
 
@@ -1572,164 +1576,6 @@ module Rigor
         return result if result
 
         dispatch_miss_result(site, node, receiver)
-      end
-
-      # ADR-121 WD2 (issue #1664) — a call through an in-effect Ruby refinement, typed from the winning refine body
-      # with the call's receiver as `self`, ahead of every tier below: each answers from the method the refinement
-      # replaces (a refined `String#upcase` must not fold, a refined `map` must not fold per element, a top-level
-      # `def` must not bind ahead of a refinement of `Object`, a plugin models the class's own method). An unreadable
-      # body, or a list that may hold any refinement, answers `Dynamic[top]`, never the replaced method's signature.
-      # A union receiver is decided per member; a `Dynamic` receiver and a call no refinement wins fall through. A
-      # class object walks its own lookup (issue #1752): under `refine(Object) { def oo = :o }` a refinement that wins
-      # `Integer.oo` answers `Dynamic[top]` ({#refined_class_object_result}). A call site no refinement is in effect
-      # at answers nil at once and records nothing: its answer cannot change without an edit to its own file.
-      #
-      # ADR-121 WD7 (A2) — inside the span of an activation that puts an opaque module in effect
-      # ({InEffectRefinements.opaque_module?}), any method of any object may be replaced, so every call on an instance
-      # or a class object answers `Dynamic[top]`.
-      def try_refined_dispatch(node, receiver, arg_types, block_type)
-        list = scope.in_effect_refinements(node)
-        return nil if list.empty?
-
-        InEffectRefinements.record_refinement_names(node.name)
-        return dynamic_top if refined_receiver?(receiver) && opaque_refinement_span?(node, list)
-        return nil if scope.discovered_refinements.empty?
-
-        refined_indirect_result(node, receiver, list) ||
-          refined_receiver_result(node, receiver, list, arg_types, block_type)
-      end
-
-      # ADR-121 WD4 — `send` / `__send__` / `public_send` with a literal name, `respond_to?` and `method` /
-      # `public_method` with one, and a `&:name` block argument honour refinements too (CRuby `test_refinement.rb`;
-      # probed on Ruby 4.0.5). When the name they reach is refined in effect for the receiver they answer
-      # `Dynamic[top]`: typing them through the arm is deferred, and `respond_to?` must never fold to `false`. A
-      # `&:name` block's receiver is the yielded element, which is not known here, so any in-effect refinement of the
-      # name answers. Only `methods` ignores refinements and keeps its answer.
-      def refined_indirect_result(node, receiver, list)
-        name = REFINED_NAMING_CALLS.include?(node.name) ? literal_method_name_argument(node) : nil
-        return dynamic_top if name && refined_name_for?(receiver, name, list)
-
-        block_name = symbol_block_argument(node)
-        dynamic_top if block_name && RefinedDispatch.refined_anywhere?(scope, block_name, list)
-      end
-
-      REFINED_NAMING_CALLS = Set[:send, :__send__, :public_send, :respond_to?, :method, :public_method].freeze
-      private_constant :REFINED_NAMING_CALLS
-
-      def literal_method_name_argument(node)
-        argument = node.arguments&.arguments&.first
-        name = argument.unescaped if argument.is_a?(Prism::SymbolNode) || argument.is_a?(Prism::StringNode)
-        return nil if name.nil?
-
-        name = name.to_sym
-        InEffectRefinements.record_refinement_names(name)
-        name
-      end
-
-      def symbol_block_argument(node)
-        block = node.block
-        return nil unless block.is_a?(Prism::BlockArgumentNode) && block.expression.is_a?(Prism::SymbolNode)
-
-        name = block.expression.unescaped.to_sym
-        InEffectRefinements.record_refinement_names(name)
-        name
-      end
-
-      def refined_name_for?(receiver, name, list)
-        members = receiver.is_a?(Type::Union) ? receiver.members : [receiver]
-        members.any? do |member|
-          next !RefinedDispatch.winner(scope, member.class_name, name, list, kind: :singleton).nil? if
-            member.is_a?(Type::Singleton)
-
-          class_name = refined_receiver_class_name(member)
-          !class_name.nil? && !RefinedDispatch.winner(scope, class_name, name, list).nil?
-        end
-      end
-
-      # ADR-121 WD7 — does the call's lexical list (a plugin-declared module is the plugin's declaration and never
-      # opaque) hold an opaque module? `list` is the full list, which is the lexical one when nothing is declared.
-      def opaque_refinement_span?(node, list)
-        lexical = scope.declared_refinements.empty? ? list : scope.in_effect_refinements(node, InEffectRefinements::EMPTY)
-        InEffectRefinements.opaque_in?(scope, lexical)
-      end
-
-      # Does `receiver` (or a member of a union) have a lookup the refined arm answers for: an instance of a class,
-      # or a class object (issue #1752), not `Dynamic`?
-      def refined_receiver?(receiver)
-        members = receiver.is_a?(Type::Union) ? receiver.members : [receiver]
-        members.any? { |member| member.is_a?(Type::Singleton) || !refined_receiver_class_name(member).nil? }
-      end
-
-      def refined_receiver_result(node, receiver, list, arg_types, block_type)
-        return refined_member_result(node, receiver, list, arg_types, block_type) unless receiver.is_a?(Type::Union)
-
-        answers = receiver.members.map { |member| refined_member_result(node, member, list, arg_types, block_type) }
-        return nil if answers.none?
-
-        members = receiver.members.each_with_index.map do |member, index|
-          answers[index] || call_result_type_for(node, receiver_override: member)
-        end
-        Type::Combinator.union(*members)
-      end
-
-      def refined_member_result(node, receiver, list, arg_types, block_type)
-        return refined_class_object_result(node, receiver, list, arg_types, block_type) if
-          receiver.is_a?(Type::Singleton)
-
-        class_name = refined_receiver_class_name(receiver)
-        return nil if class_name.nil?
-
-        winner = RefinedDispatch.winner(scope, class_name, node.name, list)
-        return nil if winner.nil?
-        return dynamic_top if winner == RefinedDispatch::UNKNOWN
-
-        refined_body_return(winner, node, Type::Combinator.nominal_of(class_name), arg_types, block_type) ||
-          dynamic_top
-      end
-
-      # Issue #1752 — a call on a class object, walked through its singleton levels. A refinement that wins answers
-      # `Dynamic[top]`, never its refine body's type: a hook on any ancestor (an RBS-declared `include Singleton`, a
-      # gem concern, `define_singleton_method(:included)`, a `Module#included` patch) can install the class object's
-      # own method where no table sees it, and the body's type then fires downstream on correct code. A walk that finds
-      # no winner keeps the class object's own answer (`Integer.sqrt(16)` stays `Integer`).
-      def refined_class_object_result(node, receiver, list, _arg_types, _block_type)
-        winner = RefinedDispatch.winner(scope, receiver.class_name, node.name, list, kind: :singleton)
-        dynamic_top unless winner.nil?
-      end
-
-      # The winning refine body's inferred return, re-typed with the receiver's class as `self` and the call's
-      # argument types bound as an undeclared method's are; nil when the body is not readable here.
-      #
-      # A body another file wrote is re-typed with that file's in-effect refinements at the `def` (its own module
-      # among them), so a sibling override it calls answers from its refine body too.
-      def refined_body_return(winner, call_node, self_type, arg_types, block_type)
-        def_node, foreign =
-          InEffectRefinements.refinement_def_with_query(scope, winner.module_name, winner.refined_class, call_node.name)
-        return nil if def_node.nil?
-
-        refinements = foreign&.at(def_node.location.start_offset) do |name|
-          InEffectRefinements.activated_modules(scope, name)
-        end
-        arg_types, positionals_unknown = positional_correspondence(call_node, arg_types)
-        infer_user_method_return(def_node, self_type, arg_types, yield_type: block_type, refinements: refinements,
-                                                                 positionals_unknown: positionals_unknown)
-      rescue StandardError
-        nil
-      end
-
-      # The class an instance-side receiver is an instance of, or nil for one this instance walk does not answer: a
-      # class object (it walks its own lookup, {#refined_class_object_result}), `Dynamic`, `top`, or a shape with no
-      # class.
-      def refined_receiver_class_name(receiver)
-        case receiver
-        when Type::Nominal, Type::StructInstance, Type::DataInstance then receiver.class_name
-        when Type::Constant then receiver.value.class.name
-        when Type::Tuple then "Array"
-        when Type::HashShape then "Hash"
-        when Type::IntegerRange then "Integer"
-        when Type::FloatRange then "Float"
-        when Type::Refined, Type::Difference then refined_receiver_class_name(receiver.base)
-        end
       end
 
       # Issue #1237 — whether the call's argument list leaves the positional correspondence unknown: it holds a
@@ -5800,12 +5646,12 @@ module Rigor
       end
 
       # @api private — the typer's side of the call ladder's port (ADR-116 WD12). A rung module under `call_ladder/`
-      # is given the walking typer and calls these five on it, and reads `scope`; `CallLadder::PORT` is that list and
+      # is given the walking typer and calls these six on it, and reads `scope`; `CallLadder::PORT` is that list and
       # `spec/rigor/inference/call_ladder/port_spec.rb` holds both sides to it. Each runs this typer's own code inside
       # the `type_of` walk that asked the rung, so nothing outside `call_ladder/` may call one on a typer it holds
       # (`spec/rigor/inference/call_ladder/reentry_spec.rb`).
       public :class_graph_buckets, :positional_correspondence, :infer_user_method_return, :degrade_if_overridable,
-             :resolve_user_def_through_ancestors
+             :resolve_user_def_through_ancestors, :call_result_type_for
     end
   end
 end

@@ -21,8 +21,10 @@ require "tmpdir"
 # asks the ladder for two or more different things, a rung or a method a place is written in. There a rung is
 # asked by its own entry or by a second entry of its module (`CallLadder::SECOND_ENTRIES`: its gate, its
 # positional entry), except a second entry called in that module's own file, which is the rung's body: the own-`def`
-# rung tests its own gate and asks user-method inference once. The rung's own entry is an ask everywhere. A method
-# that asks for one is not an order and is not held. A failure says which edit settles it ({CallLadderPin::Advice}).
+# rung tests its own gate and asks user-method inference once. The rung's own entry is an ask everywhere. A method a
+# place is written in is asked with no receiver in its own file, and on the local `typer` a module is given: the refined
+# rung re-enters the call's ladder there for a member of a union. A method that asks for one is not an order and is not
+# held. A failure says which edit settles it ({CallLadderPin::Advice}).
 #
 # Every spelling the reading matches comes from a row. The examples under "the reading" prove that on a small
 # typer and tables of their own, so that a rung whose body moves edits its row in `call_ladder.rb` and nothing
@@ -482,6 +484,33 @@ RSpec.describe Rigor::Inference::CallLadder do
           [["ExpressionTyper", :elsewhere, %i[overriding_def user_method]],
            ["CallLadder::OverridingDef", :astray, %i[overriding_def user_method dispatcher]]]
         )
+      end
+
+      # The refined rung re-enters the call's ladder on the typer it is given, for a member of a union receiver no
+      # refinement wins (`typer.call_result_type_for`, a re-entry point). That asks the place, so a function that
+      # re-enters it and asks another rung writes a sequence of two, and one that only re-enters asks one. A call of
+      # the same name on anything but the local `typer` is not the typer's.
+      it "counts a rung module's re-entry into a place, on the typer it is given, as an ask of that place" do
+        body = <<~MODULE
+          module Rigor::Inference::CallLadder::Refined
+            module_function
+
+            def try_call(site, typer)
+              member(site, typer) || typer.call_result_type_for(site.call_node, receiver_override: site.receiver)
+            end
+
+            def astray(site, typer)
+              typer.call_result_type_for(site.call_node) || UserMethod.try_call(site, typer)
+            end
+
+            def elsewhere(site, other)
+              other.call_result_type_for(site.call_node) || UserMethod.try_call(site, other)
+            end
+          end
+        MODULE
+        reading = read(moved_typer, rungs: moved_rungs, modules: { "CallLadder::Refined" => body })
+
+        expect(reading.stray_sequences).to eq([["CallLadder::Refined", :astray, %i[call_result_type_for user_method]]])
       end
 
       it "reads a gate by its own name: the same answer under another test is no gate" do

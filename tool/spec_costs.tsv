@@ -227,6 +227,7 @@
 0.17	spec/rigor/inference/call_ladder/port_spec.rb
 0.15	spec/rigor/inference/call_ladder/project_singleton_spec.rb
 0.18	spec/rigor/inference/call_ladder/reentry_spec.rb
+0.39	spec/rigor/inference/call_ladder/refined_spec.rb
 0.88	spec/rigor/inference/call_ladder/top_level_def_spec.rb
 0.13	spec/rigor/inference/call_ladder/user_method_spec.rb
 0.18	spec/rigor/inference/call_ladder_spec.rb

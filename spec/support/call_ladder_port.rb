@@ -21,7 +21,7 @@ module CallLadderPort
   # examples.
   ENGINE_GLOBS = %w[lib/**/*.rb plugins/*/lib/**/*.rb examples/*/lib/**/*.rb].freeze
   # The parameter a rung function holds the typer in. The reading knows the typer by this name alone.
-  TYPER = :typer
+  TYPER = CallLadderPin::TYPER_LOCAL
   # Calls that name the method they reach in their first argument.
   REFLECTIVE = %i[send __send__ public_send method public_method instance_method respond_to?].freeze
   # ADR-116, the #3318 cut-off: a rung calls back at most this many distinct typer methods, the scope read aside.

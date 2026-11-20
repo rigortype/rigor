@@ -3,8 +3,8 @@
 module Rigor
   module Inference
     # ADR-121 WD2 (issue #1664) — which in-effect refinement, if any, answers a call on an instance of a class. The
-    # typed refined arm (`ExpressionTyper#try_refined_dispatch`) asks it before every other answer, because those
-    # answer from the method a refinement replaces.
+    # typed refined arm (`CallLadder::Refined.try_call`, the first rung of the call ladder) asks it before every other
+    # answer, because those answer from the method a refinement replaces.
     #
     # Precedence follows `doc/syntax/refinements.rdoc` § Method Lookup: walk the receiver's classes from the most
     # derived. At each class, the latest in-effect module refining the name for that class wins; otherwise its

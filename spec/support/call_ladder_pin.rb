@@ -14,6 +14,10 @@ module CallLadderPin
   NAMESPACE = "Rigor::Inference"
   LIB = "lib/rigor/inference"
   ROOT = File.expand_path("../..", __dir__)
+  # The parameter a rung module (or a module under `expression_typer/`) holds the walking typer in, and the typer's
+  # own home. The reading knows a typer held in a local by this name alone.
+  TYPER_LOCAL = :typer
+  TYPER_HOME = "ExpressionTyper"
 
   # A sequence the spec holds: an entry's own methods (`exception` nil), or a branch an exception row names.
   Place = Data.define(:name, :entry, :exception)
@@ -251,8 +255,9 @@ module CallLadderPin
 
     # `[home, method, asks]` for each method outside the places that asks the ladder for two or more different
     # things: a sequence the tables do not hold. A rung counts by its name, asked by its own entry or by a second
-    # entry of its module, and so does a method a place is written in, since a continuation is the rungs it holds.
-    # In a rung module's own file a call of its own second entries is the rung at work, not an ask ({#ladder_asks}).
+    # entry of its module, and so does a method a place is written in, since a continuation is the rungs it holds:
+    # with no receiver in that place's file, and on the local `typer` a module is given ({#place_ask?}). In a rung
+    # module's own file a call of its own second entries is the rung at work, not an ask ({#ladder_asks}).
     def stray_sequences
       methods = @defs.flat_map { |home, by_name| by_name.flat_map { |name, found| found.map { [home, name, it] } } }
       methods.filter_map do |home, name, definition|
@@ -407,10 +412,21 @@ module CallLadderPin
         rung = direct || second_entry_rung(node, home)
         next if !direct && rung && rung.home == home
 
-        place = node.receiver.nil? && place_methods.include?([home, node.name])
-        found << (rung ? rung.name : node.name) if rung || place
+        found << (rung ? rung.name : node.name) if rung || place_ask?(node, home)
       end
       found
+    end
+
+    # Whether `call`, read in `home`'s file, asks a method a place is written in: with no receiver in the place's own
+    # file, or on the local {TYPER_LOCAL} for a place of the typer. The second is a re-entry: the refined rung asks the
+    # call's ladder again for a member of a union receiver (`typer.call_result_type_for`), so a function that did that
+    # and asked another rung would write a sequence of two.
+    def place_ask?(call, home)
+      receiver = call.receiver
+      return place_methods.include?([home, call.name]) if receiver.nil?
+
+      receiver.is_a?(Prism::LocalVariableReadNode) && receiver.name == TYPER_LOCAL &&
+        place_methods.include?([TYPER_HOME, call.name])
     end
 
     # The rung whose module `call` asks through one of its second entries, spelled as a rung's own entry is: a

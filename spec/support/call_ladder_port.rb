@@ -36,6 +36,11 @@ module CallLadderPort
   # `scope.rb` to keep this list whole). A rung module calls none of them on anything but its typer, where `PORT`
   # decides.
   TYPING_ENTRIES = %i[type_of return_type_for user_method_return evaluate].freeze
+  # What reaches a constant by its name. A rung module names the constants it uses; through `const_get` it could reach
+  # one of {TYPING_CLASSES} with no constant node to see (`Rigor::Inference.const_get(:ExpressionTyper)`,
+  # `Object.const_get("Rigor::Inference::ExpressionTyper")`), and through a name it builds, any constant at all. So
+  # the call is banned whatever its argument: a reading of its literal argument would miss a name that is built.
+  CONSTANT_LOOKUPS = %i[const_get].freeze
   SCOPE_FILE = "lib/rigor/scope.rb"
 
   module_function
@@ -247,18 +252,15 @@ module CallLadderPort
     end
 
     # Where the module would type code itself rather than through its typer, as messages: a constant naming one of
-    # {TYPING_CLASSES}, and a call of one of {TYPING_ENTRIES} on anything but the local `typer` (a scope, `typer.scope`
-    # included), by name, through a reflective call that spells it, or as a `&:name` block.
+    # {TYPING_CLASSES}, a call of one of {TYPING_ENTRIES} on anything but the local `typer` (a scope, `typer.scope`
+    # included), and a call of one of {CONSTANT_LOOKUPS} on anything. A call counts by name, through a reflective
+    # call that spells it, or as a `&:name` block.
     def typing_bypasses
       named = @nodes.select { |node| CallLadderPort.typing_constant?(node) }.map do |node|
         "#{where(node)}: names `#{node.slice}`; a rung types only through its typer"
       end
       entered = @nodes.grep(Prism::CallNode).flat_map do |call|
-        [CallLadderPort.reached(call), CallLadderPort.block_symbol(call)].uniq.filter_map do |name|
-          next unless TYPING_ENTRIES.include?(name) && !typer?(call.receiver)
-
-          "#{where(call)}: calls `#{name}` on `#{call.receiver&.slice || 'self'}`; a rung types only through its typer"
-        end
+        [CallLadderPort.reached(call), CallLadderPort.block_symbol(call)].uniq.filter_map { |name| bypass(call, name) }
       end
       named + entered
     end
@@ -338,6 +340,16 @@ module CallLadderPort
       definition = node
       definition = @parents[definition] until definition.nil? || definition.is_a?(Prism::DefNode)
       "#{home}#{".#{definition.name}" if definition} (line #{node.location.start_line})"
+    end
+
+    # Why `call`, reaching `name`, types past the typer, or nil.
+    def bypass(call, name)
+      if CONSTANT_LOOKUPS.include?(name)
+        return "#{where(call)}: calls `#{name}`; a rung names the constants it uses, and types only through its typer"
+      end
+      return unless TYPING_ENTRIES.include?(name) && !typer?(call.receiver)
+
+      "#{where(call)}: calls `#{name}` on `#{call.receiver&.slice || 'self'}`; a rung types only through its typer"
     end
 
     def impurity(name, node)

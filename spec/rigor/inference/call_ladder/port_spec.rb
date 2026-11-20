@@ -20,7 +20,10 @@ require "spec_helper"
 # Nor does the module type code another way: it names no typing class (`CallLadderPort::TYPING_CLASSES`:
 # `ExpressionTyper`, `StatementEvaluator`), and calls no typing entry (`CallLadderPort::TYPING_ENTRIES`: the typer's
 # `return_type_for`, and each method of `Scope` that builds a typer, which the spec reads off `scope.rb`) on anything
-# but the local `typer`, `typer.scope` included. Either would type past `PORT` and the cut-off.
+# but the local `typer`, `typer.scope` included. Either would type past `PORT` and the cut-off. It calls no `const_get`
+# on anything (`CallLadderPort::CONSTANT_LOOKUPS`), whatever the argument: `Rigor::Inference.const_get(:ExpressionTyper)`
+# names a typing class with no constant node to see, and a name the module builds could name any. A rung names the
+# constants it uses.
 #
 # Beside that, the tables are held to the code from both sides. A rung module exposes exactly its rung's `asked_as`
 # and the entries `CallLadder::SECOND_ENTRIES` names for it; every other function is hidden by `private_class_method`.
@@ -39,7 +42,9 @@ require "spec_helper"
 # What the reading cannot see. It knows the typer by the name of the local that holds it, so a typer reached another
 # way is not held: one a function builds, or one read off another object. A typer built for the module by another
 # module it calls (`OperandWalk` builds one) is not seen either. It reads the files under `call_ladder/`
-# only. A call spelled through `send` on something that is not the local `typer` is a call on that other thing.
+# only. A call spelled through `send` on something that is not the local `typer` is a call on that other thing. A
+# typing class reached by a way that is neither a constant nor `const_get` (`eval`, `ObjectSpace`, a constant another
+# module hands over) is not seen.
 RSpec.describe "The call ladder's port" do
   def ladder = Rigor::Inference::CallLadder
 
@@ -209,6 +214,25 @@ RSpec.describe "The call ladder's port" do
       expect(spelled.map { |to| bypasses.call(to).size }).to eq([1, 1, 1, 1, 1, 1])
       expect(read(rung).typing_bypasses).to eq([])
       expect(bypasses.call("Type::Nominal.new(scope.user_def_for(name))")).to eq([])
+    end
+
+    # The two probes #3371's second review round wrote: each names `ExpressionTyper` with no constant node for it.
+    it "fails `const_get` on anything, whatever it names and however it is spelled" do
+      lookup = "scope.user_def_for(\"C\", name)"
+      probes = [
+        "Rigor::Inference.const_get(:ExpressionTyper).new(scope: scope)",
+        "Object.const_get(\"Rigor::Inference::ExpressionTyper\").new(scope: scope)"
+      ]
+      spelled = ["Type.const_get(name)", "Object.send(:const_get, name)", "[name].map(&Object.method(:const_get))",
+                 "[Type].map(&:const_get)"]
+      bypasses = ->(to) { read(edit(rung, lookup, to)).typing_bypasses }
+
+      expect(bypasses.call(probes.first)).to eq(
+        ["CallLadder::Sample.lookup (line 19): calls `const_get`; a rung names the constants it uses, and types only " \
+         "through its typer"]
+      )
+      expect((probes + spelled).map { |to| bypasses.call(to).size }).to eq([1, 1, 1, 1, 1, 1])
+      expect(bypasses.call("Type.const_defined?(name) && Type::Nominal")).to eq([])
     end
 
     it "reads what a module exposes off its `private_class_method`, and a name it hides with no definition" do

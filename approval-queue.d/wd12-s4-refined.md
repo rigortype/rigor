@@ -37,7 +37,11 @@ from the site throughout. A fourth came with the entry's shape: where the call's
   naming-call test (`send`, `respond_to?` …), the instance and class-object winner lookups, and the refine body's
   lookup. Reading `node.name` is the base body unchanged and is right for a call. Reading `site.method_name` is what
   the internal spec requires of a rung, and is right too for the read of `c[k] += v`, whose site has the write node
-  as its call node: that is the entry #3358's fix will add.
+  as its call node: that is the entry #3358's fix will add. One path does not follow the site: on a union receiver
+  the rung re-enters `call_result_type_for` with the write node, which has no `name` and raises. The index read does
+  not ask the rung today, so the path is unreachable; #3358's fix must re-enter the asking entry or decline unions
+  there (recorded on #3358). No guard is added here, so that a one-line fix fails loudly rather than silently
+  dropping unions.
 
 ## Decision
 

@@ -18,8 +18,10 @@ require "tmpdir"
 # So a rung out of order, a rung left out, a rung its row does not give the entry and a call that has no row
 # each fail, and so does an exception row that goes while the code it excuses stays. Two more hold the rest of
 # the files read to the tables: a place's method asks a rung only where it answers with it, and no other method
-# asks the ladder for two or more different things, a rung or a method a place is written in. A method that asks
-# for one is not an order and is not held. A failure says which edit settles it ({CallLadderPin::Advice}).
+# asks the ladder for two or more different things, a rung or a method a place is written in. There a rung is
+# asked by its own entry or by a second entry of its module (`CallLadder::SECOND_ENTRIES`: its gate, its
+# positional entry). A method that asks for one is not an order and is not held. A failure says which edit
+# settles it ({CallLadderPin::Advice}).
 #
 # Every spelling the reading matches comes from a row. The examples under "the reading" prove that on a small
 # typer and tables of their own, so that a rung whose body moves edits its row in `call_ladder.rb` and nothing
@@ -406,6 +408,21 @@ RSpec.describe Rigor::Inference::CallLadder do
         expect(failing(typer, rungs: moved_rungs)).to eq(places)
         expect(failing(moved_typer)).to eq(places)
         expect(written(read(moved_typer))[:send_target][2]).to eq([:undeclared, "CallLadder::UserMethod.try_call"])
+      end
+
+      # A second entry (`CallLadder::SECOND_ENTRIES`) is part of its module's rung: a method that tests the rung's
+      # gate and then asks another rung writes a sequence of two, and one that asks the gate and the rung asks one.
+      it "counts a second entry of the module as its rung, by the row that names it, in the check for strays" do
+        second = [ladder::SecondEntry.new(home: "CallLadder::UserMethod", name: :user_inference_receiver?,
+                                          given_typer: false, because: "the gate")]
+        gate = "    return nil unless CallLadder::UserMethod.user_inference_receiver?(node)\n\n"
+        astray = "  def elsewhere(node)\n#{gate}    try_project_singleton_inference(node)\n  end\n"
+        single = "  def own(node)\n#{gate}    CallLadder::UserMethod.try_call(site, self)\n  end\n"
+        source = edit(moved_typer, /^end\n\z/, "#{astray}#{single}end\n")
+
+        expect(read(source, rungs: moved_rungs, second_entries: second).stray_sequences)
+          .to eq([["ExpressionTyper", :elsewhere, %i[user_method project_singleton]]])
+        expect(read(source, rungs: moved_rungs).stray_sequences).to eq([])
       end
 
       it "reads a gate at its rung's home, and its answer only under that test" do

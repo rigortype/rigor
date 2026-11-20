@@ -222,10 +222,13 @@
 0.01	spec/rigor/flow_contribution/merger_spec.rb
 0.01	spec/rigor/flow_contribution/to_element_list_spec.rb
 0.03	spec/rigor/flow_contribution_spec.rb
+0.17	spec/rigor/inference/call_ladder/port_spec.rb
+0.18	spec/rigor/inference/call_ladder/reentry_spec.rb
+0.13	spec/rigor/inference/call_ladder/user_method_spec.rb
 0.18	spec/rigor/inference/call_ladder_spec.rb
 0.02	spec/rigor/inference/declaration_walk/shadow_spec.rb
 0.76	spec/rigor/inference/declaration_walk_spec.rb
-0.08	spec/rigor/inference/expression_typer/call_ladder_spec.rb
+0.32	spec/rigor/inference/expression_typer/call_ladder_spec.rb
 0.13	spec/rigor/inference/expression_typer/composites_spec.rb
 0.01	spec/rigor/inference/expression_typer/per_element_assemblers_spec.rb
 1.68	spec/rigor/inference/expression_typer/writes_spec.rb

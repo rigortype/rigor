@@ -312,6 +312,11 @@ SIG_PROVENANCE_RESIDUE = {
   # `unrenderable` for `parameter_intent`: its body is now a call of the declared `dispatch_site`, whose own body
   # returns `resolve_site`'s declared answer, so sig-gen renders both. The unrenderable row moved to the method the
   # ladder moved to.
+  # 0 net (#3345, ADR-116 WD12 S6). `ExpressionTyper#infer_user_method_return` is public for the call ladder's port
+  # and is declared `-> Type::t?`, so that what a rung module gets back from it is typed. It is `unrenderable`:
+  # sig-gen renders no return for the memo, guard and fixpoint body (`sig.skipped.untyped-return`).
+  # `ExpressionTyper#return_type_for` leaves `unrenderable` for `parameter_intent`: its body is one call of the
+  # declared method, so sig-gen renders it. The unrenderable row moved from the public face to the method behind it.
   "sig/rigor/inference.rbs" => 68,
   "sig/rigor/inference/builtins/method_catalog.rbs" => 1,
   "sig/rigor/inference/void_origin.rbs" => 5,
@@ -450,7 +455,14 @@ SIG_PROVENANCE_PARAMETER_ONLY = {
   # (`sig.skipped.untyped-return`: it answers what `RbsDispatch.try_dispatch` answers, itself a row here). The other
   # two declare the return sig-gen generates and are earned: `DiscoveredMethod` `Type::Dynamic | nil`, and
   # `CompositeReceiver` every member of `Type::t` or nil, declared `Type::t?`.
-  "sig/rigor/inference.rbs" => { unmarked: 14, marked: 0 },
+  # +2 (#3345, ADR-116 WD12 S6): `CallLadder::UserMethod`, the first rung module, has twelve functions, and eleven
+  # are declared (`note_missing_class` is not). Of those, sig-gen renders no return for
+  # `resolve_typing_def_with_owner` (it answers what `MemoAudit.check` yields) or `definer_without_single_body?` (it
+  # answers `DiscoveryIndex` predicates, undeclared), both `sig.skipped.untyped-return`. Each declares its parameters
+  # so that the `typer` and the `scope` it is given read as `ExpressionTyper` and `Scope` inside it, which the
+  # self-typing ratchet counts: 36 precise expressions and 8 call sites of `user_method.rb`, measured. The other
+  # nine declared functions declare the return sig-gen generates and are earned.
+  "sig/rigor/inference.rbs" => { unmarked: 16, marked: 0 },
   # Both rows were marked `unrenderable` rows before the class existed.
   "sig/rigor/scope.rbs" => { unmarked: 0, marked: 2 }
 }.freeze
@@ -464,12 +476,13 @@ SIG_PROVENANCE_PARAMETER_ONLY_MARKED = [
 ].freeze
 
 # #3335 — method declarations whose parameter list was compared with a recorded `def` on the tree this pin was taken
-# from (1074 on 2026-11-20 after #3345's eleven `try_dispatch` declarations for the tiers moved out of
-# `method_dispatcher.rb` in three batches and its `dispatch_site` and `resolve_site`, every one fitting). A floor, not
-# an exact pin, because every new declaration of a `def` raises it: raise it when the count grows, and lower it only
-# with the reason in the commit body (a deleted declaration, or a `def` the pairing stopped finding, which is the case
-# this floor exists to catch).
-SIG_PARAMETER_SHAPE_COMPARED_FLOOR = 1074
+# from (1088 on 2026-11-20 after #3345's eleven `try_dispatch` declarations for the tiers moved out of
+# `method_dispatcher.rb` in three batches, its `dispatch_site` and `resolve_site`, and the fourteen of slice S6: the
+# eleven declared functions of `CallLadder::UserMethod` and three typer methods of the call ladder's port, every one
+# fitting). A floor, not an exact pin, because every new declaration of a `def` raises it: raise it when the count
+# grows, and lower it only with the reason in the commit body (a deleted declaration, or a `def` the pairing stopped
+# finding, which is the case this floor exists to catch).
+SIG_PARAMETER_SHAPE_COMPARED_FLOOR = 1088
 
 module SigProvenanceSpecHelpers
   # The hard-rule failure for unmarked `tighter_return` rows. A row whose declared return is the bare `untyped` claims

@@ -8,8 +8,8 @@ require "rigor/inference/call_ladder"
 # for the rule and for what the reading cannot see.
 #
 # Everything a call is spelled with comes from the tables: a rung's `home` and `asked_as`, an entry's `home`,
-# `written_in` and `ahead`, an exception row's `written_in` and gates. Nothing here names a method of the typer,
-# so a rung whose body moves changes its row and not this file.
+# `written_in` and `ahead`, an exception row's `written_in` and gates, a second entry's `home` and `name`. Nothing
+# here names a method of the typer, so a rung whose body moves changes its row and not this file.
 module CallLadderPin
   NAMESPACE = "Rigor::Inference"
   LIB = "lib/rigor/inference"
@@ -30,12 +30,11 @@ module CallLadderPin
   def reading(root = ROOT)
     ladder = Rigor::Inference::CallLadder
     Reading.new(entries: ladder::ENTRIES, rungs: ladder::RUNGS, exceptions: ladder::EXCEPTIONS,
-                sources: sources(root))
+                second_entries: ladder::SECOND_ENTRIES, sources: sources(root))
   end
 
   # `home => source` for every file a sequence can be written in: the typer, the modules moved out of it under
-  # `expression_typer/`, and each rung module under `call_ladder/` (there is none before the first rung's body
-  # moves).
+  # `expression_typer/`, and each rung module under `call_ladder/`.
   def sources(root)
     paths = ["#{LIB}/expression_typer.rb"] + Dir.glob("#{LIB}/{expression_typer,call_ladder}/*.rb", base: root)
     paths.sort.to_h { |path| [home_of(path), File.read(File.join(root, path))] }
@@ -59,7 +58,8 @@ module CallLadderPin
     end
   end
 
-  TABLES = %w[RUNGS ENTRIES EXCEPTIONS].freeze
+  # The order's three tables, and the four of the port (`spec/support/call_ladder_port.rb` reads those).
+  TABLES = %w[RUNGS ENTRIES EXCEPTIONS PORT REENTRY SECOND_ENTRIES DISPATCHER_INTERIOR].freeze
 
   # What in `source` reads the tables: a `require` of their file, or one of them named. Inside `CallLadder`
   # (`inside`) a table can be named bare; elsewhere only `RUNGS` is a name no other constant of `lib/` has.
@@ -194,10 +194,12 @@ module CallLadderPin
 
   # The tables read against the sources. `sources` is `home => Ruby source`.
   class Reading
-    def initialize(entries:, rungs:, exceptions:, sources:)
+    # `second_entries` are rows of `CallLadder::SECOND_ENTRIES`, which only {#stray_sequences} reads.
+    def initialize(entries:, rungs:, exceptions:, sources:, second_entries: [])
       @entries = entries
       @rungs = rungs
       @exceptions = exceptions
+      @second_entries = second_entries
       @defs = sources.transform_values { |source| defs_in(source) }
     end
 
@@ -248,8 +250,8 @@ module CallLadderPin
     end
 
     # `[home, method, asks]` for each method outside the places that asks the ladder for two or more different
-    # things: a sequence the tables do not hold. A rung counts by its name, and so does a method a place is
-    # written in, since a continuation is the rungs it holds.
+    # things: a sequence the tables do not hold. A rung counts by its name, asked by its own entry or by a second
+    # entry of its module, and so does a method a place is written in, since a continuation is the rungs it holds.
     def stray_sequences
       methods = @defs.flat_map { |home, by_name| by_name.flat_map { |name, found| found.map { [home, name, it] } } }
       methods.filter_map do |home, name, definition|
@@ -350,7 +352,7 @@ module CallLadderPin
     end
 
     # The rung `call` asks, read from `file_home`'s file: by one of the rung's own spellings, or through a method
-    # of that file whose whole body is one such call (the typer's `index_read_dispatch` is the dispatcher).
+    # of that file whose whole body is one such call (a typer method that only wraps `MethodDispatcher.dispatch`).
     def rung_of(call, file_home, wrapped: false)
       direct = @rungs.find { |rung| rung.asked_as.include?(call.name) && at_home?(call.receiver, rung.home, file_home) }
       return direct if direct || wrapped || call.receiver
@@ -395,11 +397,20 @@ module CallLadderPin
       CallLadderPin.each_node(definition.body) do |node|
         next unless call?(node)
 
-        rung = rung_of(node, home)
+        rung = rung_of(node, home) || second_entry_rung(node, home)
         place = node.receiver.nil? && place_methods.include?([home, node.name])
         found << (rung ? rung.name : node.name) if rung || place
       end
       found
+    end
+
+    # The rung whose module `call` asks through one of its second entries, spelled as a rung's own entry is: a
+    # rung's gate and its positional entry are parts of that rung. Only the stray check reads this. A place's
+    # method may test a gate where it does not answer with it (the splat index read does), so {#hidden_asks}
+    # counts a rung's own entry alone.
+    def second_entry_rung(call, file_home)
+      row = @second_entries.find { |entry| entry.name == call.name && at_home?(call.receiver, entry.home, file_home) }
+      row && @rungs.find { |rung| rung.home == row.home }
     end
   end
 

@@ -88,7 +88,8 @@ is the same command with the survey checkouts.
 
 `tool/typing_census.rb --base REV --head REV --corpus-dir DIR [--target PATH]... [--classes REGEX] [--json FILE]` archives
 each engine whole, runs each in a fresh process (`rigor check --no-cache --workers 0`) with a module prepended over
-`ExpressionTyper#try_user_method_inference`, and prints the (class, method) pairs the base typed at least once and the
+the user-method rung (`CallLadder::UserMethod.infer`, or `ExpressionTyper#try_user_method_inference` in an engine from
+before ADR-116 WD12's slice S6), and prints the (class, method) pairs the base typed at least once and the
 head never does, with the typed and untyped call totals of each side. It is ADR-119 WD7(f)'s "census of reads
 answering `Dynamic`" for the instance typing site, taken from the engine's own scopes. Run it with `bundle exec`, one
 heavy job at a time.

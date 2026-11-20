@@ -58,6 +58,7 @@ require_relative "version_guard"
 require_relative "expression_typer/composites"
 require_relative "expression_typer/per_element_assemblers"
 require_relative "expression_typer/writes"
+require_relative "call_ladder/user_method"
 
 module Rigor
   module Inference
@@ -348,9 +349,11 @@ module Rigor
       def implicit_index_read_type(node, receiver, arg_types)
         return splat_index_read_type(node, receiver, arg_types) if splat_arguments?(node)
 
-        try_overriding_def_dispatch(node, receiver, arg_types, method_name: :[]) ||
-          index_read_dispatch(node, receiver, arg_types) ||
-          try_user_method_inference(receiver, node, arg_types, method_name: :[]) ||
+        overriding_def = try_overriding_def_dispatch(node, receiver, arg_types, method_name: :[])
+        return overriding_def if overriding_def
+
+        site = index_read_site(node, receiver, arg_types)
+        MethodDispatcher.dispatch_site(site) || CallLadder::UserMethod.try_call(site, self) ||
           try_project_singleton_inference(receiver, node, arg_types, method_name: :[])
       end
 
@@ -513,9 +516,13 @@ module Rigor
         Reflection.resolve_constant_type(name, scope: scope, rooted: rooted, caller_derived: caller_derived)
       end
 
+      # @api private — the scope this typer reads. Public only so a rung module of the call ladder can read it from
+      # the typer it is given ({CallLadder::PORT}, with the four methods made public at the end of this class).
+      attr_reader :scope
+
       private
 
-      attr_reader :scope, :tracer
+      attr_reader :tracer
 
       # One-line delegators for the node typers `PRISM_DISPATCH` names (and `statements_or_nil`, which the rescue
       # typers call) whose bodies live in the modules under `expression_typer/` (ADR-116 C3); each passes the values it
@@ -1208,13 +1215,13 @@ module Rigor
       def try_overriding_def_dispatch(node, receiver, arg_types, method_name: node.name)
         return nil unless overriding_own_def?(receiver, method_name)
 
-        try_user_method_inference(receiver, node, arg_types, method_name: method_name) || dynamic_top
+        CallLadder::UserMethod.infer(receiver, node, arg_types, method_name, nil, self) || dynamic_top
       end
 
       # The three conditions above: an own source `def` of `method_name` on the receiver's class, which has no
       # declaration of its own but inherits one a project-declared ancestor wrote.
       def overriding_own_def?(receiver, method_name)
-        return false unless user_inference_receiver?(receiver)
+        return false unless CallLadder::UserMethod.user_inference_receiver?(receiver)
 
         class_name = receiver.class_name
         return false if class_name.nil?
@@ -1229,10 +1236,10 @@ module Rigor
         project_declared_owner?(definition)
       end
 
-      # {#implicit_index_read_type}'s dispatcher tier, with the write node as the call context.
-      def index_read_dispatch(node, receiver, arg_types)
-        MethodDispatcher.dispatch(
-          receiver_type: receiver, method_name: :[], arg_types: arg_types,
+      # {#implicit_index_read_type}'s site: the `[]` read, with the write node as the call node and no block.
+      def index_read_site(node, receiver, arg_types)
+        MethodDispatcher::CallContext.build(
+          receiver: receiver, method_name: :[], args: arg_types,
           environment: scope.environment, call_node: node, scope: scope
         )
       end
@@ -1246,7 +1253,7 @@ module Rigor
       def splat_index_read_type(node, receiver, arg_types)
         return dynamic_top if overriding_own_def?(receiver, :[])
 
-        index_read_dispatch(node, receiver, arg_types)
+        MethodDispatcher.dispatch_site(index_read_site(node, receiver, arg_types))
       end
 
       # Whether the class an inherited declaration was written about is one the project declares itself.
@@ -1776,18 +1783,19 @@ module Rigor
         overriding_def = try_overriding_def_dispatch(node, receiver, arg_types)
         return overriding_def if overriding_def
 
-        result = MethodDispatcher.dispatch(
-          receiver_type: receiver,
+        site = MethodDispatcher::CallContext.build(
+          receiver: receiver,
           method_name: node.name,
-          arg_types: arg_types,
+          args: arg_types,
           block_type: block_type,
           environment: scope.environment,
           call_node: node,
           scope: scope
         )
+        result = MethodDispatcher.dispatch_site(site)
         return result if result
 
-        dispatch_miss_result(node, receiver, arg_types, block_type)
+        dispatch_miss_result(site, node, receiver, arg_types, block_type)
       end
 
       # ADR-121 WD2 (issue #1664) — a call through an in-effect Ruby refinement, typed from the winning refine body
@@ -1961,6 +1969,8 @@ module Rigor
           (forwards_arguments?(arguments) && ExpressionTyper.current_forwarded_arg_types.nil?)
       end
 
+      # @api private — a member of {CallLadder::PORT}, made public at the end of this class.
+      #
       # The argument list and the `positionals_unknown:` flag a body tier re-types a user `def` with. Under
       # {#splat_arguments?} the body is still re-typed, so a body that always raises still answers `bot` and a
       # return that does not read its arguments is kept, but with no positional correspondence
@@ -2095,11 +2105,11 @@ module Rigor
 
       # The rungs below the dispatcher, for a call `MethodDispatcher` could not answer: {#call_result_type_for}
       # continues here, in the order of {CallLadder::RUNGS}.
-      def dispatch_miss_result(node, receiver, arg_types, block_type = nil)
+      def dispatch_miss_result(site, node, receiver, arg_types, block_type)
         # v0.0.2 #5 — inter-procedural inference for user-defined methods. When dispatch misses but the
         # receiver is a user class with a `def` body, re-type the body with the call's argument types bound
         # and return the body's last-expression type.
-        user_inference = try_user_method_inference(receiver, node, arg_types, block_type: block_type)
+        user_inference = CallLadder::UserMethod.try_call(site, self)
         return user_inference if user_inference
 
         # Module-singleton call resolution (ADR-57 follow-up) — when the receiver is `Singleton[Foo]` (a
@@ -2323,7 +2333,7 @@ module Rigor
       # permanently on 2026-06-12 (ADR-57 WD2) with a zero `rigor check lib` + plugin self-check delta.
       #
       # The `adoptable_self_call_result?` predicate is subsumed by unconditional adoption and removed;
-      # `try_local_def_dispatch` / `try_user_method_inference` simply return the inferred return.
+      # `try_local_def_dispatch` / `CallLadder::UserMethod.infer` simply return the inferred return.
       # `clamp_unroll_result` still backstops an untrustworthy unrolled value independently of adoption.
 
       # An extended (value-keyed) guard frame is `[plain_signature, value_key]` where `plain_signature` is
@@ -2350,18 +2360,6 @@ module Rigor
         when Type::HashShape
           # Issue #3115 — the shape {#pinned_shape_descriptor} keys an unroll on is as pinned as a result.
           type.closed? && type.optional_keys.empty? && type.pairs.each_value.all? { |value| fully_value_pinned?(value) }
-        else false
-        end
-      end
-
-      # #525 — instance-side user-method inference accepts the named ADR-48 member carriers alongside
-      # plain nominals: a `Line = Struct.new(...) do ... end` value is a StructInstance whose block defs
-      # live under "Line", and the carrier itself is the right `self` for the body (member reads inside
-      # the def project through it).
-      def user_inference_receiver?(receiver)
-        case receiver
-        when Type::Nominal then true
-        when Type::StructInstance, Type::DataInstance then !receiver.class_name.nil?
         else false
         end
       end
@@ -2423,11 +2421,11 @@ module Rigor
         rest = args[1..]
         inner_name = args.first.unescaped.to_sym
         inner_args = rest.map { |a| type_of(a) }
-        MethodDispatcher.dispatch(
-          receiver_type: receiver, method_name: inner_name, arg_types: inner_args,
+        target = MethodDispatcher::CallContext.build(
+          receiver: receiver, method_name: inner_name, args: inner_args,
           block_type: nil, environment: scope.environment, call_node: node, scope: scope
-        ) ||
-          try_user_method_inference(receiver, node, inner_args, method_name: inner_name) ||
+        )
+        MethodDispatcher.dispatch_site(target) || CallLadder::UserMethod.try_call(target, self) ||
           try_project_singleton_inference(receiver, node, inner_args, method_name: inner_name)
       end
 
@@ -2452,80 +2450,10 @@ module Rigor
       # as for any other declared method. Nil too
       # where no body can be read: a union or class-object receiver.
       def own_send_type(node, receiver, args)
-        return nil unless user_inference_receiver?(receiver)
+        return nil unless CallLadder::UserMethod.user_inference_receiver?(receiver)
         return nil unless GenuineSend.rbs_genuine?(receiver.class_name, :instance, scope)
 
-        try_user_method_inference(receiver, node, args.map { |a| type_of(a) })
-      end
-
-      # v0.0.2 #5 — re-types the body of a user-defined instance method with the call site's argument types
-      # bound to the method's parameters. Used as a last-resort tier after `MethodDispatcher.dispatch` has
-      # exhausted its catalogue (RBS, shape, constant folding, user-class fallback). Returns nil when:
-      #
-      # - the receiver is not `Nominal[T]` for some T;
-      # - no def_node is recorded for that class/method (the receiver is foreign or has only an RBS sig);
-      # - the def has no body, or has a parameter shape we cannot bind from the call's positional args.
-      def try_user_method_inference(receiver, call_node, arg_types, method_name: call_node.name, block_type: nil)
-        return nil unless user_inference_receiver?(receiver)
-
-        def_node, owner, raising = resolve_typing_def_with_owner(receiver.class_name, method_name)
-        return every_definer_raises_type(raising, receiver, call_node, arg_types, block_type) if def_node.nil?
-
-        arg_types, positionals_unknown = positional_correspondence(call_node, arg_types)
-        result = infer_user_method_return(def_node, receiver, arg_types,
-                                          self_fold_safe: fold_safe_call_receiver?(call_node),
-                                          yield_type: block_type, positionals_unknown: positionals_unknown)
-        return result if result.nil?
-
-        degrade_if_overridable(result, owner, method_name, :instance)
-      rescue StandardError
-        nil
-      end
-
-      # Issue #525 — whether the RECEIVER EXPRESSION of this call is one whose struct member map is still
-      # current. Three arms:
-      #
-      # - a call that MATERIALISES the struct (`Point.new(…)`, `Point[…]`, `Struct.new(:x).new(…)`, a
-      #   `.with(…)` copy) — the object was created by this very expression, so nothing has run against it;
-      # - a local the fold-safe scan proved is never mutated / aliased / escaped;
-      # - `nil` / `self`, inheriting the CURRENT body's own grant, which is what lets a chain of
-      #   implicit-self readers propagate: `Line.new(…).outer` grants `outer`'s body `:self`, and an
-      #   `inner` call inside it carries the grant into `inner`'s body.
-      #
-      # The first arm shares `StructFolding`'s materialisation test with the direct member-read gate. Neither
-      # accepts a bare chained call: "chained" is not "fresh" once a method can hand back its own receiver,
-      # and a self-returning fluent builder is ordinary Ruby:
-      #
-      #     Line = Struct.new(:text) do
-      #       def with_text(v) = (self.text = v; self)
-      #       def shout       = text.upcase
-      #     end
-      #     Line.new("a").with_text("z").shout   # runtime "Z"
-      #
-      # Accepting the `with_text(…)` receiver as fresh would grant `shout` a member map two statements
-      # stale and fold `"A"`. Only the shapes the folding layer itself materialises qualify here.
-      #
-      # This is only a property of the receiver expression; whether the grant is actually issued also needs
-      # a `StructInstance` carrier and a body that survives the self-use scan, both decided in
-      # {#build_user_method_body_scope}.
-      def fold_safe_call_receiver?(call_node)
-        return false if call_node.nil?
-
-        case call_node.receiver
-        when Prism::CallNode then materialization_call?(call_node.receiver)
-        when Prism::LocalVariableReadNode then scope.struct_fold_safe?(call_node.receiver.name)
-        when nil, Prism::SelfNode then scope.struct_fold_safe?(:self)
-        else false
-        end
-      end
-
-      # Issue #595 — the materialisation test lives ONCE, in
-      # [`struct_materialization.rb`](method_dispatcher/struct_materialization.rb), because the direct
-      # member-read gate ({MethodDispatcher::StructFolding}`#fresh_receiver?`) needs the identical answer;
-      # see {MethodDispatcher::StructMaterialization.materialization_call?}. A `.with` call is never one
-      # (`Struct` has no `#with`, #1335), so the test needs no lookup from either consumer.
-      def materialization_call?(node)
-        MethodDispatcher::StructMaterialization.materialization_call?(node, scope)
+        CallLadder::UserMethod.infer(receiver, node, args.map { |a| type_of(a) }, node.name, nil, self)
       end
 
       # Module-singleton call resolution (ADR-57 follow-up) — resolves `Foo.<name>` on a `Singleton[Foo]`
@@ -2855,6 +2783,8 @@ module Rigor
       )
       private_constant :CLASS_GRAPH_CACHE
 
+      # @api private — a member of {CallLadder::PORT}, made public at the end of this class.
+      #
       # Memo for the static class-graph resolvers below. They are pure functions of the scope's *frozen*
       # discovery tables — `user_def_for` / `superclass_of` / `includes_of` and the ancestor-name resolver
       # read nothing else, and never touch the current scope's locals or narrowings — so a result computed
@@ -2908,123 +2838,10 @@ module Rigor
         { user_def: {}, typing_def: {}, self_pure: {}.compare_by_identity, yields: {}.compare_by_identity }
       end
 
-      # ADR-119 C2-b1 — the TYPING read of {#resolve_user_def_with_owner}: the same `[def_node, owner]` pair, but
-      # answered through {DefinerResolution} so a chain that does not stand for the name (a conditional definer,
-      # a conditional include, a fork, an external ancestor that may answer first) is `[nil, nil]` and the call
-      # types `Dynamic` instead of from a definer Ruby may not reach. ABSENT is the same `[nil, nil]`: at a typing
-      # site "no definer" and "cannot say" both fall through to `dispatch_miss_result`. Existence reads
-      # ({#resolve_user_def_through_ancestors}, the self-purity scan) stay on {#resolve_user_def_with_owner}'s
-      # memo: an existence read turning false there could ADD a `call.undefined-method` firing.
-      #
-      # UNKNOWN carries a third element, the `bot` exception's definers ({#every_project_definer}): the def nodes
-      # of every project entry on the chain that defines the name, or nil where the exception cannot apply.
-      def resolve_typing_def_with_owner(class_name, method_name)
-        cache = class_graph_buckets[:typing_def]
-        table = (cache[class_name.to_s] ||= {})
-        key = method_name.to_sym
-        if table.key?(key)
-          return MemoAudit.check("class graph typing def", table[key], class_name, key) do
-            compute_typing_def_with_owner(class_name, method_name)
-          end
-        end
-
-        table[key] = MemoAudit.key_audit("class graph typing def") do
-          compute_typing_def_with_owner(class_name, method_name)
-        end
-      end
-
-      def compute_typing_def_with_owner(class_name, method_name)
-        case DefinerResolution.resolve(scope, class_name, method_name, :instance, question: :definer)
-        in DefinerResolution::Known(answer: [node, owner])
-          [node, owner]
-        in DefinerResolution::UNKNOWN
-          [nil, nil, every_project_definer(class_name, method_name)]
-        in DefinerResolution::ABSENT
-          [nil, nil]
-        end
-      end
-
-      # ADR-119 C2-b1 errata (the `bot` exception) — an UNKNOWN chain does not say WHICH definer Ruby calls, but
-      # when every project definer of the name on the chain types `bot` (each raises or exits), the call cannot
-      # return whichever of them runs, so it types `bot` and a guard such as `fail_with 'no' unless count` still
-      # narrows. `defs` is {#every_project_definer}'s list; each is inferred with this call's receiver and
-      # arguments, stopping at the first that returns (the answer is then `Dynamic` whatever the rest say).
-      # Accepted cost: an RBS-unknown external ahead of them that really defines the name and returns is a
-      # narrowing false negative; `bot` reports nothing about a value, and that exposure is master's.
-      def every_definer_raises_type(defs, receiver, call_node, arg_types, block_type)
-        return nil if defs.nil?
-
-        self_fold_safe = fold_safe_call_receiver?(call_node)
-        arg_types, positionals_unknown = positional_correspondence(call_node, arg_types)
-        defs.each do |def_node|
-          result = infer_user_method_return(def_node, receiver, arg_types,
-                                            self_fold_safe: self_fold_safe, yield_type: block_type,
-                                            positionals_unknown: positionals_unknown)
-          return nil unless result.is_a?(Type::Bot)
-        end
-        Type::Combinator.bot
-      end
-
-      # The def node of every project entry on `class_name`'s instance chain that defines `method_name`, in any
-      # position (the order is what UNKNOWN does not know), or nil where the `bot` exception cannot apply: a cut
-      # chain, no project definer, an entry whose only record of the name has no body (an `attr_*` or a
-      # `define_method` with no `def`), a definer resting on a `possible` or contested fact (another body may be the
-      # one Ruby holds), or an external RBS knows that declares the name. An external RBS does not know is passed
-      # over. Only what the tables hold is read: a `define_method` beside an entry's own `def` of the name, and a
-      # receiver-form `X.include(M)` outside `X`'s body, are not seen (as on the Known path).
-      #
-      # ADR-46: the answer depends on every entry, so each files its class edge and its negative class edge (a new
-      # file reopening it may add a definer or a mixin), and each project entry's {Scope#user_def_for} files the
-      # method edge, positive for a definer and `read_missing(:method, "Owner#name")` for one that lacks the
-      # `def`. `DefinerResolution`'s decline filed none of this past the external that stopped it.
-      def every_project_definer(class_name, method_name)
-        chain = Scope::ResolutionChain.for(scope, class_name.to_s, :instance, :methods)
-        chain.record(scope)
-        return nil if chain.truncated?
-
-        defs = []
-        declined = false
-        chain.entries.uniq.each do |entry|
-          if entry.external?
-            note_missing_class(entry.raw.to_s.split("::").last)
-            declined = true if external_declares?(entry.candidates, method_name)
-            next
-          end
-          note_missing_class(entry.last_segment)
-          node = scope.user_def_for(entry.name, method_name)
-          defs << node if node
-          declined = true if definer_without_single_body?(entry.name, method_name, node)
-        end
-        declined || defs.empty? ? nil : defs.freeze
-      end
-
-      def note_missing_class(segment)
-        Analysis::DependencyRecorder.read_missing(:class, segment) if Analysis::DependencyRecorder.active?
-      end
-
-      def definer_without_single_body?(owner, method_name, node)
-        discovery = scope.discovery
-        key = [owner, method_name.to_sym]
-        (node.nil? && scope.discovered_method?(owner, method_name, :instance)) ||
-          discovery.possible_method?(owner, method_name, :instance) ||
-          discovery.contested?(:discovered_def_nodes, key)
-      end
-
-      # True where RBS knows one of the names the external's spelling can denote and declares the instance method
-      # in it; a lookup that fails counts as declaring (the exception then does not apply).
-      def external_declares?(candidates, method_name)
-        known = candidates.find { |candidate| Rigor::Reflection.rbs_class_known?(candidate, scope: scope) }
-        return false if known.nil?
-
-        !Rigor::Reflection.instance_method_definition(known, method_name, scope: scope).nil?
-      rescue StandardError
-        true
-      end
-
       # ADR-24 slice 2 — resolves `method_name` against the project definers on `class_name`'s
       # {Scope::ResolutionChain}, in Ruby's order: prepended modules, the class, its included modules, then the
       # superclass's chain likewise. RBS-known ancestors are NOT answered here — the `MethodDispatcher` RBS
-      # tier runs before `try_user_method_inference` and already covers them; they sit on the chain as
+      # tier runs before {CallLadder::UserMethod} and already covers them; they sit on the chain as
       # external entries this lookup passes over. Cross-file: the chain is built from the tables the runner
       # seeds from the project-wide pre-pass, cycle-guarded and capped at `Scope::ANCESTOR_WALK_LIMIT`.
       def resolve_user_def_through_ancestors(class_name, method_name)
@@ -3061,6 +2878,8 @@ module Rigor
         scope.user_def_through_ancestors(class_name, method_name)
       end
 
+      # @api private — a member of {CallLadder::PORT}, made public at the end of this class.
+      #
       # ADR-57 N5 — overridable-method adoption gate. A self-call resolved to a project `def` whose owner has
       # a discovered subclass / includer that REDEFINES the same method (same instance-vs-singleton kind) is
       # a template-method site: the base body's literal return is the *default*, not the value every
@@ -3536,6 +3355,8 @@ module Rigor
       RECURSION_VALUE_SIZE_CAP = 64
       private_constant :RECURSION_VALUE_SIZE_CAP
 
+      # @api private — a member of {CallLadder::PORT}, made public at the end of this class.
+      #
       # `self_fold_safe` (issue #525) is the caller's statement that its RECEIVER EXPRESSION was foldable;
       # {#build_user_method_body_scope} turns it into the body scope's `:self` sentinel when the carrier and
       # the body both qualify. It does NOT need its own memo-key slot here — the bit is observable on the
@@ -4365,7 +4186,7 @@ module Rigor
 
       def recursion_def_for(receiver, method_name)
         return scope.singleton_def_for(receiver.class_name, method_name) if receiver.is_a?(Type::Singleton)
-        return :unknown unless user_inference_receiver?(receiver)
+        return :unknown unless CallLadder::UserMethod.user_inference_receiver?(receiver)
 
         resolve_user_def_through_ancestors(receiver.class_name, method_name)
       end
@@ -6588,6 +6409,13 @@ module Rigor
       rescue StandardError
         nil
       end
+
+      # @api private — the typer's side of the call ladder's port (ADR-116 WD12). A rung module under `call_ladder/`
+      # is given the walking typer and calls these four on it, and reads `scope`; `CallLadder::PORT` is that list and
+      # `spec/rigor/inference/call_ladder/port_spec.rb` holds both sides to it. Each runs this typer's own code inside
+      # the `type_of` walk that asked the rung, so nothing outside `call_ladder/` may call one on a typer it holds
+      # (`spec/rigor/inference/call_ladder/reentry_spec.rb`).
+      public :class_graph_buckets, :positional_correspondence, :infer_user_method_return, :degrade_if_overridable
     end
   end
 end

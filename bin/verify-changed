@@ -376,9 +376,17 @@ ancestry_walker_spec=spec/rigor/scope/ancestry_walker_detection_spec.rb
 # the typer's modules under expression_typer/ and the rung modules under
 # call_ladder/, whose own mirrors are other specs, so a change to either
 # directory selects both by path, in both tiers.
+#
+# The port's two specs (what a rung module may call on its typer, and who may
+# call the typer's re-entry points) read the same files through
+# spec/support/call_ladder_port.rb and are selected with the pin: for a change
+# to either reader, and for a change under the two directories. The typer-side
+# spec runs their examples too, so an edit to the typer meets them by mirror.
 call_ladder_specs=(
   spec/rigor/inference/call_ladder_spec.rb
   spec/rigor/inference/expression_typer/call_ladder_spec.rb
+  spec/rigor/inference/call_ladder/port_spec.rb
+  spec/rigor/inference/call_ladder/reentry_spec.rb
 )
 # An edit to how the engine records ADR-46 dependencies can over-invalidate
 # files no spec of the edited file names: #2136 failed CI twice on
@@ -447,8 +455,8 @@ for path in ${changed[@]+"${changed[@]}"}; do
       [[ "$path" == spec/support/sig_* ]] && add_spec "$provenance_spec"
       # The ancestry-walker scan: the detection spec is its only user.
       [[ "$path" == spec/support/ancestry_walker_scan.rb ]] && add_spec "$ancestry_walker_spec"
-      # The call ladder's reader: the two specs that run the pin are its only users.
-      [[ "$path" == spec/support/call_ladder_pin.rb ]] &&
+      # The call ladder's two readers: the specs that run the pin and the port are their only users.
+      [[ "$path" == spec/support/call_ladder_pin.rb || "$path" == spec/support/call_ladder_port.rb ]] &&
         for spec in "${call_ladder_specs[@]}"; do add_spec "$spec"; done
       ;;
     spec/*_spec.rb) add_spec "$path" ;;

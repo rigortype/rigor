@@ -5,7 +5,7 @@
 # `Prism::CallNode`. The engine passes four families of node as `call_node`:
 #
 # - the compound writes (`x.attr op= v`, `x.attr ||= v`, `x.attr &&= v`, and the `x[i]` forms), through
-#   `ExpressionTyper#attribute_compound_read_type` and `#index_read_dispatch`;
+#   `ExpressionTyper#attribute_compound_read_type` and `#implicit_index_read_type`;
 # - the `&:symbol` block argument, through `ExpressionTyper#symbol_block_return_type` (an Array element) and
 #   `#apply_hash_block` (a Hash pair).
 #

@@ -89,7 +89,7 @@ class Rigor::Plugin::Base
   # join, so it proposes the literal fallback `nil` instead of the honest contract.
   # `call_node` is a `CallNode` except where the engine dispatches a compound write or a block argument. The
   # compound writes (`x.attr op= v`, `x.attr ||= v`, `x.attr &&= v`, and the `x[i]` forms) reach a rule through
-  # `ExpressionTyper#attribute_compound_read_type`, `#call_operator_write_type_for` and `#index_read_dispatch`;
+  # `ExpressionTyper#attribute_compound_read_type`, `#call_operator_write_type_for` and `#implicit_index_read_type`;
   # the `&:symbol` block arguments through `ExpressionTyper#symbol_block_return_type` and `#apply_hash_block`.
   # A rule the name gate does not screen out (a `receivers:`-only rule, for one) is offered those nodes, so the
   # `dynamic_return` block union above is the full set. A rule that reads a `CallNode`-only member (`receiver`,

@@ -384,6 +384,30 @@ RSpec.describe "Typing calls through Ruby refinements (#1664)", type: :runner do
     RUBY
   end
 
+  # A body another file wrote is re-typed with what that file's own `using` puts in effect at the `def`, beside its own
+  # module (the expansion `CallLadder::Refined` asks `InEffectRefinements.activated_modules` for). Ruby 4.0.5 prints
+  # `:helped`.
+  it "types a refine body from another file with the refinements that file's `using` puts in effect" do
+    helper = <<~RUBY
+      module Helper
+        refine(Integer) { def even? = :helped }
+      end
+    RUBY
+    refinement = <<~RUBY
+      using Helper
+      module R
+        refine String do
+          def upcase = 42
+          def twice = upcase.even?
+        end
+      end
+    RUBY
+    expect(dumps(<<~RUBY, files: { "h.rb" => helper, "r.rb" => refinement })).to eq([":helped"])
+      using R
+      Rigor.dump_type("a".twice)
+    RUBY
+  end
+
   # Review of #1747: Ruby prints `LOUD` and `YELL`, because the module a project reopening mixes into a core class
   # sits ahead of `Object` in the lookup. The arm declines rather than order a mixin RBS does not record.
   it "declines where the project mixes a module into a core class's ancestry" do

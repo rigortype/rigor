@@ -1,5 +1,7 @@
 # Dead code / coverage sweep — 2026-06-03
 
+> **Historical** (marked 2026-11-20): a one-off work log: no dead code was found and the missing tests landed in `9fae4cba`. Kept for the record; default `rg` skips it (see [the notes README](README.md#historical-notes)).
+
 ## Motivation
 
 Internal-optimisation theme for the next version. First step: verify

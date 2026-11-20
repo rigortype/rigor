@@ -1,5 +1,7 @@
 # ADR-67 WD3 + WD5 — call-site parameter inference (implementation + measurement)
 
+> **Historical** (marked 2026-11-20): ADR-67's status now records the WD3/WD5 numbers, the do-not-re-litigate caveat and the later WD6 measurement. Superseded by [ADR-67](../adr/67-parameter-type-inference.md). Kept for the record; default `rg` skips it (see [the notes README](README.md#historical-notes)).
+
 2026-06-16. Landed the [ADR-67](../adr/67-parameter-type-inference.md) substrate
 (WD1 + WD3 single-level, then WD5 capped fixpoint) and measured it. This note records the
 architecture, the measured deltas, and — load-bearing — *why the two cited corpora barely

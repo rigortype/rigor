@@ -1,5 +1,7 @@
 # CLI editor mode — disk-backed `ProjectScan` snapshot cache
 
+> **Historical** (marked 2026-11-20): a deferred plan untouched since v0.1.6; `--incremental --tmp-file` on the ADR-46 snapshot and ADR-85 seed bundles now cover its case, and its timings are stale. Superseded by [ADR-46](../adr/46-incremental-dependency-graph.md), [ADR-85](../adr/85-seed-bundles-and-lazy-def-node-handles.md). Kept for the record; default `rg` skips it (see [the notes README](../notes/README.md#historical-notes)).
+
 **Status:** Design note. Authored 2026-05-18. Implementation
 **deferred** until concrete editor-extension demand surfaces. The
 LSP path (in-memory `ProjectContext` + `Analysis::ProjectScan`,

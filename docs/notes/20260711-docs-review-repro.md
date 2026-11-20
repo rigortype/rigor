@@ -1,5 +1,7 @@
 # L2 伝(b) procedure-reproduction review — 01-installation.md + 14-rails-quickstart.md
 
+> **Historical** (marked 2026-11-20): a procedure-repro docs review whose fixes landed the same day in `2c8950650`. Kept for the record; default `rg` skips it (see [the notes README](README.md#historical-notes)).
+
 Date: 2026-07-11. Lens: reproduce each procedure from the text alone,
 flag any step that cannot be completed without outside knowledge.
 Rigor version exercised: `rigor 0.2.8` (repo `master`, dirty tree).

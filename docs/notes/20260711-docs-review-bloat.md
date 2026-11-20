@@ -1,5 +1,7 @@
 # Docs review — L3 簡 bloat detector (INVERTED)
 
+> **Historical** (marked 2026-11-20): its structural cuts were applied in `ebd9ae626`. Kept for the record; default `rg` skips it (see [the notes README](README.md#historical-notes)).
+
 Lens: flag **fat only** (duplication, non-goal violations, prose-that-wants-a-table,
 within-chapter redundancy). Never flags thin prose; never recommends adding material.
 Primary criterion: the README-declared split — **type model → handbook, operation →

@@ -1,5 +1,7 @@
 # Module-singleton facade: the cross-file discovery seed
 
+> **Historical** (marked 2026-11-20): a design draft whose decision and measured payoff ADR-57 WD3 records. Superseded by [ADR-57](../adr/57-self-call-return-adoption.md). Kept for the record; default `rg` skips it (see [the notes README](README.md#historical-notes)).
+
 Design note for the GitLab improvement plan's **P2 item 6** ([`20260708-gitlab-type-coverage-improvement-plan.md`](20260708-gitlab-type-coverage-improvement-plan.md)),
 written 2026-07-10 before implementation. The decision it settles is recorded as a WD on
 [ADR-57](../adr/57-self-call-return-adoption.md), whose tier-4 already names module-singleton

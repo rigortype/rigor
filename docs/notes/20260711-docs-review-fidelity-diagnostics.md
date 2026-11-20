@@ -1,5 +1,7 @@
 # L1 fidelity review — diagnostics / engine behaviour (area B)
 
+> **Historical** (marked 2026-11-20): its fidelity fixes were applied in PR #69 (`6ac28341d`). Kept for the record; default `rg` skips it (see [the notes README](README.md#historical-notes)).
+
 Date: 2026-07-11
 Lens: L1 semantic fidelity, area B (diagnostics + engine behaviour)
 Chapters: `docs/manual/04-diagnostics.md`, `docs/handbook/08-understanding-errors.md`, `docs/handbook/03-narrowing.md`

@@ -1,5 +1,7 @@
 # GitLab survey: type-coverage improvement plan
 
+> **Historical** (marked 2026-11-20): P0–P2 and P3-10 were executed in PRs #58–#67 and P2-7's remedy was overturned; the outcomes are recorded in ADRs and the 0.2.x changelog. Superseded by [ADR-57](../adr/57-self-call-return-adoption.md), [ADR-82](../adr/82-dynamic-provenance-wiring.md), [`CHANGELOG-0.2.x.md`](../CHANGELOG-0.2.x.md). Kept for the record; default `rg` skips it (see [the notes README](README.md#historical-notes)).
+
 Synthesized 2026-07-08 from the GitLab (app+lib, 11,344 files) onboarding arc. Inputs, both audited
 (one adjudication overturned on challenge and corrected against actionpack source):
 

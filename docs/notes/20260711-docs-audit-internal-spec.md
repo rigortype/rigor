@@ -1,5 +1,7 @@
 # Docs audit — `docs/internal-spec/` fidelity + internal-consistency lens (2026-07-11)
 
+> **Historical** (marked 2026-11-20): its findings were handled; ADR-92 and its 2026-07-25 sweep took over this lens. Superseded by [ADR-92](../adr/92-normative-status-fidelity.md), [status-fidelity sweep](20260725-internal-spec-status-fidelity-sweep.md). Kept for the record; default `rg` skips it (see [the notes README](README.md#historical-notes)).
+
 Lens: verify each analyzer-internal contract claim against the actual engine code
 (`lib/rigor/type/*`, `lib/rigor/inference/*`, `lib/rigor/scope*`), and check the
 internal-spec corpus for self-consistency. Focus per the cycle: ADR-53 discovery

@@ -1,5 +1,7 @@
 # VSCode extension — first-party marketplace client for `rigor lsp`
 
+> **Historical** (marked 2026-11-20): a pre-build draft; the extension shipped in `editors/vscode/` and has changed over many PRs since. Superseded by [`editors/vscode/README.md`](../../editors/vscode/README.md). Kept for the record; default `rg` skips it (see [the notes README](../notes/README.md#historical-notes)).
+
 **Status:** Draft. Not yet sliced; superseded only by a future ADR if
 one is opened.
 

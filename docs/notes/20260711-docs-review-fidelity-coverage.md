@@ -1,5 +1,7 @@
 # L1 fidelity review — coverage / CLI (2026-07-11)
 
+> **Historical** (marked 2026-11-20): its fidelity fixes were applied in PR #69 (`6ac28341d`). Kept for the record; default `rg` skips it (see [the notes README](README.md#historical-notes)).
+
 Lens: L1 semantic fidelity, area A (coverage / CLI). Scope: `docs/manual/02-cli-reference.md`
 (coverage + check), `15-type-protection-coverage.md`, `17-driving-improvement.md`,
 `03-configuration.md`, `12-caching.md`. Verified against `--help`, scratch-dir probes, and

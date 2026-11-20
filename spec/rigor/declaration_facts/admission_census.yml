@@ -92,6 +92,7 @@ members:
     - lib/rigor/analysis/incremental_session.rb
     - lib/rigor/analysis/runner.rb
     - lib/rigor/inference/block_call_timing.rb
+    - lib/rigor/inference/call_ladder/user_method.rb
     - lib/rigor/inference/expression_typer.rb
     - lib/rigor/inference/global_writer_reach.rb
     - lib/rigor/inference/parameter_inference_collector.rb
@@ -122,6 +123,8 @@ members:
       - paired_copy
       lib/rigor/inference/block_call_timing.rb:
       - existence
+      lib/rigor/inference/call_ladder/user_method.rb:
+      - consults_contested
       lib/rigor/inference/definer_resolution.rb:
       - consults_contested
       lib/rigor/inference/expression_typer.rb:

@@ -134,8 +134,8 @@ RSpec.describe "bin/verify-changed spec selection" do
       full, = selection_for("lib/rigor/inference/call_ladder/user_method.rb")
       elsewhere, = selection_for("lib/rigor/inference/method_dispatcher/call_context.rb", quick: true)
 
-      expect(quick).to match_array(pin)
-      expect(full).to include(*pin)
+      expect(quick).to contain_exactly("spec/rigor/inference/call_ladder/user_method_spec.rb", *pin)
+      expect(full).to include("spec/rigor/inference/call_ladder/user_method_spec.rb", *pin)
       expect(elsewhere).not_to include(*pin)
       expect(elsewhere).to include("spec/rigor/inference/method_dispatcher/call_context_spec.rb")
     end

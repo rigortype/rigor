@@ -2025,7 +2025,7 @@ module Rigor
     # ADR-24 slice 2 — per-class table mapping a fully qualified user-class name to its superclass name AS WRITTEN
     # at the `class Foo < Bar` declaration (`"Bar"`, possibly a qualified `"A::B"`). Populated by `ScopeIndexer` —
     # per-file plus the cross-file project pre-pass — and consumed by
-    # `ExpressionTyper#try_user_method_inference` to walk the superclass chain when an implicit-self call does not
+    # `Inference::CallLadder::UserMethod` to walk the superclass chain when an implicit-self call does not
     # resolve against the enclosing class's own defs. The as-written name is resolved to a qualified class at walk
     # time against the call's lexical nesting.
     def superclass_of(class_name)

@@ -2,8 +2,8 @@
 # frozen_string_literal: true
 
 # Typing census (ADR-119 WD7(f)): the (class, method) pairs whose user-method return inference answers nothing
-# (`ExpressionTyper#try_user_method_inference` returns nil, so the call falls through to `Dynamic`) under the head
-# engine and not under the base engine, over one corpus.
+# (`CallLadder::UserMethod.infer` returns nil, so the call falls through to `Dynamic`) under the head engine and not
+# under the base engine, over one corpus.
 #
 # ## Why an instrument, not `rigor coverage` or `rigor type-of`
 #
@@ -15,10 +15,14 @@
 #
 # As `tool/engine_diag_diff.rb`: each engine revision is archived whole (`lib data plugins`) and run in its own FRESH
 # child process (`--measure`) over the corpus, `rigor check --no-cache --workers 0` (the counters are process-local
-# and do not cross a `fork`). The child prepends a module over `try_user_method_inference` that records, per
+# and do not cross a `fork`). The child prepends a module over the user-method rung that records, per
 # `(receiver class, method name)`, how many calls were typed and how many answered nil. Only calls whose receiver
 # `user_inference_receiver?` admits reach the method, so the census is of project-class receivers. A pair's typed /
 # untyped counts are over every call site, so one pair can be both.
+#
+# The rung is `CallLadder::UserMethod.infer` since ADR-116 WD12's slice S6 and was the typer's private
+# `try_user_method_inference` before it. A base and a head may stand on either side of that move, so each child
+# instruments whichever its engine has; every call that reached the one reaches the other.
 #
 # ## Output
 #
@@ -43,21 +47,33 @@ require_relative "engine_alloc_ab"
 module TypingCensus
   ROOT = EngineAllocAB::ROOT
 
-  # Prepended over `Rigor::Inference::ExpressionTyper`; counts `[class_name, method_name] => [typed, untyped]`.
+  # Prepended over `Rigor::Inference::ExpressionTyper` in an engine whose rung is the typer's method; counts
+  # `[class_name, method_name] => [typed, untyped]`.
   module Instrument
     COUNTS = Hash.new { |hash, key| hash[key] = [0, 0] }
     private_constant :COUNTS
 
     def self.counts = COUNTS
 
+    def self.count(receiver, name, result)
+      COUNTS[[receiver.class_name.to_s, name.to_s]][result.nil? ? 1 : 0] += 1
+    end
+
     private
 
     def try_user_method_inference(receiver, call_node, *rest, **options)
       result = super
-      if user_inference_receiver?(receiver)
-        name = options[:method_name] || call_node.name
-        COUNTS[[receiver.class_name.to_s, name.to_s]][result.nil? ? 1 : 0] += 1
-      end
+      Instrument.count(receiver, options[:method_name] || call_node.name, result) if user_inference_receiver?(receiver)
+      result
+    end
+  end
+
+  # Prepended over the singleton class of `Rigor::Inference::CallLadder::UserMethod` in an engine that has the
+  # module; `try_call` and both callers of the second entry go through `infer`.
+  module RungInstrument
+    def infer(receiver, call_node, arg_types, method_name, block_type, typer)
+      result = super
+      Instrument.count(receiver, method_name, result) if user_inference_receiver?(receiver)
       result
     end
   end
@@ -69,7 +85,7 @@ module TypingCensus
     $LOAD_PATH.unshift(File.join(engine_dir, "lib"))
     require "rigor/cli"
     require "rigor/inference/expression_typer"
-    Rigor::Inference::ExpressionTyper.prepend(Instrument)
+    instrument_rung
 
     out = StringIO.new
     err = StringIO.new
@@ -80,6 +96,15 @@ module TypingCensus
       end
       EngineAllocAB.assert_engine_loads(engine_dir)
       Instrument.counts.map { |(klass, name), (typed, untyped)| [klass, name, typed, untyped] }
+    end
+  end
+
+  # Puts the counter over the user-method rung, wherever the loaded engine keeps it.
+  def instrument_rung
+    if defined?(Rigor::Inference::CallLadder::UserMethod)
+      Rigor::Inference::CallLadder::UserMethod.singleton_class.prepend(RungInstrument)
+    else
+      Rigor::Inference::ExpressionTyper.prepend(Instrument)
     end
   end
 
@@ -118,7 +143,7 @@ module TypingCensus
 
   # rubocop:disable-next Metrics/AbcSize -- one report, one straight run of lines
   def render(result, classes)
-    lines = ["### Typing census (`try_user_method_inference`)", ""]
+    lines = ["### Typing census (the `user_method` rung)", ""]
     result[:totals].each do |side, t|
       lines << "- #{side}: #{t[:pairs]} pairs, #{t[:typed_calls]} typed calls, #{t[:untyped_calls]} untyped calls, " \
                "#{t[:untyped_only_pairs]} pairs never typed"

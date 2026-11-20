@@ -24,7 +24,7 @@ module Rigor
         #
         # Returns `nil` when scope / receiver class is unavailable, when the method is not in the
         # discovered table, OR when `discovered_def_nodes` carries a re-typable body for the method
-        # (so the downstream `ExpressionTyper#try_user_method_inference` tier can re-type the body
+        # (so the downstream `CallLadder::UserMethod` rung can re-type the body
         # for a precise return type rather than collapsing to `Dynamic[top]` here).
         #
         # The tier does NOT gate on `rbs_class_known?`. RBS dispatch already had its turn upstream

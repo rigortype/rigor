@@ -89,9 +89,8 @@ module Rigor
           # `dispatch_site` the site.
           Rung.new(name: :dispatcher, asked_by: %i[call index_read send_target], home: "MethodDispatcher",
                    asked_as: %i[dispatch dispatch_site], in_typer_because: nil),
-          Rung.new(name: :user_method, asked_by: %i[call index_read send_target], home: TYPER,
-                   asked_as: %i[try_user_method_inference],
-                   in_typer_because: "S6 moves it, the first rung to get a module"),
+          Rung.new(name: :user_method, asked_by: %i[call index_read send_target], home: "CallLadder::UserMethod",
+                   asked_as: %i[try_call], in_typer_because: nil),
           Rung.new(name: :project_singleton, asked_by: %i[call index_read send_target], home: TYPER,
                    asked_as: %i[try_project_singleton_inference],
                    in_typer_because: "S5 moves it"),

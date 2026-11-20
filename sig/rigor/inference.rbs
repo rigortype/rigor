@@ -20,6 +20,12 @@ module Rigor
       def call_arg_types: (untyped node) -> Array[Type::t]
       def block_return_type_for: (untyped call_node, Type::t? receiver_type, Array[Type::t] arg_types) -> Type::t?
 
+      # The call ladder's port (ADR-116 WD12): with `scope`, the methods a rung module under `call_ladder/` may call
+      # on the typer it is given. @api private: each is public only for those modules.
+      def positional_correspondence: (untyped call_node, Array[Type::t] arg_types) -> ([Array[untyped], false] | [Array[Type::t], false] | [[Type::t], true])
+      def infer_user_method_return: (untyped def_node, Type::t receiver, Array[Type::t] arg_types, ?self_fold_safe: bool, ?yield_type: Type::t?, ?refinements: untyped, ?positionals_unknown: bool) -> Type::t?
+      def degrade_if_overridable: (Type::t result, untyped owner, Symbol method_name, Symbol kind) -> Type::t
+
       # The entries of the node-typer modules under `expression_typer/` that sig-gen renders a return for, and the
       # private helpers that receive `typer` and that sig-gen renders a return for (without a declaration `typer`
       # reads `Dynamic[top]` inside them). The rest is undeclared (#3315): a row there would be residue.
@@ -57,6 +63,24 @@ module Rigor
         def self?.written_constant_binding: (String full_name, bool rooted, Scope scope, ExpressionTyper typer) -> Type::t?
         def self?.unnamed_path_binding: (untyped target, Scope scope, ExpressionTyper typer) -> Type::Dynamic?
         def self?.compound_operator_result: (Type::t current, Type::t rhs, untyped operator, Scope scope, ExpressionTyper typer) -> Type::t
+      end
+    end
+
+    # The rung modules of the call ladder (ADR-116 WD12). A rung's entry is `try_call(site, typer)`: the site is the
+    # call, and the typer is the walking `ExpressionTyper`, declared so that what a rung calls on it is typed.
+    module CallLadder
+      module UserMethod
+        def self?.try_call: (MethodDispatcher::CallContext site, ExpressionTyper typer) -> Type::t?
+        def self?.infer: (Type::t? receiver, untyped call_node, Array[Type::t] arg_types, Symbol method_name, Type::t? block_type, ExpressionTyper typer) -> Type::t?
+        def self?.user_inference_receiver?: (Type::t? receiver) -> bool
+        def self?.fold_safe_call_receiver?: (untyped call_node, Scope scope) -> bool
+        def self?.materialization_call?: (untyped node, Scope scope) -> bool
+        def self?.resolve_typing_def_with_owner: (String class_name, Symbol method_name, ExpressionTyper typer) -> untyped
+        def self?.compute_typing_def_with_owner: (String class_name, Symbol method_name, Scope scope) -> ([untyped, untyped] | [nil, nil, Array[untyped]?] | [nil, nil] | nil)
+        def self?.every_definer_raises_type: (Array[untyped]? defs, Type::t receiver, untyped call_node, Array[Type::t] arg_types, Type::t? block_type, ExpressionTyper typer) -> Type::Bot?
+        def self?.every_project_definer: (String class_name, Symbol method_name, Scope scope) -> Array[untyped]?
+        def self?.definer_without_single_body?: (String owner, Symbol method_name, untyped node, Scope scope) -> untyped
+        def self?.external_declares?: (Array[String] candidates, Symbol method_name, Scope scope) -> bool
       end
     end
 

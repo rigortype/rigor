@@ -34,8 +34,7 @@ module CallLadderPin
   end
 
   # `home => source` for every file a sequence can be written in: the typer, the modules moved out of it under
-  # `expression_typer/`, and each rung module under `call_ladder/` (there is none before the first rung's body
-  # moves).
+  # `expression_typer/`, and each rung module under `call_ladder/`.
   def sources(root)
     paths = ["#{LIB}/expression_typer.rb"] + Dir.glob("#{LIB}/{expression_typer,call_ladder}/*.rb", base: root)
     paths.sort.to_h { |path| [home_of(path), File.read(File.join(root, path))] }
@@ -350,7 +349,7 @@ module CallLadderPin
     end
 
     # The rung `call` asks, read from `file_home`'s file: by one of the rung's own spellings, or through a method
-    # of that file whose whole body is one such call (the typer's `index_read_dispatch` is the dispatcher).
+    # of that file whose whole body is one such call (a typer method that only wraps `MethodDispatcher.dispatch`).
     def rung_of(call, file_home, wrapped: false)
       direct = @rungs.find { |rung| rung.asked_as.include?(call.name) && at_home?(call.receiver, rung.home, file_home) }
       return direct if direct || wrapped || call.receiver

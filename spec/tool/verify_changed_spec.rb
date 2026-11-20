@@ -106,19 +106,26 @@ RSpec.describe "bin/verify-changed spec selection" do
     end
   end
 
-  it "selects both specs of the call ladder's pin for a change to the reader they share" do
-    specs, uncovered = selection_for("spec/support/call_ladder_pin.rb")
+  # The pin's two specs and the port's two (ADR-116 WD12) read the typer and the rung modules through two readers
+  # under `spec/support/`, which mirror no spec.
+  it "selects the call ladder's four specs for a change to either reader they share" do
+    ladder = %w[spec/rigor/inference/call_ladder_spec.rb spec/rigor/inference/expression_typer/call_ladder_spec.rb
+                spec/rigor/inference/call_ladder/port_spec.rb spec/rigor/inference/call_ladder/reentry_spec.rb]
 
-    expect(specs).to contain_exactly("spec/rigor/inference/call_ladder_spec.rb",
-                                     "spec/rigor/inference/expression_typer/call_ladder_spec.rb")
-    expect(uncovered).to eq(["spec/support/call_ladder_pin.rb"])
+    %w[spec/support/call_ladder_pin.rb spec/support/call_ladder_port.rb].each do |reader|
+      specs, uncovered = selection_for(reader)
+
+      expect(specs).to match_array(ladder)
+      expect(uncovered).to eq([reader])
+    end
   end
 
-  # The pin reads the typer's modules under `expression_typer/` and the rung modules under `call_ladder/`
-  # (`CallLadderPin.sources`), and a file there mirrors a spec of its own, not one that runs the pin.
+  # The pin and the port read the typer's modules under `expression_typer/` and the rung modules under `call_ladder/`
+  # (`CallLadderPin.sources`), and a file there mirrors a spec of its own, not one that runs them.
   describe "the call ladder's pin, for a file it reads" do
     let(:pin) do
-      %w[spec/rigor/inference/call_ladder_spec.rb spec/rigor/inference/expression_typer/call_ladder_spec.rb]
+      %w[spec/rigor/inference/call_ladder_spec.rb spec/rigor/inference/expression_typer/call_ladder_spec.rb
+         spec/rigor/inference/call_ladder/port_spec.rb spec/rigor/inference/call_ladder/reentry_spec.rb]
     end
 
     it "is selected for a module of the typer, in both tiers, beside the module's own spec" do

@@ -19,6 +19,12 @@ module Rigor
     # To add a rung, add its row to {RUNGS} at its position, naming the entries that ask it, and its call at that
     # position in each of those entries' methods. To move a rung's body out of the typer, change its row's `home`
     # and `asked_as`: the spec takes the spelling of every ask from the row.
+    #
+    # A rung whose body has moved is a module under `call_ladder/` whose entry is `try_call(site, typer)`. What it
+    # may call on that typer is {PORT}, and what it exposes beside `try_call` is {SECOND_ENTRIES}:
+    # `spec/rigor/inference/call_ladder/port_spec.rb` holds each rung module to both, and
+    # `spec/rigor/inference/call_ladder/reentry_spec.rb` holds every other file away from {REENTRY} and the typer
+    # and the rungs away from {DISPATCHER_INTERIOR}.
     module CallLadder
       # One way the typer asks the ladder. `home` is the constant, as written from `Rigor::Inference`, whose file
       # holds the entry's sequence, and `written_in` the methods there: the first starts the sequence, and each
@@ -143,6 +149,55 @@ module Rigor
           )
         ]
       )
+
+      # The typer's re-entry points: methods of `ExpressionTyper` that are public only so that a rung module can call
+      # them on the typer it is given, each `@api private`. They run the typer's own code, which reads its cursor
+      # (the node `type_of` is typing) and the frames `TypingState` pushes and pops around a body, so they mean
+      # something only inside the `type_of` walk that asked the rung. Nothing outside `call_ladder/` calls one on a
+      # typer it holds. A slice adds a name here when its rung first needs it, and makes the method public then.
+      REENTRY = Ractor.make_shareable(
+        %i[
+          class_graph_buckets
+          positional_correspondence
+          infer_user_method_return
+          degrade_if_overridable
+        ]
+      )
+
+      # The port: every method of the typer a rung module may call on the `typer` it is given, `send` and the
+      # other reflective calls being none of them. `scope` reads the frame's scope; a rung reads it there and never
+      # from its site, whose `scope` `sig/` leaves untyped. The rest are {REENTRY}. A rung that needs a fifth
+      # re-entry point of its own does not move (ADR-116, the #3318 cut-off): the list is not widened to fit one.
+      PORT = Ractor.make_shareable([:scope, *REENTRY])
+
+      # A function a rung module exposes beside its rung's `asked_as`, for a caller that asks part of the rung with
+      # arguments that are not a site's. `home` is the module, as a rung's `home` is. `given_typer` says whether the
+      # entry takes the typer, and so may use {PORT}; one that does not is a function of its arguments alone, and
+      # names neither a typer nor a scope. ADR-116's amendment names each entry: a new one is a row here and its
+      # name there.
+      SecondEntry = Data.define(:home, :name, :given_typer, :because)
+
+      SECOND_ENTRIES = Ractor.make_shareable(
+        [
+          SecondEntry.new(
+            home: "CallLadder::UserMethod", name: :infer, given_typer: true,
+            because: "the own-`def` rung and a receiver's own `send` ask this rung alone, with a method name and " \
+                     "argument types that are not their site's, so it takes them as positionals."
+          ),
+          SecondEntry.new(
+            home: "CallLadder::UserMethod", name: :user_inference_receiver?, given_typer: false,
+            because: "the rung's gate, a predicate on the receiver type. The own-`def` rung's gate, the own-`send` " \
+                     "reading and the recursion scan ask it too, so it moved with the rung: left in the typer it " \
+                     "was the rung's fifth callback."
+          )
+        ]
+      )
+
+      # The dispatcher's interior: entries of `MethodDispatcher` that only the dispatcher and the tiers that dispatch
+      # again call (`MethodDispatcher::ProjectPatched`, `MethodDispatcher::CompositeReceiver`). They skip the records
+      # `dispatch_site` makes after an answer, so the typer and the rung modules ask the dispatcher by its row's
+      # `asked_as` and never by one of these.
+      DISPATCHER_INTERIOR = Ractor.make_shareable(%i[resolve resolve_site])
     end
   end
 end

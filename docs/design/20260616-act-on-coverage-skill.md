@@ -1,7 +1,5 @@
 # Act-on-coverage skill — skeleton draft (ADR-63 WD5)
 
-> **Historical** (marked 2026-11-20): promoted: the skeleton shipped as a live user-facing skill, so this is an older duplicate draft. Superseded by [`skills/rigor-protection-uplift/SKILL.md`](../../skills/rigor-protection-uplift/SKILL.md), [ADR-73](../adr/73-skill-driven-user-experience.md). Kept for the record; default `rg` skips it (see [the notes README](../notes/README.md#historical-notes)).
-
 Status: **Promoted (2026-06-20).** This skeleton shipped as the live skill
 [`skills/rigor-protection-uplift/SKILL.md`](../../skills/rigor-protection-uplift/SKILL.md)
 under [ADR-73](../adr/73-skill-driven-user-experience.md) WD4 — the user-facing-skill

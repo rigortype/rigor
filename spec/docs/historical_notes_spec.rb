@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # A note or design document whose content is spent carries a `> **Historical**` banner under its title, and
-# the root `.ignore` lists it so a default `rg` (and the agent Grep tool built on it) skips it. The file
+# the root `.ignore` lists it so a default `rg` (and the editors and tools that read `.ignore`) skips it. The file
 # stays where it is, so every link to it still resolves; `rg --no-ignore-dot <term> docs/` reads it.
 # This spec keeps the two in step: a banner without its `.ignore` entry still shows up in every search,
 # and an entry without a banner hides a live note with nothing on the page saying why.
@@ -31,6 +31,11 @@ RSpec.describe "historical notes and the root .ignore" do
   it "lists every bannered note in the .ignore block, and nothing else" do
     expect(ignored).to eq(ignored.sort.uniq)
     expect(ignored).to eq(bannered)
+  end
+
+  it "hides no note or design document outside the block" do
+    outside = File.read(File.join(root, ".ignore")).sub(HISTORICAL_IGNORE_BLOCK, "")
+    expect(outside.lines.map(&:strip).grep(%r{\A/?docs(?:/(?:notes|design)\b|/?\z)})).to be_empty
   end
 
   it "points every entry at a file that exists" do

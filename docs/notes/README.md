@@ -81,7 +81,7 @@ comparison) appears nowhere else in this index.
 | 2026-08-13 | [Unused-constant false-positive baseline — three-project corpus measurement (issue #345)](20260813-unused-constant-fp-baseline.md) |
 | 2026-08-17 | [Effect catalogue — corpus measurement, before and after (issue #380)](20260817-effect-catalogue-corpus.md) |
 | 2026-08-17 | [Effect collection — where the WD13 budget went, and what got it back (issue #382)](20260817-effect-collection-perf.md) |
-| 2026-08-17 | [Rails effect layer — corpus measurement, before and after (issue #387)](20260817-effect-rails-layer-corpus.md) *(historical)* |
+| 2026-08-17 | [Rails effect layer — corpus measurement, before and after (issue #387)](20260817-effect-rails-layer-corpus.md) |
 | 2026-08-22 | [Effect system — first-adopter user story on Redmine](20260822-effect-user-story-redmine.md) |
 | 2026-08-23 | [`super` effect edge — corpus measurement (issue #446)](20260823-effect-super-edge-corpus.md) |
 | 2026-08-23 | [Effect labels — ten user stories, adjudicated against the corpus (redmine + mastodon)](20260823-effect-user-stories-corpus.md) |
@@ -184,8 +184,8 @@ comparison) appears nowhere else in this index.
 
 A note whose content is spent — a plan that was executed or dropped, an audit whose fixes landed, a draft an ADR or spec now records, a measurement a later one replaced — is marked historical instead of moved, so every link to it keeps resolving. The same rule covers [`docs/design/`](../design/README.md).
 
-1. Put a banner on the line after the title: `> **Historical** (marked YYYY-MM-DD): <why it is spent>. Superseded by <link>.` Leave the original `Status:` line as it was; it still says what kind of note this was.
-2. Add the path to the `# BEGIN historical` block of the root [`.ignore`](../../.ignore), sorted. A default `rg` (and the agent Grep tool built on it) then skips the file; git, links and `spec/docs/` are unaffected.
+1. Put a banner on the line after the title: `> **Historical** (marked YYYY-MM-DD): <why it is spent>. Superseded by <link>.` Leave the original `Status:` line and the body as they were; it still says what kind of note this was. The banner is dated metadata added on top, so the note stays the frozen record [ADR-98](../adr/98-development-flow-document-roles.md) calls it.
+2. Add the path to the `# BEGIN historical` block of the root [`.ignore`](../../.ignore), sorted. A default `rg` then skips the file, as do the tools that read `.ignore` too (`ag`, VS Code search). git, links and `spec/docs/` are unaffected. Keep every such path inside that block: the spec below checks nothing else in `.ignore`, and refuses any other line naming `docs/notes/` or `docs/design/`.
 3. Append *(historical)* to its row in the index above, if it has one.
 
-[`spec/docs/historical_notes_spec.rb`](../../spec/docs/historical_notes_spec.rb) fails when a banner and the `.ignore` block disagree. To search the historical notes too, drop the `.ignore` file and scope the path: `rg --no-ignore-dot <term> docs/`. Mark a note historical only when an agent searching its topic today would be misled or would waste time on it; a decline whose rationale is still the latest word, or the most recent measurement of something, stays.
+[`spec/docs/historical_notes_spec.rb`](../../spec/docs/historical_notes_spec.rb) fails when a banner and the `.ignore` block disagree. To search the historical notes too, skip the `.ignore` rules and scope the path: `rg --no-ignore-dot <term> docs/` (`.gitignore` still applies). Mark a note historical only when an agent searching its topic today would be misled or would waste time on it; a decline whose rationale is still the latest word, the most recent measurement of something, or an open follow-up recorded nowhere else, stays. A later note that re-measures part of a note supersedes only that part.

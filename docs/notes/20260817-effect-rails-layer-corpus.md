@@ -1,7 +1,5 @@
 # Rails effect layer — corpus measurement, before and after (#387)
 
-> **Historical** (marked 2026-11-20): a one-off before/after for the landed #387 Rails effect layer; later notes re-measured and settled the WD13 budget. Superseded by [WD13 budget verification](20260819-wd13-effect-budget-verification.md), [effect-collection profile](20260910-effect-collection-profile.md). Kept for the record; default `rg` skips it (see [the notes README](README.md#historical-notes)).
-
 Status: measurement note, no design commitments. Taken on branch
 `claude/effect-labels/11-rails-layer`. "Before" is its base, commit `426d2e6d` (the declared-lane
 slice): plugins carry no effect contract at all. "After" is the same run with the same plugin list,

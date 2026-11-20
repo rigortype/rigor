@@ -10,7 +10,6 @@
 /docs/design/20260517-dry-validation-slicing.md
 /docs/design/20260518-cli-disk-snapshot-cache.md
 /docs/design/20260522-vscode-extension.md
-/docs/design/20260616-act-on-coverage-skill.md
 /docs/notes/20260521-mastodon-cluster4-flow-folding-triage.md
 /docs/notes/20260528-rbs-upstream-pr-resolv-typeclass.md
 /docs/notes/20260603-dead-code-coverage-sweep.md
@@ -19,7 +18,6 @@
 /docs/notes/20260706-docs-review-fidelity.md
 /docs/notes/20260706-v0.2.x-to-v1.0-readiness-assessment.md
 /docs/notes/20260707-cache-hardening-plan.md
-/docs/notes/20260708-gitlab-type-coverage-improvement-plan.md
 /docs/notes/20260710-module-singleton-cross-file-seed.md
 /docs/notes/20260711-docs-audit-adr-42-82.md
 /docs/notes/20260711-docs-audit-internal-spec.md
@@ -34,6 +32,5 @@
 /docs/notes/20260711-docs-review-ruby-reader.md
 /docs/notes/20260711-external-gem-constant-provenance.md
 /docs/notes/20260725-check-allocation-attribution.md
-/docs/notes/20260817-effect-rails-layer-corpus.md
 /docs/notes/20260919-zard-first-draft-feedback.md
 # END historical

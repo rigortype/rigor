@@ -545,6 +545,18 @@ named `try_dispatch`: a tier takes the site alone and must not type anything.
   `OverridingDef.overriding_own_def?` is that rung's gate, which the typer's `splat_index_read_type`
   asks. S8 moves the gate with the rung, so it is neither copied nor a `PORT` member.
 
+> **Note, 2026-11-20** ([#3371](https://github.com/rigortype/rigor/pull/3371)). Second entries are a
+> list, not a count: each is named here, and `CallLadder::SECOND_ENTRIES` holds the same list as data,
+> with whether each entry is given the typer. S6 names a third, `UserMethod.user_inference_receiver?`,
+> the user-method rung's gate: a predicate on the receiver type, which the rung asks first and which
+> `overriding_own_def?`, `own_send_type` and the recursion scan (`recursion_def_for`) ask outside it.
+> Left in the typer it would have been the rung's fifth callback, over the cut-off, so it moved with
+> the rung, as `overriding_own_def?` moves with `OverridingDef` in S8, and its callers ask the module.
+> A second entry that is not given the typer is a function of its arguments alone: it takes neither a
+> typer nor a scope and calls nothing back. `spec/rigor/inference/call_ladder/port_spec.rb` fails one
+> that does, and the order pin counts a call of a second entry as asking its rung. Another second
+> entry is named here and added there.
+
 **The dispatcher.** Its twelve private tiers become eleven `try_dispatch(context)` modules under
 `method_dispatcher/`: plugin contribution, HKT builtin return, static refinement, synthetic method,
 project-patched, dependency source, discovered method, synthesized stub, user-class ancestor

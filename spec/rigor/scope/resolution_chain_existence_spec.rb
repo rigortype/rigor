@@ -78,11 +78,12 @@ RSpec.describe "existence probes over a contested resolution chain" do
     expect(rules.send(:ancestry_declares_method?, scope, "C", :foo, :instance)).to be(true)
   end
 
-  it "keeps ExpressionTyper's implicit-self and self-call probes answering defined" do
+  it "keeps the top-level def rung's implicit-self probes and ExpressionTyper's self-call probe answering defined" do
     typer = Rigor::Inference::ExpressionTyper.new(scope: scope)
-    expect(typer.send(:instance_self_answers?, "C", :foo)).to be(true)
+    rung = Rigor::Inference::CallLadder::TopLevelDef
+    expect(rung.send(:instance_self_answers?, "C", :foo, typer)).to be(true)
     expect(typer.send(:self_call_method_known?, "C", :foo)).to be(true)
-    expect(typer.send(:singleton_self_answers?, "S", :build)).to be(true)
+    expect(rung.send(:singleton_self_answers?, "S", :build, scope)).to be(true)
   end
 
   # `ProjectMethodOwnership.defines?` is what `ClosureEscapeAnalyzer` (a project `each` keeps the block's

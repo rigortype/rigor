@@ -8,7 +8,7 @@
 # receiver typed as `nil` and fired `undefined method ... for nil` at four sites on the subclass's own
 # working code, plus a `def.return-type-mismatch` calling the correct override wrong.
 #
-# The gate is `ExpressionTyper#try_overriding_def_dispatch`, and its three conditions are all load-bearing:
+# The gate is `CallLadder::OverridingDef.try_call`, and its three conditions are all load-bearing:
 # the receiver's class has its own source `def`, no declaration of its own, and the ancestor whose
 # declaration would answer is PROJECT-declared. The third is the blast radius — without it a project class
 # with `def each` would disqualify `Enumerable#each`, which is the blanket fix ADR-43 rejected.

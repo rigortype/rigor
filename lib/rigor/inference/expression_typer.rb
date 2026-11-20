@@ -61,6 +61,8 @@ require_relative "expression_typer/writes"
 require_relative "call_ladder/user_method"
 require_relative "call_ladder/project_singleton"
 require_relative "call_ladder/literal_send"
+require_relative "call_ladder/top_level_def"
+require_relative "call_ladder/overriding_def"
 
 module Rigor
   module Inference
@@ -351,10 +353,10 @@ module Rigor
       def implicit_index_read_type(node, receiver, arg_types)
         return splat_index_read_type(node, receiver, arg_types) if splat_arguments?(node)
 
-        overriding_def = try_overriding_def_dispatch(node, receiver, arg_types, method_name: :[])
+        site = index_read_site(node, receiver, arg_types)
+        overriding_def = CallLadder::OverridingDef.try_call(site, self)
         return overriding_def if overriding_def
 
-        site = index_read_site(node, receiver, arg_types)
         MethodDispatcher.dispatch_site(site) || CallLadder::UserMethod.try_call(site, self) ||
           CallLadder::ProjectSingleton.try_call(site, self)
       end
@@ -1134,110 +1136,6 @@ module Rigor
         end
       end
 
-      # v0.0.3 A — implicit-self calls prefer a same-named top-level `def` over RBS dispatch. Without this, a
-      # helper like `def select(...)` defined inside an `RSpec.describe ... do ... end` block mis-routes
-      # through `Enumerable#select` / `Object#select` and the caller observes `Array[Elem]` instead of the
-      # helper's actual return type. The check fires only for `node.receiver.nil?` (true implicit self), so
-      # explicit-receiver dispatch is unaffected.
-      #
-      # Issue #316 — the lookup goes through the confidence-gated `Scope#bindable_top_level_def_for`, not the
-      # raw table: inside a block whose `self` is unmodelled, a top-level `def` from ANOTHER file is not
-      # evidence about which method the call reaches, so the bind is declined and the call widens.
-      #
-      # Issue #618 — the binding is a fallback for names the enclosing `self` does NOT answer, not a
-      # first-choice tier. A top-level `def` is a private method on `Object`, the last link of every MRO, so
-      # whenever the call's own `self` carries the name the class wins at runtime and the top-level body is
-      # never reached. Binding regardless of `self_type` inverted that: a top-level `def text` typed the
-      # member read inside `class Line < Struct.new(:text); def shout = text.upcase; end` as the def's `nil`
-      # and fired `undefined method 'upcase' for nil` on correct code. The candidate is still looked up
-      # first — that lookup is a hash probe and owns the ADR-46 cross-file dependency edge — and
-      # {#self_type_answers?} then vetoes the bind for a name the enclosing class answers itself.
-      #
-      # Issue #963 item 2 — {#plugin_member_answers?} is the second veto, for the members no source the
-      # engine walks can enumerate: a plugin's `dynamic_return` answer and the ADR-16 synthetic-method
-      # index. They are members of `self` exactly as an `attr_reader` is, so a top-level `def` must not
-      # bind ahead of them either.
-      #
-      # Issue #2861 — a bind the #316 gate declines answers `Dynamic[Top]`, never the RBS method of the same name: the
-      # block's real `self` reaches either a same-named method of its own or the top-level `def`, which shadows
-      # `Kernel#format` and every other `Object` / `Kernel` method on the way. Falling through typed
-      # `format(r).bit_length` against `Kernel#format`'s `String` on code that runs the project's `def format`.
-      def try_local_def_dispatch(node, receiver, arg_types, block_type = nil)
-        return nil unless node.receiver.nil?
-
-        local_def = scope.bindable_top_level_def_for(node.name)
-        return declined_top_level_def_answer(node) if local_def.nil?
-        return nil if self_type_answers?(node.name)
-        return nil if plugin_member_answers?(node, receiver)
-
-        local_inference = infer_top_level_user_method(local_def, receiver, node, arg_types, block_type)
-        return local_inference if local_inference
-
-        # The local def matches by name but the inference was disqualified — the parameter shape is too
-        # complex for the first-iteration binder (kwargs / optionals / rest), so the body could not be
-        # re-typed. `Dynamic[Top]` is the safest answer: RBS dispatch would be wrong (the method is
-        # user-defined and shadows whatever ancestor method the dispatch would find), and `Dynamic[Top]`
-        # propagates correctly through downstream call chains without surfacing misleading false-positive
-        # diagnostics.
-        dynamic_top
-      end
-
-      # Issue #2861 — the answer for an implicit-self call whose top-level `def` the #316 gate declined: nil (dispatch
-      # as before) when the project defines no top-level `def` of the name, else `Dynamic[Top]`. The gate declines only
-      # where `self_type` is nil, so no member of `self` ({#self_type_answers?}, {#plugin_member_answers?}) can answer.
-      def declined_top_level_def_answer(node)
-        return nil unless scope.opaque_block_self? && scope.self_type.nil?
-        return nil if scope.top_level_def_for(node.name).nil?
-
-        dynamic_top
-      end
-
-      # ADR-110 WD1 / #856 — the receiver's own `def` outranks a declaration that only an ANCESTOR carries.
-      #
-      # RBS resolves through the fully built method table, so `RbsDispatch` answers a subclass call with a
-      # signature written about the base. redmine's `FieldFormat::Base#target_class` honestly declares
-      # `-> nil`; `RecordList` overrides it with a real lookup, and every call on a `RecordList` receiver
-      # typed as `nil` and fired `undefined method ... for nil` on the subclass's own working code (#744).
-      # A signature is authoritative for a receiver only where someone wrote it about that receiver;
-      # reaching it through an ancestor is a lookup convenience, not an act of authorship.
-      #
-      # This is {#try_local_def_dispatch}'s shape one level up — there the enclosing class shadows a
-      # top-level `def`, here the receiver's class shadows an ancestor's declaration — and it answers the
-      # same way: re-type the override's body, and when that is not possible answer `Dynamic[Top]` rather
-      # than let the inherited declaration speak for a method it does not describe.
-      #
-      # Three conditions, and the third is the blast radius. Clause A of the ADR (an own source `def`, no
-      # own declaration) does NOT by itself stay clear of [ADR-43]: `class Foo; def each; end` inheriting
-      # `Enumerable#each` satisfies it, and disqualifying bundled declarations that way is the blanket fix
-      # ADR-43 rejected — the same reason {#singleton_self_answers?}'s RBS arm is own-class only. So the
-      # ancestor whose declaration is being disqualified must itself be PROJECT-declared: a project sidecar
-      # describes the source under analysis, while a bundled signature describes a class the project does
-      # not own, where a project `def` is a monkey-patch and [ADR-17] owns the question.
-      # `project_declared_class?` fail-softs to false, so an unattributable environment changes nothing.
-      def try_overriding_def_dispatch(node, receiver, arg_types, method_name: node.name)
-        return nil unless overriding_own_def?(receiver, method_name)
-
-        CallLadder::UserMethod.infer(receiver, node, arg_types, method_name, nil, self) || dynamic_top
-      end
-
-      # The three conditions above: an own source `def` of `method_name` on the receiver's class, which has no
-      # declaration of its own but inherits one a project-declared ancestor wrote.
-      def overriding_own_def?(receiver, method_name)
-        return false unless CallLadder::UserMethod.user_inference_receiver?(receiver)
-
-        class_name = receiver.class_name
-        return false if class_name.nil?
-        # `Scope#user_def_for`, not `discovered_method?`: the cross-file table deliberately withholds a
-        # plain instance `def` under the ADR-17 monkey-patch contract, and this gate must see one.
-        return false if scope.user_def_for(class_name, method_name).nil?
-
-        definition = safe_rbs_method_definition(class_name, method_name, :instance)
-        return false if definition.nil?
-        return false if rbs_declared_on_class?(definition, class_name)
-
-        project_declared_owner?(definition)
-      end
-
       # {#implicit_index_read_type}'s site: the `[]` read, with the write node as the call node and no block.
       def index_read_site(node, receiver, arg_types)
         MethodDispatcher::CallContext.build(
@@ -1253,141 +1151,16 @@ module Rigor
       # the signature-driven dispatch answers. An own `def` overriding an inherited declaration still outranks
       # that declaration; with its body unreadable, it answers `Dynamic[top]` ({CallLadder::EXCEPTIONS}).
       def splat_index_read_type(node, receiver, arg_types)
-        return dynamic_top if overriding_own_def?(receiver, :[])
+        return dynamic_top if CallLadder::OverridingDef.overriding_own_def?(receiver, :[], self)
 
         MethodDispatcher.dispatch_site(index_read_site(node, receiver, arg_types))
       end
 
-      # Whether the class an inherited declaration was written about is one the project declares itself.
-      def project_declared_owner?(definition)
-        defined_in = definition.defined_in
-        return false if defined_in.nil?
-
-        Rigor::Reflection.project_declared_class?(defined_in.to_s, scope: scope)
-      rescue StandardError
-        false
-      end
-
-      # Issue #618 — whether the call's enclosing `self` already answers `method_name`. Only a `self` whose
-      # class is KNOWN participates: at genuine top level, and inside a block whose `self` is unmodelled,
-      # `scope.self_type` is nil, the predicate is false, and the historical top-level binding stands — that
-      # is #316's / #319's territory and this veto stays out of it.
-      #
-      # The ADR-48 member carriers answer from their own map first: a `StructInstance` / `DataInstance`
-      # `self` carries the member set the body reads through, and an anonymous `Struct.new(...)` value has no
-      # class name to look anything else up under.
-      def self_type_answers?(method_name)
-        case (self_type = scope.self_type)
-        when Type::Singleton then singleton_self_answers?(self_type.class_name, method_name)
-        when Type::Nominal then instance_self_answers?(self_type.class_name, method_name)
-        when Type::StructInstance, Type::DataInstance
-          self_type.members.key?(method_name.to_sym) || instance_self_answers?(self_type.class_name, method_name)
-        else false
-        end
-      end
-
-      # Issue #963 item 2 — the plugin arm of the veto: whether a plugin answers `node.name` on the call's
-      # own `self`. Asked of `MethodDispatcher.plugin_member_answers?`, which puts the question to the same
-      # two tiers dispatch would consult (the gated `dynamic_return` walk and the ADR-16 synthetic-method
-      # index), so the veto carries no plugin knowledge of its own.
-      #
-      # The confidence gate is #618's, unchanged and re-stated here rather than inherited: only a `self`
-      # whose class is KNOWN participates. At genuine top level, and inside a block whose `self` is
-      # unmodelled, `scope.self_type` is nil, `receiver` is the synthetic `Object` / `Dynamic[Top]` stand-in
-      # that {#call_receiver_type_for} substitutes, and asking a plugin about THAT receiver would be asking
-      # about a `self` the engine has not modelled — #316's / #319's territory, which this stays out of.
-      def plugin_member_answers?(node, receiver)
-        return false if scope.self_type.nil?
-
-        MethodDispatcher.plugin_member_answers?(
-          call_node: node, scope: scope, receiver_type: receiver, method_name: node.name
-        )
-      end
-
-      # The instance side of {#self_type_answers?}: the discovered methods (`def`, `attr_*`,
-      # `define_method`, `alias`) of the class or any project ancestor, its `Struct.new` / `Data.define`
-      # member accessors, a `def` reached through its project ancestors (superclass chain and included
-      # modules), and an RBS method declared on an owner that PRECEDES `::Object` in the MRO.
-      #
-      # Issue #633 — the discovery arm walks ancestors because inheritance does not distinguish how a
-      # method got there: a superclass `attr_accessor :stext` and an included module's `attr_reader` bind
-      # ahead of a top-level `def stext` exactly as an inherited `def` does, and only the latter had a walk.
-      #
-      # The RBS arm's cut-off is `::Object`, not the own class. A top-level `def` IS a private `Object`
-      # instance method, the last link of every MRO, so any declared owner that comes before `::Object`
-      # wins at runtime — `Exception#message` for a `StandardError` subclass, `Array#first`,
-      # `Comparable#clamp`. What the cut-off keeps out is the tier v0.0.3 A exists for and #316 / #319
-      # refined: a name owned by `Object` or `Kernel` themselves (`inspect`, `format`) is at or after the
-      # top-level `def`'s own rung, so the historical binding still stands there.
-      def instance_self_answers?(class_name, method_name)
-        return false if class_name.nil?
-        return true if scope.discovered_method_through_ancestors?(class_name, method_name, :instance)
-        return true if meta_member?(class_name, method_name)
-        return true if resolve_user_def_through_ancestors(class_name, method_name)
-        return true if rbs_ancestor_answers?(class_name, method_name)
-
-        # Issue #2968 — a class on the chain defines methods under names no table holds (`attr_accessor(*FLAGS)`, a
-        # splatted `Struct.new(*FIELDS)`), so the name may be one of them, ahead of the top-level `def`.
-        return true if Scope::DiscoveryIndex.open_names_on_chain?(scope, class_name, :instance)
-
-        # Issue #2994 — a class on the chain mixes in a module no table names (`include(*MODS)`, `include helper`), so
-        # the name may be that module's, ahead of the top-level `def`.
-        Scope::DiscoveryIndex.unnamed_mixin_on_chain?(scope, class_name)
-      end
-
-      # The RBS arm of {#instance_self_answers?}. A project class is usually absent from the RBS
-      # environment, so the declaration that decides the question is written about an ancestor the project
-      # does not declare (`StandardError`, `Array`, `Comparable`) — each is asked on its own terms, and
-      # each of them is itself before `::Object` in the reader's MRO by construction.
-      #
-      # Issue #527 slice 0 — the walk itself lives in {ExternalAncestorResolution}, which reports WHICH
-      # declaration answered because the dispatch side needs to dispatch there. This tier only needs to
-      # know that one did, so it reads the presence of an answer. Dependency recording stays ON: this
-      # arm genuinely read the ancestor's declaration to decide the binding.
-      def rbs_ancestor_answers?(class_name, method_name)
-        !ExternalAncestorResolution.resolve(class_name, method_name, :instance, scope: scope).nil?
-      end
-
-      # The singleton side: a class-body `self` is `Singleton[Foo]`, where an implicit-self call reaches
-      # `Foo`'s own class methods before `Object`'s private top-level `def`.
-      #
-      # Issue #633 — both discovery arms follow the superclass chain, because a subclass inherits its
-      # parent's class methods; `Scope` narrows the singleton walk to superclasses for the same reason
-      # (an `include`d module's `def self.x` is not callable on the includer).
-      def singleton_self_answers?(class_name, method_name)
-        return false if class_name.nil?
-        return true if scope.discovered_method_through_ancestors?(class_name, method_name, :singleton)
-        return true unless scope.singleton_def_through_ancestors(class_name, method_name).first.nil?
-
-        declared = safe_rbs_method_definition(class_name, method_name, :singleton)
-        return true if rbs_declared_on_class?(declared, class_name)
-
-        # Issue #2994 — a class object on the chain that a module no table names may extend through a hook (the
-        # `:include_hook` open mark of a class with `include(*MODS)`), a class that `extend(*EMODS)`s, or an extended
-        # module whose own module set is unknown, may answer any name ahead of the top-level `def`.
-        Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods).unnamed_mixin?
-      end
-
-      # A `Struct.new(:a, :b)` / `Data.define(:a, :b)` member accessor. The layouts are a discovery table of
-      # their own, separate from `discovered_methods`, so the accessor names they imply have to be asked for
-      # explicitly. Only the reader name is tested: a writer is unreachable as an implicit-self call, since
-      # bare `a = v` is a local assignment.
-      def meta_member?(class_name, method_name)
-        layout = scope.struct_member_layout(class_name)
-        members = layout ? layout[:members] : scope.data_member_layout(class_name)
-        !members.nil? && members.include?(method_name.to_sym)
-      end
-
       # Issue #527 slice 0 — the RBS lookup, its `rescue`, and the `::Object` MRO cut-off moved to
-      # {ExternalAncestorResolution}, which the dispatch side reads too. These stay as this class's
-      # spelling of them, because three other tiers here ({#overriding_own_def?}, {#singleton_self_answers?},
-      # {#core_finder_member?}) ask the own-class question without the ancestor walk.
+      # {ExternalAncestorResolution}, which the dispatch side reads too. This stays as this class's
+      # spelling of it, because {#core_finder_member?} asks the own-class question without the ancestor walk.
       def safe_rbs_method_definition(class_name, method_name, kind)
         ExternalAncestorResolution.method_definition(class_name, method_name, kind, scope: scope)
-      end
-
-      def rbs_declared_on_class?(definition, class_name)
-        ExternalAncestorResolution.declared_on_class?(definition, class_name)
       end
 
       # Issue #520 — Ruby defines the value of an attribute / index assignment (`x.attr = v`, `h[k] = v`)
@@ -1781,7 +1554,7 @@ module Rigor
         literal_send = CallLadder::LiteralSend.try_call(site, self)
         return literal_send if literal_send
 
-        local_def_result = try_local_def_dispatch(node, receiver, arg_types, block_type)
+        local_def_result = CallLadder::TopLevelDef.try_call(site, self)
         return local_def_result if local_def_result
 
         # v0.0.6 phase 2 — per-element block fold for Tuple receivers. When `[a, b, c].map { |x| f(x) }` and
@@ -1792,7 +1565,7 @@ module Rigor
         block_fold = try_receiver_block_folds(node, receiver, arg_types)
         return block_fold if block_fold
 
-        overriding_def = try_overriding_def_dispatch(node, receiver, arg_types)
+        overriding_def = CallLadder::OverridingDef.try_call(site, self)
         return overriding_def if overriding_def
 
         result = MethodDispatcher.dispatch_site(site)
@@ -2309,19 +2082,6 @@ module Rigor
           scope.discovered_method?(class_name, method_name, :singleton)
       end
 
-      # v0.0.3 A — re-types a top-level (or DSL-block-nested) `def` discovered by `ScopeIndexer` under the
-      # `TOP_LEVEL_DEF_KEY` sentinel. Mirrors the `infer_user_method_return` shape but uses the current
-      # `scope.self_type` (or implicit `Object`) as the receiver carrier so the body's own self is
-      # consistent with the call site's. Returns nil when the parameter shape disqualifies the def, when the
-      # body is empty, or when the inference raises.
-      def infer_top_level_user_method(def_node, receiver, call_node, arg_types, block_type = nil)
-        arg_types, positionals_unknown = positional_correspondence(call_node, arg_types)
-        infer_user_method_return(def_node, receiver, arg_types, yield_type: block_type,
-                                                                positionals_unknown: positionals_unknown)
-      rescue StandardError
-        nil
-      end
-
       # ADR-24 slice 1 — implicit-self method-call resolution. `discovered_def_nodes` is now carried into
       # method / class body scopes (see `StatementEvaluator#build_fresh_body_scope`), so a call written with
       # no explicit receiver inside a method body resolves against the enclosing class's own definitions and
@@ -2336,7 +2096,7 @@ module Rigor
       # permanently on 2026-06-12 (ADR-57 WD2) with a zero `rigor check lib` + plugin self-check delta.
       #
       # The `adoptable_self_call_result?` predicate is subsumed by unconditional adoption and removed;
-      # `try_local_def_dispatch` / `CallLadder::UserMethod.infer` simply return the inferred return.
+      # `CallLadder::TopLevelDef.try_call` / `CallLadder::UserMethod.infer` simply return the inferred return.
       # `clamp_unroll_result` still backstops an untrustworthy unrolled value independently of adoption.
 
       # An extended (value-keyed) guard frame is `[plain_signature, value_key]` where `plain_signature` is
@@ -2465,6 +2225,8 @@ module Rigor
         { user_def: {}, typing_def: {}, self_pure: {}.compare_by_identity, yields: {}.compare_by_identity }
       end
 
+      # @api private — a member of {CallLadder::PORT}, made public at the end of this class.
+      #
       # ADR-24 slice 2 — resolves `method_name` against the project definers on `class_name`'s
       # {Scope::ResolutionChain}, in Ruby's order: prepended modules, the class, its included modules, then the
       # superclass's chain likewise. RBS-known ancestors are NOT answered here — the `MethodDispatcher` RBS
@@ -6038,11 +5800,12 @@ module Rigor
       end
 
       # @api private — the typer's side of the call ladder's port (ADR-116 WD12). A rung module under `call_ladder/`
-      # is given the walking typer and calls these four on it, and reads `scope`; `CallLadder::PORT` is that list and
+      # is given the walking typer and calls these five on it, and reads `scope`; `CallLadder::PORT` is that list and
       # `spec/rigor/inference/call_ladder/port_spec.rb` holds both sides to it. Each runs this typer's own code inside
       # the `type_of` walk that asked the rung, so nothing outside `call_ladder/` may call one on a typer it holds
       # (`spec/rigor/inference/call_ladder/reentry_spec.rb`).
-      public :class_graph_buckets, :positional_correspondence, :infer_user_method_return, :degrade_if_overridable
+      public :class_graph_buckets, :positional_correspondence, :infer_user_method_return, :degrade_if_overridable,
+             :resolve_user_def_through_ancestors
     end
   end
 end

@@ -86,6 +86,15 @@ RSpec.describe Rigor::Inference::CallLadder do
       end
     end
 
+    # A gate is part of its rung, so where the rung has a module the gate is one of that module's second entries.
+    it "ask each gate as a second entry of its rung's module" do
+      gates = ladder::EXCEPTIONS.flat_map(&:gates)
+      seconds = ladder::SECOND_ENTRIES.map { |entry| [entry.home, entry.name] }
+
+      expect(gates).not_to be_empty
+      expect(gates.map { |gate| [rung(gate.rung).home, gate.ask] }).to all(satisfy { |pair| seconds.include?(pair) })
+    end
+
     it "are frozen all the way down" do
       tables = [ladder::ENTRIES, ladder::RUNGS, ladder::EXCEPTIONS]
 

@@ -473,7 +473,14 @@ SIG_PROVENANCE_PARAMETER_ONLY = {
   # `project_singleton.rb`, measured with and without. The four functions whose parameters are all `untyped`
   # (`unordered_prepend_definer?`, `answered_ahead?`, `level_start_of`, `own_singleton_index`) gain nothing from a
   # declaration, measured, and are left undeclared.
-  "sig/rigor/inference.rbs" => { unmarked: 28, marked: 0 },
+  # +2 (#3345, ADR-116 WD12 S8): `CallLadder::TopLevelDef` and `CallLadder::OverridingDef` declare all twelve of their
+  # functions. Ten declare the return sig-gen generates and are earned. For `self_type_answers?` and
+  # `singleton_self_answers?` sig-gen renders no return (`sig.skipped.untyped-return`: the second answers an
+  # undeclared `Scope::ResolutionChain#unnamed_mixin?`, and the first what the second answers), and each declares its
+  # parameters so that the `typer` or `scope` it is given reads as `ExpressionTyper` or `Scope` inside it, which the
+  # self-typing ratchet counts: 27 precise expressions and 8 call sites of `top_level_def.rb`, measured with and
+  # without.
+  "sig/rigor/inference.rbs" => { unmarked: 30, marked: 0 },
   # Both rows were marked `unrenderable` rows before the class existed.
   "sig/rigor/scope.rbs" => { unmarked: 0, marked: 2 }
 }.freeze
@@ -491,10 +498,11 @@ SIG_PROVENANCE_PARAMETER_ONLY_MARKED = [
 # `method_dispatcher.rb` in three batches, its `dispatch_site` and `resolve_site`, the fourteen of slice S6 (the eleven
 # declared functions of `CallLadder::UserMethod` and three typer methods of the call ladder's port), the nineteen
 # declared functions of `CallLadder::ProjectSingleton` of slice S5 and the two of `CallLadder::LiteralSend` of slice S7,
-# every one fitting). A floor, not an exact pin, because every new declaration of a `def` raises it: raise it when the
+# every one fitting; 1121 after the twelve declared functions of `CallLadder::TopLevelDef` and `CallLadder::OverridingDef`
+# of slice S8). A floor, not an exact pin, because every new declaration of a `def` raises it: raise it when the
 # count grows, and lower it only with the reason in the commit body (a deleted declaration, or a `def` the pairing
 # stopped finding, which is the case this floor exists to catch).
-SIG_PARAMETER_SHAPE_COMPARED_FLOOR = 1109
+SIG_PARAMETER_SHAPE_COMPARED_FLOOR = 1121
 
 module SigProvenanceSpecHelpers
   # The hard-rule failure for unmarked `tighter_return` rows. A row whose declared return is the bare `untyped` claims

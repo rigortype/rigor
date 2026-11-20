@@ -4,7 +4,7 @@
 #
 # #618 made a same-named top-level `def` a FALLBACK for names the call's own `self` does not answer, because
 # a top-level `def` is a private instance method on `Object`, the last link of every MRO. #633 / #955 /
-# #1030 / #1035 widened the sources `ExpressionTyper#self_type_answers?` reads — inherited discovery,
+# #1030 / #1035 widened the sources `CallLadder::TopLevelDef.self_type_answers?` reads — inherited discovery,
 # pre-`::Object` RBS owners, singleton twins, the `define_method` block's `self`, the meta-constant
 # spellings — and every one of them is a source the ENGINE walks.
 #
@@ -18,7 +18,7 @@
 # The fix asks the two tiers `MethodDispatcher#resolve_site` itself consults — the gated `dynamic_return` walk
 # and the ADR-16 synthetic-method index — through `MethodDispatcher.plugin_member_answers?`, so a name the
 # veto reports as answered is a name the dispatch really would resolve, and no plugin knowledge moves into
-# the engine's veto. `ExpressionTyper#plugin_member_answers?` keeps #618's confidence gate unchanged: a
+# the engine's veto. `CallLadder::TopLevelDef.plugin_member_answers?` keeps #618's confidence gate unchanged: a
 # `self` whose class is not KNOWN does not participate, which leaves #316's / #319's territory alone.
 #
 # The ancestor-walking half of the veto lives in `self_class_method_over_toplevel_def_spec.rb`; this file is

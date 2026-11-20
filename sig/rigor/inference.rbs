@@ -109,6 +109,24 @@ module Rigor
         def self?.try_call: (MethodDispatcher::CallContext site, ExpressionTyper typer) -> Type::t?
         def self?.own_send_type: (untyped node, Type::t? receiver, Array[untyped] args, ExpressionTyper typer) -> Type::t?
       end
+
+      module TopLevelDef
+        def self?.try_call: (MethodDispatcher::CallContext site, ExpressionTyper typer) -> Type::t?
+        def self?.declined_top_level_def_answer: (Symbol method_name, Scope scope) -> Type::Dynamic?
+        def self?.infer_top_level_user_method: (untyped def_node, Type::t? receiver, untyped call_node, Array[Type::t] arg_types, Type::t? block_type, ExpressionTyper typer) -> Type::t?
+        def self?.self_type_answers?: (Symbol method_name, ExpressionTyper typer) -> untyped
+        def self?.plugin_member_answers?: (untyped node, Type::t? receiver, Symbol method_name, Scope scope) -> bool
+        def self?.instance_self_answers?: (String? class_name, Symbol method_name, ExpressionTyper typer) -> bool
+        def self?.rbs_ancestor_answers?: (String class_name, Symbol method_name, Scope scope) -> bool
+        def self?.singleton_self_answers?: (String? class_name, Symbol method_name, Scope scope) -> untyped
+        def self?.meta_member?: (String class_name, Symbol method_name, Scope scope) -> bool
+      end
+
+      module OverridingDef
+        def self?.try_call: (MethodDispatcher::CallContext site, ExpressionTyper typer) -> Type::t?
+        def self?.overriding_own_def?: (Type::t? receiver, Symbol method_name, ExpressionTyper typer) -> bool
+        def self?.project_declared_owner?: (untyped definition, Scope scope) -> bool
+      end
     end
 
     class StatementEvaluator

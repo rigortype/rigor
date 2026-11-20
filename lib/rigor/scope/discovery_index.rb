@@ -374,7 +374,7 @@ module Rigor
       # `Struct.new(*FIELDS)`, `attr_accessor(*NAMES)`, a `define_method` under a computed name, so the side defines
       # methods no table names. A project class with no `def` of its own is an external entry (#2094), so its candidate
       # names are asked too. Read by `Reflection.project_method_defined` and by the implicit-self top-level-`def` veto
-      # (`ExpressionTyper#instance_self_answers?`), beside `call.undefined-method`'s own reader.
+      # (`CallLadder::TopLevelDef.instance_self_answers?`), beside `call.undefined-method`'s own reader.
       def self.open_names_on_chain?(scope, class_name, kind)
         marks = OPEN_NAMES_MARKS.fetch(kind)
         chain = ResolutionChain.for(scope, class_name.to_s, kind, :methods)

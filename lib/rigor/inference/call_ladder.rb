@@ -83,16 +83,14 @@ module Rigor
                    in_typer_because: "S4 moves it, and only with a plan for the self-typing ratchet"),
           Rung.new(name: :literal_send, asked_by: %i[call], home: "CallLadder::LiteralSend", asked_as: %i[try_call],
                    in_typer_because: nil),
-          Rung.new(name: :top_level_def, asked_by: %i[call send_target], home: TYPER,
-                   asked_as: %i[try_local_def_dispatch],
-                   in_typer_because: "S8 moves it"),
+          Rung.new(name: :top_level_def, asked_by: %i[call send_target], home: "CallLadder::TopLevelDef",
+                   asked_as: %i[try_call], in_typer_because: nil),
           Rung.new(name: :receiver_block_folds, asked_by: %i[call], home: TYPER,
                    asked_as: %i[try_receiver_block_folds],
                    in_typer_because: "stays: its methods call back eight of block typing's, the cluster #3359 " \
                                      "decides."),
-          Rung.new(name: :overriding_def, asked_by: %i[call index_read send_target], home: TYPER,
-                   asked_as: %i[try_overriding_def_dispatch],
-                   in_typer_because: "S8 moves it, with its gate `overriding_own_def?`"),
+          Rung.new(name: :overriding_def, asked_by: %i[call index_read send_target], home: "CallLadder::OverridingDef",
+                   asked_as: %i[try_call], in_typer_because: nil),
           # Two spellings until every entry builds its site once: `dispatch` takes the call's fields as keywords,
           # `dispatch_site` the site.
           Rung.new(name: :dispatcher, asked_by: %i[call index_read send_target], home: "MethodDispatcher",
@@ -134,7 +132,8 @@ module Rigor
             gates: [Gate.new(rung: :overriding_def, ask: :overriding_own_def?, answer: :dynamic_top)], issue: nil,
             because: "a splat index (`c[*keys] += v`) leaves no positional argument types to bind to a body, so " \
                      "the rungs that type a body are not asked: the own-`def` rung is asked through its gate " \
-                     "and answers `Dynamic[top]`, and only the dispatcher follows."
+                     "(`CallLadder::OverridingDef.overriding_own_def?`) and answers `Dynamic[top]`, and only the " \
+                     "dispatcher follows."
           ),
           ExceptionRow.new(
             name: :send_target_without_top_level_def, entry: :send_target, written_in: nil, omits: %i[top_level_def],
@@ -162,6 +161,7 @@ module Rigor
           positional_correspondence
           infer_user_method_return
           degrade_if_overridable
+          resolve_user_def_through_ancestors
         ]
       )
 
@@ -199,6 +199,12 @@ module Rigor
             because: "the rung's gate, a predicate on the receiver type. The own-`def` rung's gate, the own-`send` " \
                      "reading and the recursion scan ask it too, so it moved with the rung: left in the typer it " \
                      "was the rung's fifth callback."
+          ),
+          SecondEntry.new(
+            home: "CallLadder::OverridingDef", name: :overriding_own_def?, given_typer: true,
+            because: "the rung's gate, which the read under a splat index asks in place of the rung (the design row " \
+                     "`splat_index_read` of EXCEPTIONS), so it moved with the rung. It reads the scope and the RBS " \
+                     "definition, so it is given the typer."
           )
         ]
       )

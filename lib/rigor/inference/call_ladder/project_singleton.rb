@@ -4,6 +4,7 @@ require_relative "../../memo_audit"
 require_relative "../../type"
 require_relative "../singleton_external_ahead"
 require_relative "../singleton_hook_decline"
+require_relative "../singleton_included_hook"
 require_relative "../singleton_object_constant"
 
 module Rigor
@@ -23,7 +24,7 @@ module Rigor
       # `class_graph_buckets`, `positional_correspondence`, `infer_user_method_return` and `degrade_if_overridable`.
       # `CallLadder::PORT` lists them, and `spec/rigor/inference/call_ladder/port_spec.rb` fails a call on the typer
       # that is not one of them. A function that only reads the scope takes it as a parameter and never sees the typer.
-      module ProjectSingleton
+      module ProjectSingleton # rubocop:disable Metrics/ModuleLength
         module_function
 
         # The project-side singleton-method band: a `Foo.bar` call resolved against a `class << …` / `def self.…`
@@ -305,7 +306,8 @@ module Rigor
         def dynamic_singleton_definer_ahead?(class_name, method_name, owner, scope)
           name = method_name.to_sym
           chain = Scope::ResolutionChain.for(scope, class_name.to_s, :singleton, :methods)
-          return true if class_name.to_s != owner.to_s && inherited_hook_on_chain?(chain, class_name.to_s, scope)
+          return true if SingletonIncludedHook.ahead?(chain, owner.to_s, scope) ||
+                         (class_name.to_s != owner.to_s && inherited_hook_on_chain?(chain, class_name.to_s, scope))
 
           chain.entries.each do |entry|
             next if entry.external?

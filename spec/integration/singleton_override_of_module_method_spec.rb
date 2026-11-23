@@ -113,6 +113,28 @@ RSpec.describe "a project singleton override of a Module method wins on the clas
     RUBY
   end
 
+  # A module's `included` hook runs when the class includes it and may define the name on the class, ahead of the
+  # superclass's `def` (#3373).
+  it "types the call Dynamic when a nearer included module's hook may define the name" do
+    expect(dumps(<<~RUBY)).to eq(["Dynamic[top]", "\"s\"", "\"s\""])
+      class Dd; def self.dyn = "s"; end
+      module Hk; def self.included(base) = base.define_singleton_method(:dyn) { 1 }; end
+      class Ee < Dd; include Hk; end
+      module Pl; def other = 1; end
+      class Ff < Dd; include Pl; end
+      class Gg < Dd; prepend Hk; end
+      Rigor.dump_type(Ee.dyn) # 1
+      Rigor.dump_type(Ff.dyn) # "s"
+      Rigor.dump_type(Gg.dyn) # "s": `prepend` runs `prepended`, not `included`
+    RUBY
+    expect(undefined_methods(<<~RUBY)).to eq([])
+      class Dd; def self.dyn = "s"; end
+      module Hk; def self.included(base) = base.define_singleton_method(:dyn) { 1 }; end
+      class Ee < Dd; include Hk; end
+      Ee.dyn.fdiv(2)
+    RUBY
+  end
+
   # An `inherited` hook on an ancestor runs when the subclass is created and may define the name on it.
   it "reports nothing on a subclass whose ancestor's inherited hook may redefine the name" do
     expect(undefined_methods(<<~RUBY)).to eq([])

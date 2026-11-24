@@ -110,9 +110,15 @@ RSpec.describe Rigor::Inference::Acceptance do
       expect(accepts(singleton("IO"), singleton("Tempfile"))).not_to be_no
     end
 
-    it "still refutes an unrelated class against IO, and Tempfile against a class neither hierarchy reaches" do
+    it "still refutes a Tempfile or Random against a class neither hierarchy reaches" do
+      expect(accepts(int_nominal, nominal("Tempfile"))).to be_no
+      expect(accepts(str_nominal, nominal("Tempfile"))).to be_no
+      expect(accepts(int_nominal, nominal("Random"))).to be_no
       expect(accepts(nominal("IO"), int_nominal)).to be_no
-      expect(accepts(nominal("Tempfile"), int_nominal)).to be_no
+    end
+
+    it "keeps refuting Random against an unrelated arm, so overload selection is unchanged" do
+      expect(accepts(Rigor::Type::Combinator.nominal_of("Symbol"), nominal("Random"))).to be_no
     end
   end
 

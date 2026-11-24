@@ -1277,25 +1277,26 @@ module Rigor
         # stdlib, and application classes. When either name fails to resolve we surface "maybe": the caller
         # (overload selector) treats yes/maybe identically, so the conservative answer keeps overload
         # coverage intact. RbsHierarchy exists but this path does not yet consult it; migration to an
-        # RBS-driven lookup is deferred. A `:no` for a class in `UNRELIABLE_ANCESTRY` is withheld as `:maybe` (#3321).
+        # RBS-driven lookup is deferred. A `:no` against an ancestor only RBS declares (`RBS_ONLY_ANCESTORS`) is
+        # withheld as `:maybe` (#3321).
         def class_subtype_result(target_name:, actual_name:, mode:, kind:)
           return Type::AcceptsResult.yes(mode: mode, reasons: "exact name match") if target_name == actual_name
 
           result = host_class_subtype_result(target_name: target_name, actual_name: actual_name, mode: mode, kind: kind)
-          return result unless result.no? && unreliable_host_ancestry?(actual_name)
+          return result unless result.no? && rbs_only_ancestor?(actual_name, target_name)
 
-          # #3321 — the analyzer process's own hierarchy cannot refute a class whose Ruby ancestry disagrees with its
-          # RBS ancestry: `rigor check` requires `tempfile`, whose `Tempfile < Delegator`, while the RBS declares
+          # #3321 — the analyzer process's own hierarchy cannot refute an ancestor RBS declares and Ruby's hierarchy
+          # lacks: `rigor check` requires `tempfile`, whose `Tempfile < Delegator`, while the RBS declares
           # `class Tempfile < File`. A `:no` here would report a `Tempfile` passed where `IO` is declared.
           Type::AcceptsResult.maybe(
             mode: mode,
-            reasons: "#{actual_name}'s host ancestry disagrees with its RBS ancestry (#{kind}: #{actual_name} <= " \
-                     "#{target_name})"
+            reasons: "RBS declares #{target_name} an ancestor of #{actual_name}; the host hierarchy does not (#{kind})"
           )
         end
 
-        def unreliable_host_ancestry?(name)
-          Environment::MemberConsistency::RbsProof::UNRELIABLE_ANCESTRY.include?(name.to_s.delete_prefix("::"))
+        def rbs_only_ancestor?(actual_name, target_name)
+          ancestors = Environment::MemberConsistency::RbsProof::RBS_ONLY_ANCESTORS[actual_name.to_s.delete_prefix("::")]
+          !ancestors.nil? && ancestors.include?(target_name.to_s.delete_prefix("::"))
         end
 
         def host_class_subtype_result(target_name:, actual_name:, mode:, kind:)

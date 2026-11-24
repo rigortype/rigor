@@ -10,7 +10,7 @@ require "tempfile"
 RSpec.describe "a Tempfile argument against an IO or File parameter (#3321)", type: :runner do
   let(:signature) do
     { "report_writer.rbs" => "class ReportWriter\n  def self.write: (IO io) -> void\n  " \
-                             "def self.write_file: (File file) -> void\nend\n" }
+                             "def self.write_file: (File file) -> void\n  def self.count: (Integer n) -> void\nend\n" }
   end
 
   def mismatches(source)
@@ -27,5 +27,10 @@ RSpec.describe "a Tempfile argument against an IO or File parameter (#3321)", ty
 
   it "still reports an Integer for an IO parameter (the control that the rule is live)" do
     expect(mismatches("ReportWriter.write(1)\n")).to eq(["call.argument-type-mismatch"])
+  end
+
+  it "still reports a Tempfile for an Integer parameter (neither hierarchy relates them)" do
+    expect(mismatches("require 'tempfile'\nReportWriter.count(Tempfile.new('report'))\n"))
+      .to eq(["call.argument-type-mismatch"])
   end
 end

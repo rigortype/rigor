@@ -69,7 +69,21 @@ RSpec.describe "MemberConsistency::RbsProof ancestry guard" do
           mismatches << [name, ancestor.name] unless rbs_ancestors.include?(ancestor.name)
         end
       end
-      puts JSON.generate("compared" => compared, "mismatches" => mismatches.uniq.sort)
+      # The reverse direction, for the excluded classes only: named ancestors RBS declares and Ruby lacks.
+      rbs_only = {}
+      ENV.fetch("RIGOR_UNRELIABLE_ANCESTRY", "").split(",").each do |name|
+        runtime = begin
+          Object.const_get(name)
+        rescue NameError, LoadError
+          next
+        end
+        host = runtime.ancestors.filter_map(&:name)
+        rbs = ancestor_builder.instance_ancestors(RBS::TypeName.parse("::#{name}")).ancestors
+                              .map { |a| a.name.to_s.delete_prefix("::") }
+        only = rbs.reject { |ancestor| host.include?(ancestor) || ancestor.start_with?("RBS::Unnamed") }
+        rbs_only[name] = only.sort unless only.empty?
+      end
+      puts JSON.generate("compared" => compared, "mismatches" => mismatches.uniq.sort, "rbs_only" => rbs_only)
     RUBY
   end
 
@@ -77,11 +91,22 @@ RSpec.describe "MemberConsistency::RbsProof ancestry guard" do
     (Rigor::Environment::DEFAULT_LIBRARIES + %w[set weakref ostruct socket net-http zlib openssl]).uniq
   end
 
-  it "finds no RBS / Ruby ancestry disagreement outside RbsProof::UNRELIABLE_ANCESTRY" do
-    output, error, status = Open3.capture3(RbConfig.ruby, "-e", script, *libraries)
-    expect(status).to be_success, error
+  let(:result) do
+    names = Rigor::Environment::MemberConsistency::RbsProof::UNRELIABLE_ANCESTRY.to_a.join(",")
+    output, error, status = Open3.capture3({ "RIGOR_UNRELIABLE_ANCESTRY" => names }, RbConfig.ruby, "-e", script,
+                                           *libraries)
+    raise "ancestry probe failed: #{error}" unless status.success?
 
-    result = JSON.parse(output.lines.last)
+    JSON.parse(output.lines.last)
+  end
+
+  # #3321 — `Inference::Acceptance` withholds a host-hierarchy `no` only against these ancestors.
+  it "matches RbsProof::RBS_ONLY_ANCESTORS to the ancestors RBS declares and Ruby lacks" do
+    table = Rigor::Environment::MemberConsistency::RbsProof::RBS_ONLY_ANCESTORS.transform_values { |set| set.to_a.sort }
+    expect(result.fetch("rbs_only")).to eq(table)
+  end
+
+  it "finds no RBS / Ruby ancestry disagreement outside RbsProof::UNRELIABLE_ANCESTRY" do
     # Not vacuous: the default libraries alone declare several hundred loadable classes.
     expect(result.fetch("compared")).to be > 300
 

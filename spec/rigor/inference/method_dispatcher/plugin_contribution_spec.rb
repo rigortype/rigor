@@ -55,6 +55,14 @@ RSpec.describe Rigor::Inference::MethodDispatcher::PluginContribution do
         .with(call_node, Rigor::Inference::OptimisticOrigin::PLUGIN_NIL_FREE)
     end
 
+    it "records no mark when the optimistic answer wraps nil and another plugin answers plainly" do
+      plugins.replace([plugin_answering(Rigor::Plugin::OptimisticReturn.new(type: nil)), plugin_answering(string)])
+      allow(scope).to receive(:record_optimistic_origin)
+
+      expect(described_class.try_dispatch(site)).to eq(string)
+      expect(scope).not_to have_received(:record_optimistic_origin)
+    end
+
     it "records no mark for a plain answer" do
       allow(scope).to receive(:record_optimistic_origin)
 

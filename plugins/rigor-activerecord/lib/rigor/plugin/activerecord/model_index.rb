@@ -182,7 +182,7 @@ module Rigor
             next column unless overrides.include?(column.name)
 
             SchemaTable::Column.new(
-              name: column.name, type: column.type, ruby_type: "Object", array: column.array
+              name: column.name, type: column.type, ruby_type: "Object", array: column.array, not_null: column.not_null
             )
           end
         end

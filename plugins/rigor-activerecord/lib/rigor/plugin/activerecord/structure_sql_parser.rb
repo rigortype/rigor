@@ -147,7 +147,8 @@ module Rigor
             name: name,
             type: rails_type,
             ruby_type: ruby_type,
-            array: array
+            array: array,
+            not_null: rest.match?(/\b(?:NOT\s+NULL|PRIMARY\s+KEY)\b/i)
           )
         end
 

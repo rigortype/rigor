@@ -107,7 +107,7 @@ module Rigor
         # it cannot read leaves `id` untyped as well.
         def implicit_id_column(call_node)
           unless single_primary_key?(call_node)
-            return SchemaTable::Column.new(name: "id", type: UNKNOWN_PRIMARY_KEY_TYPE, ruby_type: "Object")
+            return SchemaTable::Column.new(name: "id", type: UNKNOWN_PRIMARY_KEY_TYPE, ruby_type: "Object", not_null: true)
           end
 
           SchemaTable::Column.new(name: "id", **primary_key_shape(call_node))
@@ -145,11 +145,11 @@ module Rigor
           options = id.is_a?(Prism::HashNode) ? id.elements : []
           array = keyword_in(options, :array).is_a?(Prism::TrueNode)
           unless primary_key_type_stated?(call_node, options)
-            return { type: UNKNOWN_PRIMARY_KEY_TYPE, ruby_type: "Object", array: array }
+            return { type: UNKNOWN_PRIMARY_KEY_TYPE, ruby_type: "Object", array: array, not_null: true }
           end
 
           type = primary_key_type(id, options)
-          { type: type, ruby_type: primary_key_ruby_type(type), array: array }
+          { type: type, ruby_type: primary_key_ruby_type(type), array: array, not_null: true }
         end
 
         # `id: :string` or `id: { type: :string, ... }`. `id: true` asks for the default key, as does an
@@ -266,7 +266,8 @@ module Rigor
             name: name,
             type: type,
             ruby_type: column_ruby_type(type, call_node),
-            array: keyword_true?(call_node, :array)
+            array: keyword_true?(call_node, :array),
+            not_null: null_false?(call_node)
           )
         end
 
@@ -278,10 +279,11 @@ module Rigor
           return nil if name.nil?
 
           columns = [
-            SchemaTable::Column.new(name: "#{name}_id", type: :integer, ruby_type: "Integer")
+            SchemaTable::Column.new(name: "#{name}_id", type: :integer, ruby_type: "Integer", not_null: null_false?(call_node))
           ]
           if references_polymorphic?(call_node)
-            columns << SchemaTable::Column.new(name: "#{name}_type", type: :string, ruby_type: "String")
+            columns << SchemaTable::Column.new(name: "#{name}_type", type: :string, ruby_type: "String",
+                                               not_null: null_false?(call_node))
           end
           columns
         end
@@ -297,6 +299,11 @@ module Rigor
           keyword_value(call_node, name).is_a?(Prism::TrueNode)
         end
 
+        # `null: false` — the one spelling that proves a column non-nullable (#3322).
+        def null_false?(call_node)
+          keyword_value(call_node, :null).is_a?(Prism::FalseNode)
+        end
+
         # `t.column "name", "type"` / `t.column "name", :type` — the explicit generic column form. The
         # type lives in the second argument; an absent type degrades to `:string`.
         def parse_generic_column(call_node)
@@ -309,7 +316,8 @@ module Rigor
             name: name,
             type: type_sym,
             ruby_type: column_ruby_type(type_sym, call_node),
-            array: keyword_true?(call_node, :array)
+            array: keyword_true?(call_node, :array),
+            not_null: null_false?(call_node)
           )
         end
 

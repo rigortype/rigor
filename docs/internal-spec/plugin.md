@@ -575,7 +575,21 @@ the block carries logic and runs through `instance_exec`:
   `CallNode` answers `name`; a `methods:`/`file_methods:` rule declines
   them, so a rule declared later in the same plugin still runs (#2764).
   First non-`nil` wins. The engine invokes it through
-  `#dynamic_return_type(call_node:, scope:, receiver_type:)`.
+  `#dynamic_return_answer(call_node:, scope:, receiver_type:)`;
+  `#dynamic_return_type` is the same answer unwrapped to a type.
+  - **An optimistically nil-free answer** (issue #3322). A block MAY
+    return `optimistic_nil_free(type)` (a `Plugin::OptimisticReturn`)
+    when the honest type is `type | nil` but contributing the `nil`
+    would report `call.possible-nil-receiver` on the idiom every caller
+    writes. The engine types the call as `type` and records the
+    `OptimisticOrigin::PLUGIN_NIL_FREE` mark on the call node, so the
+    certainty consumers decline on it exactly as on an
+    `%a{implicitly-returns-nil}` read ([inference-engine.md](inference-engine.md)
+    § "That deferred-to answer is nil-free for a lookup that can miss"):
+    a condition over the value never folds to a constant. When several
+    plugins answer one call, any optimistic answer marks the merged one.
+    `rigor-activerecord`'s reader of a column the schema does not prove
+    `NOT NULL` is the bundled consumer.
   `rigor-mangrove` (unwrap → carried `type_args[0]`) is the worked
   consumer.
   - **A `receivers:` entry names a receiver KIND, not just a class**

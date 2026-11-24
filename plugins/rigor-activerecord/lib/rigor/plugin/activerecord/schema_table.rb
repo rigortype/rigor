@@ -14,11 +14,18 @@ module Rigor
       # reads `Object` here. Exotic types (json, jsonb, ltree, hstore, custom) fall back to `Object` so the
       # plugin stays silent rather than guessing.
       class SchemaTable
-        Column = Struct.new(:name, :type, :ruby_type, :array, keyword_init: true) do
-          def to_h = { name: name, type: type, ruby_type: ruby_type, array: array }
+        # `not_null` is true only where the schema proves the column cannot hold `NULL` — `null: false`, a primary
+        # key, or `NOT NULL` / `PRIMARY KEY` in `structure.sql`. Anything else, unknown included, is nullable, and
+        # its reader is answered optimistically nil-free (#3322).
+        Column = Struct.new(:name, :type, :ruby_type, :array, :not_null, keyword_init: true) do
+          def to_h = { name: name, type: type, ruby_type: ruby_type, array: array, not_null: not_null }
 
           def array?
             array == true
+          end
+
+          def not_null?
+            not_null == true
           end
         end
 
@@ -52,7 +59,7 @@ module Rigor
         # assumes these exist; users who run `create_table id: false` or `id: nil` get no implicit `id` column from
         # the parser, but most apps never disable it.
         IMPLICIT_COLUMNS = [
-          Column.new(name: "id", type: :integer, ruby_type: "Integer").freeze
+          Column.new(name: "id", type: :integer, ruby_type: "Integer", not_null: true).freeze
         ].freeze
 
         attr_reader :tables

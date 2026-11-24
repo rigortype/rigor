@@ -19,7 +19,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::PluginContribution do
   let(:plugins) { [plugin_answering(string)] }
 
   def plugin_answering(type)
-    instance_double(Rigor::Plugin::Base, dynamic_return_type: type)
+    instance_double(Rigor::Plugin::Base, dynamic_return_answer: type)
   end
 
   def site(node: call_node, in_scope: scope)
@@ -29,7 +29,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::PluginContribution do
   describe ".try_dispatch" do
     it "answers the plugin's return type, asked with the site's call node, scope and receiver" do
       expect(described_class.try_dispatch(site)).to eq(string)
-      expect(plugins.first).to have_received(:dynamic_return_type)
+      expect(plugins.first).to have_received(:dynamic_return_answer)
         .with(call_node: call_node, scope: scope, receiver_type: receiver)
     end
 
@@ -41,7 +41,25 @@ RSpec.describe Rigor::Inference::MethodDispatcher::PluginContribution do
         [string, integer].map { |type| Rigor::FlowContribution.new(return_type: type) }
       ).return_type
       expect(described_class.try_dispatch(site)).to eq(merged)
-      expect(plugins).to all(have_received(:dynamic_return_type).once)
+      expect(plugins).to all(have_received(:dynamic_return_answer).once)
+    end
+
+    # Issue #3322 — an answer through `Plugin::Base#optimistic_nil_free` types the call as the wrapped type and
+    # records the optimistic mark on the call node; a plain answer records none.
+    it "unwraps an optimistic answer and records the plugin nil-free mark on the call node" do
+      plugins.replace([plugin_answering(Rigor::Plugin::OptimisticReturn.new(type: string))])
+      allow(scope).to receive(:record_optimistic_origin)
+
+      expect(described_class.try_dispatch(site)).to eq(string)
+      expect(scope).to have_received(:record_optimistic_origin)
+        .with(call_node, Rigor::Inference::OptimisticOrigin::PLUGIN_NIL_FREE)
+    end
+
+    it "records no mark for a plain answer" do
+      allow(scope).to receive(:record_optimistic_origin)
+
+      described_class.try_dispatch(site)
+      expect(scope).not_to have_received(:record_optimistic_origin)
     end
 
     it "declines when no plugin answers, with nothing to merge" do
@@ -54,7 +72,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::PluginContribution do
 
     it "declines a site without a call node, asking no plugin" do
       expect(described_class.try_dispatch(site(node: nil))).to be_nil
-      expect(plugins.first).not_to have_received(:dynamic_return_type)
+      expect(plugins.first).not_to have_received(:dynamic_return_answer)
     end
 
     it "declines a site without a scope" do
@@ -82,7 +100,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::PluginContribution do
       allow(index).to receive(:dispatch_candidate?).with(:foo).and_return(false)
 
       expect(described_class.try_dispatch(site)).to be_nil
-      expect(plugins.first).not_to have_received(:dynamic_return_type)
+      expect(plugins.first).not_to have_received(:dynamic_return_answer)
     end
 
     it "asks the global gate with nil for a call node that has no name" do
@@ -99,7 +117,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::PluginContribution do
       allow(index).to receive(:dynamic_candidate_for?).with(gated, :foo).and_return(false)
 
       expect(described_class.try_dispatch(site)).to eq(string)
-      expect(gated).not_to have_received(:dynamic_return_type)
+      expect(gated).not_to have_received(:dynamic_return_answer)
     end
 
     it "does not consult the gates when no plugin declares a dynamic_return" do
@@ -111,7 +129,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::PluginContribution do
 
     it "drops a plugin that raises and keeps what the others answer" do
       raising = instance_double(Rigor::Plugin::Base)
-      allow(raising).to receive(:dynamic_return_type).and_raise("boom")
+      allow(raising).to receive(:dynamic_return_answer).and_raise("boom")
       plugins.unshift(raising)
 
       expect(described_class.try_dispatch(site)).to eq(string)
@@ -123,7 +141,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::PluginContribution do
   describe ".merged_return_type" do
     it "answers for a call node, a scope and a receiver type, in that order" do
       expect(described_class.merged_return_type(call_node, scope, receiver)).to eq(string)
-      expect(plugins.first).to have_received(:dynamic_return_type)
+      expect(plugins.first).to have_received(:dynamic_return_answer)
         .with(call_node: call_node, scope: scope, receiver_type: receiver)
     end
 
@@ -132,7 +150,7 @@ RSpec.describe Rigor::Inference::MethodDispatcher::PluginContribution do
       asked = { call_node: call_node, scope: scope, receiver_type: receiver, method_name: :foo }
 
       expect(dispatcher.plugin_member_answers?(**asked)).to be(true)
-      expect(plugins.first).to have_received(:dynamic_return_type)
+      expect(plugins.first).to have_received(:dynamic_return_answer)
         .with(call_node: call_node, scope: scope, receiver_type: receiver)
     end
   end

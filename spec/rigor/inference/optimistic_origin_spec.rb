@@ -309,6 +309,21 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
       # through it would widen this channel into a general taint and silence honest verdicts.
       expect(described_class::NIL_COLLAPSING_PREDICATES).to contain_exactly(:nil?, :!)
     end
+
+    # Issue #3322 — ActiveSupport's `present?` / `blank?` are value predicates on a hit, but a miss answers a
+    # fixed boolean (`nil.present?` is false, `nil.blank?` true), so a fold over a marked carrier is a bet.
+    it "derives through an argument-free, blockless present? or blank?, answering nil's value on a miss" do
+      scope_with_mark = scope.with_local(:v, Rigor::Type::Combinator.nominal_of("String"))
+                             .with_optimistic_local(:v, described_class::PLUGIN_NIL_FREE, miss: nil)
+      parse = ->(source) { Prism.parse(source, scopes: [[:v]]).value.statements.body.first }
+      { "v.present?" => false, "v.blank?" => true, "!v.present?" => true }.each do |source, miss|
+        expect(described_class.resolve(parse.call(source), scope_with_mark)).to eq(described_class::PLUGIN_NIL_FREE)
+        expect(described_class.miss_answer(parse.call(source), scope_with_mark)).to be(miss), source
+      end
+      %w[v.present?(1) v.blank?{} v.empty?].each do |source|
+        expect(described_class.resolve(parse.call(source), scope_with_mark)).to be_nil, source
+      end
+    end
   end
 
   # Issue #1172 — the derivation above lets the in-scope consumers decline, but it does not change the

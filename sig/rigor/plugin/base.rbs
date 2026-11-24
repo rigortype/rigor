@@ -95,9 +95,16 @@ class Rigor::Plugin::Base
   # `dynamic_return` block union above is the full set. A rule that reads a `CallNode`-only member (`receiver`,
   # `name`, `arguments`) must guard with `call_node.is_a?(::Prism::CallNode)` first (#2717).
   def dynamic_return_type: (call_node: ::Prism::CallNode | ::Prism::CallOperatorWriteNode | ::Prism::CallOrWriteNode | ::Prism::CallAndWriteNode | ::Prism::IndexOperatorWriteNode | ::Prism::IndexOrWriteNode | ::Prism::IndexAndWriteNode | ::Prism::BlockArgumentNode, scope: Rigor::Plugin::_Scope, receiver_type: Rigor::Type::t) -> Rigor::Type::t?
+  # sig-gen gap: #1007 — the body `dynamic_return_type` carried before #3322: the `instance_exec`'d rule block
+  # is not folded into the return join. The rule body's answer before `dynamic_return_type` unwraps an
+  # `OptimisticReturn`; the engine's contribution tier reads it so the optimistic flag reaches `OptimisticOrigin`.
+  def dynamic_return_answer: (call_node: ::Prism::CallNode | ::Prism::CallOperatorWriteNode | ::Prism::CallOrWriteNode | ::Prism::CallAndWriteNode | ::Prism::IndexOperatorWriteNode | ::Prism::IndexOrWriteNode | ::Prism::IndexAndWriteNode | ::Prism::BlockArgumentNode, scope: Rigor::Plugin::_Scope, receiver_type: Rigor::Type::t) -> (Rigor::Type::t | Rigor::Plugin::OptimisticReturn)?
   def narrowing_facts_for: (call_node: ::Prism::CallNode, scope: Rigor::Plugin::_Scope) -> Array[untyped]
 
   # Authoring helpers.
+  # authored: hook-contract — wraps a `dynamic_return` answer whose type omits a `nil` the value can hold
+  # (#3322); the parameter is the plugin's answer type, which sig-gen reads `untyped`.
+  def optimistic_nil_free: (Rigor::Type::t? type) -> Rigor::Plugin::OptimisticReturn?
   def diagnostic: (untyped node, path: untyped, message: untyped, ?severity: untyped, ?rule: untyped, ?location: untyped) -> Rigor::Analysis::Diagnostic
   def diagnostics_for: (untyped violations, path: untyped, ?node: untyped) -> Array[untyped]
   def read_fact: (plugin_id: untyped, name: untyped) -> untyped

@@ -1,0 +1,16 @@
+module Rigor
+  module Plugin
+    # Issue #3322 — a `dynamic_return` answer whose nil-freeness is the plugin's bet (`Base#optimistic_nil_free`).
+    class OptimisticReturn < ::Data
+      # sig-gen gap: #1150 — a `Data.define` member; sig-gen proposes `untyped`.
+      def type: () -> Rigor::Type::t
+      # sig-gen gap: #1150 — the `Data.define` constructor; sig-gen types its members `untyped`.
+      def self.new: (type: Rigor::Type::t) -> instance | (Rigor::Type::t type) -> instance
+      # sig-gen gap: #1150 — as above.
+      def self.[]: (type: Rigor::Type::t) -> instance | (Rigor::Type::t type) -> instance
+      # authored: hook-contract — the answer is whatever a plugin's `dynamic_return` block returned, which
+      # sig-gen reads `untyped`; the declared union is the contract `Base#dynamic_return_answer` states.
+      def self.unwrap: (Rigor::Type::t | OptimisticReturn | nil answer) -> Rigor::Type::t?
+    end
+  end
+end

@@ -1427,6 +1427,60 @@ RSpec.describe "plugins/rigor-activerecord" do
     end
   end
 
+  describe "a nullable column's reader is optimistically nil-free (#3322)" do
+    # The reporter's repro: a column without `null: false` can hold NULL, but its reader types as the plain class
+    # so `user.email.downcase` stays silent. With ActiveSupport's `present?: () -> true` loaded, that omission used
+    # to fold the ordinary nil check to `true` and report `flow.always-truthy-condition`.
+    let(:schema) { <<~SCHEMA }
+      ActiveRecord::Schema[8.1].define(version: 1) do
+        create_table "users", force: :cascade do |t|
+          t.bigint "external_id", unsigned: true
+          t.datetime "completed_at"
+          t.datetime "verified_at", null: false
+        end
+      end
+    SCHEMA
+    let(:present_rbs) do
+      "class Numeric\n  def present?: () -> true\n  def blank?: () -> false\nend\n" \
+        "class Time\n  def present?: () -> true\n  def blank?: () -> false\nend\n"
+    end
+
+    def truthy_lines(source)
+      files = { "db/schema.rb" => schema, "sig/present.rbs" => present_rbs }.merge(DEFAULT_MODELS)
+      run_plugin(source: source, plugin_entry: nil, files: files, signature_paths: ["sig"])
+        .diagnostics.select { |d| d.path.end_with?("demo.rb") && d.qualified_rule.start_with?("flow.always-") }
+        .map(&:line)
+    end
+
+    it "does not fold a presence or nil check on a nullable column" do
+      source = <<~RUBY
+        user = User.find(1)
+        p(:a) if user.completed_at.present?
+        p(:b) if user.external_id.present?
+        p(:c) if user.completed_at
+        p(:d) unless user.completed_at.nil?
+        p(:e) if user.completed_at.blank?
+        at = user.completed_at
+        p(:f) if at.present?
+      RUBY
+      expect(truthy_lines(source)).to eq([])
+    end
+
+    it "still folds a presence check on a `null: false` column (the control that the rule is live)" do
+      expect(truthy_lines("p(:a) if User.find(1).verified_at.present?\n")).to eq([1])
+    end
+
+    it "keeps the nullable reader's nil-free type, so a call on it reports nothing" do
+      source = <<~RUBY
+        Rigor.dump_type(User.find(1).completed_at)
+        User.find(1).completed_at.year
+      RUBY
+      diagnostics = run_ar(source, schema: schema).diagnostics.select { |d| d.path.end_with?("demo.rb") }
+      expect(diagnostics.select { |d| d.qualified_rule == "dump.type" }.map(&:message)).to eq(["dump_type: Time"])
+      expect(diagnostics.map(&:qualified_rule)).not_to include("call.possible-nil-receiver")
+    end
+  end
+
   describe "a decimal column's reader follows its scale (#2964)" do
     # The reporter's repro: a scale-0 decimal reads as an Integer and a scale-2 decimal as a BigDecimal, so the
     # Integer and BigDecimal calls on them are correct and must report nothing. A column with no scale stays untyped.

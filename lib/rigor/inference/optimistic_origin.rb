@@ -37,6 +37,11 @@ module Rigor
       # distinguish further optimistic families without changing the table's shape.
       IMPLICITLY_RETURNS_NIL = :implicitly_returns_nil
 
+      # Issue #3322 — a plugin's `dynamic_return` answered through `Plugin::Base#optimistic_nil_free`: the type
+      # omits a `nil` the value can hold, on the plugin's judgment that contributing it costs more false
+      # positives than it finds (rigor-activerecord's nullable column readers).
+      PLUGIN_NIL_FREE = :plugin_nil_free
+
       # The argument-free unary predicates whose folded result is a statement about the receiver's
       # *nil-freeness* and nothing else, which is what makes the derivation sound rather than a general taint:
       # `nil?` answers the exact question the optimism is a bet on, and `!` (which Prism spells as a `CallNode`
@@ -50,6 +55,13 @@ module Rigor
       # nil-freeness alone, so the derivation is exactly as sound as the unary one. A comparison against any
       # other value folds from the carrier's value and stays out, for the reason the value predicates do.
       NIL_COMPARISONS = %i[== != eql? equal? ===].freeze
+
+      # Issue #3322 — ActiveSupport's presence predicates. Both are value predicates on a hit (`"".present?` is
+      # false), but on a miss each answers a fixed boolean — `nil.present?` is false and `nil.blank?` true, as for
+      # `false` — so a fold over an optimistic carrier is a bet exactly as `nil?`'s is: `record.completed_at
+      # .present?` folds to `true` only because the reader omitted the `nil` the column can hold. The value is
+      # the predicate's answer for a falsey carrier ({.miss_answer_of_call}).
+      PRESENCE_PREDICATES = { present?: false, blank?: true }.freeze
 
       # {.miss_answer}'s answer for an expression whose value on a miss cannot be told.
       UNKNOWN_MISS = Object.new.freeze
@@ -270,7 +282,7 @@ module Rigor
         return nil unless node.block.nil?
 
         arguments = node.arguments&.arguments || []
-        if NIL_COLLAPSING_PREDICATES.include?(node.name)
+        if NIL_COLLAPSING_PREDICATES.include?(node.name) || PRESENCE_PREDICATES.key?(node.name)
           node.receiver if arguments.empty?
         elsif NIL_COMPARISONS.include?(node.name) && arguments.size == 1
           nil_comparison_operand(node.receiver, arguments.first)
@@ -317,8 +329,16 @@ module Rigor
         case node.name
         when :! then !inner
         when :!= then !inner.nil?
+        when :present?, :blank? then presence_answer(node.name, inner)
         else inner.nil?
         end
+      end
+
+      # What `present?` / `blank?` answers for a carrier whose value is `inner`: the falsey answer for `nil` /
+      # `false`, its negation for `true` (the only other miss answers a derivation produces).
+      def presence_answer(name, inner)
+        falsey = PRESENCE_PREDICATES.fetch(name)
+        inner ? !falsey : falsey
       end
 
       # `(x.nil?)` — a single-statement parenthesised body is its own value, and authors do parenthesise a

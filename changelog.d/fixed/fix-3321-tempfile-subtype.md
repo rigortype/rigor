@@ -1,0 +1,2 @@
+- **[inference]** Passing a `Tempfile` where `IO` or `File` is declared, such as `CSV.new(Tempfile.new(...))`, no longer reports `call.argument-type-mismatch`. ([#3384](https://github.com/rigortype/rigor/pull/3384))
+  - The subtype check had read the analyzer process's own `Tempfile < Delegator` instead of the RBS `class Tempfile < File`.

@@ -588,6 +588,11 @@ the block carries logic and runs through `instance_exec`:
     § "That deferred-to answer is nil-free for a lookup that can miss"):
     a condition over the value never folds to a constant. When several
     plugins answer one call, any optimistic answer marks the merged one.
+    The mark is the same one a lookup carries, so `rigor sig-gen` keeps
+    the omitted `nil` in a signature it writes (the #2197 rule in
+    inference-engine.md): `def g = user.completed_at` is proposed as
+    `-> Time?`, since a `sig/` return is a contract callers' nil checks
+    are judged against.
     `rigor-activerecord`'s reader of a column the schema does not prove
     `NOT NULL` is the bundled consumer.
   `rigor-mangrove` (unwrap → carried `type_args[0]`) is the worked

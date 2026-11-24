@@ -118,9 +118,11 @@ module Rigor
             next unless index.dynamic_candidate_for?(plugin, name)
 
             answer = plugin.dynamic_return_answer(call_node: call_node, scope: scope, receiver_type: receiver_type)
-            optimistic = true if answer.is_a?(Plugin::OptimisticReturn)
             dynamic = Plugin::OptimisticReturn.unwrap(answer)
-            (result ||= []) << FlowContribution.new(return_type: dynamic) if dynamic
+            next unless dynamic
+
+            optimistic = true if answer.is_a?(Plugin::OptimisticReturn)
+            (result ||= []) << FlowContribution.new(return_type: dynamic)
           rescue StandardError
             next
           end

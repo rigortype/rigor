@@ -1470,6 +1470,29 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(truthy_lines("p(:a) if User.find(1).verified_at.present?\n")).to eq([1])
     end
 
+    # The mark is a lookup's, so sig-gen keeps the omitted nil in a contract it writes (#2197), and only there.
+    it "has sig-gen propose the nil a nullable column can hold, and none for a null: false one" do
+      Dir.mktmpdir do |dir|
+        materialize_files(dir, { "db/schema.rb" => schema, "app/services/reader.rb" => <<~RUBY }.merge(DEFAULT_MODELS))
+          class Reader
+            def completed(id) = User.find(id).completed_at
+            def verified(id) = User.find(id).verified_at
+          end
+        RUBY
+        Rigor::Plugin.unregister!
+        Rigor::Plugin.register(plugin_class)
+        rbs = Dir.chdir(dir) do
+          File.write(".rigor.yml",
+                     "paths:\n  - app\nplugins:\n  - gem: rigor-activerecord\n    id: #{plugin_class.manifest.id}\n")
+          configuration = Rigor::Configuration.load(".rigor.yml")
+          Rigor::SigGen::Generator.new(configuration: configuration, paths: ["app/services/reader.rb"]).run
+                                  .to_h { |candidate| [candidate.method_name, candidate.rbs || candidate.skip_reason] }
+        end
+        expect(rbs).to include(completed: "def completed: (untyped) -> (Time | nil)",
+                               verified: "def verified: (untyped) -> Time")
+      end
+    end
+
     it "keeps the nullable reader's nil-free type, so a call on it reports nothing" do
       source = <<~RUBY
         Rigor.dump_type(User.find(1).completed_at)

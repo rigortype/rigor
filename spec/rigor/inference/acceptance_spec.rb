@@ -96,6 +96,26 @@ RSpec.describe Rigor::Inference::Acceptance do
     end
   end
 
+  describe "a class whose host ancestry disagrees with its RBS ancestry (#3321)" do
+    # The `tempfile` library defines `Tempfile < Delegator`, while the RBS Rigor reads declares `class Tempfile < File`.
+    # The analyzer process requires `tempfile` itself, so its live class hierarchy must not refute `Tempfile <= IO`.
+    before { require "tempfile" }
+
+    def nominal(name) = Rigor::Type::Combinator.nominal_of(name)
+    def singleton(name) = Rigor::Type::Combinator.singleton_of(name)
+
+    it "does not refute Tempfile against IO or File from the host hierarchy" do
+      expect(accepts(nominal("IO"), nominal("Tempfile"))).not_to be_no
+      expect(accepts(nominal("File"), nominal("Tempfile"))).not_to be_no
+      expect(accepts(singleton("IO"), singleton("Tempfile"))).not_to be_no
+    end
+
+    it "still refutes an unrelated class against IO, and Tempfile against a class neither hierarchy reaches" do
+      expect(accepts(nominal("IO"), int_nominal)).to be_no
+      expect(accepts(nominal("Tempfile"), int_nominal)).to be_no
+    end
+  end
+
   describe "Singleton" do
     it "accepts the same singleton" do
       expect(accepts(int_singleton, int_singleton)).to be_yes

@@ -89,6 +89,16 @@ module Rigor
         # so an rbs or Ruby bump that introduces one fails CI instead of reporting an error on correct code.
         UNRELIABLE_ANCESTRY = %w[Tempfile Delegator Random Random::Base Gem::MissingSpecError].to_set.freeze
 
+        # The other direction of the same disagreements: for each class above, the named ancestors RBS declares
+        # that Ruby's own hierarchy lacks. A subtype check that reads the analyzer process's loaded classes
+        # (`Inference::Acceptance`) must not refute `Tempfile <= IO` from Ruby's `Tempfile < Delegator`
+        # (#3321), but `Tempfile <= Integer` is refuted by both hierarchies and stays refuted. A class absent
+        # here has no such ancestor (rbs 4.2 gives `Random` only an unnamed module). The ancestry guard spec
+        # derives this table afresh and fails when it drifts.
+        RBS_ONLY_ANCESTORS = {
+          "Tempfile" => %w[File IO Enumerable File::Constants Object Kernel PP::ObjectMixin].to_set.freeze
+        }.freeze
+
         # @param loader — the project's {RbsLoader}, whose built environment answers the hierarchy.
         def initialize(loader)
           @loader = loader

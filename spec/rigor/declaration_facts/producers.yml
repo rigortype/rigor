@@ -370,7 +370,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#collect_initializer_block_ivars: grandfathered
     Rigor::Inference::ScopeIndexer#collect_local_send_names: 'issue #3006, a consumer, not a declaration producer; it collects the name literals a local of a class-body `send` is bound to, stopping at a nested `def` or declaration (a new local scope), and records no table and derives no owner or side'
     Rigor::Inference::ScopeIndexer#collect_meta_new_method_defs?: grandfathered
-    Rigor::Inference::ScopeIndexer#collect_mixin_names: grandfathered
     Rigor::Inference::ScopeIndexer#collect_nil_test_ivars: grandfathered
     Rigor::Inference::ScopeIndexer#collect_read_before_write_evidence: grandfathered
     Rigor::Inference::ScopeIndexer#collect_receiver_writer_ivars: the explicit-receiver arm of the ivar census walk (#2488); it resolves the receiver through eval_receiver_prefix, the resolution walk_ivars_eval_call? already gives a class_eval receiver, and records only the receiver class's attr_writer names and define_method block writes, deriving no declaration context of its own
@@ -385,7 +384,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#contest_replaced_visibility: 'issue #1989, contests the visibility slot a define_method or alias replaces (on the instance or, since #1984, the singleton side); the owner is the visibility walk''s prefix and it derives no context'
     Rigor::Inference::ScopeIndexer#contest_singleton_rewrites: 'issue #1984, contests the singleton visibility slots a define_singleton_method or a call on the body''s own singleton_class may make public; the owner is the visibility walk''s prefix and it derives no context'
     Rigor::Inference::ScopeIndexer#declaration_before?: 'issue #3010, whether a file declares a qualified name (a class or module declaration, or a bare constant write) at a statement that starts ahead of a class << Const, so the constant''s nested candidate exists when the statement runs; it answers one yes-or-no question for constant_singleton_owners and records nothing'
-    Rigor::Inference::ScopeIndexer#declared_ancestor_names: grandfathered
     Rigor::Inference::ScopeIndexer#define_method_written_ivars: lists the ivar names a define_method block body writes (#1768), stopping at a nested def, class or module as gather_ivar_writes does; it records them under the class the walk passes in and derives no declaration context
     Rigor::Inference::ScopeIndexer#detect_multi_write_target_writes: grandfathered
     Rigor::Inference::ScopeIndexer#detect_read_before_write: grandfathered
@@ -445,7 +443,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#merge_member_layout_tables: grandfathered
     Rigor::Inference::ScopeIndexer#merge_renamed_header_bucket: grandfathered
     Rigor::Inference::ScopeIndexer#method_definite_assigns: grandfathered
-    Rigor::Inference::ScopeIndexer#mixin_call?: grandfathered
     Rigor::Inference::ScopeIndexer#mixin_call_recorded?: grandfathered
     Rigor::Inference::ScopeIndexer#mixin_call_view: classifies a call as an include, prepend or extend (or a send of one); it reads the call's own name and arguments, not a declaration context
     Rigor::Inference::ScopeIndexer#mixin_effects: names which ancestry side of which owner a mixin call reshapes, from the call's receiver and the owner the walk already resolved; it computes no declaration context
@@ -461,7 +458,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#record_alias_map_entry: grandfathered
     Rigor::Inference::ScopeIndexer#record_aliased_ivar_mutations!: grandfathered
     Rigor::Inference::ScopeIndexer#record_anonymous_body_def_as_toplevel: grandfathered
-    Rigor::Inference::ScopeIndexer#record_anonymous_meta_superclass: grandfathered
     Rigor::Inference::ScopeIndexer#record_attr_visibility: 'issue #1911, records the attr_reader / attr_writer / attr_accessor members in the visibility table beside the grandfathered record_def_visibility; the owner is the visibility walk''s prefix and the names are each_attr_macro_name''s, so it derives no context'
     Rigor::Inference::ScopeIndexer#record_attr_writer_ivars: grandfathered
     Rigor::Inference::ScopeIndexer#record_class_or_module?: grandfathered
@@ -471,8 +467,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#record_concern_class_methods: 'issue #2986, files a concern module''s hook-extend entry for its ClassMethods and records each def of its class_methods blocks (and, #1592, its def node; #2997, in every body of the module, not only one that extends ActiveSupport::Concern) on Owner::ClassMethods, the module ActiveSupport evaluates that block in, and files the hook-body-call entry of each call on self in its included or prepended blocks (#3005, in every body too, under the gated hook in a body without the extend), under the module prefix the walk passes in; the instance side is the side those defs have there, and it derives no other context'
     Rigor::Inference::ScopeIndexer#record_constant_class_method_calls: 'issue #1984, records a `K.public_class_method(:x)` (or `send` of it) as K''s public singleton slot and contests K''s singleton slots for a call on `K.singleton_class`, on each class constant_receiver_candidates gives for K; it derives no context'
     Rigor::Inference::ScopeIndexer#record_constant_write: grandfathered
-    Rigor::Inference::ScopeIndexer#record_data_member_layout: grandfathered
-    Rigor::Inference::ScopeIndexer#record_declaration_ancestry: grandfathered
     Rigor::Inference::ScopeIndexer#record_declaration_facts: grandfathered
     Rigor::Inference::ScopeIndexer#record_declarations: grandfathered
     Rigor::Inference::ScopeIndexer#record_def_body_evidence: grandfathered
@@ -494,7 +488,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#record_meta_new_constant?: grandfathered
     Rigor::Inference::ScopeIndexer#record_method_kind: grandfathered
     Rigor::Inference::ScopeIndexer#record_mixin_call: grandfathered
-    Rigor::Inference::ScopeIndexer#record_mixin_names: grandfathered
     Rigor::Inference::ScopeIndexer#record_module_function: writes the bare module_function edge under the owner the walk passes in; it computes no declaration context
     Rigor::Inference::ScopeIndexer#record_module_function_names: grandfathered
     Rigor::Inference::ScopeIndexer#record_multi_write_ivars: grandfathered
@@ -504,7 +497,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#record_singleton_class_sources: files the constants a file's `class << Const` bodies open under that file in their own table (#1752), read only by the incremental class-declaration diff; the walk it calls names them by the lexical rule `class << X` already follows, and nothing reads them as declared
     Rigor::Inference::ScopeIndexer#record_singleton_def_node: grandfathered
     Rigor::Inference::ScopeIndexer#record_singleton_prepend: names the module a `singleton_class.prepend` on an object, or a `prepend` in a `class << obj` body, puts ahead of an object's class (#1820), and marks it as the object-extend recorder does; it reads only whether the call sits in a singleton-class body and whether its object may be an instance, which the walk passes in, and decides no owner or side
-    Rigor::Inference::ScopeIndexer#record_struct_member_layout: grandfathered
     Rigor::Inference::ScopeIndexer#recording_evaluator: 'builds the per-node scope index''s recording evaluation, for the file and for each construct the walk reaches unentered (#2196, #2056); it records which scope a node is typed under, not what a declaration is'
     Rigor::Inference::ScopeIndexer#runs_computed_self_definer?: 'issue #2901, whether a method body runs a computed define_method on its own self; it names the declaration node classes only to stop at a body where self changes, and answers a Boolean, never an owner or a side'
     Rigor::Inference::ScopeIndexer#seed_operator_only_ivars!: grandfathered
@@ -526,17 +518,10 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#walk_class_includes: grandfathered
     Rigor::Inference::ScopeIndexer#walk_class_ivars: grandfathered
     Rigor::Inference::ScopeIndexer#walk_class_methods_visibilities: 'issue #1592, walks a concern''s class_methods block for visibility under Owner::ClassMethods, the module ActiveSupport evaluates that block in, starting public; the owner is the concern prefix the walk passes in, and it derives no other context'
-    Rigor::Inference::ScopeIndexer#walk_class_superclasses: grandfathered
     Rigor::Inference::ScopeIndexer#walk_conditional_ivar_writes: grandfathered
     Rigor::Inference::ScopeIndexer#walk_constant_write_census: grandfathered
     Rigor::Inference::ScopeIndexer#walk_constant_write_children: grandfathered
     Rigor::Inference::ScopeIndexer#walk_constant_writes: grandfathered
-    Rigor::Inference::ScopeIndexer#walk_data_layout_meta_new?: grandfathered
-    Rigor::Inference::ScopeIndexer#walk_data_member_layouts: grandfathered
-    Rigor::Inference::ScopeIndexer#walk_def_nesting_declaration: grandfathered
-    Rigor::Inference::ScopeIndexer#walk_def_nesting_eval?: grandfathered
-    Rigor::Inference::ScopeIndexer#walk_def_nesting_meta_new?: grandfathered
-    Rigor::Inference::ScopeIndexer#walk_def_nestings: grandfathered
     Rigor::Inference::ScopeIndexer#walk_deferred_body: grandfathered
     Rigor::Inference::ScopeIndexer#walk_deferred_children: grandfathered
     Rigor::Inference::ScopeIndexer#walk_deferred_def_leaf: grandfathered
@@ -566,7 +551,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#walk_ivars_leaf?: grandfathered
     Rigor::Inference::ScopeIndexer#walk_ivars_meta_call?: grandfathered
     Rigor::Inference::ScopeIndexer#walk_ivars_meta_new?: grandfathered
-    Rigor::Inference::ScopeIndexer#walk_layout_declaration: grandfathered
     Rigor::Inference::ScopeIndexer#walk_method_visibilities: grandfathered
     Rigor::Inference::ScopeIndexer#walk_methods_and_def_nodes: grandfathered
     Rigor::Inference::ScopeIndexer#walk_mixin_call_children: grandfathered
@@ -577,12 +561,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#walk_singleton_class_writes: grandfathered
     Rigor::Inference::ScopeIndexer#walk_singleton_def_nodes: grandfathered
     Rigor::Inference::ScopeIndexer#walk_singleton_meta_new?: grandfathered
-    Rigor::Inference::ScopeIndexer#walk_singleton_superclasses: grandfathered
-    Rigor::Inference::ScopeIndexer#walk_struct_layout_meta_new?: grandfathered
-    Rigor::Inference::ScopeIndexer#walk_struct_member_layouts: grandfathered
-    Rigor::Inference::ScopeIndexer#walk_superclass_declaration?: grandfathered
-    Rigor::Inference::ScopeIndexer#walk_superclass_eval_call?: grandfathered
-    Rigor::Inference::ScopeIndexer#walk_superclass_meta_new?: grandfathered
     Rigor::Inference::ScopeIndexer#walk_typed_declaration?: grandfathered
     Rigor::Inference::ScopeIndexer#walk_visibility_singleton_class: grandfathered
     Rigor::Inference::ScopeIndexer#write_mixin_targets: grandfathered
@@ -698,6 +676,31 @@ lib/rigor/inference/scope_indexer/published_constant_ivars.rb:
     Rigor::Inference::ScopeIndexer::PublishedConstantIvars#walk_published_ivar_leaf?: grandfathered
     Rigor::Inference::ScopeIndexer::PublishedConstantIvars#walk_published_ivar_meta_new?: grandfathered
     Rigor::Inference::ScopeIndexer::PublishedConstantIvars#walk_singleton_published_ivars: grandfathered
+lib/rigor/inference/scope_indexer/shared_walk_tables.rb:
+  computes: the tables one shared declaration walk builds for a file, which are each class's as-written superclass with the nesting its header is written in, the Module.nesting of each def, and each Data and Struct class's member layout; the three collectors on the walk record through it with the prefix and nesting of the walk's context, and the walkers those collectors replaced, kept as the shadow oracles, ask DeclarationWalk::Rules for every declaration context
+  producers:
+    Rigor::Inference::ScopeIndexer::SharedWalkTables#collect_mixin_names: grandfathered
+    Rigor::Inference::ScopeIndexer::SharedWalkTables#declared_ancestor_names: grandfathered
+    Rigor::Inference::ScopeIndexer::SharedWalkTables#mixin_call?: grandfathered
+    Rigor::Inference::ScopeIndexer::SharedWalkTables#record_anonymous_meta_superclass: grandfathered
+    Rigor::Inference::ScopeIndexer::SharedWalkTables#record_data_member_layout: grandfathered
+    Rigor::Inference::ScopeIndexer::SharedWalkTables#record_declaration_ancestry: grandfathered
+    Rigor::Inference::ScopeIndexer::SharedWalkTables#record_mixin_names: grandfathered
+    Rigor::Inference::ScopeIndexer::SharedWalkTables#record_struct_member_layout: grandfathered
+    Rigor::Inference::ScopeIndexer::SharedWalkTables#walk_class_superclasses: grandfathered
+    Rigor::Inference::ScopeIndexer::SharedWalkTables#walk_data_layout_meta_new?: grandfathered
+    Rigor::Inference::ScopeIndexer::SharedWalkTables#walk_data_member_layouts: grandfathered
+    Rigor::Inference::ScopeIndexer::SharedWalkTables#walk_def_nesting_declaration: grandfathered
+    Rigor::Inference::ScopeIndexer::SharedWalkTables#walk_def_nesting_eval?: grandfathered
+    Rigor::Inference::ScopeIndexer::SharedWalkTables#walk_def_nesting_meta_new?: grandfathered
+    Rigor::Inference::ScopeIndexer::SharedWalkTables#walk_def_nestings: grandfathered
+    Rigor::Inference::ScopeIndexer::SharedWalkTables#walk_layout_declaration: grandfathered
+    Rigor::Inference::ScopeIndexer::SharedWalkTables#walk_singleton_superclasses: grandfathered
+    Rigor::Inference::ScopeIndexer::SharedWalkTables#walk_struct_layout_meta_new?: grandfathered
+    Rigor::Inference::ScopeIndexer::SharedWalkTables#walk_struct_member_layouts: grandfathered
+    Rigor::Inference::ScopeIndexer::SharedWalkTables#walk_superclass_declaration?: grandfathered
+    Rigor::Inference::ScopeIndexer::SharedWalkTables#walk_superclass_eval_call?: grandfathered
+    Rigor::Inference::ScopeIndexer::SharedWalkTables#walk_superclass_meta_new?: grandfathered
 lib/rigor/inference/scope_indexer/superclasses_collector.rb:
   computes: each class's superclass and header nesting, as a collector on the shared declaration walk
   producers:

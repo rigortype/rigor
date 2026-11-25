@@ -149,7 +149,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer::LayeredDefNestings do
     end
 
     it "answers the file's own def and the seed's def" do
-      seed_table = Rigor::Inference::ScopeIndexer.build_def_nestings(seed_program)
+      seed_table = Rigor::Inference::ScopeIndexer::SharedWalkTables.send(:build_def_nestings, seed_program)
       index = Rigor::Inference::ScopeIndexer.index(program, default_scope: seeded_scope(seed_table))
       nestings = index[program].discovery.discovered_def_nestings
 

@@ -256,10 +256,10 @@ module Rigor
     private_class_method :ancestor_constant_type
 
     # Issue #716 — whether the scope carries a RECORDED empty `Module.nesting`, which is the declaration
-    # walk's positive statement that the body is written at the top level (`Inference::ScopeIndexer#
-    # walk_def_nestings`). Distinct from `nil`, which still means "no declaration walk built this scope" and
-    # keeps the peel ({.lexical_nesting_chain}); the two are only distinguishable because the table is
-    # populated by that walk alone.
+    # walk's positive statement that the body is written at the top level
+    # (`Inference::ScopeIndexer::SharedWalkTables.walk_def_nestings`). Distinct from `nil`, which still means "no
+    # declaration walk built this scope" and keeps the peel ({.lexical_nesting_chain}); the two are only
+    # distinguishable because the table is populated by that walk alone.
     def recorded_toplevel_nesting?(scope) = scope.lexical_nesting.is_a?(Array) && scope.lexical_nesting.empty?
     private_class_method :recorded_toplevel_nesting?
 

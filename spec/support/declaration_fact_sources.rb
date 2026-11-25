@@ -410,6 +410,15 @@ module DeclarationWriterScan
   #   `collect_body_cvar_writes` and `finished_cvar_census` from `class_cvars_collector.rb`. Its two calls of
   #   `ScopeIndexer.census_body_scope` make that function an entry point of `scope_indexer.rb`, where the row's
   #   roots reached it already and it writes no table.
+  # - `shared_walk_tables.rb`: the tables one shared walk builds, their recorders and the walkers the collectors
+  #   replaced, moved out of `scope_indexer.rb` (ADR-116 WD9, U4). The writers of each table stay rule (v)'s. It is
+  #   entered through eight functions, each spelled on the module: `SharedWalkTables.declaration_walk_tables`,
+  #   `meta_member_names` and `meta_members_open?` from `scope_indexer.rb`, the four recorders from
+  #   `superclasses_collector.rb` and `member_layouts_collector.rb`, and `recorded_ancestor_name` from
+  #   `cvar_hierarchy.rb`. Its calls of `ScopeIndexer.add_header_nesting`, `rebound_block_self` and
+  #   `resolve_meta_factory_call` make those three entry points of `scope_indexer.rb`. The first writes the
+  #   header-nesting table and keeps its row there: left in this file it would hand that table to a writer in
+  #   another, which the rule does not follow.
   SOURCES = {
     DeclarationProducerScan::RULE_V_FILE => {
       module: "Rigor::Inference::ScopeIndexer",
@@ -433,6 +442,8 @@ module DeclarationWriterScan
       { module: "Rigor::Inference::ScopeIndexer::PublishedConstantIvars", roots: [] },
     "lib/rigor/inference/scope_indexer/class_cvar_census.rb" =>
       { module: "Rigor::Inference::ScopeIndexer::ClassCvarCensus", roots: [] },
+    "lib/rigor/inference/scope_indexer/shared_walk_tables.rb" =>
+      { module: "Rigor::Inference::ScopeIndexer::SharedWalkTables", roots: [] },
     "lib/rigor/inference/declaration_walk/rules.rb" => { module: "Rigor::Inference::DeclarationWalk::Rules", roots: [] }
   }.freeze
 

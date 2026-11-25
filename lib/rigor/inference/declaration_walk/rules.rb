@@ -665,7 +665,8 @@ module Rigor
         # Recognises `Data.define(*Symbol)` and `Data.define(*Symbol) do ... end` at constant-write rvalue position. The
         # receiver MUST be the bare `Data` constant (or `::Data`); other receivers (a local variable, a method call
         # return) are rejected because their identity is not statically known. Issue #2968 — a splatted member list
-        # (`Data.define(*FIELDS)`) still creates the class; {ScopeIndexer#meta_members_open?} marks its members unknown.
+        # (`Data.define(*FIELDS)`) still creates the class; {ScopeIndexer::SharedWalkTables.meta_members_open?} marks
+        # its members unknown.
         def data_define_call?(node)
           return false unless node.is_a?(Prism::CallNode)
           return false unless node.name == :define
@@ -681,8 +682,9 @@ module Rigor
         # `Struct.new()` is a degenerate form callers don't typically use.
         #
         # Issue #2968 — a leading String (`Struct.new("Named", :a)`, the class `Struct::Named`) and a splatted member
-        # list (`Struct.new(*FIELDS)`) create the class just the same. {ScopeIndexer#meta_member_positionals} drops the
-        # String; {ScopeIndexer#meta_members_open?} marks a splatted list's members unknown.
+        # list (`Struct.new(*FIELDS)`) create the class just the same.
+        # {ScopeIndexer::SharedWalkTables.meta_member_positionals} drops the String;
+        # {ScopeIndexer::SharedWalkTables.meta_members_open?} marks a splatted list's members unknown.
         def struct_new_call?(node)
           return false unless meta_call_with_name?(node, :Struct, :new)
 

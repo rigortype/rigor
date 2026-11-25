@@ -117,6 +117,7 @@ end
 RSpec.describe Rigor::Inference::ScopeIndexer do
   let(:shadow) { Rigor::Inference::DeclarationWalk::Shadow }
   let(:walk) { Rigor::Inference::DeclarationWalk }
+  let(:walk_tables) { described_class::SharedWalkTables }
 
   around do |example|
     saved = ENV.fetch("RIGOR_SHADOW_RULE_WALK", nil)
@@ -139,22 +140,22 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       it "builds the legacy walker's tables, with a file path and without: #{name}" do
         root = parse(source)
         ["app/x.rb", nil].each do |path|
-          legacy = described_class.legacy_superclass_tables(root, path)
+          legacy = walk_tables.send(:legacy_superclass_tables, root, path)
           expect(legacy.first).not_to be_empty
-          expect(shadow.first_difference(legacy, described_class.build_superclass_tables(root, path), "")).to be_nil
+          expect(shadow.first_difference(legacy, walk_tables.send(:build_superclass_tables, root, path), "")).to be_nil
         end
       end
     end
 
     it "records each header's ancestry under the nesting outside it, skipping an unnameable header" do
       headers = cases["headers: nested, compact, rooted, reopened, mixin-only"]
-      supers, nestings = described_class.build_superclass_tables(parse(headers))
+      supers, nestings = walk_tables.send(:build_superclass_tables, parse(headers))
       expect(supers).to eq("Outer::Plain" => "Other", "Outer::Admin::Compact" => "::Rooted::Base", "Top" => "Base")
       expect(nestings.keys).to eq(%w[Outer::Plain Outer::Admin::Compact Top Outer::Mixed])
       expect(nestings["Outer::Admin::Compact"]).to eq(nil => ["Outer"], "::Rooted::Base" => ["Outer"],
                                                       "Helper" => ["Outer"])
 
-      supers, = described_class.build_superclass_tables(parse(cases["class << bodies and expressions"]), "app/x.rb")
+      supers, = walk_tables.send(:build_superclass_tables, parse(cases["class << bodies and expressions"]), "app/x.rb")
       # `C::C::Pathed` is wrong, pinned because the port reproduces the legacy walker: Ruby opens `C::Pathed`.
       # Flip this when #1519 is fixed.
       expect(supers.keys).to eq(["Anchored", "C::C::Pathed", "#<Class:6:4>", "#<Class:app/x.rb:10:2>",
@@ -164,7 +165,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     # Both answers below are the `walk_class_superclasses` variants the collector declares, and both are wrong
     # in Ruby's terms; #1521 tracks converging them. Flip these when its items 8 and 11 are fixed.
     it "walks a bare factory block as an ordinary call (the factory_block variant)" do
-      supers, nestings = described_class.build_superclass_tables(parse(cases["bare factory blocks"]), "app/x.rb")
+      supers, nestings = walk_tables.send(:build_superclass_tables, parse(cases["bare factory blocks"]), "app/x.rb")
       # `self::E` anchors on the enclosing `C`, and the block's parameters are walked.
       expect(supers).to include("C::E" => "S", "TopE" => "S", "#<Class:2:28>" => "InParams")
       expect(nestings.keys).to eq(%w[C::E C::Named TopE])
@@ -172,7 +173,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
 
     it "keys an anonymous class without the path inside class, meta-new and eval bodies (the path variant)" do
       keys = cases.values.flat_map do |source|
-        described_class.build_superclass_tables(parse(source), "app/x.rb").first.keys.grep(/\A#</)
+        walk_tables.send(:build_superclass_tables, parse(source), "app/x.rb").first.keys.grep(/\A#</)
       end
       expect(keys).to eq(
         ["#<Class:6:4>", "#<Class:app/x.rb:10:2>", "#<Class:app/x.rb:12:9>", "#<Class:4:4>", "#<Class:19:27>",
@@ -187,7 +188,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     def shared_tables(root, scope, order)
       collectors = { cvars: described_class::ClassCvarsCollector.new,
                      supers: described_class::SuperclassesCollector.new }
-      walk.run(root, collectors.values_at(*order), described_class.superclass_walk_root("app/x.rb", scope: scope))
+      walk.run(root, collectors.values_at(*order), walk_tables.send(:superclass_walk_root, "app/x.rb", scope: scope))
       [collectors[:cvars].table, collectors[:supers].tables]
     end
 
@@ -196,7 +197,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       (cases.values + [SuperclassesEquivalenceCases::FORK]).each do |source|
         root = parse(source)
         legacy = [described_class::ClassCvarCensus.send(:legacy_class_cvar_index, root, scope),
-                  described_class.legacy_superclass_tables(root, "app/x.rb")]
+                  walk_tables.send(:legacy_superclass_tables, root, "app/x.rb")]
         [%i[cvars supers], %i[supers cvars]].each do |order|
           expect(shadow.first_difference(legacy, shared_tables(root, scope, order), "")).to be_nil
         end
@@ -211,7 +212,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       end
       collector = conforming.new
       walk.run(parse(SuperclassesEquivalenceCases::FORK), [collector],
-               described_class.superclass_walk_root("app/x.rb"))
+               walk_tables.send(:superclass_walk_root, "app/x.rb"))
       expect(collector.tables.first).to eq("#<Class:app/x.rb:3:2>" => "Parent")
     end
 
@@ -233,9 +234,9 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     let(:divergence) { Rigor::Inference::DeclarationWalk::Shadow::Divergence }
 
     it "never runs the legacy walker while RIGOR_SHADOW_RULE_WALK is unset" do
-      allow(described_class).to receive(:legacy_superclass_tables).and_call_original
-      expect(described_class.build_superclass_tables(parse(source)).first).to eq("C" => "Base")
-      expect(described_class).not_to have_received(:legacy_superclass_tables)
+      allow(walk_tables).to receive(:legacy_superclass_tables).and_call_original
+      expect(walk_tables.send(:build_superclass_tables, parse(source)).first).to eq("C" => "Base")
+      expect(walk_tables).not_to have_received(:legacy_superclass_tables)
     end
 
     # The superclass collector forgets everything, so the harness must report every file that declares one.

@@ -30,8 +30,9 @@ module Rigor
         # header (`class D` below `class <<` opens `#<Class:C>::D`, which no name spells) records nothing.
         def on_declaration(node, _context, body)
           if node.is_a?(Prism::ClassNode) && !body.singleton_cref
-            ScopeIndexer.record_data_member_layout(@data, body.prefix, node.superclass, allow_outer_block: false)
-            ScopeIndexer.record_struct_member_layout(@struct, body.prefix, node.superclass, allow_outer_block: false)
+            SharedWalkTables.record_data_member_layout(@data, body.prefix, node.superclass, allow_outer_block: false)
+            SharedWalkTables.record_struct_member_layout(@struct, body.prefix, node.superclass,
+                                                         allow_outer_block: false)
           end
           DeclarationWalk::DESCEND
         end
@@ -45,8 +46,8 @@ module Rigor
           end
           if child_prefix
             rvalue = DeclarationWalk::Rules.meta_new_rvalue(node)
-            ScopeIndexer.record_data_member_layout(@data, child_prefix, rvalue)
-            ScopeIndexer.record_struct_member_layout(@struct, child_prefix, rvalue)
+            SharedWalkTables.record_data_member_layout(@data, child_prefix, rvalue)
+            SharedWalkTables.record_struct_member_layout(@struct, child_prefix, rvalue)
           end
           DeclarationWalk::DESCEND
         end

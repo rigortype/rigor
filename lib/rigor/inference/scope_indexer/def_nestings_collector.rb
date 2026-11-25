@@ -11,8 +11,8 @@ module Rigor
       class DefNestingsCollector
         include DeclarationWalk::Collector
 
-        # The rules `walk_def_nestings` answered differently from the walk, kept so the table stays
-        # byte-identical (ADR-116 WD5). Each is a legacy answer, and #1521 tracks converging it:
+        # The rules {SharedWalkTables.walk_def_nestings} answered differently from the walk, kept so the table
+        # stays byte-identical (ADR-116 WD5). Each is a legacy answer, and #1521 tracks converging it:
         #
         # - `factory_block: :ordinary_call` — no bare-factory arm, so a `self::` header in a `Class.new { … }`
         #   block anchors on the enclosing `self` and the block's parameters are walked (#1521 item 8).

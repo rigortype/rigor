@@ -13,8 +13,8 @@ module Rigor
       class SuperclassesCollector
         include DeclarationWalk::Collector
 
-        # The two rules `walk_class_superclasses` answered differently from the walk, kept so both tables stay
-        # byte-identical (ADR-116 WD5). Each is a legacy answer, and #1521 tracks converging it:
+        # The two rules {SharedWalkTables.walk_class_superclasses} answered differently from the walk, kept so both
+        # tables stay byte-identical (ADR-116 WD5). Each is a legacy answer, and #1521 tracks converging it:
         #
         # - `factory_block: :ordinary_call` — the legacy walker had no bare-factory arm, so it walked
         #   `Class.new { … }` as any call, block parameters included, with the enclosing `self`. A
@@ -38,7 +38,7 @@ module Rigor
         # OUTSIDE the header, because the header is evaluated before its body is entered.
         def on_declaration(node, context, body)
           unless body.singleton_cref
-            ScopeIndexer.record_declaration_ancestry(node, context.nesting, body.prefix, @accumulator)
+            SharedWalkTables.record_declaration_ancestry(node, context.nesting, body.prefix, @accumulator)
           end
           DeclarationWalk::DESCEND
         end
@@ -48,12 +48,12 @@ module Rigor
         def on_call(node, context)
           if node.block.is_a?(Prism::BlockNode)
             path = context.anonymous_class_path(@path_variant)
-            ScopeIndexer.record_anonymous_meta_superclass(node, @accumulator[:superclasses], path)
+            SharedWalkTables.record_anonymous_meta_superclass(node, @accumulator[:superclasses], path)
           end
           DeclarationWalk::DESCEND
         end
 
-        # `[superclasses, header_nestings]`, each frozen, as {ScopeIndexer.declaration_walk_tables} returns
+        # `[superclasses, header_nestings]`, each frozen, as {SharedWalkTables.declaration_walk_tables} returns
         # them.
         def tables
           [@accumulator[:superclasses].freeze, @accumulator[:header_nestings].freeze]

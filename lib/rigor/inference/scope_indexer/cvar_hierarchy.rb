@@ -29,7 +29,7 @@ module Rigor
         def headers = { declared: {}, superclasses: {} }
 
         # A header's declared name and kind, and a class header's superclass: `raw` is the as-written name
-        # ({ScopeIndexer.recorded_ancestor_name}, nil for a non-constant expression) and `nesting` the
+        # ({SharedWalkTables.recorded_ancestor_name}, nil for a non-constant expression) and `nesting` the
         # `Module.nesting` outside the header, where Ruby resolves it (nil when the walk lost it). A header below
         # `class <<` that names no class records under the empty name, which no candidate and no census entry spells.
         def record(headers, node, context, body)
@@ -38,7 +38,7 @@ module Rigor
           headers[:declared][name] = klass ? :class : (headers[:declared][name] || :module)
           return unless klass && node.superclass
 
-          (headers[:superclasses][name] ||= []) << [ScopeIndexer.recorded_ancestor_name(node.superclass),
+          (headers[:superclasses][name] ||= []) << [SharedWalkTables.recorded_ancestor_name(node.superclass),
                                                     context.nesting]
         end
 

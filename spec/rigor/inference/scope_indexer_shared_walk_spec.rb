@@ -5,10 +5,12 @@ require "prism"
 require "tmpdir"
 
 # ADR-116 WD5 slice 3 — the first shared walk. The def-nesting table and the two member-layout tables join the
-# superclass tables on ONE {DeclarationWalk} run per file (`ScopeIndexer.declaration_walk_tables`), where the
-# legacy walkers descended the file once per table. The legacy walkers stay as the oracles; these sources drive
-# every arm they had, and every variant the new collectors declare, through the shared run and through each
-# standalone builder. The corpus-scale half is `RIGOR_SHADOW_RULE_WALK=1`.
+# superclass tables on ONE {DeclarationWalk} run per file (`SharedWalkTables.declaration_walk_tables`), where
+# the legacy walkers descended the file once per table. The legacy walkers stay as the oracles; these sources
+# drive every arm they had, and every variant the new collectors declare, through the shared run and through
+# each standalone builder. The builders and the walkers are private to the module, which
+# `scope_indexer/shared_walk_tables_spec.rb` mirrors, and are reached through `send`. The corpus-scale half is
+# `RIGOR_SHADOW_RULE_WALK=1`.
 module SharedWalkCases
   CASES = {
     "nesting head: a compact header, and a receiver naming its last segment" => <<~RUBY,
@@ -109,6 +111,7 @@ end
 
 RSpec.describe Rigor::Inference::ScopeIndexer do
   let(:shadow) { Rigor::Inference::DeclarationWalk::Shadow }
+  let(:walk_tables) { described_class::SharedWalkTables }
 
   around do |example|
     saved = ENV.fetch("RIGOR_SHADOW_RULE_WALK", nil)
@@ -123,24 +126,24 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
   end
 
   def legacy_tables(root, path)
-    superclasses, header_nestings = described_class.legacy_superclass_tables(root, path)
+    superclasses, header_nestings = walk_tables.send(:legacy_superclass_tables, root, path)
     { superclasses: superclasses, header_nestings: header_nestings,
-      def_nestings: described_class.legacy_def_nestings(root),
-      data_member_layouts: described_class.legacy_data_member_layouts(root),
-      struct_member_layouts: described_class.legacy_struct_member_layouts(root) }
+      def_nestings: walk_tables.send(:legacy_def_nestings, root),
+      data_member_layouts: walk_tables.send(:legacy_data_member_layouts, root),
+      struct_member_layouts: walk_tables.send(:legacy_struct_member_layouts, root) }
   end
 
   def standalone_tables(root, path)
-    superclasses, header_nestings = described_class.build_superclass_tables(root, path)
-    data, struct = described_class.member_layout_tables(root)
+    superclasses, header_nestings = walk_tables.send(:build_superclass_tables, root, path)
+    data, struct = walk_tables.send(:member_layout_tables, root)
     { superclasses: superclasses, header_nestings: header_nestings,
-      def_nestings: described_class.build_def_nestings(root), data_member_layouts: data,
+      def_nestings: walk_tables.send(:build_def_nestings, root), data_member_layouts: data,
       struct_member_layouts: struct }
   end
 
   def nestings_by_name(source)
-    described_class.declaration_walk_tables(parse(source), "app/x.rb")
-                   .fetch(:def_nestings).to_h { |node, chain| [node.name, chain] }
+    walk_tables.declaration_walk_tables(parse(source), "app/x.rb")
+               .fetch(:def_nestings).to_h { |node, chain| [node.name, chain] }
   end
 
   describe "the shared walk" do
@@ -149,7 +152,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
         root = parse(source)
         legacy = legacy_tables(root, "app/x.rb")
         expect(legacy.values.map(&:size).sum).to be_positive
-        expect(shadow.first_difference(legacy, described_class.declaration_walk_tables(root, "app/x.rb"), "")).to be_nil
+        expect(shadow.first_difference(legacy, walk_tables.declaration_walk_tables(root, "app/x.rb"), "")).to be_nil
         expect(shadow.first_difference(legacy, standalone_tables(root, "app/x.rb"), "")).to be_nil
       end
     end
@@ -162,14 +165,14 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
 
     it "keys an anonymous class with the path the file is walked under" do
       source = SharedWalkCases::CASES.fetch("a top-level anonymous class, keyed with the file's path")
-      walked = described_class.declaration_walk_tables(parse(source), "app/x.rb")
+      walked = walk_tables.declaration_walk_tables(parse(source), "app/x.rb")
       expect(walked.fetch(:superclasses)).to eq("#<Class:app/x.rb:1:0>" => "Base")
       expect(nestings_by_name(source)).to eq(m: [])
     end
 
     it "keys a def-nesting entry by the def node itself" do
       root = parse("class C\n  def a; end\n  def a; end\nend\n")
-      table = described_class.declaration_walk_tables(root).fetch(:def_nestings)
+      table = walk_tables.declaration_walk_tables(root).fetch(:def_nestings)
       expect(table.compare_by_identity?).to be(true)
       expect(table.keys).to eq(root.statements.body.first.body.body)
     end
@@ -200,7 +203,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
 
   describe "the member-layout variants" do
     let(:tables) do
-      described_class.declaration_walk_tables(parse(SharedWalkCases::CASES["member layouts in every form"]))
+      walk_tables.declaration_walk_tables(parse(SharedWalkCases::CASES["member layouts in every form"]))
     end
 
     it "records every form, and nothing below a header that renders no name (unrendered_header: :skip)" do
@@ -214,7 +217,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     end
 
     it "walks a bare factory block as an ordinary call, parameters included (factory_block: :ordinary_call)" do
-      walked = described_class.declaration_walk_tables(parse(SharedWalkCases::CASES["a bare factory block"]))
+      walked = walk_tables.declaration_walk_tables(parse(SharedWalkCases::CASES["a bare factory block"]))
       expect(walked.fetch(:data_member_layouts)).to eq("C::Param" => %i[p], "C::F" => %i[f])
     end
   end
@@ -229,7 +232,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       instance = forgetful.new
       allow(described_class::DefNestingsCollector).to receive(:new).and_return(instance)
       # The file is named, and the node key is rendered by its class, name and start, not its subtree.
-      expect { described_class.declaration_walk_tables(parse("class C\n  def m; end\nend\n"), "app/c.rb") }
+      expect { walk_tables.declaration_walk_tables(parse("class C\n  def m; end\nend\n"), "app/c.rb") }
         .to raise_error(Rigor::Inference::DeclarationWalk::Shadow::Divergence,
                         "RIGOR_SHADOW_RULE_WALK divergence: discovery table `def_nestings` for app/c.rb: " \
                         "the table: key #<DefNode m at 2:2> only in legacy")
@@ -241,7 +244,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       end
       instance = forgetful.new
       allow(described_class::MemberLayoutsCollector).to receive(:new).and_return(instance)
-      expect { described_class.declaration_walk_tables(parse("Point = Data.define(:x)\n"), "app/c.rb") }
+      expect { walk_tables.declaration_walk_tables(parse("Point = Data.define(:x)\n"), "app/c.rb") }
         .to raise_error(Rigor::Inference::DeclarationWalk::Shadow::Divergence,
                         %r{discovery table `member_layouts` for app/c\.rb: \[0\]: key "Point" only in legacy\z})
     end
@@ -270,7 +273,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     end
 
     it "builds the ported tables in one walk of the file" do
-      expect(walk_runs { described_class.declaration_walk_tables(parse(source), "app/x.rb") }).to eq([ported])
+      expect(walk_runs { walk_tables.declaration_walk_tables(parse(source), "app/x.rb") }).to eq([ported])
     end
 
     it "walks a file once for the ported tables in its own index" do

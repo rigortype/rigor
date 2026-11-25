@@ -129,8 +129,8 @@ module Rigor
         # `M = Module.new do … end`: the block's `self` is the module the write names, so a `refine` in it refines
         # for `M`. The write's other parts walk as they would anyway.
         def walked_meta_new_write?(node, prefix, body, in_def, context)
-          call = ScopeIndexer.meta_new_block_call(node)
-          return false if call.nil? || !ScopeIndexer.module_new_call?(call)
+          call = DeclarationWalk::Rules.meta_new_block_call(node)
+          return false if call.nil? || !DeclarationWalk::Rules.module_new_call?(call)
 
           named = meta_new_owner(node, prefix)
           walk(call.receiver, prefix, body, in_def, context) if call.receiver

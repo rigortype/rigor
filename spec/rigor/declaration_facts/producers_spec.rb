@@ -48,8 +48,14 @@ RSpec.describe "Declaration producers" do
   # and `append_envelope_signature`. Two went to
   # `lib/rigor/inference/scope_indexer/program_globals.rb#Rigor::Inference::ScopeIndexer::ProgramGlobals#`:
   # `gather_global_writes` and `record_global_write`. None was renamed.
+  # Digest change, count still 366 (#3346, ADR-116 WD9 R1): seven grandfathered keys moved from
+  # `lib/rigor/inference/scope_indexer.rb#Rigor::Inference::ScopeIndexer#` to
+  # `lib/rigor/inference/declaration_walk/rules.rb#Rigor::Inference::DeclarationWalk::Rules#`, the walk behind the
+  # declared-names oracle: `add_declared_name`, `collect_declared_anonymous_factory?`, `collect_declared_bare_write`,
+  # `collect_declared_class_decl`, `collect_declared_constant_names`, `collect_declared_path_write` and
+  # `collect_rvalue_declared_names`. None was renamed.
   let(:grandfathered_pin) do
-    { count: 366, digest: "d653f9575c3f65b03bbd058efb02f700610ddfbe074f755862883124d9b79f5f" }
+    { count: 366, digest: "89080ef058549a86bee77e5b18ed89389dfa9bb7b8d4732a86dffc4e0e1af05e" }
   end
 
   define_method(:found) do |parsed = DeclarationFactSources.parsed_under|

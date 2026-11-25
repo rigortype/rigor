@@ -15,8 +15,8 @@ module Rigor
     # becomes a collector that receives events and never tracks context itself; the {Context} it is handed is
     # the walk's.
     #
-    # Require `rigor/inference/declaration_walk`, not this file: the rules the walk applies are `ScopeIndexer`
-    # functions, and that entry point loads them.
+    # Require `rigor/inference/declaration_walk`, not this file: the rules the walk applies are {Rules}' functions,
+    # which this file does not load ({Rules} says why), and that entry point loads them.
     #
     # The arms, in the order the walk tries them:
     #
@@ -396,7 +396,7 @@ module Rigor
         # `self`, the `:ordinary_call` ones the whole block, parameters included, under the enclosing context.
         # Each collector sees the same events in the same order as in a run of its own.
         def walk_factory_call?(node, collectors, context)
-          return false unless @unnamed_factories && ScopeIndexer.meta_new_constant_rvalue?(node)
+          return false unless @unnamed_factories && Rules.meta_new_constant_rvalue?(node)
 
           unnamed = unnamed_factory_group(collectors)
           return false if unnamed.empty?

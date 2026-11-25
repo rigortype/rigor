@@ -34,7 +34,7 @@ module Rigor
       # The receiver constant name (`:Class`, `:Module`, `:Struct`, `:Data`) of a class-creating meta call that
       # carries a literal block, or nil for anything else. The receiver MUST be the bare constant (or its
       # `::`-rooted spelling) — a call through a variable or another call's return has no statically known
-      # identity, exactly as `ScopeIndexer#meta_constant_receiver?` requires.
+      # identity, exactly as `DeclarationWalk::Rules.meta_constant_receiver?` requires.
       #
       # Argument shapes are deliberately NOT inspected: `Class.new(Base) { ... }` and
       # `Data.define(*members) { ... }` evaluate their block as a class body whatever the arguments are, and a

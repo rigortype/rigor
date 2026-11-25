@@ -161,8 +161,8 @@ module Rigor
           )
         end
 
-        # Issue #1814 — the names the file binds by a constant write without declaring a class or module by them, or
-        # the last segment alone where the walk cannot spell the owner Ruby binds. A bare write (`K = …`, `K ||= …`,
+        # Issue #1814 — the names the file binds by a constant write without declaring a class or module by them, or the
+        # last segment alone where the walk cannot spell the owner Ruby binds. A bare write (`K = …`, `K ||= …`,
         # `K += …`, a multiple-assignment target) binds the name under the lexical nesting of the `class` / `module`
         # headers around it, which a block does not change (a `Module.new do … end` or `module_eval { … }` body assigns
         # a constant in the lexical scope around it); `prefixes` holds every nesting the headers can denote, since a
@@ -170,12 +170,12 @@ module Rigor
         # `W::Shared::Inner` or `Shared::Inner`), as the census spells a refine target. A write whose value is one of
         # the class-creating shapes the project walk registers as a declaration (`Class.new`, `Module.new`,
         # `Struct.new`, `Data.define`, a `.freeze` tail or a `K = K || …` guard stripped:
-        # {Inference::ScopeIndexer.meta_new_rvalue}) declares a class, so `Point = Struct.new(:x); refine(Point)` keeps
-        # a normal row. Where the owner cannot be spelled the segment alone is recorded, which matches that segment of
-        # any key: a write under `class << …` (the singleton's), a path write that is not rooted (`Wrap::K = …` may
-        # bind under an included module's `Wrap`; `self::K = …` in a block binds under the block's `self`), and a
-        # `const_set` with a literal name (`Object.const_set(:K, …)` binds `::K`). A rooted path (`::Shared::K = …`)
-        # binds that name. One pass over the tree; the rows are not touched.
+        # {Inference::DeclarationWalk::Rules.meta_new_rvalue}) declares a class, so
+        # `Point = Struct.new(:x); refine(Point)` keeps a normal row. Where the owner cannot be spelled the segment
+        # alone is recorded, which matches that segment of any key: a write under `class << …` (the singleton's), a path
+        # write that is not rooted (`Wrap::K = …` may bind under an included module's `Wrap`; `self::K = …` in a block
+        # binds under the block's `self`), and a `const_set` with a literal name (`Object.const_set(:K, …)` binds
+        # `::K`). A rooted path (`::Shared::K = …`) binds that name. One pass over the tree; the rows are not touched.
         def collect_bound_constants(node, prefixes, harvest)
           return unless node.is_a?(Prism::Node)
 
@@ -196,8 +196,8 @@ module Rigor
         end
 
         def declares_class?(write)
-          rvalue = Inference::ScopeIndexer.meta_new_rvalue(write)
-          !rvalue.nil? && Inference::ScopeIndexer.meta_new_constant_rvalue?(rvalue)
+          rvalue = Inference::DeclarationWalk::Rules.meta_new_rvalue(write)
+          !rvalue.nil? && Inference::DeclarationWalk::Rules.meta_new_constant_rvalue?(rvalue)
         end
 
         # The nestings a `class` / `module` body may sit in, given the ones its header is written in: a bare header
@@ -244,7 +244,7 @@ module Rigor
 
           name, value = node.arguments&.arguments
           return unless name.is_a?(Prism::SymbolNode) || name.is_a?(Prism::StringNode)
-          return if value && Inference::ScopeIndexer.meta_new_constant_rvalue?(value)
+          return if value && Inference::DeclarationWalk::Rules.meta_new_constant_rvalue?(value)
 
           harvest.bound_segments << name.unescaped
         end

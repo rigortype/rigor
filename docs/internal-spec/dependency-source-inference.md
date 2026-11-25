@@ -249,7 +249,7 @@ over each file also collects the names its constant writes bind
 (an assignment, an operator write, a multiple assignment, a rooted
 path write) without declaring a class or module (`Point =
 Struct.new(:x)` declares one, through the project walk's own
-`meta_new_rvalue` reading). A bare write binds its name under the
+`DeclarationWalk::Rules.meta_new_rvalue` reading). A bare write binds its name under the
 lexical nesting of the `class` / `module` headers around it
 (`Shared::Target` for `module Shared; Target = String; end`), which
 a block does not change, under every name a nested compact header

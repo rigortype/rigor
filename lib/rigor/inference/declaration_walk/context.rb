@@ -27,7 +27,7 @@ module Rigor
       #   renders no name ({#lost_header_body}). The context keeps the two apart: a `self::` header below a
       #   rebound self grows a lost chain again, while an untracked one stays nil everywhere.
       # - `scope` — the census scope a collector types an rvalue under, carrying the chain
-      #   {ScopeIndexer.scope_entering_declaration} stamps at each header. nil when the caller has none.
+      #   {Rules.scope_entering_declaration} stamps at each header. nil when the caller has none.
       # - `source_path` — the path of the file being walked, which an anonymous class's synthetic name carries
       #   ({AnonymousMetaClass.name_for}). nil when the caller has none. Read it through
       #   {#anonymous_class_path}, which answers each variant of that rule.
@@ -43,10 +43,10 @@ module Rigor
       # (ADR-116's variant rule); the scope's is wrong below `class <<` (#1520), and converging the two is
       # #1521's.
       #
-      # The rules themselves stay in {ScopeIndexer} ({ScopeIndexer.decl_body_context},
-      # {ScopeIndexer.meta_new_block_split}, {ScopeIndexer.eval_block_split}), where the walkers not yet ported
-      # still call them; this class is the one place a ported collector reaches them from. That is why the
-      # entry point is `rigor/inference/declaration_walk`, which loads `ScopeIndexer` and, through it, this file.
+      # The rules themselves are {Rules}' functions ({Rules.decl_body_context}, {Rules.meta_new_block_split},
+      # {Rules.eval_block_split}), which the walkers not yet ported call too; this class is the one place a ported
+      # collector reaches them from. This file does not require `rules.rb` ({Rules} says why): the entry point is
+      # `rigor/inference/declaration_walk`, which loads `ScopeIndexer` and, through it, this file and the rules.
       class Context
         EMPTY_PREFIX = [].freeze
 
@@ -84,7 +84,7 @@ module Rigor
         # `class <<` body, under a `self` an eval or factory block left unnamed, or below an unnameable cref
         # that no rebound self re-anchors.
         def unnameable_self?
-          ScopeIndexer.unnameable_eval_self?(false, self_owner, prefix, singleton_cref)
+          Rules.unnameable_eval_self?(false, self_owner, prefix, singleton_cref)
         end
 
         # The file path an anonymous class created at this node carries in its synthetic name, under the
@@ -108,12 +108,12 @@ module Rigor
         # so the rebound self resets.
         def declaration_body(node)
           self_decl, child_prefix, child_cref =
-            ScopeIndexer.decl_body_context(node, prefix, self_owner, singleton_cref)
+            Rules.decl_body_context(node, prefix, self_owner, singleton_cref)
           return nil unless child_prefix
 
           Context.new(child_cref ? EMPTY_PREFIX : child_prefix, nil, child_cref,
                       declaration_nesting(node, self_decl, child_cref),
-                      ScopeIndexer.scope_entering_declaration(scope, node.constant_path), source_path, true)
+                      Rules.scope_entering_declaration(scope, node.constant_path), source_path, true)
         end
 
         # The context of a `class << expr` body. `self` is the singleton class, which no `self::` path names,
@@ -166,15 +166,15 @@ module Rigor
         end
 
         # `[enclosing_parts, body, body_self]` for a `K = Class.new { … }`-shaped write, or nil when its
-        # rvalue is not the idiom ({ScopeIndexer.meta_new_block_split}).
+        # rvalue is not the idiom ({Rules.meta_new_block_split}).
         def meta_new_split(node, variant = :prefix)
-          ScopeIndexer.meta_new_block_split(node, lexical_prefix(variant), self_owner, singleton_cref)
+          Rules.meta_new_block_split(node, lexical_prefix(variant), self_owner, singleton_cref)
         end
 
         # `[enclosing_parts, body, eval_self]` for an eval-family call with a block, or nil
-        # ({ScopeIndexer.eval_block_split}).
+        # ({Rules.eval_block_split}).
         def eval_split(node, variant = :prefix)
-          ScopeIndexer.eval_block_split(node, lexical_prefix(variant), self_owner, singleton_cref)
+          Rules.eval_block_split(node, lexical_prefix(variant), self_owner, singleton_cref)
         end
 
         private

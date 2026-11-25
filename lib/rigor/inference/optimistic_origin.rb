@@ -6,8 +6,9 @@ require_relative "../type"
 
 module Rigor
   module Inference
-    # Marks a value whose *nil-freeness* rests on Rigor's deliberate choice to ignore core RBS's
-    # `%a{implicitly-returns-nil}` annotation rather than on the value's class. See
+    # Marks a value whose *nil-freeness* rests on a deliberate choice rather than on the value's class: Rigor's
+    # choice to ignore core RBS's `%a{implicitly-returns-nil}` annotation ({IMPLICITLY_RETURNS_NIL}), or a plugin's
+    # to omit a `nil` its answer can hold ({PLUGIN_NIL_FREE}, #3322). See
     # docs/internal-spec/inference-engine.md § "That deferred-to answer is nil-free for a lookup that can
     # miss": `Hash#[]` reads as `V` and `Array#first` as `E` because pessimising them to `V?` costs 25
     # measured false positives on Rigor's own `lib`. The consequence the spec draws is that such a value is
@@ -96,7 +97,13 @@ module Rigor
 
       # The entry a control-flow join keeps for a name both arms mark: the answer survives only when the arms
       # agree on it, since otherwise a miss can take either arm's.
-      def join_bound_marks(mine, theirs) = mine == theirs ? mine : bound_cause(mine)
+      def join_bound_marks(mine, other) = mine == other ? mine : stronger_cause(bound_cause(mine), bound_cause(other))
+
+      # #3322 — the cause kept where two marks combine (a join, either operand of `&&` / `||`, a write's right-hand
+      # side and old binding). A lookup's cause outranks a plugin's: both stop the certainty consumers, but only the
+      # lookup's makes `rigor sig-gen` keep the `nil` a miss returns (`DefReturnTyper#lookup_mark?`), so letting the
+      # plugin's shadow it would drop that `nil` by arm order alone.
+      def stronger_cause(left, right) = left && right && left == PLUGIN_NIL_FREE ? right : left || right
 
       # `rebound` — `scope` with the local `name` rebound to its type across a loop's iterations
       # (`CapturedLocals.bind`) — re-marked with the mark `scope` holds for `name` or `optimistic`, the one an
@@ -143,7 +150,7 @@ module Rigor
              Prism::InstanceVariableAndWriteNode, Prism::ClassVariableAndWriteNode,
              Prism::GlobalVariableAndWriteNode
           resolve_write_form(node, scope)
-        when Prism::AndNode, Prism::OrNode then resolve(node.left, scope) || resolve(node.right, scope)
+        when Prism::AndNode, Prism::OrNode then stronger_cause(resolve(node.left, scope), resolve(node.right, scope))
         when Prism::CallNode
           resolve_attribute_write(node, scope) || resolve_through_safe_navigation(node, scope) ||
             resolve_through_predicate(node, scope)
@@ -173,7 +180,7 @@ module Rigor
       # the mark recorded on the read itself, which lives in the side table every scope shares; the binding lookup
       # stays as the fallback for the post-write scope `branch_certainty` passes.
       def resolve_write(node, scope)
-        resolve(node.value, scope) || optimistic_write_binding(node, scope)
+        stronger_cause(resolve(node.value, scope), optimistic_write_binding(node, scope))
       end
 
       # Only locals and ivars carry a binding mark; a global or class-variable write, and a
@@ -206,7 +213,7 @@ module Rigor
       # to, joined by the old binding's own mark for the case where the miss — not the rvalue — is
       # what makes the condition live (`v = h[k]; if (v &&= "lit")`).
       def resolve_and_write(node, scope)
-        resolve(node.value, scope) || and_write_binding_mark(node, scope)
+        stronger_cause(resolve(node.value, scope), and_write_binding_mark(node, scope))
       end
 
       # The `[type, mark]` pair an `||=` reads its old value through: the scope binding and the

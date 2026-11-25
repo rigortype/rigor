@@ -376,6 +376,16 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     yes()
   ].freeze
 
+  # Issue #3322 — the `dynamic_return` answer `Plugin::Base#optimistic_nil_free` returns.
+  OPTIMISTIC_RETURN_INSTANCE = %w[type()].freeze
+  OPTIMISTIC_RETURN_SINGLETON = %w[
+    [](rest:)
+    inspect()
+    members()
+    new(rest:)
+    unwrap(req:answer)
+  ].freeze
+
   PLUGIN_SINGLETON = %w[
     ids_for_gem(req:gem_name)
     record_gem_registration(req:gem_name,req:ids)
@@ -951,6 +961,15 @@ RSpec.describe "Public API drift", :public_api_drift do
     it "exposes the expected value-object surface" do
       expect(instance_signatures(Rigor::Trinary)).to eq(PublicApiDriftSnapshots::TRINARY_INSTANCE)
       expect(singleton_signatures(Rigor::Trinary)).to eq(PublicApiDriftSnapshots::TRINARY_SINGLETON)
+    end
+  end
+
+  describe "Rigor::Plugin::OptimisticReturn" do
+    it "exposes the expected value-object surface" do
+      expect(instance_signatures(Rigor::Plugin::OptimisticReturn))
+        .to eq(PublicApiDriftSnapshots::OPTIMISTIC_RETURN_INSTANCE)
+      expect(singleton_signatures(Rigor::Plugin::OptimisticReturn))
+        .to eq(PublicApiDriftSnapshots::OPTIMISTIC_RETURN_SINGLETON)
     end
   end
 

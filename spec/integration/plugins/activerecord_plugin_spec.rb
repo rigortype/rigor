@@ -1445,6 +1445,51 @@ RSpec.describe "plugins/rigor-activerecord" do
         "class Time\n  def present?: () -> true\n  def blank?: () -> false\nend\n" \
         "class NilClass\n  def present?: () -> false\n  def blank?: () -> true\nend\n"
     end
+    let(:reader_source) { <<~RUBY }
+      class Reader
+        def completed(id) = User.find(id).completed_at
+        def verified(id) = User.find(id).verified_at
+        def guarded(id)
+          user = User.find(id)
+          return user.completed_at if user.completed_at
+
+          Time.at(0)
+        end
+
+        def bound(id)
+          at = User.find(id).completed_at
+          at
+        end
+
+        def bound_ivar(id)
+          @at = User.find(id).completed_at
+          @at
+        end
+
+        def mixed_join(c, id)
+          if c
+            x = User.find(id).completed_at
+          else
+            x = table[:a]
+          end
+          x
+        end
+
+        def mixed_ivar_join(c, id)
+          if c
+            @x = User.find(id).completed_at
+          else
+            @x = table[:a]
+          end
+          @x
+        end
+
+        def mixed_or(id)
+          x = User.find(id).completed_at || table[:a]
+          x
+        end
+      end
+    RUBY
 
     def truthy_lines(source)
       files = { "db/schema.rb" => schema, "sig/present.rbs" => present_rbs }.merge(DEFAULT_MODELS)
@@ -1471,35 +1516,41 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(truthy_lines("p(:a) if User.find(1).verified_at.present?\n")).to eq([1])
     end
 
+    # `{ method_name => proposed RBS or skip reason }` for `reader_source`, with `table` declared a Hash read.
+    def reader_signatures
+      Dir.mktmpdir do |dir|
+        materialize_files(dir, { "db/schema.rb" => schema, "app/services/reader.rb" => reader_source,
+                                 "sig/reader.rbs" => "class Reader\n  def table: () -> Hash[Symbol, Integer]\nend\n" }
+                                 .merge(DEFAULT_MODELS))
+        Rigor::Plugin.unregister!
+        Rigor::Plugin.register(plugin_class)
+        Dir.chdir(dir) do
+          File.write(".rigor.yml", "paths:\n  - app\nsignature_paths:\n  - sig\nplugins:\n  - gem: " \
+                                   "rigor-activerecord\n    id: #{plugin_class.manifest.id}\n")
+          Rigor::SigGen::Generator.new(configuration: Rigor::Configuration.load(".rigor.yml"),
+                                       paths: ["app/services/reader.rb"]).run
+                                  .to_h { |candidate| [candidate.method_name, candidate.rbs || candidate.skip_reason] }
+        end
+      end
+    end
+
     # The plugin's mark is not a lookup's: sig-gen keeps the reader's nil-free type in a contract it writes, so an
     # adopted signature does not report possible-nil-receiver on every caller.
     it "has sig-gen propose the reader's nil-free type, checked or not, nullable or not" do
-      Dir.mktmpdir do |dir|
-        materialize_files(dir, { "db/schema.rb" => schema, "app/services/reader.rb" => <<~RUBY }.merge(DEFAULT_MODELS))
-          class Reader
-            def completed(id) = User.find(id).completed_at
-            def verified(id) = User.find(id).verified_at
-            def guarded(id)
-              user = User.find(id)
-              return user.completed_at if user.completed_at
+      expect(reader_signatures).to include(completed: "def completed: (untyped) -> Time",
+                                           verified: "def verified: (untyped) -> Time",
+                                           guarded: "def guarded: (untyped) -> Time",
+                                           bound: "def bound: (untyped) -> Time",
+                                           bound_ivar: "def bound_ivar: (untyped) -> Time")
+    end
 
-              Time.at(0)
-            end
-          end
-        RUBY
-        Rigor::Plugin.unregister!
-        Rigor::Plugin.register(plugin_class)
-        rbs = Dir.chdir(dir) do
-          File.write(".rigor.yml",
-                     "paths:\n  - app\nplugins:\n  - gem: rigor-activerecord\n    id: #{plugin_class.manifest.id}\n")
-          configuration = Rigor::Configuration.load(".rigor.yml")
-          Rigor::SigGen::Generator.new(configuration: configuration, paths: ["app/services/reader.rb"]).run
-                                  .to_h { |candidate| [candidate.method_name, candidate.rbs || candidate.skip_reason] }
-        end
-        expect(rbs).to include(completed: "def completed: (untyped) -> Time",
-                               verified: "def verified: (untyped) -> Time",
-                               guarded: "def guarded: (untyped) -> Time")
-      end
+    # A lookup's cause outranks the plugin's where the two combine, so the lookup's nil survives (#2197).
+    it "has sig-gen keep a lookup's nil where a binding mixes it with a column read" do
+      expect(reader_signatures).to include(
+        mixed_join: "def mixed_join: (untyped, untyped) -> (Integer | Time | nil)",
+        mixed_ivar_join: "def mixed_ivar_join: (untyped, untyped) -> (Integer | Time | nil)",
+        mixed_or: "def mixed_or: (untyped) -> (Integer | Time | nil)"
+      )
     end
 
     it "keeps the nullable reader's nil-free type, so a call on it reports nothing" do

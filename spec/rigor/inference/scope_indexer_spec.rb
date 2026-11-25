@@ -4326,6 +4326,25 @@ Unrelated
   # #682 — the per-declaration table `Scope#ancestor_name_candidates` reads. It records the nesting the
   # HEADER is written in, so the two spellings of one qualified name are distinguishable afterwards, which
   # is exactly what the peel it replaces could not do.
+  # Issue #3219 — a class and its subclasses share one cvar slot, so each entry a `def` write creates joins the writes
+  # every class of its in-file superclass tree makes, and a tree whose top names a superclass outside the file joins the
+  # unknown floor.
+  # The join is pinned through the census's entry, in `scope_indexer/class_cvar_census_spec.rb`; what stays here
+  # calls `CvarHierarchy` alone.
+  describe "class-cvar census superclass join (#3219)" do
+    # A guard: a name lookup that raises reads as declared elsewhere, which only widens.
+    it "reads a name lookup that raises as declared elsewhere" do
+      loader = Object.new
+      def loader.class_known?(_name) = raise(ArgumentError, "boom")
+      scope = Struct.new(:discovered_classes, :discovered_superclasses, :environment)
+                    .new({}, {}, Struct.new(:rbs_loader).new(loader))
+      hierarchy = described_class::CvarHierarchy
+      headers = { declared: { "Base" => :class }, superclasses: {} }
+      expect(hierarchy.send(:declared_elsewhere?, scope, "Ns::Base")).to be(true)
+      expect(hierarchy.send(:reopened_elsewhere?, "Base", headers, scope)).to be(true)
+    end
+  end
+
   describe ".build_superclass_tables" do
     def unkeyed = Rigor::Scope::DiscoveryIndex::UNKEYED_HEADER_NESTING
 

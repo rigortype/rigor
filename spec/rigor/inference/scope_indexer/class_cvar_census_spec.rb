@@ -389,18 +389,6 @@ RSpec.describe Rigor::Inference::ScopeIndexer::ClassCvarCensus do
       expect(cvars.fetch("Sub")[:@@c].describe).to eq("1 | Dynamic[top]")
     end
 
-    # A guard: a name lookup that raises reads as declared elsewhere, which only widens.
-    it "reads a name lookup that raises as declared elsewhere" do
-      loader = Object.new
-      def loader.class_known?(_name) = raise(ArgumentError, "boom")
-      scope = Struct.new(:discovered_classes, :discovered_superclasses, :environment)
-                    .new({}, {}, Struct.new(:rbs_loader).new(loader))
-      hierarchy = Rigor::Inference::ScopeIndexer::CvarHierarchy
-      headers = { declared: { "Base" => :class }, superclasses: {} }
-      expect(hierarchy.send(:declared_elsewhere?, scope, "Ns::Base")).to be(true)
-      expect(hierarchy.send(:reopened_elsewhere?, "Base", headers, scope)).to be(true)
-    end
-
     it "keeps a class `class << self` nests out of the tree" do
       # `class Base` below `class << self` opens `#<Class:Outer>::Base`, which keys nothing, so `Sub < Base`
       # names the top-level `Base`, whose writes hold no `nil`.
@@ -645,9 +633,10 @@ RSpec.describe Rigor::Inference::ScopeIndexer::ClassCvarCensus do
           .to eq("C" => { :@@x => "0?", :@@me => "0 | singleton(C)" })
       end
 
-      it "types each body under the chain its header pushed" do
-        expect(walked("module M\n  class C\n    @@b = nil\n    def a = (@@a = @@b = Bar.new)\n  end\nend\n", bars))
-          .to eq("M::C" => { :@@a => "M::C::Bar", :@@b => "M::C::Bar?" })
+      it "types a body's own writes and its defs' under the chain its header pushed" do
+        source = "module M\n  class C\n    @@b = Bar.new\n    def a = (@@a = @@b = Bar.new)\n  end\nend\n"
+
+        expect(walked(source, bars)).to eq("M::C" => { :@@a => "M::C::Bar", :@@b => "M::C::Bar" })
       end
 
       it "reads a header with no body as nothing, and goes on" do
@@ -681,6 +670,62 @@ RSpec.describe Rigor::Inference::ScopeIndexer::ClassCvarCensus do
           .to eq("C::K::I" => { :@@i => "1" })
       end
 
+      # A bare header below `class <<` opens `#<Class:C>::Bare`, which no name reaches: its own writes join nothing,
+      # the real `C::Bare` least of all, and a header or a `self::` eval receiver inside it is ownerless too, until a
+      # header re-anchors at the root.
+      it "keeps a bare header's writes, and whatever it nests, out of a class of the same name" do
+        source = <<~RUBY
+          class C
+            class Bare; def x = (@@u = 1); end
+            class << self
+              class Bare
+                @@u = nil
+                def y = (@@v = 2)
+                class Deeper; @@w = nil; def d = (@@d = 3); end
+                self::Foo.class_eval { class self::InFoo; def z = (@@z = 5); end }
+                class ::Top; def t = (@@t = 4); end
+              end
+            end
+          end
+        RUBY
+
+        expect(walked(source)).to eq("C::Bare" => { :@@u => "1" }, "Top" => { :@@t => "4" })
+      end
+
+      it "keeps its cref below a factory write, an eval block and a bare factory block" do
+        source = <<~RUBY
+          class C
+            class << self
+              K = Class.new { class self::I; def i = (@@i = 1); end; class InK; def b = (@@b = 5); end; def k = (@@k = 2) }
+              X.class_eval { class self::J; def j = (@@j = 3); end; class InEval; def b = (@@c = 6); end }
+              Class.new { class Named; def n = (@@n = 4); end }
+              class_eval { class self::Z; def z = (@@z = 7); end }
+            end
+          end
+        RUBY
+
+        expect(walked(source)).to eq("C" => { :@@k => "2" }, "X::J" => { :@@j => "3" })
+      end
+
+      # Below an eval the block's self is the receiver, and a `class << self` there opens the receiver's singleton
+      # class: nothing in its body is named after the receiver.
+      it "drops the self around it: a `self::` name in its body is not the enclosing eval's" do
+        source = <<~RUBY
+          class X; end
+          module M
+            X.class_eval do
+              class << self
+                self::K = Class.new { class self::I; def i = (@@i = 1); end }
+                class self::D; def d = (@@d = 2); end
+                class_eval { class self::Z; def z = (@@z = 3); end }
+              end
+            end
+          end
+        RUBY
+
+        expect(walked(source)).to eq({})
+      end
+
       it "reads one with no body as nothing" do
         expect(walked("class C\n  class << self; end\n  def a = (@@a = 1)\nend\n")).to eq("C" => { :@@a => "1" })
       end
@@ -696,17 +741,19 @@ RSpec.describe Rigor::Inference::ScopeIndexer::ClassCvarCensus do
             end
             G ||= Class.new { class self::Guarded; def g = (@@g = 3); end }
             self::P = Class.new { class self::Q; def q = (@@q = 4); end }
+            self::O ||= Class.new { class self::R; def r = (@@r = 5); end }
           end
         RUBY
 
         expect(walked(source)).to eq("C" => { :@@a => "1" }, "C::K::Inner" => { :@@i => "2" },
-                                     "C::G::Guarded" => { :@@g => "3" }, "C::P::Q" => { :@@q => "4" })
+                                     "C::G::Guarded" => { :@@g => "3" }, "C::P::Q" => { :@@q => "4" },
+                                     "C::O::R" => { :@@r => "5" })
       end
 
       it "walks the factory's arguments in the enclosing context" do
         source = <<~RUBY
           class C
-            K = Struct.new(:a, (Class.new { def q = (@@q = 1) })) do
+            K = Class.new((Class.new { def q = (@@q = 1) })) do
               def a = (@@a = 2)
             end
           end
@@ -791,6 +838,41 @@ RSpec.describe Rigor::Inference::ScopeIndexer::ClassCvarCensus do
         RUBY
 
         expect(walked(source)).to eq("C::K::B" => { :@@b => "1" })
+      end
+    end
+
+    # The four places the walker hands an expression on in the context around it: the operand of a `class <<`, and
+    # the receiver and arguments of a factory write, of a bare factory call and of an eval call. Each holds a
+    # factory written to a constant here, whose block declares a `self::` class with a def that writes a cvar.
+    describe "an expression walked in the enclosing context" do
+      def factory(name, anchor)
+        "(#{anchor}#{name} = Class.new { class self::I#{name}; def i = (@@i#{name.downcase} = 1); end })"
+      end
+
+      def four_places(anchor = "")
+        <<~RUBY
+          class << #{factory('A', anchor)}; end
+          B = Class.new(#{factory('C', anchor)}) { }
+          Class.new(#{factory('D', anchor)}) { }
+          Y.class_eval(#{factory('E', anchor)}) { }
+        RUBY
+      end
+
+      def named(prefix)
+        %w[A C D E].to_h { |name| ["#{prefix}::#{name}::I#{name}", { "@@i#{name.downcase}": "1" }] }
+      end
+
+      it "walks each of the four, under the cref around it" do
+        expect(walked("module M\n#{four_places}end\n")).to eq(named("M"))
+      end
+
+      it "keeps an eval's self around each: a `self::` write there is named after the receiver" do
+        expect(walked("class X; end\nmodule M\n  X.class_eval do\n#{four_places('self::')}  end\nend\n"))
+          .to eq(named("X"))
+      end
+
+      it "keeps the unnameable cref around each: below `class <<` none names a class" do
+        expect(walked("class C\n  class << self\n#{four_places}  end\nend\n")).to eq({})
       end
     end
   end

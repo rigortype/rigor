@@ -10,7 +10,9 @@ module Rigor
       # {.declaration_signature} renders the cross-file declaration surfaces of a single file's index into parts
       # and digests them; every other function here is one of its parts. It reads the index it is handed and,
       # lexically, `ScopeIndexer::CONSTANT_MEMO`, and calls nothing else of the indexer: `scope_indexer.rb` requires
-      # this file, and this file does not require it back.
+      # this file, and this file does not require it back. So the file loads alone but answers only once
+      # `scope_indexer.rb` has loaded: rendering a constant write that publishes no literal reads `CONSTANT_MEMO`, a
+      # `NameError` until then, as the indexer's constants are for {NodePropagation}, which reads them the same way.
       module DeclarationSignature
         module_function
 

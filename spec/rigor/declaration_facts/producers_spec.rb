@@ -54,8 +54,23 @@ RSpec.describe "Declaration producers" do
   # declared-names oracle: `add_declared_name`, `collect_declared_anonymous_factory?`, `collect_declared_bare_write`,
   # `collect_declared_class_decl`, `collect_declared_constant_names`, `collect_declared_path_write` and
   # `collect_rvalue_declared_names`. None was renamed.
+  # Digest change, count still 366 (#3346, ADR-116 WD9 U1 to U3): 22 grandfathered keys moved from
+  # `lib/rigor/inference/scope_indexer.rb#Rigor::Inference::ScopeIndexer#`. Six went to
+  # `lib/rigor/inference/scope_indexer/class_declarations.rb#Rigor::Inference::ScopeIndexer::ClassDeclarations#`:
+  # `collect_class_decls`, `collect_decl_body?`, `collect_eval_class_decls?`, `collect_meta_new_constant_decls?`,
+  # `record_class_new_constant_decl` and `record_compact_header`. Nine went to
+  # `lib/rigor/inference/scope_indexer/literal_receiver_mutations.rb#
+  # Rigor::Inference::ScopeIndexer::LiteralReceiverMutations#`: `constant_mutation_candidates`,
+  # `path_mutation_candidates`, `record_literal_receiver_mutation`, `walk_literal_mutation_declaration?`,
+  # `walk_literal_mutation_eval_call?`, `walk_literal_mutation_meta_call?`, `walk_literal_mutation_meta_new?`,
+  # `walk_literal_receiver_mutations` and `walk_singleton_literal_mutations`. Seven went to
+  # `lib/rigor/inference/scope_indexer/published_constant_ivars.rb#
+  # Rigor::Inference::ScopeIndexer::PublishedConstantIvars#`: `record_published_constant_ivar`,
+  # `walk_published_constant_ivars`, `walk_published_ivar_declaration?`, `walk_published_ivar_eval_call?`,
+  # `walk_published_ivar_leaf?`, `walk_published_ivar_meta_new?` and `walk_singleton_published_ivars`. None was
+  # renamed.
   let(:grandfathered_pin) do
-    { count: 366, digest: "89080ef058549a86bee77e5b18ed89389dfa9bb7b8d4732a86dffc4e0e1af05e" }
+    { count: 366, digest: "c8986ec3826271b133fa10806b9546d19ff20850284b8b7614425633594df3bd" }
   end
 
   define_method(:found) do |parsed = DeclarationFactSources.parsed_under|

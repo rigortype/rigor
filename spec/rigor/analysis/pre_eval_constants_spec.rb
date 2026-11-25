@@ -113,7 +113,7 @@ RSpec.describe "pre_eval: constant publication" do
       end
     end
 
-    it "still crosses the meta-new class-shaped form (ScopeIndexer#record_class_new_constant_decl)" do
+    it "still crosses the meta-new class-shaped form (ScopeIndexer::ClassDeclarations)" do
       expect(receiver_for(unlisted, "probe_cross_class_new")).to eq("singleton(StandardError)")
     end
   end

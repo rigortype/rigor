@@ -14,8 +14,8 @@ module Rigor
     # ADR-17 slice 2 gave `pre_eval:` a project-wide **method** registry ({ProjectPatchedMethods}). A
     # constant declared in the same file stayed invisible across the file boundary: `Scope#in_source_constants`
     # was per-file and kept out of `Runner#project_scope_seed_tables`, so only class-shaped
-    # constants (a `class` / `module` declaration, or one of the four meta-new forms `ScopeIndexer`'s
-    # `record_class_new_constant_decl` promotes) ever crossed. `TIMEOUT = 30` in a listed file read as
+    # constants (a `class` / `module` declaration, or one of the four meta-new forms
+    # `ScopeIndexer::ClassDeclarations` promotes) ever crossed. `TIMEOUT = 30` in a listed file read as
     # `Dynamic[top]` everywhere else.
     #
     # This collector closes that half. It walks the `pre_eval:` files with the SAME constant pre-pass the

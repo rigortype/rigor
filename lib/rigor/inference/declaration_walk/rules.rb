@@ -400,7 +400,7 @@ module Rigor
 
         # The walk behind {eval_file_declared_names}: every qualified constant
         # name a declaration introduces, `class`/`module`/`class <<` bodies and
-        # `Const = …` writes alike. Deliberately NOT {ScopeIndexer#collect_class_decls} —
+        # `Const = …` writes alike. Deliberately NOT {ScopeIndexer::ClassDeclarations} —
         # that walk resolves eval receivers through {eval_receiver_prefix},
         # which consults this oracle and would reenter it mid-build; this one
         # never asks the question it feeds. `def` bodies cannot contain constant

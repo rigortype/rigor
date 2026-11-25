@@ -7,12 +7,12 @@ require "fileutils"
 # Issue #271 — a nested `Const = Data.define(...)` must win Ruby's lexical constant lookup over a SAME-NAMED sibling in
 # the parent namespace, from a consumer in another file.
 #
-# The cross-file discovery table (`ScopeIndexer.collect_class_decls`) recorded `class` / `module` declarations and
-# `Const = Class.new(...)`, but not the Data/Struct constant-write forms; only the DEFINING file's `in_source_constants`
-# knew about those, and that table is not part of the project seed. So when a consumer in another file adopted the
-# inferred return of a factory defined here, `Result` inside the callee's body fell through the nested candidate to the
-# parent namespace's sibling — and because that sibling is RBS-known (closed world), `call.undefined-method` fired on
-# correct code with a receiver from an unrelated class.
+# The cross-file discovery table (`ScopeIndexer::ClassDeclarations.collect_class_decls`) recorded `class` / `module`
+# declarations and `Const = Class.new(...)`, but not the Data/Struct constant-write forms; only the DEFINING file's
+# `in_source_constants` knew about those, and that table is not part of the project seed. So when a consumer in another
+# file adopted the inferred return of a factory defined here, `Result` inside the callee's body fell through the nested
+# candidate to the parent namespace's sibling — and because that sibling is RBS-known (closed world),
+# `call.undefined-method` fired on correct code with a receiver from an unrelated class.
 #
 # The RBS-known sibling is load-bearing, not decoration: without it the whole chain degrades to `Dynamic` and nothing
 # fires, which is why the issue's first minimal repro came back clean.

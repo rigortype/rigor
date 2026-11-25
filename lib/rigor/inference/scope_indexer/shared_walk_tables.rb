@@ -37,8 +37,8 @@ module Rigor
       # header nesting is keyed by), `ScopeIndexer.add_header_nesting` (the insert of the header-nesting table,
       # which stays beside the merges the cross-file fold shares with it) and
       # `ScopeIndexer.resolve_meta_factory_call` (the factory call an expression unwinds to, which the methods
-      # table and the declared-names walk ask too). `scope_indexer.rb` requires this file, and this file does not
-      # require it back. It reads `ScopeIndexer::EMPTY_NESTING`, `EMPTY_PREFIX`, `RECEIVER_EVAL_CALLS` and
+      # table and the discovered-classes walk ask too). `scope_indexer.rb` requires this file, and this file does
+      # not require it back. It reads `ScopeIndexer::EMPTY_NESTING`, `EMPTY_PREFIX`, `RECEIVER_EVAL_CALLS` and
       # `MIXIN_CALL_NAMES` lexically, as {NodePropagation} reads the indexer's constants. So the file loads
       # alone, and until `scope_indexer.rb` has loaded only the functions that reach none of those seven names
       # answer.

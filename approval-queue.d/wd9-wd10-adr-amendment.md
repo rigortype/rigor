@@ -1,6 +1,6 @@
 # #3346 is answered as `DeclarationWalk::Rules` plus collector moves that stop at a measured line, and the fold and the codec wait for WD2
 
-- **PR:** [#0000](https://github.com/rigortype/rigor/pull/0000)
+- **PR:** [#3386](https://github.com/rigortype/rigor/pull/3386)
 - **Issue:** [#3346](https://github.com/rigortype/rigor/issues/3346)
 - **Class:** scope
 - **Precedent:** [ADR-116](../docs/adr/116-hot-file-restructuring.md)

@@ -329,13 +329,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#add_header_nesting: grandfathered
     Rigor::Inference::ScopeIndexer#add_module_function_entries: 'issue #2161, copies every named deferred-range def row whose kind is not :instance (a :both row from ModuleFunctionState.deferred_module_function?, a :singleton row from a named module_function call or from a def that record_deferred_def / def_singleton? places on the singleton side, such as def self.x, class << self or instance_eval) into the file''s visibility entries, the rows DefinerResolution.module_function_row? counts, so the --incremental diff sees one appear or vanish; it reads finished rows and decides no owner or side'
     Rigor::Inference::ScopeIndexer#alias_renamed_header_nestings: grandfathered
-    Rigor::Inference::ScopeIndexer#append_ancestry_signature: grandfathered
-    Rigor::Inference::ScopeIndexer#append_certainty_signature: ADR-119 WD3, it renders the file's filled siblings (possible names, contested slots) into the ADR-89 declaration signature so a certainty-only edit (`… end if X`) moves it; it reads the siblings the walk produced and decides no context
-    Rigor::Inference::ScopeIndexer#append_constant_signature: grandfathered
-    Rigor::Inference::ScopeIndexer#append_declaration_tables: grandfathered
-    Rigor::Inference::ScopeIndexer#append_def_signatures: grandfathered
-    Rigor::Inference::ScopeIndexer#append_envelope_signature: grandfathered
-    Rigor::Inference::ScopeIndexer#append_mixin_signature: renders the mixin lists and the unpositioned table into the declaration signature; it derives no declaration context
     Rigor::Inference::ScopeIndexer#apply_alias_def_nodes: grandfathered
     Rigor::Inference::ScopeIndexer#apply_class_method_visibility: 'issue #1984, applies a private_class_method / public_class_method call to the class''s singleton visibility slots as the grandfathered apply_visibility_call applies private / public to the instance ones; the owner is the visibility walk''s prefix and it derives no context'
     Rigor::Inference::ScopeIndexer#apply_compact_header_renames!: grandfathered
@@ -427,7 +420,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#freeze_mixin_lists: it freezes the mixin accumulator's per-class lists into the include and prepend tables; it is the one place the two are projected, and the include projection alone is a set (#1587)
     Rigor::Inference::ScopeIndexer#gather_aliased_mutations: grandfathered
     Rigor::Inference::ScopeIndexer#gather_cvar_writes: grandfathered
-    Rigor::Inference::ScopeIndexer#gather_global_writes: grandfathered
     Rigor::Inference::ScopeIndexer#gather_ivar_writes: grandfathered
     Rigor::Inference::ScopeIndexer#hook_singleton_reshape?: 'issue #1592, whether a call in a self.included(base) or self.prepended(base) hook body mixes into the parameter''s singleton class other than through a plain base.extend (base.send(:extend, M), base.singleton_class.include M); it reads the call''s shape and the hook''s parameter name and derives no declaration context'
     Rigor::Inference::ScopeIndexer#literal_send_name: 'issue #3006, a consumer, not a declaration producer; it reads the method name a `send` argument spells, or rules out every mixin name for an interpolation, and derives no declaration context'
@@ -504,7 +496,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#record_extend_targets: grandfathered
     Rigor::Inference::ScopeIndexer#receiver_extend_recorded?: writes one receiver-form `Const.extend(M)` call into the extend accumulator under the class the constant receiver names (#2094), as instance_mixin_recorded? does for `Const.include(M)`; it computes no declaration context
     Rigor::Inference::ScopeIndexer#record_file_positions: grandfathered
-    Rigor::Inference::ScopeIndexer#record_global_write: grandfathered
     Rigor::Inference::ScopeIndexer#record_ivar_and_write: grandfathered
     Rigor::Inference::ScopeIndexer#record_ivar_mutator_call: grandfathered
     Rigor::Inference::ScopeIndexer#record_ivar_operator_write: grandfathered
@@ -640,6 +631,16 @@ lib/rigor/inference/scope_indexer/cvar_hierarchy.rb:
   computes: 'issue #3219, the in-file superclass tree the class-cvar census joins each class''s cvar entries along'
   producers:
     Rigor::Inference::ScopeIndexer::CvarHierarchy#record: 'issue #3219, records, for the class-cvar census, the name a class or module header declares and a class header''s as-written superclass with the Module.nesting outside the header; it takes the prefix and nesting from the walk''s DeclarationWalk::Context and body context and derives none of its own'
+lib/rigor/inference/scope_indexer/declaration_signature.rb:
+  computes: the ADR-89 declaration signature, a digest of the declaration surfaces one file's index already holds; it renders the tables it is handed and derives no declaration context
+  producers:
+    Rigor::Inference::ScopeIndexer::DeclarationSignature#append_ancestry_signature: grandfathered
+    Rigor::Inference::ScopeIndexer::DeclarationSignature#append_certainty_signature: ADR-119 WD3, it renders the file's filled siblings (possible names, contested slots) into the ADR-89 declaration signature so a certainty-only edit (`… end if X`) moves it; it reads the siblings the walk produced and decides no context
+    Rigor::Inference::ScopeIndexer::DeclarationSignature#append_constant_signature: grandfathered
+    Rigor::Inference::ScopeIndexer::DeclarationSignature#append_declaration_tables: grandfathered
+    Rigor::Inference::ScopeIndexer::DeclarationSignature#append_def_signatures: grandfathered
+    Rigor::Inference::ScopeIndexer::DeclarationSignature#append_envelope_signature: grandfathered
+    Rigor::Inference::ScopeIndexer::DeclarationSignature#append_mixin_signature: renders the mixin lists and the unpositioned table into the declaration signature; it derives no declaration context
 lib/rigor/inference/scope_indexer/declared_param_writes.rb:
   computes: the ivar writes in one instance def whose value reads only parameters with a declared type
   producers:
@@ -677,6 +678,11 @@ lib/rigor/inference/scope_indexer/node_propagation.rb:
     Rigor::Inference::ScopeIndexer::NodePropagation#record_class_body_defs: records in the per-node scope table the self each def of a value-position class-body or refine block runs on (#1696); it records which scope a node is typed under, not what a declaration is
     Rigor::Inference::ScopeIndexer::NodePropagation#unentered_block_entry: the entry scope of a block the evaluator never entered; it passes the scope table to unentered_meta_class_body_entry, which records which scope a node is typed under, not what a declaration is
     Rigor::Inference::ScopeIndexer::NodePropagation#unentered_meta_class_body_entry: records the class-body self of a value-position Class.new / Module.new / Struct.new / Data.define block in the per-node scope table (#1696), under the name AnonymousMetaClass.name_for gives; it records which scope a node is typed under, not what a declaration is
+lib/rigor/inference/scope_indexer/program_globals.rb:
+  computes: the globals a file writes and the seed each one is bound to, with the censuses the same walk fills; the walk's one context question is whether a node sits outside every class and module body
+  producers:
+    Rigor::Inference::ScopeIndexer::ProgramGlobals#gather_global_writes: grandfathered
+    Rigor::Inference::ScopeIndexer::ProgramGlobals#record_global_write: grandfathered
 lib/rigor/inference/scope_indexer/superclasses_collector.rb:
   computes: each class's superclass and header nesting, as a collector on the shared declaration walk
   producers:

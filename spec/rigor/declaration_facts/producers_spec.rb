@@ -41,8 +41,15 @@ RSpec.describe "Declaration producers" do
   # Rigor::Inference::ScopeIndexer#` to `lib/rigor/inference/scope_indexer/node_propagation.rb#
   # Rigor::Inference::ScopeIndexer::NodePropagation#`: `propagate`, `propagate_call`, `propagate_end_body`,
   # `propagate_if_branches` and `propagate_unless_branches`; none was renamed.
+  # Digest change, count still 366 (#3346, ADR-116 WD9 L1 and L4): seven grandfathered keys moved from
+  # `lib/rigor/inference/scope_indexer.rb#Rigor::Inference::ScopeIndexer#`. Five went to
+  # `lib/rigor/inference/scope_indexer/declaration_signature.rb#Rigor::Inference::ScopeIndexer::DeclarationSignature#`:
+  # `append_ancestry_signature`, `append_constant_signature`, `append_declaration_tables`, `append_def_signatures`
+  # and `append_envelope_signature`. Two went to
+  # `lib/rigor/inference/scope_indexer/program_globals.rb#Rigor::Inference::ScopeIndexer::ProgramGlobals#`:
+  # `gather_global_writes` and `record_global_write`. None was renamed.
   let(:grandfathered_pin) do
-    { count: 366, digest: "b596f2681627bd2be74ac7e0ff8b1a4626264e00f30d0a653bdee25be8140e3a" }
+    { count: 366, digest: "d653f9575c3f65b03bbd058efb02f700610ddfbe074f755862883124d9b79f5f" }
   end
 
   define_method(:found) do |parsed = DeclarationFactSources.parsed_under|

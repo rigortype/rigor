@@ -390,6 +390,10 @@ module DeclarationWriterScan
   #   (`finalize_project_index`, `fold_def_tables`, `fold_def_sources`, …) are reachable from no other root.
   # - `node_propagation.rb`: the per-node propagation, moved out of `scope_indexer.rb` (ADR-116 WD10); its `table`
   #   writers stay rule (v)'s. `scope_indexer.rb`'s delegators enter it as `NodePropagation.x`.
+  # - `declaration_signature.rb` and `program_globals.rb`: the declaration signature and the program-global seed,
+  #   moved out of `scope_indexer.rb` (ADR-116 WD9, L1 and L4). The writers of the signature's `parts` and of the
+  #   seed's accumulator stay rule (v)'s. `scope_indexer.rb` enters each through its one function,
+  #   `DeclarationSignature.declaration_signature` and `ProgramGlobals.seed_program_globals`.
   SOURCES = {
     DeclarationProducerScan::RULE_V_FILE => {
       module: "Rigor::Inference::ScopeIndexer",
@@ -401,6 +405,12 @@ module DeclarationWriterScan
     },
     "lib/rigor/inference/scope_indexer/node_propagation.rb" => {
       module: "Rigor::Inference::ScopeIndexer::NodePropagation", roots: []
+    },
+    "lib/rigor/inference/scope_indexer/declaration_signature.rb" => {
+      module: "Rigor::Inference::ScopeIndexer::DeclarationSignature", roots: []
+    },
+    "lib/rigor/inference/scope_indexer/program_globals.rb" => {
+      module: "Rigor::Inference::ScopeIndexer::ProgramGlobals", roots: []
     }
   }.freeze
 

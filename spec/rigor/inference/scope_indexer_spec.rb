@@ -954,49 +954,6 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     end
   end
 
-  describe "declaration_signature parts (ADR-89 WD1)" do
-    let(:tmpdir) { Dir.mktmpdir }
-
-    after { FileUtils.remove_entry(tmpdir) }
-
-    def write(name, body)
-      path = File.join(tmpdir, name)
-      File.write(path, body)
-      path
-    end
-
-    it "joins a multi-module include list with a comma (append_ancestry_signature)" do
-      path = write("a.rb", <<~RUBY)
-        module ModA; end
-        module ModB; end
-
-        class Foo
-          include ModA
-          include ModB
-        end
-      RUBY
-      file_index = described_class.discovered_project_index_for_paths([path]).fetch(:def_index)
-      parts = []
-      described_class.append_ancestry_signature(parts, file_index)
-      # Source order, nearest first: the later `include` searches ahead of the earlier one.
-      expect(parts).to include("i:Foo=ModB,ModA")
-    end
-
-    it "joins a multi-parameter signature with a comma (parameter_signature)" do
-      path = write("a.rb", <<~RUBY)
-        class Foo
-          def bar(x, y:, z: 1)
-            x
-          end
-        end
-      RUBY
-      program = parse(File.read(path))
-      idx = described_class.index(program, default_scope: default_scope)
-      def_node = idx[program].user_def_for("Foo", :bar)
-      expect(described_class.parameter_signature(def_node)).to eq("(r:x,kr:y,ko:z)")
-    end
-  end
-
   describe ".discovered_project_index_incremental (ADR-85 WD2 fold path)" do
     let(:tmpdir) { Dir.mktmpdir }
 
@@ -5073,14 +5030,6 @@ end
         E += 1
       RUBY
       expect(writes).to eq(%w[A B C D E].to_h { |name| [name, :unpublishable] })
-    end
-
-    it "renders the memo in the declaration signature apart from an unpublishable write" do
-      parts = []
-      described_class.append_constant_signature(
-        parts, constant_writes: { "A" => { "a.rb" => :memo }, "B" => { "a.rb" => :unpublishable } }
-      )
-      expect(parts).to eq(["k:A=||", "k:B=?"])
     end
   end
 end

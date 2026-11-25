@@ -55,6 +55,8 @@ require_relative "scope_indexer/constant_ivar_value"
 require_relative "scope_indexer/ivar_contributions"
 require_relative "scope_indexer/empty_seed"
 require_relative "scope_indexer/mutated_element_census"
+require_relative "scope_indexer/declaration_signature"
+require_relative "scope_indexer/program_globals"
 
 module Rigor
   module Inference
@@ -177,7 +179,7 @@ module Rigor
         class_cvars = widen_mutated_cvars(build_class_cvar_index(root, seeded_scope),
                                           *mutations.values_at(:cvars, :cvar_elements))
         seeded_scope = seeded_scope.with_discovery(seeded_scope.discovery.with(class_cvars: class_cvars))
-        seeded_scope = seed_program_globals(root, seeded_scope)
+        seeded_scope = ProgramGlobals.seed_program_globals(root, seeded_scope)
 
         # Slice 7 phase 9. In-source constant value tracking. Walks every ConstantWriteNode/ConstantPathWriteNode in the
         # program and types its rvalue under a scope that carries the surrounding qualified prefix as `self_type`, so
@@ -2648,127 +2650,6 @@ module Rigor
           kept = entries.reject { |_, type| type.is_a?(JoinOnlyCvarWrite) }
           [class_name, kept.freeze] unless kept.empty?
         end.to_h.freeze
-      end
-
-      # The program-global pre-pass's tables on the seeded scope's discovery index, and each global materialised into
-      # the scope's own `globals` map (see the call site) — a declared one's seed ({#join_declared_globals}) under the
-      # ADR-58 `:global` mark — with the `gets` / `readline` names the file patches in and whether it may set `$?` to
-      # nil or define a singleton `===`.
-      def seed_program_globals(root, seeded_scope)
-        program_globals, census = build_program_global_index(root, seeded_scope)
-        census[:discovered_global_write_census] =
-          union_write_census(seeded_scope.discovered_global_write_census, census.delete(:write_census).census)
-        seeds = join_declared_globals(program_globals, seeded_scope.environment)
-        seeded_scope = seeded_scope.with_discovery(
-          seeded_scope.discovery.with(program_globals: program_globals, program_global_seeds: seeds, **census)
-        )
-        program_globals.each do |name, written|
-          seed = seeds[name]
-          seeded_scope =
-            seed ? seeded_scope.seed_declaration_sourced_global(name, seed) : seeded_scope.with_global(name, written)
-        end
-        seeded_scope
-      end
-
-      # Slice 7 phase 6 — program-global pre-pass. Globals are process-wide so the accumulator is a flat `Hash[Symbol,
-      # Type::t]` populated from every `Prism::GlobalVariableWriteNode` in the program (top-level AND inside method
-      # bodies). The same accumulator is seeded into every method body and the top-level scope.
-      #
-      # Issue #1359 — except the frame-local specials ({FRAME_LOCAL_GLOBALS}): Ruby keeps `$_` and `$~` in the slot
-      # of the method, class, module or file body that writes them, so a write binds only that body and its blocks,
-      # which the flow binding already carries, and every other body starts from its own slot.
-      FRAME_LOCAL_GLOBALS = %i[$_ $~].freeze
-      # Issue #1360 — nor `$!`, `$@` and `$?`, which hold no program-wide value either: the first two are the rescue
-      # clause's that is running, and `$?` the thread's. Ruby refuses a write to `$!` or `$?` (`NameError`), and a
-      # write to `$@` sets the backtrace of the exception being rescued.
-      UNSEEDED_GLOBALS = (FRAME_LOCAL_GLOBALS + %i[$! $@ $?]).freeze
-      private_constant :FRAME_LOCAL_GLOBALS, :UNSEEDED_GLOBALS
-
-      #
-      # The same walk collects the `gets` / `readline` names the file patches in through the `define_method` family
-      # ({LastLine.patched_readers}), which it reaches in every node too, and whether the file holds a call that may
-      # set `$?` to nil ({LastStatus.clears?}) or a `define_method` naming `===` ({ErrorInfo.defines_case_equality?}).
-      # Issue #1415 — the census also carries the file's evidence about the `self` of its implicit-self readers
-      # ({LastLine::SelfEvidence}), which walks the file only when a reader condition first asks. Issue #1367 — and the
-      # file's {GlobalWriteCensus}, which the `global.*` write rules read.
-      # @return the `program_globals` table and the census, keyed by the discovery index members it fills
-      def build_program_global_index(root, default_scope)
-        accumulator = {}
-        in_effect = InEffectRefinements.new(root)
-        census = { patched_line_readers: Set.new, clears_last_status: false, defines_case_equality: false,
-                   write_census: GlobalWriteCensus::Collector.new(in_effect) }
-        gather_global_writes(root, default_scope, accumulator, census)
-        census[:patched_line_readers] = census[:patched_line_readers].freeze
-        census[:implicit_self_evidence] = LastLine::SelfEvidence.new(root)
-        census[:in_effect_refinements] = in_effect
-        [accumulator.freeze, census]
-      end
-
-      # Issue #1362 (ADR-117 WD1) — the seed of each global in `program_globals` Ruby's own signatures declare
-      # (`$VERBOSE: bool?`, `$stdout: IO`). Such a global holds what the interpreter set, from the command line or at
-      # boot, until a write, and any loaded file may write it, so its seed is the declared type joined with the file's
-      # writes, which can only widen it: `$VERBOSE = true` seeds `bool`, and `$stdout = StringIO.new` seeds
-      # `IO | StringIO`. A global only a project or a gem declares, or none does, has no entry here and is seeded with
-      # the union of the file's writes, as before, and so is a separator ({UNJOINED_SEPARATORS}).
-      #
-      # Issue #1437 — the declared `nil` is not joined (`$VERBOSE` joins `bool`, not `bool?`): a value that mixes the
-      # global with something else (`c ? $VERBOSE : true`) would carry it past the ADR-58 mark into a report the file's
-      # writes did not earn. A `nil` the file writes is joined as any write is.
-      def join_declared_globals(program_globals, environment)
-        program_globals.each_with_object({}) do |(name, written), seeds|
-          next if UNJOINED_SEPARATORS.include?(name)
-
-          declared = non_nil_declared(environment.global_for_name(name, builtin: true))
-          seeds[name] = Type::Combinator.union(declared, written) if declared
-        end.freeze
-      end
-
-      # `declared` without its `nil` member, or nil when it has no other.
-      def non_nil_declared(declared)
-        return declared unless declared.is_a?(Type::Union) || nil_type?(declared)
-
-        members = declared.is_a?(Type::Union) ? declared.members.reject { |member| nil_type?(member) } : []
-        members.empty? ? nil : Type::Combinator.union(*members)
-      end
-
-      def nil_type?(type)
-        (type.is_a?(Type::Constant) && type.value.nil?) || (type.is_a?(Type::Nominal) && type.class_name == "NilClass")
-      end
-
-      # Issue #1437 — the separators whose declared type is nil-bearing (`String?`, `Regexp | String | nil`) stay out of
-      # the join for now. The declared `nil` would reach `call.possible-nil-receiver` through a value that mixes the
-      # global with something else (`sep = c ? $/ : ";"`, `sep = given || $/`), which the ADR-58 mark does not follow.
-      UNJOINED_SEPARATORS = %i[$/ $, $; $\\ $-0 $-F $-i].freeze
-      private_constant :UNJOINED_SEPARATORS
-
-      # `top_level` is false inside a `class` / `module` body, for the census's top-level mixins.
-      def gather_global_writes(node, scope, accumulator, census, top_level: true)
-        return unless node.is_a?(Prism::Node)
-
-        if node.is_a?(Prism::GlobalVariableWriteNode) && !UNSEEDED_GLOBALS.include?(node.name)
-          record_global_write(node, scope, accumulator)
-        end
-        readers = LastLine.patched_readers(node)
-        census[:patched_line_readers].merge(readers) if readers
-        census[:clears_last_status] ||= LastStatus.clears?(node)
-        census[:defines_case_equality] ||= ErrorInfo.defines_case_equality?(node)
-        census[:write_census].visit(node, top_level: top_level)
-        inner = top_level && !(node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode))
-        node.rigor_each_child { |c| gather_global_writes(c, scope, accumulator, census, top_level: inner) }
-      end
-
-      # The project's census with the analysed file's own, answering `seed` itself when the file adds nothing to it.
-      def union_write_census(seed, file_census)
-        return seed if file_census.empty? || file_census.subset?(seed)
-
-        (seed | file_census).freeze
-      end
-
-      def record_global_write(node, scope, accumulator)
-        rvalue_type = EmptySeed.erase(node.value, scope.type_of(node.value))
-        existing = accumulator[node.name]
-        accumulator[node.name] =
-          existing ? Type::Combinator.union(existing, rvalue_type) : rvalue_type
       end
 
       # Slice 7 phase 9 — in-source constant value pre-pass. Walks the entire program (top-level AND inside class /
@@ -11300,7 +11181,7 @@ module Rigor
 
       # B1 / ADR-89 WD1 (incremental propagation gates) — parses `paths` ONCE and returns the merged def-index
       # (as {#discovered_def_index_for_paths}), each file's comment-stripped {#code_fingerprint} (B1), AND each
-      # file's {#declaration_signature} (ADR-89 WD1 — the per-def SIGNATURE shape that replaces the per-def body
+      # file's {DeclarationSignature} (ADR-89 WD1 — the per-def SIGNATURE shape that replaces the per-def body
       # fingerprint, so a body edit that leaves every signature equal is declaration-stable). The incremental
       # session drives the fingerprint / class-declaration change detection off `def_index` and the
       # declaration-stability skip decision off `declaration_signatures`, so a changed file is parsed once for
@@ -11324,7 +11205,7 @@ module Rigor
           file_index = build_file_index(path, parsed.value)
           fold_file_index(acc, file_index)
           code_fingerprints[path] = code_fingerprint(source, parsed.comments)
-          declaration_signatures[path] = declaration_signature(file_index)
+          declaration_signatures[path] = DeclarationSignature.declaration_signature(file_index)
           file_summary(file_index).each { |key, table| per_file[key][path] = table unless table.nil? }
         rescue DeclarationWalk::ContractError
           raise # a broken walk contract, not an unreadable file: skipping it would hide the failure
@@ -11386,191 +11267,6 @@ module Rigor
             entries << [:module_function, owner, name] if name && owner && kind != :instance
           end
         end
-      end
-
-      # ADR-89 WD1 — a per-file digest of every cross-file DECLARATION surface an ancestry / file-level
-      # dependent consumes, EXCLUDING method bodies (which only symbol dependents consume, via the ADR-46
-      # symbol edges the change-detection already fingerprints per method). A body edit that touches no
-      # signature leaves this equal, so the session drops the file's ancestry / file-level dependents; an
-      # arity / visibility / added-or-removed-method / ancestry / member-layout edit moves it. Deliberately
-      # SYNTACTIC (parameter structure from the def node, not inferred types).
-      #
-      # It captures, from a single file's live def-index: declared class/module names, superclass + include
-      # ancestry, Data/Struct member layouts, the accessor/alias/define_method existence table, per-method
-      # visibilities, and per method (instance + singleton) its name, parameter signature, AND def-start LINE.
-      # The line is load-bearing for soundness: a body edit that SHIFTS a later def's line moves the ADR-17
-      # `project_definition_site` a `call.undefined-method` consumer embeds, so a line shift must invalidate
-      # the declaration (the file's dependents re-check) — this is why the signature is a superset of B1's
-      # comment-stripped code fingerprint on line-moving edits, and strictly more permissive only on
-      # same-line body edits (a local rename, an internal literal), which is the collapse WD1 exists for.
-      def declaration_signature(file_index)
-        parts = []
-        append_ancestry_signature(parts, file_index)
-        append_constant_signature(parts, file_index)
-        append_declaration_tables(parts, file_index)
-        append_def_signatures(parts, file_index[:def_nodes], "#")
-        append_def_signatures(parts, file_index[:singleton_def_nodes], ".")
-        append_envelope_signature(parts, file_index[:parameter_envelopes] || {})
-        append_certainty_signature(parts, file_index[:siblings] || {})
-        Digest::SHA256.hexdigest(parts.join("\x00"))
-      end
-
-      # ADR-119 WD3 — which of the file's contributions are possible is a declaration surface too: a `… end if X`
-      # modifier, or moving a `def` into a block, keeps every def line and envelope and moves only this, while a
-      # dependent's candidate-set read now declines where it answered.
-      def append_certainty_signature(parts, siblings)
-        certainty = []
-        siblings.each do |name, table|
-          next if table.empty?
-
-          if name == :possible_discovered_methods
-            table.each do |class_name, row|
-              row.each { |method_name, kind| certainty << "P:#{class_name}##{method_name}=#{kind}" }
-            end
-          else
-            table.each { |path| certainty << "C:#{name}:#{path.inspect}" }
-          end
-        end
-        parts.concat(certainty.sort)
-      end
-
-      # Issue #992 — the joined envelope table is a declaration surface the per-def signatures above cannot
-      # reconstruct: they keep the LAST `def` of a name, and they see neither a second `def` with another
-      # shape nor a `memoize :f` beside it, either of which moves a dependent's `call.wrong-arity` verdict.
-      def append_envelope_signature(parts, envelopes)
-        envelopes.sort_by { |cn, _| cn.to_s }.each do |class_name, entries|
-          entries.map { |key, envelope| "a:#{class_name}#{key.inspect}=#{envelope.inspect}" }.sort.each do |part|
-            parts << part
-          end
-        end
-      end
-
-      # Issue #644 — the cross-file VALUE-constant surface. Load-bearing for soundness, not precision: a
-      # file's published constants are a declaration-level fact its file-level dependents consume, so
-      # `FOO = :sym` becoming `FOO = :other` MUST move this signature or the reader would be declaration-
-      # stable, dropped from the closure, and served the pre-edit `:sym`. Both halves are here: the write
-      # NAMES (an added / removed / renamed assignment) and the published VALUES (a same-name value edit).
-      def append_constant_signature(parts, file_index)
-        parts.concat((file_index[:constant_writes] || {}).sort.map do |name, by_path|
-          "k:#{name}=#{constant_descriptor_signature(by_path.values.first)}"
-        end)
-      end
-
-      # `[literal]` renders its value, a `||=`-only name `||`, and an unpublishable write `?`. All three halves
-      # matter: a write appearing or vanishing moves the signature, and so does the same name's value or
-      # memo status changing.
-      def constant_descriptor_signature(descriptor)
-        return descriptor.first.inspect if descriptor.is_a?(Array)
-
-        descriptor == CONSTANT_MEMO ? "||" : "?"
-      end
-
-      # The class-declaration + ancestry + member-layout surface of the declaration signature (declared class
-      # names, superclass / include ancestry, Data/Struct member layouts). Kept out of
-      # {#declaration_signature} to hold its ABC budget.
-      def append_ancestry_signature(parts, file_index)
-        parts.concat(file_index[:class_sources].keys.sort_by(&:to_s).map { |cn| "c:#{cn}" })
-        parts.concat(sorted_by_class(file_index[:superclasses]).map { |cn, sc| "s:#{cn}<#{sc}" })
-        append_mixin_signature(parts, file_index)
-        parts.concat(sorted_by_class(file_index[:data_member_layouts]).map { |cn, l| "d:#{cn}=#{l.inspect}" })
-        parts.concat(sorted_by_class(file_index[:struct_member_layouts]).map { |cn, l| "t:#{cn}=#{l.inspect}" })
-      end
-
-      # The mixin surface of {#append_ancestry_signature}. The lists keep SOURCE order: this is one file's own
-      # index, so the order is deterministic, and it is a fact an ancestor-order reader consumes, so an edit
-      # that only reorders an `include` must move the signature. The unpositioned table is there for the same
-      # reason: guarding an `include` changes no name and no order, only whether the order is known.
-      def append_mixin_signature(parts, file_index)
-        { "i" => :includes, "p" => :prepends, "x" => :extends }.each do |tag, key|
-          sorted_by_class(file_index[key] || {}).each { |cn, mods| parts << "#{tag}:#{cn}=#{Array(mods).join(',')}" }
-        end
-        sorted_by_class(file_index[:unpositioned_mixins] || {}).each do |cn, sides|
-          sides.sort_by { |side, _| side.to_s }.each do |side, names|
-            parts << "u:#{cn}.#{side}=#{names.sort.join(',')}"
-          end
-        end
-      end
-
-      # A class-keyed table's pairs sorted by class name (stringified) for a deterministic signature.
-      def sorted_by_class(table)
-        table.sort_by { |cn, _| cn.to_s }
-      end
-
-      # The method-existence and visibility surfaces of the declaration signature (kept out of
-      # {#declaration_signature} to hold its ABC budget). Both are consumed cross-file — the existence table
-      # by undefined-method suppression, the visibilities by the ADR-35 override-visibility rule.
-      def append_declaration_tables(parts, file_index)
-        file_index[:methods].sort_by { |cn, _| cn.to_s }.each do |cn, table|
-          table.sort_by { |m, _| m.to_s }.each { |m, kind| parts << "e:#{cn}##{m}=#{kind}" }
-        end
-        file_index[:method_visibilities].sort_by { |cn, _| cn.to_s }.each do |cn, table|
-          table.sort_by { |m, _| m.to_s }.each { |m, vis| parts << "v:#{cn}##{m}=#{vis}" }
-        end
-      end
-
-      # Appends one def-node table's per-method signature entries (name + parameter structure + def-start
-      # line) under `separator` (`#` instance / `.` singleton). Nodes here are always LIVE (both call sites —
-      # {#scan_summary_for_paths} and {#build_seed_bundle} — pass a freshly parsed single-file index), so the
-      # parameter structure and location are read directly.
-      def append_def_signatures(parts, defs, separator)
-        defs.sort_by { |cn, _| cn.to_s }.each do |class_name, methods|
-          methods.sort_by { |m, _| m.to_s }.each do |method_name, node|
-            parts << "m:#{class_name}#{separator}#{method_name}#{parameter_signature(node)}@#{def_start_line(node)}"
-          end
-        end
-      end
-
-      # ADR-89 WD1 — a compact, order-preserving descriptor of a def node's parameter STRUCTURE: each
-      # parameter's kind (required / optional / rest / post / keyword-required / keyword-optional /
-      # keyword-rest / block / forwarding) and name, plus default-PRESENCE (implied by the optional kinds).
-      # Names are included for all parameter positions: soundness-first (a keyword-name change is Liskov-
-      # visible to overriders; a positional-name change is rare and only over-conservatively keeps a
-      # dependent). Not the inferred parameter TYPE — this gate is deliberately syntactic.
-      def parameter_signature(node)
-        return "()" unless node.respond_to?(:parameters)
-
-        params = node.parameters
-        return "()" if params.nil?
-
-        parts = []
-        parts.concat(labelled_params(params.requireds, "r"))
-        parts.concat(labelled_params(params.optionals, "o"))
-        parts.concat(labelled_params(params.posts, "p"))
-        parts.concat(labelled_params(params.keywords) { |p| keyword_param_kind(p) })
-        parts.concat(rest_param_parts(params))
-        "(#{parts.join(',')})"
-      end
-
-      # The `<kind>:<name>` labels for a list of parameter nodes (nil → none). `kind` is a fixed String or a
-      # block computing it per node (for the keyword-required / keyword-optional split).
-      def labelled_params(nodes, kind = nil)
-        (nodes || []).map { |p| "#{kind || yield(p)}:#{param_label(p)}" }
-      end
-
-      # The single rest / keyword-rest / block parameter labels (each present at most once).
-      def rest_param_parts(params)
-        parts = []
-        parts << "*:#{param_label(params.rest)}" if params.rest
-        parts << "**:#{param_label(params.keyword_rest)}" if params.keyword_rest
-        parts << "&:#{param_label(params.block)}" if params.block
-        parts
-      end
-
-      def keyword_param_kind(param)
-        param.is_a?(Prism::OptionalKeywordParameterNode) ? "ko" : "kr"
-      end
-
-      # A parameter node's name, or a class-tagged sentinel for the nameless / destructuring forms
-      # (`MultiTargetNode`, an anonymous `*` / `**` / `&`, `NoKeywordsParameterNode`, `ForwardingParameterNode`).
-      def param_label(param)
-        return "" if param.nil?
-
-        param.respond_to?(:name) && param.name ? param.name.to_s : param.class.name.split("::").last
-      end
-
-      # The 1-based start line of a live def node (the `project_definition_site` an ADR-17 consumer embeds).
-      def def_start_line(node)
-        node.respond_to?(:location) ? node.location.start_line : 0
       end
 
       # B1 — the SHA-256 of `source` with every comment's byte range excised (a line comment ends before its
@@ -12097,7 +11793,7 @@ module Rigor
           # so a recheck can prove this file's body edit changed no declaration and skip its ancestry /
           # file-level dependents. Computed from the same live `file_index` the bundle is built from, so the
           # value stored here equals the one a later recheck recomputes for an unchanged declaration.
-          declaration_signature: declaration_signature(file_index),
+          declaration_signature: DeclarationSignature.declaration_signature(file_index),
           classes: file_classes,
           extends: file_index[:extends],
           def_nodes: live_defs_to_bundle(file_index[:def_nodes], file_index[:def_nestings]),

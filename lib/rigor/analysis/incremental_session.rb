@@ -606,7 +606,7 @@ module Rigor
 
       # ADR-89 WD1 — the changed files whose ancestry / file-level dependents must STILL be re-checked: those
       # not provably declaration-stable. A changed file is declaration-STABLE (its ancestry / file-level
-      # dependents skippable) when its current {ScopeIndexer.declaration_signature} matches the one stored in
+      # dependents skippable) when its current {ScopeIndexer::DeclarationSignature} matches the one stored in
       # the snapshot's seed bundle — i.e. its edit changed no method signature, visibility, ancestry, member
       # layout, def line, or method existence, so every cross-file DECLARATION fact its dependents consume is
       # unchanged. The signature reads code, not comments; the other half of stability — that no source-RBS

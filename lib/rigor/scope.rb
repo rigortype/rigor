@@ -2490,7 +2490,7 @@ module Rigor
     # file that wrote the constant: editing the literal, or deleting the file, re-checks the reader. Recorded
     # WITHOUT a symbol (a file-granularity / ancestry edge) because a constant's published value is a
     # declaration-level fact of the whole file, which is also the granularity
-    # `ScopeIndexer#append_constant_signature` moves the declaration signature at.
+    # `ScopeIndexer::DeclarationSignature#append_constant_signature` moves the declaration signature at.
     #
     # `constant_sources` is seeded when dependency recording is on and in the editor publish's discovery seed
     # (ADR-124), where the recorder is inactive; elsewhere the table is empty and this is one Hash miss. The caller

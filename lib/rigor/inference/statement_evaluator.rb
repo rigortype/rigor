@@ -9089,7 +9089,7 @@ module Rigor
       # without consulting the index on every lookup. The frame-local `$_` and `$~` are not in it (issue #1359): a
       # method body starts with a slot of its own. A global Ruby's own signatures declare is seeded with its declared
       # type joined with the file's writes, under the ADR-58 `:global` mark (issue #1362,
-      # `ScopeIndexer#join_declared_globals`, `Scope#seed_declaration_sourced_global`).
+      # `ScopeIndexer::ProgramGlobals#join_declared_globals`, `Scope#seed_declaration_sourced_global`).
       def seed_program_globals(body_scope)
         written = scope.program_globals
         return body_scope if written.empty?

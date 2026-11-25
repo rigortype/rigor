@@ -85,6 +85,17 @@ RSpec.describe Rigor::Inference::ScopeIndexer::ClassDeclarations do
       expect(names("class C; class << self; class self::S; end; end; end\n")).to eq(["C"])
       expect(names("class C; class << self; class_eval { class self::D; end }; end; end\n")).to eq(["C"])
     end
+
+    it "keeps its cref below an eval block: a bare header there is declined, a `self::` one is the receiver's" do
+      expect(names("class C; class << self; X.class_eval { class E; end; class self::D; end }; end; end\n"))
+        .to eq(%w[C X::D])
+    end
+
+    it "declines an eval call's `self::` receiver, there and below a bare header" do
+      expect(names("class C; class << self; self::T.class_eval { class self::D; end }; end; end\n")).to eq(["C"])
+      expect(names("class C; class << self; class Hidden; self::T.class_eval { class self::D; end }; end; end; end\n"))
+        .to eq(["C"])
+    end
   end
 
   describe "an eval-family block" do
@@ -101,11 +112,17 @@ RSpec.describe Rigor::Inference::ScopeIndexer::ClassDeclarations do
 
     it "keeps the enclosing self for a bare receiver, and declines a `self::` header under a receiver it cannot name" do
       expect(names("module M; class_eval { class self::D; end }; end\n")).to eq(%w[M M::D])
+      expect(names("X.class_eval { class_eval { class self::D; end } }\n")).to eq(["X::D"])
       expect(names("module M; foo.class_eval { class self::D; end; class E; end }; end\n")).to eq(%w[M M::E])
+    end
+
+    it "anchors a `self::` receiver on the class around the call" do
+      expect(names("class C; self::T.class_eval { class self::D; end }; end\n")).to eq(%w[C C::T::D])
     end
 
     it "walks the receiver and the arguments in the enclosing context" do
       expect(names("(class Recv; self; end).class_eval(class Arg; self; end) { }\n")).to eq(%w[Recv Arg])
+      expect(names("X.class_eval { foo.class_eval((class self::InArg; self; end)) { } }\n")).to eq(["X::InArg"])
     end
 
     it "walks a call whose block is an argument as any other node" do
@@ -185,6 +202,11 @@ RSpec.describe Rigor::Inference::ScopeIndexer::ClassDeclarations do
       expect(names(source)).to eq(%w[W W::K W::K::Inner W::Lexical])
     end
 
+    it "inside an eval block, anchors a `self::` target and its block on the receiver, and keeps a bare one lexical" do
+      expect(names("X.class_eval { self::S = Class.new { class self::I; end }; T = Class.new }\n"))
+        .to eq(%w[X::S X::S::I T])
+    end
+
     it "walks the factory call's receiver and arguments in the enclosing context" do
       expect(names("K = Class.new((class InArg; self; end)) { }\n")).to eq(%w[K InArg])
     end
@@ -199,7 +221,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer::ClassDeclarations do
         class C
           class << self
             K = Class.new { class self::I; end }
-            ::R = Class.new { class self::J; end }
+            ::R = Class.new { class self::J; end; class Bare; end }
           end
         end
       RUBY
@@ -241,5 +263,34 @@ RSpec.describe Rigor::Inference::ScopeIndexer::ClassDeclarations do
   it "exposes the walk alone, and no constant of its own" do
     expect(described_class.singleton_methods(false)).to eq([:collect_class_decls])
     expect(described_class.constants).to be_empty
+  end
+
+  it "leaves none of its 8 functions on ScopeIndexer, public or private" do
+    functions = described_class.private_instance_methods(false)
+
+    expect(functions.size).to eq(8)
+    expect(functions.select { |name| Rigor::Inference::ScopeIndexer.respond_to?(name, true) }).to eq([])
+  end
+
+  # The module reads `EMPTY_PREFIX` and `RECEIVER_EVAL_CALLS` through `ScopeIndexer`'s own names, which
+  # `scope_indexer.rb` binds: the file requires what else it names and answers until a walk reaches one of the two.
+  it "loads without the indexer, and answers until it reads one of the indexer's two lists" do
+    probe = <<~RUBY
+      require "rigor/inference/scope_indexer/class_declarations"
+      walk = Rigor::Inference::ScopeIndexer::ClassDeclarations
+      answers = ["module A; class B; end; end; K = Class.new(B)", "class C; class << self; D = 1; end; end",
+                 "tap { }"].map do |source|
+        walk.collect_class_decls(Prism.parse(source).value, [], table = {})
+        table.transform_values(&:describe)
+      rescue NameError => e
+        e.name
+      end
+      print [Rigor::Inference::ScopeIndexer.respond_to?(:index), *answers].inspect
+    RUBY
+    out, err, status = RubyRun.capture("-I", File.join(DeclarationFactSources::REPO_ROOT, "lib"), "-e", probe)
+
+    expect(status).to be_success, err
+    expect(out).to eq('[false, {"A" => "singleton(A)", "A::B" => "singleton(A::B)", "K" => "singleton(B)"}, ' \
+                      ":EMPTY_PREFIX, :RECEIVER_EVAL_CALLS]")
   end
 end

@@ -27,6 +27,11 @@ RSpec.describe Rigor::Inference::ScopeIndexer::LiteralReceiverMutations do
       expect(result).to eq({ constants: Set[], cvars: {}, constant_elements: Set[], cvar_elements: {} })
     end
 
+    it "answers the same for a root that is no node" do
+      expect(described_class.collect_literal_receiver_mutations(nil))
+        .to eq({ constants: Set[], cvars: {}, constant_elements: Set[], cvar_elements: {} })
+    end
+
     it "answers an empty set for a class neither class-variable table names" do
       result = census("x = 1\n")
 
@@ -155,12 +160,13 @@ RSpec.describe Rigor::Inference::ScopeIndexer::LiteralReceiverMutations do
             T << 1
             @@v << 1
             class Hidden; @@w << 1; U << 1; end
-            class ::Ro; @@r << 1; end
+            class ::Ro; @@r << 1; class In; @@i << 1; end; end
           end
         end
       RUBY
 
-      expect(recorded(source)).to eq(constants: %w[C::T T C::U U], cvars: { "C" => [:@@v], "Ro" => [:@@r] })
+      expect(recorded(source))
+        .to eq(constants: %w[C::T T C::U U], cvars: { "C" => [:@@v], "Ro" => [:@@r], "Ro::In" => [:@@i] })
     end
 
     it "walks the expression in the enclosing context" do
@@ -170,12 +176,40 @@ RSpec.describe Rigor::Inference::ScopeIndexer::LiteralReceiverMutations do
     it "declines a `self::` header in an eval block of its own self" do
       expect(recorded("class C; class << self; class_eval { class self::D; @@v << 1; end }; end; end\n")).to eq({})
     end
+
+    it "keeps its cref below an eval block: a bare header there is ownerless, a `self::` one is the receiver's" do
+      source = <<~RUBY
+        class C
+          class << self
+            X.class_eval { class E; @@e << 1; end; class self::D; @@d << 1; end }
+          end
+        end
+      RUBY
+
+      expect(recorded(source)).to eq(cvars: { "X::D" => [:@@d] })
+    end
+
+    it "declines an eval call's `self::` receiver below a bare header" do
+      source = <<~RUBY
+        class C
+          class << self
+            class Hidden; self::T.class_eval { class self::D; @@v << 1; end }; end
+          end
+        end
+      RUBY
+
+      expect(recorded(source)).to eq({})
+    end
   end
 
   describe "an eval-family block" do
-    it "anchors a `self::` header on the receiver, for the class variable's key and the constant's nesting" do
-      expect(recorded("X.class_eval { class self::D; T << 1; @@v << 1; end }\n"))
-        .to eq(constants: %w[X::D::T T], cvars: { "X::D" => [:@@v] })
+    it "anchors a `self::` header on the receiver: the class variable's key, and one entry on top of the nesting" do
+      expect(recorded("module M; X.class_eval { class self::D; T << 1; @@v << 1; end }; end\n"))
+        .to eq(constants: %w[X::D::T M::T T], cvars: { "X::D" => [:@@v] })
+    end
+
+    it "leaves the block of any other call the self around it" do
+      expect(recorded("class C; foo { class self::D; @@v << 1; end }; end\n")).to eq(cvars: { "C::D" => [:@@v] })
     end
 
     it "leaves a mutation written straight in the block lexical" do
@@ -201,6 +235,18 @@ RSpec.describe Rigor::Inference::ScopeIndexer::LiteralReceiverMutations do
       expect(recorded(source)).to eq(constants: %w[W::T T], cvars: { "W::K::D" => [:@@v], "W" => [:@@k] })
     end
 
+    it "inside an eval block, anchors the block of a `self::` target on the receiver" do
+      expect(recorded("X.class_eval { self::S = Class.new { class self::D; @@v << 1; end } }\n"))
+        .to eq(cvars: { "X::S::D" => [:@@v] })
+    end
+
+    it "does so in each spelling of the write" do
+      source = "K ||= Class.new { class self::D; @@a << 1; end }\nP::Q = Class.new { class self::D; @@b << 1; end }\n" \
+               "P::R ||= Class.new { class self::D; @@c << 1; end }\n"
+
+      expect(recorded(source)).to eq(cvars: { "K::D" => [:@@a], "P::Q::D" => [:@@b], "P::R::D" => [:@@c] })
+    end
+
     it "walks the factory call's arguments in the enclosing context" do
       expect(recorded("K = Class.new((T << 1)) { }\n")).to eq(constants: %w[T])
     end
@@ -210,7 +256,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer::LiteralReceiverMutations do
         class C
           class << self
             K = Class.new { class self::I; @@k << 1; end }
-            ::R = Class.new { class self::J; @@j << 1; end }
+            ::R = Class.new { class self::J; @@j << 1; end; class Bare; @@b << 1; end }
           end
         end
       RUBY
@@ -225,6 +271,14 @@ RSpec.describe Rigor::Inference::ScopeIndexer::LiteralReceiverMutations do
       expect(recorded("Struct.new(:a) { class self::D; @@v << 1; end }\n")).to eq({})
     end
 
+    it "keeps the `class <<` cref below its block: a bare header there is ownerless" do
+      expect(recorded("class C; class << self; Class.new { class E; @@e << 1; end }; end; end\n")).to eq({})
+    end
+
+    it "walks one with no block as any other call" do
+      expect(recorded("Class.new((T << 1))\nx = Struct.new(:a)\n")).to eq(constants: %w[T])
+    end
+
     it "walks its arguments and its block's own mutations in the enclosing context" do
       expect(recorded("class C; Class.new((T << 1)) { U << 1; @@u << 1 }; end\n"))
         .to eq(constants: %w[C::T T C::U U], cvars: { "C" => [:@@u] })
@@ -234,5 +288,34 @@ RSpec.describe Rigor::Inference::ScopeIndexer::LiteralReceiverMutations do
   it "exposes the census alone, and no constant of its own" do
     expect(described_class.singleton_methods(false)).to eq([:collect_literal_receiver_mutations])
     expect(described_class.constants).to be_empty
+  end
+
+  it "leaves none of its 11 functions on ScopeIndexer, public or private" do
+    functions = described_class.private_instance_methods(false)
+
+    expect(functions.size).to eq(11)
+    expect(functions.select { |name| Rigor::Inference::ScopeIndexer.respond_to?(name, true) }).to eq([])
+  end
+
+  # The module reads `EMPTY_NESTING` through `ScopeIndexer`'s own name, which `scope_indexer.rb` binds: the file
+  # requires what else it names, and its entry answers only once the indexer has loaded.
+  it "loads without the indexer, with what it names, and cannot answer until the indexer binds the empty nesting" do
+    probe = <<~RUBY
+      require "rigor/inference/scope_indexer/literal_receiver_mutations"
+      indexer = Rigor::Inference::ScopeIndexer
+      named = [defined?(Rigor::Inference::MutationWidening::SHAPE_MUTATORS), defined?(indexer::MutatedElementCensus),
+               defined?(Rigor::Inference::DeclarationWalk::Rules), defined?(Rigor::Source::ConstantPath),
+               Prism::ProgramNode.method_defined?(:rigor_each_child)]
+      answer = begin
+        indexer::LiteralReceiverMutations.collect_literal_receiver_mutations(Prism.parse("T << 1").value)
+      rescue NameError => e
+        e.name
+      end
+      print [indexer.respond_to?(:index), named, answer].inspect
+    RUBY
+    out, err, status = RubyRun.capture("-I", File.join(DeclarationFactSources::REPO_ROOT, "lib"), "-e", probe)
+
+    expect(status).to be_success, err
+    expect(out).to eq('[false, ["constant", "constant", "constant", "constant", true], :EMPTY_NESTING]')
   end
 end

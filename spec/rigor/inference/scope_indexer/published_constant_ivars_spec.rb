@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "delegate"
 require "prism"
 require "rigor/inference/scope_indexer"
 
@@ -30,7 +31,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer::PublishedConstantIvars do
   describe "the scope it answers" do
     it "carries the table on its discovery index, frozen, and leaves the scope it was handed as it was" do
       scope = scope_with(ivars: { "A" => any_constant })
-      answered = seed("class A; def initialize; @mode = MODE; end; end\n", scope)
+      answered = seed("class A; LIMIT = 3; def initialize; @mode = MODE; end; end\n", scope)
       table = answered.discovery.published_constant_ivars
 
       expect(table).to eq({ "A" => Set[:@mode] })
@@ -39,10 +40,19 @@ RSpec.describe Rigor::Inference::ScopeIndexer::PublishedConstantIvars do
       expect(scope.discovery.published_constant_ivars).to be_empty
     end
 
-    it "is the scope it was handed when the project published nothing" do
-      scope = scope_with(published: Set[], ivars: { "A" => any_constant })
+    # The internal spec's "nothing-published shortcut": the file is not walked, so the scope is asked for no seed.
+    it "is the scope it was handed when the project published nothing, asked for no class's seeds" do
+      scope = Class.new(SimpleDelegator) do
+        attr_reader :asked
+
+        def class_ivars_for(name)
+          (@asked ||= []) << name
+          __getobj__.class_ivars_for(name)
+        end
+      end.new(scope_with(published: Set[], ivars: { "A" => any_constant }))
 
       expect(seed("class A; def initialize; @mode = MODE; end; end\n", scope)).to equal(scope)
+      expect(scope.asked).to be_nil
     end
 
     it "is the scope it was handed when the file seeds no ivar from a published constant" do
@@ -73,8 +83,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer::PublishedConstantIvars do
       expect(answered.discovery.published_constant_ivars).to eq({ "A" => Set[:@mode] })
     end
 
-    it "records nothing outside a class" do
-      expect(seeded("@top = MODE\ndef m = (@in_def = MODE)\n", "A")).to eq({})
+    it "records nothing outside a class, whatever the seeds hold under the empty name" do
+      expect(seeded("@top = MODE\ndef m = (@in_def = MODE)\n", "")).to eq({})
     end
 
     it "does not look inside the value of a write" do
@@ -113,6 +123,26 @@ RSpec.describe Rigor::Inference::ScopeIndexer::PublishedConstantIvars do
     end
   end
 
+  describe "an eval-family block under `class <<`" do
+    it "keeps the cref: a bare header in the block is ownerless, the block's own writes are the receiver's" do
+      source = <<~RUBY
+        class A
+          class << self
+            X.class_eval { class E; def m = (@e = MODE); end; def n = (@x = MODE) }
+          end
+        end
+      RUBY
+
+      expect(seeded(source, "A", "X", "E", "A::E", "X::E")).to eq("X" => [:@x])
+    end
+
+    it "gives the block of a `self::` receiver below a bare header to no class" do
+      source = "class A; class << self; class Hidden; self::T.class_eval { @t = MODE }; end; end; end\n"
+
+      expect(seeded(source, "A", "T", "A::T", "Hidden", "A::Hidden")).to eq({})
+    end
+  end
+
   describe "an eval-family block" do
     it "gives its writes to the receiver, and anchors a `self::` header there" do
       source = "X.class_eval { def m = (@x = MODE); @b = MODE; class self::D; def m = (@d = MODE); end }\n"
@@ -124,10 +154,12 @@ RSpec.describe Rigor::Inference::ScopeIndexer::PublishedConstantIvars do
       source = "class A; (@receiver = MODE).class_eval(@argument = MODE) { def m = (@x = MODE) }; end\n"
 
       expect(seeded(source, "A")).to eq("A" => %i[@receiver @argument])
+      expect(seeded("X.class_eval { foo.class_eval(@argument = MODE) { } }\n", "X")).to eq("X" => [:@argument])
     end
 
     it "keeps the enclosing self for a bare receiver, and gives the block of a receiver it cannot name to no class" do
       expect(seeded("class A; class_eval { def m = (@x = MODE) }; end\n", "A")).to eq("A" => [:@x])
+      expect(seeded("X.class_eval { class_eval { def m = (@y = MODE) } }\n", "X")).to eq("X" => [:@y])
       expect(seeded("class A; foo.class_eval { def m = (@x = MODE) }; end\n", "A")).to eq({})
     end
   end
@@ -139,10 +171,24 @@ RSpec.describe Rigor::Inference::ScopeIndexer::PublishedConstantIvars do
       expect(seeded(source, "W", "W::K", "W::K::D", "K", "D")).to eq("W::K" => [:@k], "W::K::D" => [:@d])
     end
 
+    it "inside an eval block, names the class of a `self::` target under the receiver" do
+      expect(seeded("X.class_eval { self::S = Class.new { def m = (@s = MODE) } }\n", "X", "X::S", "S"))
+        .to eq("X::S" => [:@s])
+    end
+
+    it "does so in each spelling of the write" do
+      source = "K ||= Class.new { def m = (@a = MODE) }\nP::Q = Class.new { def m = (@b = MODE) }\n" \
+               "P::R ||= Class.new { def m = (@c = MODE) }\n"
+
+      expect(seeded(source, "K", "P::Q", "P::R")).to eq("K" => [:@a], "P::Q" => [:@b], "P::R" => [:@c])
+    end
+
     it "walks the factory call's arguments in the enclosing context" do
       source = "class A; K = Class.new(foo(@argument = MODE)) { def m = (@k = MODE) }; end\n"
 
       expect(seeded(source, "A", "A::K")).to eq("A" => [:@argument], "A::K" => [:@k])
+      expect(seeded("X.class_eval { K = Class.new(foo(@argument = MODE)) { } }\n", "X", "K", "X::K"))
+        .to eq("X" => [:@argument])
     end
 
     it "under `class <<`, gives the block of a bare write to no class, and that of a rooted path write to its class" do
@@ -150,17 +196,47 @@ RSpec.describe Rigor::Inference::ScopeIndexer::PublishedConstantIvars do
         class A
           class << self
             K = Class.new { def m = (@k = MODE) }
-            ::R = Class.new { def m = (@r = MODE) }
+            ::R = Class.new { def m = (@r = MODE); class Bare; def m = (@b = MODE); end }
           end
         end
       RUBY
 
-      expect(seeded(source, "A", "K", "A::K", "R")).to eq("R" => [:@r])
+      expect(seeded(source, "A", "K", "A::K", "R", "Bare", "A::Bare", "R::Bare")).to eq("R" => [:@r])
     end
   end
 
   it "exposes the seed alone, and no constant of its own" do
     expect(described_class.singleton_methods(false)).to eq([:seed_published_constant_ivars])
     expect(described_class.constants).to be_empty
+  end
+
+  it "leaves none of its 8 functions on ScopeIndexer, public or private" do
+    functions = described_class.private_instance_methods(false)
+
+    expect(functions.size).to eq(8)
+    expect(functions.select { |name| Rigor::Inference::ScopeIndexer.respond_to?(name, true) }).to eq([])
+  end
+
+  # The module reads none of the indexer's constants: with what it requires, it answers. `Scope` needs the bundle,
+  # which the child does not have, so the probe hands it a stand-in that answers what the pass asks of a scope.
+  it "loads and answers without the indexer" do
+    probe = <<~RUBY
+      require "rigor/inference/scope_indexer/published_constant_ivars"
+      discovery = Struct.new(:published_constant_ivars) { def with(**members) = self.class.new(*members.values) }
+      scope = Struct.new(:discovery) do
+        def published_constant_names = ["MODE"]
+        def published_constant?(name) = name == "MODE"
+        def class_ivars_for(_name) = Hash.new(Rigor::Type::Combinator.constant_of(:production))
+        def with_discovery(discovery) = self.class.new(discovery)
+      end
+      root = Prism.parse("class A; def m = (@mode = MODE); X.class_eval { @x = MODE }; class << self; @own = MODE; end; end")
+      table = Rigor::Inference::ScopeIndexer::PublishedConstantIvars
+              .seed_published_constant_ivars(scope.new(discovery.new({})), root.value).discovery.published_constant_ivars
+      print [Rigor::Inference::ScopeIndexer.respond_to?(:index), table].inspect
+    RUBY
+    out, err, status = RubyRun.capture("-I", File.join(DeclarationFactSources::REPO_ROOT, "lib"), "-e", probe)
+
+    expect(status).to be_success, err
+    expect(out).to eq('[false, {"A" => Set[:@mode], "X" => Set[:@x]}]')
   end
 end

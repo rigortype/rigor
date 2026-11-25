@@ -108,13 +108,29 @@ RSpec.describe Rigor::Inference::ScopeIndexer::SharedWalkTables do
         walkers.drop(1).each { |walker| expect(described_class).to have_received(walker).with(root).once }
       end
 
-      it "names the table and the file when a collector and its walker disagree" do
+      it "checks the table of a builder that runs one collector alone, too" do
         ENV.store("RIGOR_SHADOW_RULE_WALK", "1")
-        allow(described_class).to receive(:legacy_def_nestings).and_return({}.compare_by_identity.freeze)
+        root = parse(source)
+        described_class.send(:build_superclass_tables, root, "app/x.rb")
+        described_class.send(:build_def_nestings, root)
+        described_class.send(:member_layout_tables, root)
 
-        expect { described_class.declaration_walk_tables(parse("def m; end\n"), "app/c.rb") }
-          .to raise_error(Rigor::Inference::DeclarationWalk::Shadow::Divergence,
-                          %r{discovery table `def_nestings` for app/c\.rb: the table: key #<DefNode m at 1:0> only in})
+        expect(described_class).to have_received(:legacy_superclass_tables).with(root, "app/x.rb").once
+        walkers.drop(1).each { |walker| expect(described_class).to have_received(walker).with(root).once }
+      end
+
+      # A walker that answers a table the collector did not build, for each of the three checks.
+      { def_nestings: [:legacy_def_nestings, { ghost: [] }.compare_by_identity.freeze],
+        superclass_tables: [:legacy_superclass_tables, [{ "Ghost" => "Base" }.freeze, {}.freeze]],
+        member_layouts: [:legacy_data_member_layouts, { "Ghost" => %i[g] }.freeze] }.each do |table, (walker, answer)|
+        it "names `#{table}` and the file when a collector and its walker disagree" do
+          ENV.store("RIGOR_SHADOW_RULE_WALK", "1")
+          allow(described_class).to receive(walker).and_return(answer)
+
+          expect { described_class.declaration_walk_tables(parse("x = 1\n"), "app/c.rb") }
+            .to raise_error(Rigor::Inference::DeclarationWalk::Shadow::Divergence,
+                            %r{divergence: discovery table `#{table}` for app/c\.rb: .*ghost.* only in legacy\z}i)
+        end
       end
     end
   end
@@ -160,6 +176,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer::SharedWalkTables do
       source = <<~RUBY
         class C
           class Nested; include InNested; end
+          module NestedModule; include InNestedModule; end
           class << self; include InSingleton; end
           K = Class.new { include InFactory }
           X.class_eval { include InEval }
@@ -172,6 +189,11 @@ RSpec.describe Rigor::Inference::ScopeIndexer::SharedWalkTables do
     end
 
     # The merge is `ScopeIndexer.add_header_nesting`'s: the recorder hands it each site.
+    it "reads only a call with no receiver as a mixin" do
+      expect(ancestry("class C\n  self.include M\n  other.prepend N\nend\n", [], %w[C]))
+        .to eq(superclasses: {}, header_nestings: {})
+    end
+
     it "merges a second site into the class's bucket, the deeper chain first, and keeps the last superclass" do
       tables = { superclasses: {}, header_nestings: {} }
       described_class.record_declaration_ancestry(statement("class C < Base; end"), ["A"], %w[A C], tables)
@@ -283,11 +305,11 @@ RSpec.describe Rigor::Inference::ScopeIndexer::SharedWalkTables do
     end
 
     it "reads `keyword_init:` as true only for a literal `true` under the Symbol key" do
-      options = ["keyword_init: false", "keyword_init: flag", "'keyword_init' => true",
+      options = ["keyword_init: false", "keyword_init: flag", "'keyword_init' => true", "other: true",
                  "other: true, keyword_init: true"]
       flags = options.map { |option| struct("Struct.new(:a, #{option})").fetch("N::P").fetch(:keyword_init) }
 
-      expect(flags).to eq([false, false, false, true])
+      expect(flags).to eq([false, false, false, false, true])
     end
 
     it "leaves a leading class-name String out of the members" do
@@ -522,6 +544,25 @@ end
     end
   end
 
+  # Each runs one collector on a walk of its own, where `.declaration_walk_tables` runs the three on one.
+  describe "the builders that run one collector alone" do
+    it "keys an anonymous class with the path the superclass builder is given" do
+      root = parse("Class.new(Parent) { }\n")
+
+      expect(described_class.send(:build_superclass_tables, root, "app/x.rb").first.keys)
+        .to eq(["#<Class:app/x.rb:1:0>"])
+      expect(described_class.send(:build_superclass_tables, root).first.keys).to eq(["#<Class:1:0>"])
+    end
+
+    it "answers each member-layout table from its own builder" do
+      root = parse("P = Data.define(:x)\nS = Struct.new(:a)\n")
+
+      expect(described_class.send(:build_data_member_layouts, root)).to eq("P" => %i[x])
+      expect(described_class.send(:build_struct_member_layouts, root))
+        .to eq("S" => { members: %i[a], keyword_init: false })
+    end
+  end
+
   # Each walker below is the oracle `RIGOR_SHADOW_RULE_WALK` compares a collector with. The tables are explicit, so
   # that a change to an arm fails here and not only where the two are compared.
   describe "the walkers the collectors replaced" do
@@ -618,6 +659,23 @@ end
                  body: %w[M], o: %w[M::O M])
       end
 
+      # A header that renders no name is a parse error. The walker loses the chain there and walks the body on:
+      # the answer `DefNestingsCollector` keeps as `unrendered_header: :body_with_lost_nesting` (#1521 item 3).
+      it "records no def under a chain it lost, until a `self::` header gives it one again" do
+        source = <<~RUBY
+          class foo
+            def lost; end
+            X.class_eval do
+              class self::G
+                def regrown; end
+              end
+            end
+          end
+        RUBY
+
+        expect(nestings(source)).to eq(regrown: %w[X::G])
+      end
+
       it "names an eval's receiver below `class <<`, and nothing for the `self` of a bare eval there" do
         source = <<~RUBY
           class X; end
@@ -672,7 +730,9 @@ end
         source = <<~RUBY
           class C
             class << self
-              class D < Base; end
+              class D < Base
+                class Deeper < Base; end
+              end
               class self::E < Base; end
               class ::F < Base; end
             end
@@ -780,7 +840,11 @@ end
             ::T = Struct.new(:t)
             U ||= Data.define(:u)
             A::V ||= Struct.new(:v)
-            K = Data.define(:k) { Inner = Struct.new(:i); self::Own = Data.define(:own) }
+            K = Data.define(:k) do
+              Inner = Struct.new(:i)
+              self::Own = Data.define(:own)
+              self::Mine = Struct.new(:m)
+            end
             Z = Class.new(Struct.new(:z)) { }
           end
         RUBY
@@ -788,7 +852,7 @@ end
         expect(layouts(source))
           .to eq([{ "L" => %i[from to], "M::U" => %i[u], "M::K" => %i[k], "M::K::Own" => %i[own] },
                   { "M::N" => struct(:n), "T" => struct(:t), "M::A::V" => struct(:v), "M::Inner" => struct(:i),
-                    "M::Z" => struct(:z) }])
+                    "M::K::Mine" => struct(:m), "M::Z" => struct(:z) }])
       end
 
       it "records below `class <<` only what is rooted, and the operand in the enclosing class" do
@@ -797,7 +861,9 @@ end
             class << self
               Lost = Data.define(:l)
               ::Top = Struct.new(:t)
-              class Hidden < Data.define(:h); end
+              class Hidden < Data.define(:h)
+                Deeper = Struct.new(:dd)
+              end
               class self::Own < Struct.new(:o); end
               class ::Rooted < Data.define(:r); end
             end

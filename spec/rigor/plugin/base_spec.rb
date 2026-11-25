@@ -485,6 +485,35 @@ RSpec.describe Rigor::Plugin::Base do
       expect(type).to be_nil
     end
 
+    # Issue #3322 — the optimistic answer helper and the engine-facing answer.
+    describe "an optimistic answer" do
+      def two_rule_plugin(first)
+        Class.new(described_class) do
+          manifest(id: "dr-opt", version: "0.1.0")
+          dynamic_return(methods: [:bar]) { |_node, _scope| instance_exec(&first) }
+          dynamic_return(methods: [:bar]) { |_node, _scope| Rigor::Type::Combinator.nominal_of("String") }
+        end.new(services: services)
+      end
+
+      def answer_of(plugin, method)
+        plugin.public_send(method, call_node: call("x.bar"), scope: Rigor::Scope.empty,
+                                   receiver_type: Rigor::Type::Combinator.nominal_of("Foo"))
+      end
+
+      it "is wrapped by optimistic_nil_free, unwrapped by dynamic_return_type" do
+        plugin = two_rule_plugin(-> { optimistic_nil_free(Rigor::Type::Combinator.nominal_of("Time")) })
+        expect(answer_of(plugin, :dynamic_return_answer))
+          .to eq(Rigor::Plugin::OptimisticReturn.new(type: Rigor::Type::Combinator.nominal_of("Time")))
+        expect(answer_of(plugin, :dynamic_return_type)).to eq(Rigor::Type::Combinator.nominal_of("Time"))
+      end
+
+      it "declines on a wrapped nil, however it is spelled, so the next rule answers" do
+        [-> { optimistic_nil_free(nil) }, -> { Rigor::Plugin::OptimisticReturn.new(type: nil) }].each do |first|
+          expect(answer_of(two_rule_plugin(first), :dynamic_return_type)).to eq(Rigor::Type::Combinator.nominal_of("String"))
+        end
+      end
+    end
+
     it "rejects an empty receivers: list" do
       expect do
         Class.new(described_class) do

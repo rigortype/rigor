@@ -1442,7 +1442,8 @@ RSpec.describe "plugins/rigor-activerecord" do
     SCHEMA
     let(:present_rbs) do
       "class Numeric\n  def present?: () -> true\n  def blank?: () -> false\nend\n" \
-        "class Time\n  def present?: () -> true\n  def blank?: () -> false\nend\n"
+        "class Time\n  def present?: () -> true\n  def blank?: () -> false\nend\n" \
+        "class NilClass\n  def present?: () -> false\n  def blank?: () -> true\nend\n"
     end
 
     def truthy_lines(source)
@@ -1470,13 +1471,20 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(truthy_lines("p(:a) if User.find(1).verified_at.present?\n")).to eq([1])
     end
 
-    # The mark is a lookup's, so sig-gen keeps the omitted nil in a contract it writes (#2197), and only there.
-    it "has sig-gen propose the nil a nullable column can hold, and none for a null: false one" do
+    # The plugin's mark is not a lookup's: sig-gen keeps the reader's nil-free type in a contract it writes, so an
+    # adopted signature does not report possible-nil-receiver on every caller.
+    it "has sig-gen propose the reader's nil-free type, checked or not, nullable or not" do
       Dir.mktmpdir do |dir|
         materialize_files(dir, { "db/schema.rb" => schema, "app/services/reader.rb" => <<~RUBY }.merge(DEFAULT_MODELS))
           class Reader
             def completed(id) = User.find(id).completed_at
             def verified(id) = User.find(id).verified_at
+            def guarded(id)
+              user = User.find(id)
+              return user.completed_at if user.completed_at
+
+              Time.at(0)
+            end
           end
         RUBY
         Rigor::Plugin.unregister!
@@ -1488,8 +1496,9 @@ RSpec.describe "plugins/rigor-activerecord" do
           Rigor::SigGen::Generator.new(configuration: configuration, paths: ["app/services/reader.rb"]).run
                                   .to_h { |candidate| [candidate.method_name, candidate.rbs || candidate.skip_reason] }
         end
-        expect(rbs).to include(completed: "def completed: (untyped) -> (Time | nil)",
-                               verified: "def verified: (untyped) -> Time")
+        expect(rbs).to include(completed: "def completed: (untyped) -> Time",
+                               verified: "def verified: (untyped) -> Time",
+                               guarded: "def guarded: (untyped) -> Time")
       end
     end
 

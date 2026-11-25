@@ -33,8 +33,9 @@ module Rigor
       # The core-RBS annotation `RbsDispatch` reads the return type past.
       ANNOTATION = "implicitly-returns-nil"
 
-      # The single cause carried today. Kept as a symbol (rather than a bare `true`) so a later slice can
-      # distinguish further optimistic families without changing the table's shape.
+      # The cause an `%a{implicitly-returns-nil}` read carries. Kept as a symbol (rather than a bare `true`) so the
+      # optimistic families stay distinguishable without changing the table's shape ({PLUGIN_NIL_FREE} is the
+      # second).
       IMPLICITLY_RETURNS_NIL = :implicitly_returns_nil
 
       # Issue #3322 — a plugin's `dynamic_return` answered through `Plugin::Base#optimistic_nil_free`: the type
@@ -57,10 +58,11 @@ module Rigor
       NIL_COMPARISONS = %i[== != eql? equal? ===].freeze
 
       # Issue #3322 — ActiveSupport's presence predicates. Both are value predicates on a hit (`"".present?` is
-      # false), but on a miss each answers a fixed boolean — `nil.present?` is false and `nil.blank?` true, as for
-      # `false` — so a fold over an optimistic carrier is a bet exactly as `nil?`'s is: `record.completed_at
-      # .present?` folds to `true` only because the reader omitted the `nil` the column can hold. The value is
-      # the predicate's answer for a falsey carrier ({.miss_answer_of_call}).
+      # false), but where `NilClass` declares them ({.nil_class_declares?}) a miss answers a fixed boolean —
+      # `nil.present?` is false and `nil.blank?` true, as for `false` — so a fold over an optimistic carrier is a
+      # bet exactly as `nil?`'s is: `record.completed_at.present?` folds to `true` only because the reader omitted
+      # the `nil` the column can hold. The value is the predicate's answer for a falsey carrier
+      # ({.miss_answer_of_call}).
       PRESENCE_PREDICATES = { present?: false, blank?: true }.freeze
 
       # {.miss_answer}'s answer for an expression whose value on a miss cannot be told.
@@ -270,7 +272,7 @@ module Rigor
       # `recv.nil?` / `!recv` / `recv == nil` — the fold is a statement about `recv`, so it is exactly as
       # optimistic as `recv` is.
       def resolve_through_predicate(node, scope)
-        operand = nil_question_operand(node)
+        operand = nil_question_operand(node, scope)
         operand && resolve(operand, scope)
       end
 
@@ -278,11 +280,12 @@ module Rigor
       # or any argument means `nil?` / `!` is not the unary predicate it looks like (`x.!(y)` is a user-defined
       # operator). A comparison needs exactly one positional argument and exactly one `nil` literal side, and
       # answers the other side (`nil == nil` states nothing about a carrier).
-      def nil_question_operand(node)
+      def nil_question_operand(node, scope)
         return nil unless node.block.nil?
 
         arguments = node.arguments&.arguments || []
-        if NIL_COLLAPSING_PREDICATES.include?(node.name) || PRESENCE_PREDICATES.key?(node.name)
+        if NIL_COLLAPSING_PREDICATES.include?(node.name) ||
+           (PRESENCE_PREDICATES.key?(node.name) && nil_class_declares?(node.name, scope))
           node.receiver if arguments.empty?
         elsif NIL_COMPARISONS.include?(node.name) && arguments.size == 1
           nil_comparison_operand(node.receiver, arguments.first)
@@ -322,7 +325,7 @@ module Rigor
       def miss_answer_of_call(node, scope)
         return nil if node.safe_navigation? && resolve(node.receiver, scope)
 
-        operand = nil_question_operand(node)
+        operand = nil_question_operand(node, scope)
         inner = operand ? miss_answer(operand, scope) : UNKNOWN_MISS
         return UNKNOWN_MISS if inner.equal?(UNKNOWN_MISS)
 
@@ -332,6 +335,14 @@ module Rigor
         when :present?, :blank? then presence_answer(node.name, inner)
         else inner.nil?
         end
+      end
+
+      # #3322 — a presence predicate restates a miss only where `nil` answers it (ActiveSupport's `NilClass#present?`,
+      # which rigor-activesupport-core-ext and gem_rbs_collection declare). Without that declaration a miss raises
+      # `NoMethodError` instead — the element-read rule above — so the fold over a hit stands as proof.
+      def nil_class_declares?(name, scope)
+        definition = Rigor::Reflection.instance_definition("NilClass", scope: scope)
+        !definition.nil? && !definition.methods[name].nil?
       end
 
       # What `present?` / `blank?` answers for a carrier whose value is `inner`: the falsey answer for `nil` /

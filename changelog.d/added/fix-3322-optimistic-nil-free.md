@@ -1,0 +1,2 @@
+- **[plugin API]** A `dynamic_return` block can answer `optimistic_nil_free(type)` to type a call as `type` while keeping a nil or presence check on its value from being reported as always truthy. ([#3385](https://github.com/rigortype/rigor/pull/3385))
+  - Plugins that call `dynamic_return_type` still get a bare type.

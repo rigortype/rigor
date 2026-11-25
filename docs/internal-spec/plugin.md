@@ -588,11 +588,18 @@ the block carries logic and runs through `instance_exec`:
     § "That deferred-to answer is nil-free for a lookup that can miss"):
     a condition over the value never folds to a constant. When several
     plugins answer one call, any optimistic answer marks the merged one.
-    The mark is the same one a lookup carries, so `rigor sig-gen` keeps
-    the omitted `nil` in a signature it writes (the #2197 rule in
-    inference-engine.md): `def g = user.completed_at` is proposed as
-    `-> Time?`, since a `sig/` return is a contract callers' nil checks
-    are judged against.
+    The cause is distinct from a lookup's, and `rigor sig-gen` does NOT
+    add the omitted `nil` to a signature it writes (the #2197 rule in
+    inference-engine.md applies to lookups only): `def g =
+    user.completed_at` is proposed as `-> Time`, since `-> Time?` in
+    `sig/` would report `possible-nil-receiver` on every caller's
+    ordinary call, the cost the plugin's answer exists to avoid.
+    Boundaries: the mark is recorded only on a `Prism::CallNode` site
+    (a `&:sym` block argument or a compound write gets the bare type);
+    it covers the answer's own nil-freeness, not its elements; an
+    `OptimisticReturn` wrapping `nil` is a decline, so the rule walk
+    continues to the next rule; and wrapping a type that already holds
+    `nil` changes nothing observable.
     `rigor-activerecord`'s reader of a column the schema does not prove
     `NOT NULL` is the bundled consumer.
   `rigor-mangrove` (unwrap → carried `type_args[0]`) is the worked

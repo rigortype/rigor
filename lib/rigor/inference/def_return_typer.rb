@@ -117,16 +117,23 @@ module Rigor
         scope = context&.scope_index&.[](node) || scope
         case node
         when Prism::CallNode then optimistic_call?(node, scope, context)
-        when Prism::LocalVariableReadNode then !scope.optimistic_local(node.name).nil?
-        when Prism::InstanceVariableReadNode then !scope.optimistic_ivar(node.name).nil?
+        when Prism::LocalVariableReadNode then lookup_mark?(scope.optimistic_local(node.name))
+        when Prism::InstanceVariableReadNode then lookup_mark?(scope.optimistic_ivar(node.name))
         when Prism::AndNode then [node.left, node.right].any? { optimistic_value?(it, scope, context) }
         when Prism::OrNode then optimistic_value?(node.right, scope, context)
         else optimistic_write?(node, scope, context) || optimistic_branch?(node, scope, context)
         end
       end
 
+      # #3322 — a mark whose miss a signature should keep. A plugin's optimistic answer
+      # (`OptimisticOrigin::PLUGIN_NIL_FREE`, rigor-activerecord's nullable column readers) is not one: the plugin
+      # omits the `nil` precisely so that callers' ordinary calls do not report `possible-nil-receiver`, and a
+      # `-> T?` written into `sig/` would put that cost back one call away. It still keeps the in-scope certainty
+      # consumers from folding a condition over the value.
+      def lookup_mark?(cause) = !cause.nil? && cause != OptimisticOrigin::PLUGIN_NIL_FREE
+
       def optimistic_call?(node, scope, context)
-        if scope.optimistic_origin(node)
+        if lookup_mark?(scope.optimistic_origin(node))
           return false if guarded_lookup?(node, context) || non_empty_end?(node, scope)
 
           return true
@@ -175,9 +182,9 @@ module Rigor
              Prism::LocalVariableOrWriteNode, Prism::InstanceVariableOrWriteNode
           optimistic_value?(node.value, scope, context)
         when Prism::LocalVariableAndWriteNode
-          !scope.optimistic_local(node.name).nil? || optimistic_value?(node.value, scope, context)
+          lookup_mark?(scope.optimistic_local(node.name)) || optimistic_value?(node.value, scope, context)
         when Prism::InstanceVariableAndWriteNode
-          !scope.optimistic_ivar(node.name).nil? || optimistic_value?(node.value, scope, context)
+          lookup_mark?(scope.optimistic_ivar(node.name)) || optimistic_value?(node.value, scope, context)
         else false
         end
       end

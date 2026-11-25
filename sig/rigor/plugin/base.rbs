@@ -47,9 +47,10 @@ class Rigor::Plugin::Base
   # none of the other nodes in the union below has, so the gate declines them (#2681, #2764). Every other
   # declaration shape is offered the whole union. A callable `methods:` also only ever sees a `CallNode`
   # at runtime, since the same gate declines the nameless nodes, but RBS cannot tell a callable from an
-  # Array argument by overload alone, so it keeps the union, which is sound.
-  def self.dynamic_return: (?receivers: (Array[String] | ^() -> Array[String])?, methods: Array[untyped], ?file_methods: (^(String path) -> Array[untyped])?) { (::Prism::CallNode call_node, Rigor::Plugin::_Scope scope) -> Rigor::Type::t? } -> nil
-                         | (?receivers: (Array[String] | ^() -> Array[String])?, ?methods: (Array[untyped] | ^() -> Array[untyped])?, ?file_methods: (^(String path) -> Array[untyped])?) { (::Prism::CallNode | ::Prism::CallOperatorWriteNode | ::Prism::CallOrWriteNode | ::Prism::CallAndWriteNode | ::Prism::IndexOperatorWriteNode | ::Prism::IndexOrWriteNode | ::Prism::IndexAndWriteNode | ::Prism::BlockArgumentNode call_node, Rigor::Plugin::_Scope scope) -> Rigor::Type::t? } -> nil
+  # Array argument by overload alone, so it keeps the union, which is sound. The block answers a type, an
+  # `OptimisticReturn` (`#optimistic_nil_free`, #3322), or nil.
+  def self.dynamic_return: (?receivers: (Array[String] | ^() -> Array[String])?, methods: Array[untyped], ?file_methods: (^(String path) -> Array[untyped])?) { (::Prism::CallNode call_node, Rigor::Plugin::_Scope scope) -> (Rigor::Type::t | Rigor::Plugin::OptimisticReturn)? } -> nil
+                         | (?receivers: (Array[String] | ^() -> Array[String])?, ?methods: (Array[untyped] | ^() -> Array[untyped])?, ?file_methods: (^(String path) -> Array[untyped])?) { (::Prism::CallNode | ::Prism::CallOperatorWriteNode | ::Prism::CallOrWriteNode | ::Prism::CallAndWriteNode | ::Prism::IndexOperatorWriteNode | ::Prism::IndexOrWriteNode | ::Prism::IndexAndWriteNode | ::Prism::BlockArgumentNode call_node, Rigor::Plugin::_Scope scope) -> (Rigor::Type::t | Rigor::Plugin::OptimisticReturn)? } -> nil
   def self.dynamic_returns: () -> Array[untyped]
 
   # The block answers the facts that hold after the call returns normally, or nil. The element is a

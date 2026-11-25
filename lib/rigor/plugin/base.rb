@@ -648,7 +648,8 @@ module Rigor
           next unless dynamic_return_rule_applies?(rule, call_node, receiver_type, environment, scope)
 
           result = instance_exec(call_node, scope, &rule[:block])
-          return result if result
+          # A directly built `OptimisticReturn.new(type: nil)` is a decline, like `nil`, so the walk goes on.
+          return result if OptimisticReturn.unwrap(result)
         end
         nil
       rescue StandardError

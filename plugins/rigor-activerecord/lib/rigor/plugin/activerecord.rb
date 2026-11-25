@@ -425,8 +425,8 @@ module Rigor
         names
       end
 
-      # Resolution body for `dynamic_return` — same four-path order, returning the bare type the contract
-      # expects.
+      # Resolution body for `dynamic_return` — same four-path order, returning a type, or for a nullable
+      # column read an `optimistic_nil_free` answer (#3322).
       def contribution_return_type(call_node, scope)
         return nil unless call_node.is_a?(Prism::CallNode)
 

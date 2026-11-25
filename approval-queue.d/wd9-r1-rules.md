@@ -1,6 +1,6 @@
 # `DeclarationWalk::Rules`' interface pin compares the list both ways and reads its floor off the callers; `EMPTY_PREFIX` keeps the visibility it had; one caller is re-broken as a guard clause
 
-- **PR:** none
+- **PR:** [#3390](https://github.com/rigortype/rigor/pull/3390)
 - **Issue:** [#3346](https://github.com/rigortype/rigor/issues/3346)
 - **Class:** open-choice
 - **Precedent:** [ADR-116](../docs/adr/116-hot-file-restructuring.md)

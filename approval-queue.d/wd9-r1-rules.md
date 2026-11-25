@@ -1,4 +1,4 @@
-# `DeclarationWalk::Rules`' interface pin compares the list both ways and reads its floor off the callers; `EMPTY_PREFIX` keeps the visibility it had; one caller is re-broken as a guard clause
+# `DeclarationWalk::Rules`' interface pin compares the list both ways and reads its floor off the callers; `EMPTY_PREFIX` keeps the visibility it had; one caller is re-broken as a guard clause; the ratchet's 8 new `Dynamic` call sites are accepted until #3392
 
 - **PR:** [#3390](https://github.com/rigortype/rigor/pull/3390)
 - **Issue:** [#3346](https://github.com/rigortype/rigor/issues/3346)
@@ -24,6 +24,13 @@ the five were private in `ScopeIndexer` before the move. `EMPTY_PREFIX` was not:
 It says the moved bodies are Prism-identical and every caller is requalified, and says nothing of a
 caller whose line no longer fits. `DeclarationWalk::Rules.` is 23 columns, and it pushed 23 call
 sites past the 120-column limit.
+
+It measured, on a scratch tree, that the move adds no `Dynamic` call site to the self-typing
+ratchet. The slice measured 8 more (50,923 to 50,931, both arms from `git archive`; the review
+reproduced the delta), with precision up 0.027 points rather than about 0.11. The cause is an engine
+gap the scratch tree did not exercise: an Array or String constant read from another file types as
+`Dynamic` ([#3392](https://github.com/rigortype/rigor/issues/3392)), and `ScopeIndexer` now reads
+the eval lists it binds from `rules.rb`.
 
 ## Options and trade-offs
 
@@ -58,7 +65,19 @@ sites past the 120-column limit.
   then the `yield`), an inline `rubocop:disable`, or a local alias of the module, which the
   producers gate would not see as a call on it.
 
+**The ratchet's 8 call sites.** Reading `DeclarationWalk::Rules::INSTANCE_EVAL_CALLS` at the nine
+sites does not help: the direct cross-file read is `Dynamic` too (the review's two-file probe). A
+literal copy in `ScopeIndexer` breaks "each list is one object" and the identity example in
+`rules_spec.rb`. A `sig/` declaration of the three constants closes it (the review measured 17 fewer
+`Dynamic` sites than base), but the amendment says R1 adds no `sig/` rows, and type-authoring prefers
+surfacing an inference gap over hand-authoring around it. Accepting the 8 leaves both ratchet
+figures above their pins.
+
 ## Decision
+
+The 8 `Dynamic` call sites are accepted and the ratchet is not tightened on the precision rise;
+#3392, labelled `known-limitation`, carries the fix, and a `sig/` declaration of the three constants
+is the fallback if the engine fix does not come first.
 
 The pin compares the list both ways and reads its floor off the callers. `EMPTY_PREFIX` keeps the
 visibility it had; making it private is a one-line follow-up if the maintainer reads the amendment's
@@ -76,4 +95,5 @@ For the pin, delete the second expectation of "exposes the pinned functions and 
 two examples that read the callers in `spec/rigor/inference/declaration_walk/rules_spec.rb`. For the
 constant, add `:EMPTY_PREFIX` to the `private_constant` line under it in `scope_indexer.rb`. For the
 caller, restore the modifier form with a `# rubocop:disable Layout/LineLength` on its line. Nothing
-depends on any of the three.
+depends on any of the three. For the ratchet, declare `INSTANCE_EVAL_CALLS`, `RECEIVER_EVAL_CALLS`
+and `OBJECT_OWNER` of `DeclarationWalk::Rules` in `sig/`, or let #3392's fix recover the 8 sites.

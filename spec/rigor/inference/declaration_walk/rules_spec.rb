@@ -64,7 +64,7 @@ RSpec.describe Rigor::Inference::DeclarationWalk::Rules do
     def calls_on_the_module
       DeclarationFactSources.paths_under.each_with_object({}) do |path, calls|
         text = File.read(File.join(DeclarationFactSources::REPO_ROOT, path))
-        next unless text.include?("Rules.")
+        next unless text.match?(/Rules\s*(?:\.|::)/)
 
         names = DeclarationFactSources.each_node(Prism.parse(text).value).filter_map do |node|
           receiver = DeclarationFactSources.constant_name(node.receiver) if node.is_a?(Prism::CallNode)

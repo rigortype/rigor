@@ -147,8 +147,19 @@ module Rigor
             name: name,
             type: rails_type,
             ruby_type: ruby_type,
-            array: array
+            array: array,
+            not_null: not_null_constraint?(rest)
           )
+        end
+
+        # #3322 — `NOT NULL` / `PRIMARY KEY` among the column's own constraints. String literals and
+        # parenthesised expressions are removed first (`DEFAULT 'NOT NULL'::text`,
+        # `GENERATED ALWAYS AS (… IS NOT NULL …)`, `CHECK (…)`), since a `NOT NULL` inside one says nothing about
+        # the column; pg_dump's `DEFAULT 'x'::text NOT NULL` keeps its trailing constraint.
+        def not_null_constraint?(rest)
+          constraints = rest.gsub(/'(?:[^']|'')*'/, "''")
+          nil while constraints.gsub!(/\([^()]*\)/, "")
+          constraints.match?(/\b(?:NOT\s+NULL|PRIMARY\s+KEY)\b/i)
         end
 
         # The type is every token before the first uppercase-initial token (a column modifier such as

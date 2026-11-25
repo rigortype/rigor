@@ -47,9 +47,10 @@ class Rigor::Plugin::Base
   # none of the other nodes in the union below has, so the gate declines them (#2681, #2764). Every other
   # declaration shape is offered the whole union. A callable `methods:` also only ever sees a `CallNode`
   # at runtime, since the same gate declines the nameless nodes, but RBS cannot tell a callable from an
-  # Array argument by overload alone, so it keeps the union, which is sound.
-  def self.dynamic_return: (?receivers: (Array[String] | ^() -> Array[String])?, methods: Array[untyped], ?file_methods: (^(String path) -> Array[untyped])?) { (::Prism::CallNode call_node, Rigor::Plugin::_Scope scope) -> Rigor::Type::t? } -> nil
-                         | (?receivers: (Array[String] | ^() -> Array[String])?, ?methods: (Array[untyped] | ^() -> Array[untyped])?, ?file_methods: (^(String path) -> Array[untyped])?) { (::Prism::CallNode | ::Prism::CallOperatorWriteNode | ::Prism::CallOrWriteNode | ::Prism::CallAndWriteNode | ::Prism::IndexOperatorWriteNode | ::Prism::IndexOrWriteNode | ::Prism::IndexAndWriteNode | ::Prism::BlockArgumentNode call_node, Rigor::Plugin::_Scope scope) -> Rigor::Type::t? } -> nil
+  # Array argument by overload alone, so it keeps the union, which is sound. The block answers a type, an
+  # `OptimisticReturn` (`#optimistic_nil_free`, #3322), or nil.
+  def self.dynamic_return: (?receivers: (Array[String] | ^() -> Array[String])?, methods: Array[untyped], ?file_methods: (^(String path) -> Array[untyped])?) { (::Prism::CallNode call_node, Rigor::Plugin::_Scope scope) -> (Rigor::Type::t | Rigor::Plugin::OptimisticReturn)? } -> nil
+                         | (?receivers: (Array[String] | ^() -> Array[String])?, ?methods: (Array[untyped] | ^() -> Array[untyped])?, ?file_methods: (^(String path) -> Array[untyped])?) { (::Prism::CallNode | ::Prism::CallOperatorWriteNode | ::Prism::CallOrWriteNode | ::Prism::CallAndWriteNode | ::Prism::IndexOperatorWriteNode | ::Prism::IndexOrWriteNode | ::Prism::IndexAndWriteNode | ::Prism::BlockArgumentNode call_node, Rigor::Plugin::_Scope scope) -> (Rigor::Type::t | Rigor::Plugin::OptimisticReturn)? } -> nil
   def self.dynamic_returns: () -> Array[untyped]
 
   # The block answers the facts that hold after the call returns normally, or nil. The element is a
@@ -95,9 +96,16 @@ class Rigor::Plugin::Base
   # `dynamic_return` block union above is the full set. A rule that reads a `CallNode`-only member (`receiver`,
   # `name`, `arguments`) must guard with `call_node.is_a?(::Prism::CallNode)` first (#2717).
   def dynamic_return_type: (call_node: ::Prism::CallNode | ::Prism::CallOperatorWriteNode | ::Prism::CallOrWriteNode | ::Prism::CallAndWriteNode | ::Prism::IndexOperatorWriteNode | ::Prism::IndexOrWriteNode | ::Prism::IndexAndWriteNode | ::Prism::BlockArgumentNode, scope: Rigor::Plugin::_Scope, receiver_type: Rigor::Type::t) -> Rigor::Type::t?
+  # sig-gen gap: #1007 — the body `dynamic_return_type` carried before #3322: the `instance_exec`'d rule block
+  # is not folded into the return join. The rule body's answer before `dynamic_return_type` unwraps an
+  # `OptimisticReturn`; the engine's contribution tier reads it so the optimistic flag reaches `OptimisticOrigin`.
+  def dynamic_return_answer: (call_node: ::Prism::CallNode | ::Prism::CallOperatorWriteNode | ::Prism::CallOrWriteNode | ::Prism::CallAndWriteNode | ::Prism::IndexOperatorWriteNode | ::Prism::IndexOrWriteNode | ::Prism::IndexAndWriteNode | ::Prism::BlockArgumentNode, scope: Rigor::Plugin::_Scope, receiver_type: Rigor::Type::t) -> (Rigor::Type::t | Rigor::Plugin::OptimisticReturn)?
   def narrowing_facts_for: (call_node: ::Prism::CallNode, scope: Rigor::Plugin::_Scope) -> Array[untyped]
 
   # Authoring helpers.
+  # authored: hook-contract — wraps a `dynamic_return` answer whose type omits a `nil` the value can hold
+  # (#3322); the parameter is the plugin's answer type, which sig-gen reads `untyped`.
+  def optimistic_nil_free: (Rigor::Type::t? type) -> Rigor::Plugin::OptimisticReturn?
   def diagnostic: (untyped node, path: untyped, message: untyped, ?severity: untyped, ?rule: untyped, ?location: untyped) -> Rigor::Analysis::Diagnostic
   def diagnostics_for: (untyped violations, path: untyped, ?node: untyped) -> Array[untyped]
   def read_fact: (plugin_id: untyped, name: untyped) -> untyped

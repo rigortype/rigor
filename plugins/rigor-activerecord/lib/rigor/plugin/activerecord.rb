@@ -66,6 +66,10 @@ module Rigor
       manifest(
         id: "activerecord",
         target_gems: ["activerecord"],
+        # 0.17.0, 2026-11-25 (#3322) — `SchemaTable::Column` gains a `not_null` member, so a cached 0.16.0
+        # payload is not Marshal-compatible; and a nullable column's reader is now answered optimistically
+        # nil-free, which changes what a warm run must serve.
+        #
         # 0.16.0, 2026-11-13 (#2956) — the `id` column takes the primary key's type (`id: :uuid` reads `String`)
         # instead of always `Integer`, and `serial` / `bigserial` columns read `Integer`. The schema table
         # payload changes, so the bump follows the 0.15.0 entry.
@@ -133,7 +137,7 @@ module Rigor
         # a scope lambda body / class-method body now contributes `Relation[Model]` via `scope.self_type`
         # instead of falling through to `Kernel#select` (the IO multiplexer, `Array[String]` return). Plus
         # `:select` added to the relation-entry-point list.
-        version: "0.16.0",
+        version: "0.17.0",
         description: "Types ActiveRecord finders against the project's db/schema.rb and AR models.",
         config_schema: {
           "schema_file" => { kind: :string, default: "db/schema.rb" },
@@ -421,8 +425,8 @@ module Rigor
         names
       end
 
-      # Resolution body for `dynamic_return` — same four-path order, returning the bare type the contract
-      # expects.
+      # Resolution body for `dynamic_return` — same four-path order, returning a type, or for a nullable
+      # column read an `optimistic_nil_free` answer (#3322).
       def contribution_return_type(call_node, scope)
         return nil unless call_node.is_a?(Prism::CallNode)
 
@@ -813,6 +817,11 @@ module Rigor
       # contributing `T | nil` would light up that idiom with `possible-nil-receiver` across an entire
       # codebase. Under-reporting a nil column is a false negative; over-reporting it is a false positive
       # — and the project ranks the latter as the worse failure.
+      #
+      # #3322 — the same omission must not become a proof in the other direction. A column the schema does not
+      # prove `NOT NULL` ({SchemaTable::Column#not_null?}) is answered through `optimistic_nil_free`, so the engine
+      # still types `user.completed_at` as `Time` but does not fold `if user.completed_at.present?` (or `.nil?`,
+      # or the bare read) to a constant and report `flow.always-truthy-condition` on the nil check.
       def column_return_type(entry, method_name)
         name = method_name.to_s
         predicate = name.end_with?("?")
@@ -822,6 +831,11 @@ module Rigor
         return nil if column.nil?
         return bool_type if predicate
 
+        type = column_value_type(entry, column, column_name)
+        column.not_null? || type.is_a?(Rigor::Type::Dynamic) ? type : optimistic_nil_free(type)
+      end
+
+      def column_value_type(entry, column, column_name)
         # #1089 — an enum-backed column reads as its KEY (`"active"`), not its SQL storage type
         # (`Integer` for a `t.integer :status` column). Rails returns the configured key as a String from
         # the reader (`user.status # => "active"`), so typing it by `column.ruby_type` makes a correct

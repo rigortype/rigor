@@ -13,6 +13,25 @@ require "rigor-activerecord"
 RSpec.describe "plugins/rigor-activerecord StructureSqlParser" do
   def parse(sql) = Rigor::Plugin::Activerecord::StructureSqlParser.parse(sql)
 
+  # #3322 — only the column's own constraints decide it; a `NOT NULL` inside a generated or default
+  # expression does not.
+  it "reads NOT NULL and PRIMARY KEY as the column's constraints, not inside an expression" do
+    table = parse(<<~SQL)
+      CREATE TABLE widgets (
+          id bigint PRIMARY KEY,
+          name character varying NOT NULL,
+          body text,
+          label text DEFAULT 'NOT NULL'::text,
+          total integer GENERATED ALWAYS AS (CASE WHEN a IS NOT NULL THEN a ELSE NULL END) STORED,
+          kind text DEFAULT 'x'::text NOT NULL
+      );
+    SQL
+    not_null = table.columns_for("widgets").to_h { |c| [c.name, c.not_null?] }
+    expect(not_null).to eq(
+      "id" => true, "name" => true, "body" => false, "label" => false, "total" => false, "kind" => true
+    )
+  end
+
   it "maps common PostgreSQL types to the same Ruby types as the schema.rb parser" do
     table = parse(<<~SQL)
       CREATE TABLE widgets (

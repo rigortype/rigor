@@ -7,6 +7,7 @@ require "prism"
 
 require_relative "manifest"
 require_relative "node_context"
+require_relative "optimistic_return"
 require_relative "../analysis/diagnostic"
 require_relative "../analysis/run_disclosure_credit"
 require_relative "../cache/engine_source"
@@ -619,10 +620,26 @@ module Rigor
       end
 
       # ADR-37 slice 2 — the return type contributed by this plugin's {.dynamic_return} rules for a call, or
-      # nil. The engine calls this from `MethodDispatcher`; a rule fires only when `receiver_type`'s class
-      # equals or inherits from one of its declared `receivers:` AND is of that entry's kind (#701). First
-      # non-nil wins (declaration order). Failures isolate to nil.
+      # nil. A rule fires only when `receiver_type`'s class equals or inherits from one of its declared
+      # `receivers:` AND is of that entry's kind (#701). First non-nil wins (declaration order). Failures
+      # isolate to nil. An {OptimisticReturn} answer is unwrapped to its type here; the engine reads the
+      # answer itself through {#dynamic_return_answer}.
       def dynamic_return_type(call_node:, scope:, receiver_type:)
+        OptimisticReturn.unwrap(
+          dynamic_return_answer(call_node: call_node, scope: scope, receiver_type: receiver_type)
+        )
+      end
+
+      # Issue #3322 — a rule body's answer to pass back when the type omits a `nil` the value can hold: the
+      # engine types the call as `type` but does not let a condition over it fold to a constant
+      # ({OptimisticReturn}). `type` nil passes through, so a declining body can wrap unconditionally.
+      def optimistic_nil_free(type)
+        type.nil? ? nil : OptimisticReturn.new(type: type)
+      end
+
+      # {#dynamic_return_type} without the unwrap: the rule body's answer — a type, an {OptimisticReturn}, or
+      # nil. `MethodDispatcher::PluginContribution` calls this so the optimistic flag reaches the engine.
+      def dynamic_return_answer(call_node:, scope:, receiver_type:)
         rules = self.class.dynamic_returns
         return nil if rules.empty? || receiver_type.nil?
 
@@ -631,7 +648,8 @@ module Rigor
           next unless dynamic_return_rule_applies?(rule, call_node, receiver_type, environment, scope)
 
           result = instance_exec(call_node, scope, &rule[:block])
-          return result if result
+          # A directly built `OptimisticReturn.new(type: nil)` is a decline, like `nil`, so the walk goes on.
+          return result if OptimisticReturn.unwrap(result)
         end
         nil
       rescue StandardError

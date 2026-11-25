@@ -84,6 +84,13 @@ Instance-side: a column read (`user.name`) narrows to the
 column's value type, `user.admin?` to `bool`, and a singular
 association (`post.user`) to the target model.
 
+A column read is typed without `nil` even when the column can hold
+`NULL`, so `user.email.downcase` stays quiet. When the schema does
+not prove the column non-null (`null: false`, a primary key, or
+`NOT NULL` in `structure.sql`), Rigor also does not treat a check on
+the value as always true or always false: `if user.completed_at.present?`,
+`.blank?`, `.nil?` or a bare `if user.completed_at` reports nothing.
+
 Relation-returning call sites — `User.where(...)`, `User.all`,
 `User.order(...)`, a `has_many` / `has_and_belongs_to_many`
 accessor (`user.posts`), and user-declared `scope`s

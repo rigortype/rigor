@@ -136,7 +136,8 @@ where every engine call site provably passes a `Scope`; otherwise it is `_Scope?
   prism gem).
 - The `node_rule` block receives `(node, scope, path, file_context, context)` (`base.rb` ~L614).
   `context` is `Plugin::NodeContext`, which gets an RBS declaration in slice 1.
-- The `dynamic_return` block returns `Rigor::Type::t?`.
+- The `dynamic_return` block returns `Rigor::Type::t?`. (Amended 2026-11-25, #3322: or a
+  `Rigor::Plugin::OptimisticReturn`, the additive `#optimistic_nil_free` answer; a bare type stays valid.)
 - The `narrowing_facts` block returns the fact array `narrowing_facts_for` collects (`base.rb`
   ~L644); slice 1 declares its element type.
 - Diagnostic hooks return `Array[Rigor::Analysis::Diagnostic]`.

@@ -309,6 +309,41 @@ RSpec.describe Rigor::Inference::OptimisticOrigin do
       # through it would widen this channel into a general taint and silence honest verdicts.
       expect(described_class::NIL_COLLAPSING_PREDICATES).to contain_exactly(:nil?, :!)
     end
+
+    # Issue #3322 — ActiveSupport's `present?` / `blank?` are value predicates on a hit, but a miss answers a
+    # fixed boolean (`nil.present?` is false, `nil.blank?` true), so a fold over a marked carrier is a bet.
+    def nil_class_declaring(*names)
+      methods = names.to_h { |name| [name, :declared] }
+      allow(Rigor::Reflection).to receive(:instance_definition).and_call_original
+      allow(Rigor::Reflection).to receive(:instance_definition).with("NilClass", scope: anything)
+                                                               .and_return(instance_double(RBS::Definition,
+                                                                                           methods: methods))
+    end
+
+    it "derives through an argument-free, blockless present? or blank?, answering nil's value on a miss" do
+      nil_class_declaring(:present?, :blank?)
+      scope_with_mark = scope.with_local(:v, Rigor::Type::Combinator.nominal_of("String"))
+                             .with_optimistic_local(:v, described_class::PLUGIN_NIL_FREE, miss: nil)
+      parse = ->(source) { Prism.parse(source, scopes: [[:v]]).value.statements.body.first }
+      { "v.present?" => false, "v.blank?" => true, "!v.present?" => true }.each do |source, miss|
+        expect(described_class.resolve(parse.call(source), scope_with_mark)).to eq(described_class::PLUGIN_NIL_FREE)
+        expect(described_class.miss_answer(parse.call(source), scope_with_mark)).to be(miss), source
+      end
+      %w[v.present?(1) v.blank?{} v.empty?].each do |source|
+        expect(described_class.resolve(parse.call(source), scope_with_mark)).to be_nil, source
+      end
+    end
+
+    # Without ActiveSupport's `NilClass#present?` a miss raises instead of answering, so the fold stands.
+    it "does not derive through present? or blank? when NilClass does not declare them" do
+      nil_class_declaring
+      scope_with_mark = scope.with_local(:v, Rigor::Type::Combinator.nominal_of("String"))
+                             .with_optimistic_local(:v, described_class::PLUGIN_NIL_FREE, miss: nil)
+      %w[v.present? v.blank?].each do |source|
+        node = Prism.parse(source, scopes: [[:v]]).value.statements.body.first
+        expect(described_class.resolve(node, scope_with_mark)).to be_nil, source
+      end
+    end
   end
 
   # Issue #1172 — the derivation above lets the in-scope consumers decline, but it does not change the

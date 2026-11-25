@@ -146,8 +146,15 @@ pins instance and singleton method sets for:
   `#node_rule_diagnostics`, the `#diagnostic(node, …)` builder, and
   the run-scoped disclosure channel `#disclose_once(key, message:,
   severity:, rule:)` / `#run_disclosure_records` (#1051), and its
-  positioned sibling `#emit_once(key, diagnostics)` (#1060).
-  v0.1.0 slice 1 + ADR-37 + ADR-30 (#727) + #392 + #1051 + #1060.
+  positioned sibling `#emit_once(key, diagnostics)` (#1060), and the
+  `dynamic_return` answer helper `#optimistic_nil_free(type)` with the
+  engine-facing `#dynamic_return_answer` beside `#dynamic_return_type`
+  (#3322; the contract is [`plugin.md`](plugin.md) § `dynamic_return`).
+  v0.1.0 slice 1 + ADR-37 + ADR-30 (#727) + #392 + #1051 + #1060 + #3322.
+- `Rigor::Plugin::OptimisticReturn` — the value `#optimistic_nil_free`
+  returns: `type`, and `OptimisticReturn.unwrap(answer)`. A plugin
+  returns it from a `dynamic_return` block; it never reaches a type
+  position.
 - `Rigor::Plugin::Manifest` — `id`, `version`, `description`,
   `protocol_contracts`, `config_schema`, `validate_config(config)`,
   `template_globs`.

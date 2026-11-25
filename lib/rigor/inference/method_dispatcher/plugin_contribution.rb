@@ -2,6 +2,8 @@
 
 require_relative "../../flow_contribution"
 require_relative "../../flow_contribution/merger"
+require_relative "../../plugin/optimistic_return"
+require_relative "../optimistic_origin"
 
 module Rigor
   module Inference
@@ -16,8 +18,17 @@ module Rigor
         # The tier, as `resolve_site` asks it: the merged contribution for the site's call node, scope and receiver.
         # It declines a site without a call node or a scope, which is every dispatch the engine makes for itself (a
         # per-element block fold, an alias target).
+        #
+        # Issue #3322 — when a contributing plugin answered through `Plugin::Base#optimistic_nil_free`, the call node
+        # is recorded {OptimisticOrigin::PLUGIN_NIL_FREE} so a condition over the value does not fold to a constant.
         def try_dispatch(context)
-          merged_return_type(context.call_node, context.scope, context.receiver)
+          call_node = context.call_node
+          scope = context.scope
+          type, optimistic = merged_answer(call_node, scope, context.receiver)
+          if type && optimistic && call_node.is_a?(Prism::CallNode)
+            scope.record_optimistic_origin(call_node, OptimisticOrigin::PLUGIN_NIL_FREE)
+          end
+          type
         end
 
         # ADR-2 § "Flow Contribution Bundle" / v0.1.1 Track 2 slice 7; ADR-52 WD3 — consults each
@@ -32,22 +43,30 @@ module Rigor
         # The tier's second entry: `MethodDispatcher.plugin_member_answers?` asks it with the three values it holds
         # (the veto has no `CallContext`), and {#try_dispatch} with the same three read from the site.
         def merged_return_type(call_node, scope, receiver_type)
-          return nil if call_node.nil? || scope.nil?
+          merged_answer(call_node, scope, receiver_type).first
+        end
+
+        NO_ANSWER = [nil, false].freeze
+        private_constant :NO_ANSWER
+
+        # `[merged return type or nil, whether any contribution was an optimistic answer]`.
+        def merged_answer(call_node, scope, receiver_type)
+          return NO_ANSWER if call_node.nil? || scope.nil?
 
           registry = scope.environment&.plugin_registry
-          return nil if registry.nil? || registry.empty?
+          return NO_ANSWER if registry.nil? || registry.empty?
 
-          contributions = collect_plugin_contributions(registry, call_node, scope, receiver_type)
-          return nil if contributions.empty?
+          contributions, optimistic = collect_plugin_answers(registry, call_node, scope, receiver_type)
+          return NO_ANSWER if contributions.empty?
 
-          FlowContribution::Merger.merge(contributions).return_type
+          [FlowContribution::Merger.merge(contributions).return_type, optimistic]
         end
 
         # ADR-37 slice 2 / ADR-52 WD3 — gathers each plugin's return-type contribution from the
         # gated `dynamic_return` DSL, wrapped as a return-only `FlowContribution` for the shared
         # merger. (The legacy ungated `flow_contribution_for` escape valve was deleted once its
         # five users migrated.)
-        EMPTY_CONTRIBUTIONS = [].freeze
+        EMPTY_CONTRIBUTIONS = [[].freeze, false].freeze
         private_constant :EMPTY_CONTRIBUTIONS
 
         # Collects every plugin's flow / dynamic-return contribution for one call site. Three
@@ -69,6 +88,11 @@ module Rigor
         #    pruned consultation could only have returned nil, so contribution order and content
         #    are unchanged.
         def collect_plugin_contributions(registry, call_node, scope, receiver_type)
+          collect_plugin_answers(registry, call_node, scope, receiver_type).first
+        end
+
+        # {.collect_plugin_contributions} paired with whether any plugin answered optimistically (#3322).
+        def collect_plugin_answers(registry, call_node, scope, receiver_type)
           index = registry.contribution_index
           relevant = index.for_method_dispatch
           return EMPTY_CONTRIBUTIONS if relevant.empty?
@@ -85,17 +109,24 @@ module Rigor
         end
 
         # The post-gate walk, in registry order — the same order the ungated walk used.
+        # Answers `[contributions, optimistic]`, the second true when any plugin's answer was a
+        # `Plugin::OptimisticReturn`.
         def collect_gated_contributions(index, relevant, name, call_node, scope, receiver_type)
           result = nil
+          optimistic = false
           relevant.each do |plugin|
             next unless index.dynamic_candidate_for?(plugin, name)
 
-            dynamic = plugin.dynamic_return_type(call_node: call_node, scope: scope, receiver_type: receiver_type)
-            (result ||= []) << FlowContribution.new(return_type: dynamic) if dynamic
+            answer = plugin.dynamic_return_answer(call_node: call_node, scope: scope, receiver_type: receiver_type)
+            dynamic = Plugin::OptimisticReturn.unwrap(answer)
+            next unless dynamic
+
+            optimistic = true if answer.is_a?(Plugin::OptimisticReturn)
+            (result ||= []) << FlowContribution.new(return_type: dynamic)
           rescue StandardError
             next
           end
-          result || EMPTY_CONTRIBUTIONS
+          result ? [result, optimistic] : EMPTY_CONTRIBUTIONS
         end
       end
     end

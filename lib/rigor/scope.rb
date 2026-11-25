@@ -456,8 +456,9 @@ module Rigor
     end
 
     # Issue #286 — the {Inference::OptimisticOrigin} cause attached to a call node whose result is nil-free
-    # only because `RbsDispatch` reads past `%a{implicitly-returns-nil}`, or `nil` when the value's
-    # nil-freeness is a property of its class. Mirrors {#dynamic_origins} / {#void_origins}: advisory
+    # only because `RbsDispatch` reads past `%a{implicitly-returns-nil}` or a plugin answered through
+    # `Plugin::Base#optimistic_nil_free` (#3322), or `nil` when the value's nil-freeness is a property of its
+    # class. Mirrors {#dynamic_origins} / {#void_origins}: advisory
     # metadata, ignored by `==` / `hash`, and never varying a flow decision on its own.
     def record_optimistic_origin(node, cause)
       TypingState.current.log_bound_write(OPTIMISTIC_ORIGINS, @optimistic_origins, node, cause)

@@ -1,0 +1,1 @@
+- **[inference]** `present?` and `blank?` over a value Rigor reads as nil-free only by choice, such as `h[k].present?`, no longer fold to a constant when `NilClass` declares them, as ActiveSupport's signatures do. ([#3385](https://github.com/rigortype/rigor/pull/3385))

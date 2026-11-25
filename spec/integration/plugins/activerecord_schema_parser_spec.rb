@@ -12,6 +12,40 @@ require "rigor-activerecord"
 RSpec.describe "plugins/rigor-activerecord SchemaParser" do
   def parse(source) = Rigor::Plugin::Activerecord::SchemaParser.parse(source)
 
+  # #3322 — a column's reader is answered optimistically nil-free unless the schema proves it NOT NULL.
+  describe "Column#not_null?" do
+    let(:table) do
+      parse(<<~RUBY)
+        create_table "users", force: :cascade do |t|
+          t.string "name", null: false
+          t.string "nickname"
+          t.string "note", null: true
+          t.column "code", :string, null: false
+          t.references "team", null: false, polymorphic: true
+          t.references "org"
+          t.timestamps
+        end
+        create_table "keys", id: :uuid do |t|
+        end
+        create_table "settings", primary_key: "key", id: :string do |t|
+        end
+      RUBY
+    end
+
+    it "is true for null: false, every primary-key shape, and a null: false reference" do
+      [%w[users name], %w[users code], %w[users team_id], %w[users team_type], %w[users id], %w[keys id],
+       %w[settings key]].each do |table_name, column|
+        expect(table.column(table_name, column).not_null?).to be(true), "#{table_name}.#{column}"
+      end
+    end
+
+    it "is false for a column the schema leaves nullable or does not decide" do
+      [%w[users nickname], %w[users note], %w[users org_id], %w[users created_at]].each do |table_name, column|
+        expect(table.column(table_name, column).not_null?).to be(false), "#{table_name}.#{column}"
+      end
+    end
+  end
+
   describe "the primary_key: option of create_table" do
     it "registers the named column with the type of an id: hash" do
       table = parse(<<~RUBY)

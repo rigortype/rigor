@@ -6,8 +6,9 @@ require_relative "../type"
 
 module Rigor
   module Inference
-    # Marks a value whose *nil-freeness* rests on Rigor's deliberate choice to ignore core RBS's
-    # `%a{implicitly-returns-nil}` annotation rather than on the value's class. See
+    # Marks a value whose *nil-freeness* rests on a deliberate choice rather than on the value's class: Rigor's
+    # choice to ignore core RBS's `%a{implicitly-returns-nil}` annotation ({IMPLICITLY_RETURNS_NIL}), or a plugin's
+    # to omit a `nil` its answer can hold ({PLUGIN_NIL_FREE}, #3322). See
     # docs/internal-spec/inference-engine.md § "That deferred-to answer is nil-free for a lookup that can
     # miss": `Hash#[]` reads as `V` and `Array#first` as `E` because pessimising them to `V?` costs 25
     # measured false positives on Rigor's own `lib`. The consequence the spec draws is that such a value is
@@ -33,9 +34,15 @@ module Rigor
       # The core-RBS annotation `RbsDispatch` reads the return type past.
       ANNOTATION = "implicitly-returns-nil"
 
-      # The single cause carried today. Kept as a symbol (rather than a bare `true`) so a later slice can
-      # distinguish further optimistic families without changing the table's shape.
+      # The cause an `%a{implicitly-returns-nil}` read carries. Kept as a symbol (rather than a bare `true`) so the
+      # optimistic families stay distinguishable without changing the table's shape ({PLUGIN_NIL_FREE} is the
+      # second).
       IMPLICITLY_RETURNS_NIL = :implicitly_returns_nil
+
+      # Issue #3322 — a plugin's `dynamic_return` answered through `Plugin::Base#optimistic_nil_free`: the type
+      # omits a `nil` the value can hold, on the plugin's judgment that contributing it costs more false
+      # positives than it finds (rigor-activerecord's nullable column readers).
+      PLUGIN_NIL_FREE = :plugin_nil_free
 
       # The argument-free unary predicates whose folded result is a statement about the receiver's
       # *nil-freeness* and nothing else, which is what makes the derivation sound rather than a general taint:
@@ -50,6 +57,14 @@ module Rigor
       # nil-freeness alone, so the derivation is exactly as sound as the unary one. A comparison against any
       # other value folds from the carrier's value and stays out, for the reason the value predicates do.
       NIL_COMPARISONS = %i[== != eql? equal? ===].freeze
+
+      # Issue #3322 — ActiveSupport's presence predicates. Both are value predicates on a hit (`"".present?` is
+      # false), but where `NilClass` declares them ({.nil_class_declares?}) a miss answers a fixed boolean —
+      # `nil.present?` is false and `nil.blank?` true, as for `false` — so a fold over an optimistic carrier is a
+      # bet exactly as `nil?`'s is: `record.completed_at.present?` folds to `true` only because the reader omitted
+      # the `nil` the column can hold. The value is the predicate's answer for a falsey carrier
+      # ({.miss_answer_of_call}).
+      PRESENCE_PREDICATES = { present?: false, blank?: true }.freeze
 
       # {.miss_answer}'s answer for an expression whose value on a miss cannot be told.
       UNKNOWN_MISS = Object.new.freeze
@@ -82,7 +97,13 @@ module Rigor
 
       # The entry a control-flow join keeps for a name both arms mark: the answer survives only when the arms
       # agree on it, since otherwise a miss can take either arm's.
-      def join_bound_marks(mine, theirs) = mine == theirs ? mine : bound_cause(mine)
+      def join_bound_marks(mine, other) = mine == other ? mine : stronger_cause(bound_cause(mine), bound_cause(other))
+
+      # #3322 — the cause kept where two marks combine (a join, either operand of `&&` / `||`, a write's right-hand
+      # side and old binding). A lookup's cause outranks a plugin's: both stop the certainty consumers, but only the
+      # lookup's makes `rigor sig-gen` keep the `nil` a miss returns (`DefReturnTyper#lookup_mark?`), so letting the
+      # plugin's shadow it would drop that `nil` by arm order alone.
+      def stronger_cause(left, right) = left && right && left == PLUGIN_NIL_FREE ? right : left || right
 
       # `rebound` — `scope` with the local `name` rebound to its type across a loop's iterations
       # (`CapturedLocals.bind`) — re-marked with the mark `scope` holds for `name` or `optimistic`, the one an
@@ -90,13 +111,13 @@ module Rigor
       # that one comes without its answer, so the pair's cannot be told.
       def carry_local_mark(scope, rebound, name, optimistic)
         miss = optimistic ? UNKNOWN_MISS : scope.optimistic_local_miss(name)
-        rebound.with_optimistic_local(name, scope.optimistic_local(name) || optimistic, miss: miss)
+        rebound.with_optimistic_local(name, stronger_cause(scope.optimistic_local(name), optimistic), miss: miss)
       end
 
       # {.carry_local_mark} for an instance variable.
       def carry_ivar_mark(scope, rebound, name, optimistic)
         miss = optimistic ? UNKNOWN_MISS : scope.optimistic_ivar_miss(name)
-        rebound.with_optimistic_ivar(name, scope.optimistic_ivar(name) || optimistic, miss: miss)
+        rebound.with_optimistic_ivar(name, stronger_cause(scope.optimistic_ivar(name), optimistic), miss: miss)
       end
 
       # The effective optimistic-nil-free cause of an expression under `scope`, or nil when its nil-freeness is
@@ -129,7 +150,7 @@ module Rigor
              Prism::InstanceVariableAndWriteNode, Prism::ClassVariableAndWriteNode,
              Prism::GlobalVariableAndWriteNode
           resolve_write_form(node, scope)
-        when Prism::AndNode, Prism::OrNode then resolve(node.left, scope) || resolve(node.right, scope)
+        when Prism::AndNode, Prism::OrNode then stronger_cause(resolve(node.left, scope), resolve(node.right, scope))
         when Prism::CallNode
           resolve_attribute_write(node, scope) || resolve_through_safe_navigation(node, scope) ||
             resolve_through_predicate(node, scope)
@@ -159,7 +180,7 @@ module Rigor
       # the mark recorded on the read itself, which lives in the side table every scope shares; the binding lookup
       # stays as the fallback for the post-write scope `branch_certainty` passes.
       def resolve_write(node, scope)
-        resolve(node.value, scope) || optimistic_write_binding(node, scope)
+        stronger_cause(resolve(node.value, scope), optimistic_write_binding(node, scope))
       end
 
       # Only locals and ivars carry a binding mark; a global or class-variable write, and a
@@ -192,7 +213,7 @@ module Rigor
       # to, joined by the old binding's own mark for the case where the miss — not the rvalue — is
       # what makes the condition live (`v = h[k]; if (v &&= "lit")`).
       def resolve_and_write(node, scope)
-        resolve(node.value, scope) || and_write_binding_mark(node, scope)
+        stronger_cause(resolve(node.value, scope), and_write_binding_mark(node, scope))
       end
 
       # The `[type, mark]` pair an `||=` reads its old value through: the scope binding and the
@@ -258,7 +279,7 @@ module Rigor
       # `recv.nil?` / `!recv` / `recv == nil` — the fold is a statement about `recv`, so it is exactly as
       # optimistic as `recv` is.
       def resolve_through_predicate(node, scope)
-        operand = nil_question_operand(node)
+        operand = nil_question_operand(node, scope)
         operand && resolve(operand, scope)
       end
 
@@ -266,11 +287,12 @@ module Rigor
       # or any argument means `nil?` / `!` is not the unary predicate it looks like (`x.!(y)` is a user-defined
       # operator). A comparison needs exactly one positional argument and exactly one `nil` literal side, and
       # answers the other side (`nil == nil` states nothing about a carrier).
-      def nil_question_operand(node)
+      def nil_question_operand(node, scope)
         return nil unless node.block.nil?
 
         arguments = node.arguments&.arguments || []
-        if NIL_COLLAPSING_PREDICATES.include?(node.name)
+        if NIL_COLLAPSING_PREDICATES.include?(node.name) ||
+           (PRESENCE_PREDICATES.key?(node.name) && nil_class_declares?(node.name, scope))
           node.receiver if arguments.empty?
         elsif NIL_COMPARISONS.include?(node.name) && arguments.size == 1
           nil_comparison_operand(node.receiver, arguments.first)
@@ -310,15 +332,31 @@ module Rigor
       def miss_answer_of_call(node, scope)
         return nil if node.safe_navigation? && resolve(node.receiver, scope)
 
-        operand = nil_question_operand(node)
+        operand = nil_question_operand(node, scope)
         inner = operand ? miss_answer(operand, scope) : UNKNOWN_MISS
         return UNKNOWN_MISS if inner.equal?(UNKNOWN_MISS)
 
         case node.name
         when :! then !inner
         when :!= then !inner.nil?
+        when :present?, :blank? then presence_answer(node.name, inner)
         else inner.nil?
         end
+      end
+
+      # #3322 — a presence predicate restates a miss only where `nil` answers it (ActiveSupport's `NilClass#present?`,
+      # which rigor-activesupport-core-ext and gem_rbs_collection declare). Without that declaration a miss raises
+      # `NoMethodError` instead — the element-read rule above — so the fold over a hit stands as proof.
+      def nil_class_declares?(name, scope)
+        definition = Rigor::Reflection.instance_definition("NilClass", scope: scope)
+        !definition.nil? && !definition.methods[name].nil?
+      end
+
+      # What `present?` / `blank?` answers for a carrier whose value is `inner`: the falsey answer for `nil` /
+      # `false`, its negation for `true` (the only other miss answers a derivation produces).
+      def presence_answer(name, inner)
+        falsey = PRESENCE_PREDICATES.fetch(name)
+        inner ? !falsey : falsey
       end
 
       # `(x.nil?)` — a single-statement parenthesised body is its own value, and authors do parenthesise a

@@ -1,0 +1,2 @@
+- **[rigor-activerecord]** A nil or presence check on a column the schema does not declare `null: false`, such as `if user.completed_at.present?`, no longer reports `flow.always-truthy-condition`. ([#3385](https://github.com/rigortype/rigor/pull/3385))
+  - The reader keeps its nil-free type, so `user.email.downcase` still reports nothing, and `rigor sig-gen` still proposes `-> Time` for a method returning it.

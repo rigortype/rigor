@@ -663,6 +663,12 @@ end
                  body: %w[M], o: %w[M::O M])
       end
 
+      it "pushes nothing for a `self::` header in the block of an eval whose receiver renders no path" do
+        source = "module M\n  foo.class_eval do\n    class self::Unnamed\n      def unnamed; end\n    end\n  end\nend\n"
+
+        expect(nestings(source)).to eq(unnamed: %w[M])
+      end
+
       # A header that renders no name is a parse error. The walker loses the chain there and walks the body on:
       # the answer `DefNestingsCollector` keeps as `unrendered_header: :body_with_lost_nesting` (#1521 item 3).
       it "records no def under a chain it lost, until a `self::` header gives it one again" do
@@ -907,6 +913,7 @@ end
             end
             X.instance_eval { self::I = Data.define(:i) }
             foo(InReceiver = Data.define(:ir)).class_eval { }
+            foo.class_eval { class self::Unnamed < Data.define(:u); end }
           end
         RUBY
 

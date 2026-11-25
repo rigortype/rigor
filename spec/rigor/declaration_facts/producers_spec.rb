@@ -82,7 +82,11 @@ RSpec.describe "Declaration producers" do
     problems = tripwire_problems(current, listed(YAML.load_file(snapshot)))
     expect(problems).to eq([]), "#{problems.join("\n")}\nRecord each new producer in producers.yml with a reason, or " \
                                 "move it onto DeclarationWalk::Context / ModuleFunctionState. " \
-                                "#{DeclarationFactSources::REGENERATE_ENV}=1 adds the entries as TODO."
+                                "#{DeclarationFactSources::REGENERATE_ENV}=1 adds the entries as TODO. An entry " \
+                                "\"no longer a producer\" because its method moved out of a listed file needs a " \
+                                "row in DeclarationWriterScan::SOURCES (spec/support/declaration_fact_sources.rb) " \
+                                "for the new file, not regeneration: regenerating drops it, and the grandfathered " \
+                                "pin's count then falls where only its digest should move."
   end
 
   # YAML ends a plain scalar at a `#` that follows whitespace, so `issue #1984` loads as the text before the hash, and
@@ -370,6 +374,17 @@ RSpec.describe "Declaration producers" do
           .to eq(["lib/b.rb: rule (v) starts nowhere, no root of its row and no call on B from another covered " \
                   "file naming a method here"])
         expect(problems(sources.merge("lib/c.rb" => "B.record([])"), table)).to eq([])
+      end
+
+      it "reports a file whose only outside call names a method that left it, or one of a nested class" do
+        table = { "lib/b.rb" => { module: "B", roots: [] } }
+        starts_nowhere = ["lib/b.rb: rule (v) starts nowhere, no root of its row and no call on B from another " \
+                          "covered file naming a method here"]
+
+        expect(problems({ "lib/b.rb" => "module B; def record(t) = t << 1; end", "lib/c.rb" => "B.gone([])" }, table))
+          .to eq(starts_nowhere)
+        nested = "module B; def record(t) = t << 1; class Inner; def gone(t) = t; end; end"
+        expect(problems({ "lib/b.rb" => nested, "lib/c.rb" => "B.gone([])" }, table)).to eq(starts_nowhere)
       end
     end
 

@@ -438,7 +438,7 @@ module DeclarationWriterScan
     return ["#{path}: defines no method of #{name}"] if own.empty?
 
     problems = (source.fetch(:roots) - own).map { |root| "#{path}: root #{root} is not a method of #{name} here" }
-    unless entries.intersect?(defs.keys)
+    unless entries.intersect?(own)
       problems << "#{path}: rule (v) starts nowhere, no root of its row and no call on #{name} from another " \
                   "covered file naming a method here"
     end

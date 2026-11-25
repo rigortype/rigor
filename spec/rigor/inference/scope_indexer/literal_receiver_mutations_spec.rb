@@ -56,11 +56,11 @@ RSpec.describe Rigor::Inference::ScopeIndexer::LiteralReceiverMutations do
   end
 
   # #708 review — the mutation census's two arms key on DIFFERENT TABLES. A `@@x` keys on the declaration
-  # prefix because that is the join key with `build_class_cvar_index`, which derives its own from the same
-  # `declaration_prefix`; a constant name resolves through the whole `Module.nesting` ladder, whose outer
-  # rungs a rooted header drops from the prefix while Ruby keeps them. (The innermost entry is the same
-  # value either way — the tables are what differ.) Threading one value for both is how the cvar arm came
-  # to reference a parameter that no longer existed — a NameError
+  # prefix because that is the join key with `ClassCvarCensus.build_class_cvar_index`, which derives its own
+  # from the same `declaration_prefix`; a constant name resolves through the whole `Module.nesting` ladder,
+  # whose outer rungs a rooted header drops from the prefix while Ruby keeps them. (The innermost entry is the
+  # same value either way — the tables are what differ.) Threading one value for both is how the cvar arm
+  # came to reference a parameter that no longer existed — a NameError
   # inside the discovery pre-pass, which the runner converts into a single `internal analyzer error` and
   # DISCARDS every real diagnostic in the file. Nothing in this repository mutates a `@@` receiver, so the
   # whole suite, the self-check and the corpus were all green over it.

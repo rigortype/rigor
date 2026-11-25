@@ -195,7 +195,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
       scope = Rigor::Scope.empty.with_source_path("app/x.rb")
       (cases.values + [SuperclassesEquivalenceCases::FORK]).each do |source|
         root = parse(source)
-        legacy = [described_class.legacy_class_cvar_index(root, scope),
+        legacy = [described_class::ClassCvarCensus.send(:legacy_class_cvar_index, root, scope),
                   described_class.legacy_superclass_tables(root, "app/x.rb")]
         [%i[cvars supers], %i[supers cvars]].each do |order|
           expect(shadow.first_difference(legacy, shared_tables(root, scope, order), "")).to be_nil

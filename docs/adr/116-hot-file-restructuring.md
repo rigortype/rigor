@@ -12,7 +12,9 @@ diff. **Amended 2026-11-17** after a re-measurement: criterion C4 and slices WD8
 moves; the slices not yet started are separate design tasks
 ([below](#landing-point-2026-11-18--the-pure-moves-are-done-the-rest-is-design)). **Amended 2026-11-19**
 with WD12's interface, the first of those designs: the call-typing order as one declared ladder
-([below](#amendment-2026-11-19--wd12s-interface-3345)).
+([below](#amendment-2026-11-19--wd12s-interface-3345)). **Amended 2026-11-25** with WD9's interface and
+how far WD10 goes before WD2
+([below](#amendment-2026-11-25--wd9s-interface-and-how-far-wd10-goes-before-wd2-3346)).
 
 Grounding: [`docs/notes/20260923-hot-file-churn-audit.md`](../notes/20260923-hot-file-churn-audit.md)
 (the 60-day churn, growth and co-change measurement, and the mechanisms M1–M6 cited below); its
@@ -652,6 +654,153 @@ every rung left in the typer is named with its reason.
   rule for leaving a stateful class allows (#3318). "Landing point" above was written without
   measuring it.
 
+## Amendment, 2026-11-25 — WD9's interface, and how far WD10 goes before WD2 (#3346)
+
+WD9 and WD10 are [#3346](https://github.com/rigortype/rigor/issues/3346). This section is the
+interface WD5's amendment rule requires before their code moves. A design consult measured the file,
+and an independent critique rebuilt the call graph and applied the main slice to a scratch tree; the
+figures below are the critique's where the two differ. WD12's first rung slice
+([#3371](https://github.com/rigortype/rigor/pull/3371)) is the precedent for the port tables and
+the `sig/` rows.
+
+### What was measured
+
+At `master` `34e513fcb`; `scope_indexer.rb`, `declaration_walk/` and `scope_indexer/` are unchanged
+at `b524a28e8`. A *static census* figure is read from a Prism call graph of the file (receiverless
+calls, `ScopeIndexer.x`, `send(:x)`); a call through a local alias would escape it.
+
+- **No state.** `scope_indexer.rb` has 772 `def`s and no instance, class or global variable. Its
+  one `TypingState` slot is the declared-names memo (`DECLARED_NAMES`). What keeps code in the file
+  is the call graph, not state: the #3318 rule's ivar half is vacuous here, and its callback half,
+  at most four calls back into what stays, decides each move.
+- **The cycle is six calls.** `DeclarationWalk` calls back into `ScopeIndexer` at
+  `declaration_walk/context.rb` lines 87, 111, 116, 171 and 177 and `traversal.rb` line 399. The
+  closure of those six roots is 44 `def`s, 368 code lines, and calls nothing else in the file. It is
+  called from 97 other `def`s of the file (188 sites) and from 22 sites elsewhere: 6 in the walk, 4
+  under `scope_indexer/`, and 12 in `statement_evaluator.rb`, `refine_self.rb`,
+  `module_function_state.rb`, `in_effect_refinements/walk.rb`,
+  `dependency_source_inference/walker.rb` and `scope_indexer/certainty.rb`.
+- **It reads constants the walkers share.** `EMPTY_PREFIX`, `EMPTY_NESTING`,
+  `INSTANCE_EVAL_CALLS`, `RECEIVER_EVAL_CALLS` (built from `SELF_REBINDING_EVAL_CALLS`) and
+  `OBJECT_OWNER`, besides `DECLARED_NAMES`. The first four are read by walkers that do not move.
+- **Applied to a scratch tree** (the 44 `def`s and 7 more walker-side helpers moved, every call
+  requalified): `rigor check --no-cache --format json --workers 0` over
+  `spec/integration/fixtures` byte-identical; `rigor coverage --config .rigor.gates.yml`'s
+  `dynamic_call_count` 7,330 against 7,330 over the touched files. Precision rose by 454
+  expressions, about 0.11 points on `lib`: each `Rules.` receiver is a precise expression. That is
+  not a typing gain.
+- **Slot order.** Under `require "rigor"` the file's slots are 85–88. Requiring the new file from
+  `traversal.rb` moves slot 87 to 85; requiring it from `scope_indexer.rb` after its last
+  `require_relative` keeps the order under `require "rigor"` and the LSP path.
+- **Which collectors are on the shared walk.** `class_cvars` (`ClassCvarsCollector`, run alone), and
+  the superclass, def-nesting and member-layout tables (one run in `declaration_walk_tables`), plus
+  `Reflection`'s two plugin-facing collectors. Each engine table keeps its legacy walker as the
+  shadow oracle under `RIGOR_SHADOW_RULE_WALK` (27 `def`s, 558 lines). Every other collector is
+  hand-written.
+- **What other units call.** Four units call no context rule: the declaration signature (185
+  lines), the cross-file fold (973), the seed-bundle codec (134) and the program-globals seed (101).
+  The fold is not a leaf: from its four roots it is 72 `def`s exposing 26 entries, which 22 collector
+  `def`s, `runner.rb` and the dependency-source builder call. The fold and the codec are the code
+  [#1194](https://github.com/rigortype/rigor/issues/1194) (WD2) names.
+
+### Decision
+
+**WD9: `DeclarationWalk::Rules`.** The 44-`def` closure moves to
+`lib/rigor/inference/declaration_walk/rules.rb` as `module_function` code: the same names, the same
+positional parameters, the bodies Prism-identical apart from the requalified calls. The six
+constants and the slot move with it, and `ScopeIndexer` binds its own private names to the moved
+lists so that each is one object. `Context` and `Traversal` call `Rules`, and the walk then names
+nothing of `ScopeIndexer`. The 7 helpers that the closure does not reach
+(`meta_new_mixin_owner`, `meta_new_owner_under_cref`, `eval_body_def_context`,
+`eval_body_singleton?`, `singleton_body_prefix`, `singleton_receiver_constant_name`,
+`singleton_class_prefix`) stay with the walkers that call them. `meta_new_body_prefix`, which
+nothing calls, is deleted in the same slice. `scope_indexer.rb` requires `rules.rb` after its last
+`require_relative`.
+
+- *The deletion test.* `Rules` does not pass it by ratio: 29 public entries over 15 private
+  helpers, an interface of about two thirds of the module (`LeafNodes` went back at 29 of 30,
+  `Composites` stayed at 15 of 29). It is admitted for the reason WD9 exists: the six calls are a
+  cycle, and the closure is what breaking it takes. WD1's `CheckRules::ReceiverPredicates` (a
+  predicate library most of whose functions other files call) is the precedent.
+- *The frame.* No frame or callback object. A collector on the shared walk asks its `context`; a
+  hand-written walker passes its own positionals. The walk allocates one `Context` per body today,
+  and an unported walker handed one would allocate one per body in each of about fifteen walks.
+- *The port, as data.* WD12's tables have their counterpart here: a spec pins `Rules`' public
+  functions and exported constants as a list that may shrink and never grows. Its floor is 12, the
+  entries callers outside #3346's reach need; `Rules` names nothing of `ScopeIndexer`, which a spec
+  checks, so the callback cap of a module with no host is zero. `Rules` is marked `@api private`.
+  An entry added to it is an amendment to this section.
+- *`sig/`.* The rows of the moved methods move with them, each pin in
+  `spec/rigor/sig_gen/provenance_spec.rb` with a reason at the pin, as S6 did
+  (`approval-queue.d/wd12-s6-user-method-sig.md`).
+- *The ratchet.* The precision rise is reported in the slice and not tightened into the ratchet's
+  floor.
+
+**WD10, before WD2.** The destination is the one WD10 names, a discovery namespace; #3346 moves
+what does not need WD2 first and stops at a measured line.
+
+- *Units with no rule calls first.* The declaration signature and the program-globals seed move as
+  `ScopeIndexer::DeclarationSignature` and `ScopeIndexer::ProgramGlobals` under `scope_indexer/`,
+  #3311's precedent: they read the file's constants lexically, and the admission census's owner
+  directory already covers the path. They run ahead of WD9 because they share nothing with it.
+- *The fold and the codec wait for WD2.* WD2 replaces their hand-written slot lists by
+  declarations; moving them first would fix an interface WD2 then rewrites. "Order and procedure"
+  step 3 (WD9, WD2, WD10) stands for them.
+- *Collectors after `Rules`.* Each moves whole behind its entry, as `ScopeIndexer::<Table>` under
+  `scope_indexer/`, in this order: the class declarations, the literal-receiver mutations and the
+  published constant ivars (none calls anything left in the file), the class-variable census (one
+  call), and the shared-walk tables with their recorders and shadow oracles (five calls, so that
+  slice states which helpers move with it to meet the cut-off or why the cluster stays). Moved, not
+  ported: ADR-119 makes a port that is not byte-identical a lane-2 change, and a cluster behind one
+  entry is the unit a later port replaces.
+- *Then re-measure.* The deferred ranges, the class ivar index, the constant census, singleton
+  defs, visibility, the mixin and extend tables and the method tables (about 7,000 lines) are
+  decided one at a time against the cut-off, after the slices above. This amendment commits to none
+  of them.
+
+**What stays in `ScopeIndexer`** at the end of WD10: `index`, `recording_evaluator` (the one writer
+of the node table), `seed_struct_fold_safe` (the top-level evaluation frame), the constants
+`NodePropagation` reads lexically (`CODE_BODY_NODES`, `SELF_OPENING_BODIES`,
+`CLASS_BODY_DEF_BARRIERS`), and the table-key conventions other files read (`TOP_LEVEL_DEF_KEY`,
+`DYNAMIC_TARGET_PREFIX`, `CONSTANT_MEMO`, `CONSTANT_UNPUBLISHABLE`, `EMPTY_PATH_SET`), which belong to
+WD2's declarations. Each slice names what it leaves behind and why.
+
+### Slices, in order
+
+1. **G0 — the producers gate learns more than one file.** `spec/support/declaration_fact_sources.rb`
+   reads rule (v) from a list of files and its roots (`ROOTS`) as names in `scope_indexer.rb`, and
+   `reachable` drops a root it cannot find without failing. The list becomes a table of file to
+   module, `rules.rb` and each new `scope_indexer/` file among them, and a missing root fails. A
+   removal mutation per row. No `lib/` change.
+2. **L1, L4 — `DeclarationSignature` and `ProgramGlobals`.** One pull request or two.
+3. **R1 — `DeclarationWalk::Rules`.** The six roots' callers, 210 call sites, requalified. The two
+   producer rows that rule (i) finds again are re-keyed as grandfathered, and the grandfathered pin
+   recounted. `typing_state_closure_spec.rb` lists `rules.rb`.
+4. **U1–U3 — class declarations, literal-receiver mutations, published constant ivars.**
+5. **U5 — the class-variable census.**
+6. **U4 — the shared-walk tables, recorders and shadow oracles.**
+7. **Re-measure**, then the remaining clusters one at a time, as above.
+
+**Every slice** carries WD12's guardrails (Prism body identity with its substitutions listed;
+byte-identical `rigor check --no-cache --format json` at `--workers 0` and `2` on
+`lib/rigor/inference` and `spec/integration/fixtures`, base engine against head engine over the
+base tree; `TypingState.slots` under every load path; `tool/engine_alloc_ab.rb` three runs and a
+wall A/B; the ratchet delta with both arms from `git archive`; the sig provenance pins it expects,
+stated before it starts; the gate files that list a moved path; an independent review; landing
+within the day), and two this file adds:
+
+- byte-identical `rigor sig-gen` over the corpus, which ADR-119's lane 1 requires of a collector
+  change;
+- the mirror specs of what moves (C4), and a removal mutation per new spec.
+
+Where a slice and a WD12 slice both move a numeric pin (the `sig/rigor/inference.rbs` residue, the
+compared floor, the producers' grandfathered count), the pull request that lands second recounts
+it; it is not merged as text.
+
+*Done when:* the walk names nothing of `ScopeIndexer`; `Rules`' public list is pinned; the slices
+above have landed or are named with the reason they stopped; and each method left in
+`ScopeIndexer` is named with its reason.
+
 ## Rejected / deferred alternatives
 
 | Candidate | Status | Reason |
@@ -669,6 +818,10 @@ every rung left in the typer is named with its reason.
 | A port or frame object handed to each rung (2026-11-19) | Rejected | One more object for each call that reaches the ladder (nearly all of the census run's 1,058,027), or a second long-lived object whose lifetime must match the typer's. The typer already exists; `PORT` and its spec make what a rung sees of it narrow. |
 | The typer walks `RUNGS` at run time (`CallLadder.answer`) (2026-11-19) | Rejected | The self-check types a straight-line call to a declared `try_call`, and reads `rungs[index]` as `Dynamic`. The order-pin spec gives the same single declaration without a megamorphic call on the hot path. |
 | Wrap each rung in an adapter onto its typer method before any body moves (2026-11-19) | Rejected | Ten three-line adapters that `send` into the typer are an indirection layer with nothing behind it, which is why `LeafNodes` went back in #3319. The order-pin spec gives the one declaration without them, and makes nothing public. |
+| Move the cross-file fold and the seed-bundle codec out of `ScopeIndexer` ahead of WD2 (2026-11-25) | Rejected | WD2 (#1194) replaces their hand-written slot lists by declarations, so an interface fixed first is one WD2 rewrites. "Order and procedure" step 3 keeps WD9, WD2, WD10 for them. |
+| Re-home the def-owner and factory-member recognisers into `DeclarationWalk::Rules` so that the shared-walk tables can leave (2026-11-25) | Rejected | It grows the list the `Rules` pin says may only shrink, to move one cluster. The cluster meets the cut-off with what moves beside it, or stays. |
+| A module of the call-shape recognisers (`attr_macro`, `literal_method_name`, `statements_of`, …) for the walkers left in the file (2026-11-25) | Rejected | 20 entries for 22 `def`s, and 107 call sites to edit: the shape `LeafNodes` went back for in #3319. |
+| A `Context` reader wrapping the two rule calls in `member_layouts_collector.rb` (2026-11-25) | Rejected | One caller, on the plugin-reachable `Context`, and WD9 does not need it. |
 
 ## Consequences
 

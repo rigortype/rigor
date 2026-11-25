@@ -1611,20 +1611,20 @@ module Rigor
         after.without_constant_narrowings_named(target.name.to_s)
       end
 
-      # The rvalue call whose block is the class body, for every spelling of the write. Issue #963: the `.freeze`
-      # tail and the `||=` / `Const = Const || …` guard are unwrapped by {ScopeIndexer.meta_new_rvalue}, the same
-      # recognition the index walks under, so the two passes enter the same node or neither does. The recognition
-      # is still the loose one — a CallNode carrying a literal block — because the strict-argument shapes the
-      # index declines are entered under an anonymous name rather than dropped.
+      # The rvalue call whose block is the class body, for every spelling of the write. Issue #963: the `.freeze` tail
+      # and the `||=` / `Const = Const || …` guard are unwrapped by {DeclarationWalk::Rules.meta_new_rvalue}, the same
+      # recognition the index walks under, so the two passes enter the same node or neither does. The recognition is
+      # still the loose one — a CallNode carrying a literal block — because the strict-argument shapes the index
+      # declines are entered under an anonymous name rather than dropped.
       def meta_new_block_call(node)
-        rvalue = ScopeIndexer.meta_new_rvalue(node)
+        rvalue = DeclarationWalk::Rules.meta_new_rvalue(node)
         rvalue if rvalue.is_a?(Prism::CallNode) && rvalue.block.is_a?(Prism::BlockNode)
       end
 
       # The class context a meta-new rvalue block is entered under, or nil when the rvalue is not that shape. The
       # KEY must be the one `ScopeIndexer` filed the body's defs and member layout under, so the two passes agree —
       # which is why the decision is delegated to the ScopeIndexer's own recognition rather than re-spelled here. A
-      # constant write whose rvalue `ScopeIndexer.meta_new_block_body` recognises is keyed by the constant's
+      # constant write whose rvalue `DeclarationWalk::Rules.meta_new_block_body` recognises is keyed by the constant's
       # qualified name, one frame appended to the lexical context exactly as a `class Const` keyword body would be
       # — the path spelling included since [#703](https://github.com/rigortype/rigor/issues/703). A shape the
       # ScopeIndexer's stricter argument check rejects (`Const = Struct.new(*names) do … end`) is registered under
@@ -1642,7 +1642,7 @@ module Rigor
       # ({#eval_class_or_module}), so the stack resets to that frame alone rather than gaining one under the
       # enclosure — `current_class_path` joins the stack, and `ScopeIndexer`'s own prefix resets there too.
       def meta_new_constant_context(node)
-        return nil unless ScopeIndexer.meta_new_block_body(node)
+        return nil unless DeclarationWalk::Rules.meta_new_block_body(node)
 
         case node
         when Prism::ConstantWriteNode, Prism::ConstantOrWriteNode

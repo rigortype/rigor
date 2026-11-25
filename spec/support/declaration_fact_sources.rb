@@ -394,6 +394,10 @@ module DeclarationWriterScan
   #   moved out of `scope_indexer.rb` (ADR-116 WD9, L1 and L4). The writers of the signature's `parts` and of the
   #   seed's accumulator stay rule (v)'s. `scope_indexer.rb` enters each through its one function,
   #   `DeclarationSignature.declaration_signature` and `ProgramGlobals.seed_program_globals`.
+  # - `declaration_walk/rules.rb`: the declaration-context rules, moved out of `scope_indexer.rb` (ADR-116 WD9, R1).
+  #   The walk behind the declared-names oracle (`collect_declared_constant_names` and its arms) writes its `names`
+  #   set and stays rule (v)'s. Every caller spells the module out, as `DeclarationWalk::Rules.x` or, inside the walk,
+  #   `Rules.x`; a call through an alias of the module would not be a root.
   SOURCES = {
     DeclarationProducerScan::RULE_V_FILE => {
       module: "Rigor::Inference::ScopeIndexer",
@@ -411,7 +415,8 @@ module DeclarationWriterScan
     },
     "lib/rigor/inference/scope_indexer/program_globals.rb" => {
       module: "Rigor::Inference::ScopeIndexer::ProgramGlobals", roots: []
-    }
+    },
+    "lib/rigor/inference/declaration_walk/rules.rb" => { module: "Rigor::Inference::DeclarationWalk::Rules", roots: [] }
   }.freeze
 
   module_function

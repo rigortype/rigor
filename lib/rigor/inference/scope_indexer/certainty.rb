@@ -15,7 +15,7 @@ module Rigor
       # - the program's statements, and the bodies of `class`, `module` and `class << self` declarations that are
       #   themselves certain;
       # - the block of a meta-new constant write (`K = Class.new do … end`, `Module.new`, `Struct.new`,
-      #   `Data.define`, {ScopeIndexer#meta_new_block_call}) and of a bare factory call
+      #   `Data.define`, {DeclarationWalk::Rules.meta_new_block_call}) and of a bare factory call
       #   ({AnonymousMetaClass.block_form_receiver}), when the write or the call is certain: Ruby runs the block once,
       #   as the new class's body (ADR-119 WD2, "Conditional definers");
       # - a `begin` WITHOUT a `rescue` clause: its main statements and its `ensure` clause;
@@ -168,7 +168,7 @@ module Rigor
 
           # A meta-new constant write: the factory's receiver and arguments, and its block as the class body.
           def meta_new_write?(node)
-            call = ScopeIndexer.meta_new_block_call(node)
+            call = DeclarationWalk::Rules.meta_new_block_call(node)
             return false unless call
 
             certain(call.receiver)

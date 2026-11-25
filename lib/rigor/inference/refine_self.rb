@@ -158,7 +158,7 @@ module Rigor
         return unknown if node.is_a?(Prism::LambdaNode)
         return refinement_body(parent) if node.name == :refine
         return eval_body(parent, node, eval_names) if RefineCensus::SELF_EVAL_CALLS.include?(node.name)
-        return meta_new_body(node) if ScopeIndexer.meta_new_constant_rvalue?(node)
+        return meta_new_body(node) if DeclarationWalk::Rules.meta_new_constant_rvalue?(node)
         return unknown if parent.here == MAIN
         return method_body(parent, node.name == :define_singleton_method) if method_block?(node)
         return parent if keeps_self?(node, &)
@@ -184,7 +184,7 @@ module Rigor
       def module_here?(here) = named_module?(here) || here.is_a?(Array) || here == ANONYMOUS || here == REFINEMENT
 
       def meta_new_body(node)
-        ScopeIndexer.module_new_call?(node) ? module_body(ANONYMOUS) : class_body(false)
+        DeclarationWalk::Rules.module_new_call?(node) ? module_body(ANONYMOUS) : class_body(false)
       end
 
       # A core iteration method on a receiver whose value is a literal in this file: a literal, or a constant, local
@@ -284,10 +284,10 @@ module Rigor
         context(here, instance, here, deferred: parent.deferred, remote: remote)
       end
 
-      # The modules a `*_eval` / `*_exec` call `node` written in `context` at the lexical `prefix` may run its block
-      # on, when its receiver is a constant: every name the constant's spelling can denote, innermost first, as another
-      # file may declare any of them (`M.module_eval { … }` in `module L` runs on `L::M` where some file declares it);
-      # a `self::`-anchored one as the method walk resolves it (`ScopeIndexer.eval_receiver_prefix`). Else nil.
+      # The modules a `*_eval` / `*_exec` call `node` written in `context` at the lexical `prefix` may run its block on,
+      # when its receiver is a constant: every name the constant's spelling can denote, innermost first, as another file
+      # may declare any of them (`M.module_eval { … }` in `module L` runs on `L::M` where some file declares it); a
+      # `self::`-anchored one as the method walk resolves it (`DeclarationWalk::Rules.eval_receiver_prefix`). Else nil.
       def eval_receiver_names(node, prefix, context)
         return nil unless RefineCensus::SELF_EVAL_CALLS.include?(node.name) && !RefineCensus.self_call?(node)
 
@@ -298,7 +298,8 @@ module Rigor
 
         here = context.here
         self_prefix = here.is_a?(String) && here != wildcard ? here.split("::") : []
-        resolved = ScopeIndexer.eval_receiver_prefix(node, self_prefix, prefix, unnameable_self: self_prefix.empty?)
+        resolved = DeclarationWalk::Rules.eval_receiver_prefix(node, self_prefix, prefix,
+                                                               unnameable_self: self_prefix.empty?)
         [resolved.join("::")] unless resolved.nil? || resolved.empty?
       end
 

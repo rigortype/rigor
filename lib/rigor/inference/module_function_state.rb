@@ -44,8 +44,9 @@ module Rigor
     # call covers the instance methods written before it as well as after it, while a named call takes only a
     # def written before it. A change to what `module_function` means must decide whether that reader follows.
     #
-    # The deferred-ranges prescan asks `ScopeIndexer.receiver_eval_call?` and `ScopeIndexer.def_singleton?`, so
-    # `rigor/inference/scope_indexer` must be loaded before it runs. This file does not require it:
+    # The deferred-ranges prescan asks `DeclarationWalk::Rules.receiver_eval_call?` and `ScopeIndexer.def_singleton?`,
+    # so `rigor/inference/scope_indexer`, which loads the rules, must be loaded before it runs. This file does not
+    # require it:
     # `scope_indexer.rb` requires this file, and a require back would be circular. The other entry points need
     # only Prism.
     #
@@ -356,7 +357,7 @@ module Rigor
           Spellings.prescan(node, arguments, qualified_prefix, in_singleton_class, offsets, ranges)
         elsif visibility_reset?(node)
           offsets << [node.location.start_offset, nested ? :maybe_off : :off]
-        elsif ScopeIndexer.receiver_eval_call?(node) || (node.block && ScopeIndexer.meta_new_constant_rvalue?(node))
+        elsif DeclarationWalk::Rules.receiver_eval_call?(node) || (node.block && DeclarationWalk::Rules.meta_new_constant_rvalue?(node))
           prescan_eval_call(node, qualified_prefix, in_singleton_class, offsets, ranges)
         else
           return false

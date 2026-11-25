@@ -40,11 +40,11 @@ module Rigor
         # cref only a path write still names one.
         def on_constant_write(node, context)
           self_owner = context.self_owner
-          unless context.singleton_cref && !ScopeIndexer.meta_new_path_target_nameable?(node, self_owner)
-            child_prefix = ScopeIndexer.meta_new_child_prefix(node, context.prefix, self_owner)
+          unless context.singleton_cref && !DeclarationWalk::Rules.meta_new_path_target_nameable?(node, self_owner)
+            child_prefix = DeclarationWalk::Rules.meta_new_child_prefix(node, context.prefix, self_owner)
           end
           if child_prefix
-            rvalue = ScopeIndexer.meta_new_rvalue(node)
+            rvalue = DeclarationWalk::Rules.meta_new_rvalue(node)
             ScopeIndexer.record_data_member_layout(@data, child_prefix, rvalue)
             ScopeIndexer.record_struct_member_layout(@struct, child_prefix, rvalue)
           end

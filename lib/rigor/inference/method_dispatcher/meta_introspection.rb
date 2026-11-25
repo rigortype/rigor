@@ -106,7 +106,7 @@ module Rigor
         # trailing `.new` dispatches instead of firing a spurious `undefined method 'new' for
         # Struct`.
         #
-        # The disambiguation mirrors `ScopeIndexer#struct_new_call?`: a call whose positionals are
+        # The disambiguation mirrors `DeclarationWalk::Rules.struct_new_call?`: a call whose positionals are
         # all `Constant<Symbol>` literals is a member-list class definition → `Singleton[Struct]`.
         # The following `AnonStruct.new(1, 2)` carries non-symbol args, so it falls through this
         # gate to `Nominal[Struct]` (a fresh instance) via the `meta_new` tail. ADR-48 deferred full

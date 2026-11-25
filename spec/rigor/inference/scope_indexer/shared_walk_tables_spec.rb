@@ -317,9 +317,9 @@ RSpec.describe Rigor::Inference::ScopeIndexer::SharedWalkTables do
     end
 
     it "records nothing for a member list that is empty or holds a splat, or for another call" do
-      sources = ["Struct.new", "Struct.new(*F)", "Struct.new(:a, *F)", "Data.define(:a)", "nil"]
+      sources = ["Struct.new", "Struct.new('Named')", "Struct.new(*F)", "Struct.new(:a, *F)", "Data.define(:a)", "nil"]
 
-      expect(sources.map { |source| struct(source) }).to eq([{}] * 5)
+      expect(sources.map { |source| struct(source) }).to eq([{}] * 6)
     end
 
     it "takes the block of the outermost call for a write's value, and not for a header's superclass" do
@@ -596,6 +596,9 @@ end
               def s; end
               class D
                 def d; end
+                class Deeper
+                  def deeper; end
+                end
               end
               class self::E
                 def e; end
@@ -609,7 +612,8 @@ end
           end
         RUBY
 
-        expect(nestings(source)).to eq(s: %w[C], d: %w[C], e: %w[C], f: %w[F C], in_operand: %w[C])
+        expect(nestings(source))
+          .to eq(s: %w[C], d: %w[C], deeper: %w[C], e: %w[C], f: %w[F C], in_operand: %w[C])
       end
 
       it "anchors a `self::` header in a factory block on the class the write names, the chain staying lexical" do
@@ -650,7 +654,7 @@ end
               end
             end
             foo(def in_receiver; end).class_eval(def in_argument; end) { def body; end }
-            other { class self::O; def o; end; end }
+            X.tap { class self::O; def o; end; end }
           end
         RUBY
 
@@ -691,11 +695,25 @@ end
                   def u; end
                 end
               end
+              self::Y.class_eval do
+                class self::W
+                  def w; end
+                end
+              end
             end
           end
         RUBY
 
-        expect(nestings(source)).to eq(d: %w[X::D S], u: %w[S])
+        expect(nestings(source)).to eq(d: %w[X::D S], u: %w[S], w: %w[S])
+      end
+
+      # The walker threads no prefix: it splits the head of the chain. Below a compact header that names the
+      # receiver by its last segment, where the walk's own prefix (`["Admin::W"]`) would find the top-level `W`:
+      # the answer `DefNestingsCollector` keeps as `lexical_prefix: :nesting_head` (#1521 item 1).
+      it "resolves an eval's receiver against the head of the chain, split into its segments" do
+        source = "class Admin::W\n  W.class_eval do\n    class self::U\n      def u; end\n    end\n  end\nend\n"
+
+        expect(nestings(source)).to eq(u: %w[Admin::W::U Admin::W])
       end
     end
 
@@ -735,6 +753,7 @@ end
               end
               class self::E < Base; end
               class ::F < Base; end
+              class_eval { class self::U < Base; end }
             end
             class << (class InOperand < Base; end; self)
             end
@@ -783,21 +802,21 @@ end
       it "records the superclass of a `Class.new` with a block, with the path only outside every body" do
         source = <<~RUBY
           Class.new(Top) { }
+          K = Class.new(Named) { Class.new(InFactory) { } }
+          X.class_eval { Class.new(InEval) { } }
           class C
             Class.new(InClass) { }
             class << self
               Class.new(InSingleton) { }
             end
-            K = Class.new(Named) { Class.new(InFactory) { } }
-            X.class_eval { Class.new(InEval) { } }
             Class.new(NoBlock)
             Module.new(NotAClass) { }
           end
         RUBY
 
         expect(tables(source).first)
-          .to eq("#<Class:app/x.rb:1:0>" => "Top", "#<Class:3:2>" => "InClass", "#<Class:5:4>" => "InSingleton",
-                 "#<Class:7:25>" => "InFactory", "#<Class:8:17>" => "InEval")
+          .to eq("#<Class:app/x.rb:1:0>" => "Top", "#<Class:2:23>" => "InFactory", "#<Class:3:15>" => "InEval",
+                 "#<Class:5:2>" => "InClass", "#<Class:7:4>" => "InSingleton")
       end
     end
 
@@ -846,13 +865,15 @@ end
               self::Mine = Struct.new(:m)
             end
             Z = Class.new(Struct.new(:z)) { }
+            J = Class.new((InArgument = Data.define(:ia); SArgument = Struct.new(:sa); Base)) { }
           end
         RUBY
 
         expect(layouts(source))
-          .to eq([{ "L" => %i[from to], "M::U" => %i[u], "M::K" => %i[k], "M::K::Own" => %i[own] },
+          .to eq([{ "L" => %i[from to], "M::U" => %i[u], "M::K" => %i[k], "M::K::Own" => %i[own],
+                    "M::InArgument" => %i[ia] },
                   { "M::N" => struct(:n), "T" => struct(:t), "M::A::V" => struct(:v), "M::Inner" => struct(:i),
-                    "M::K::Mine" => struct(:m), "M::Z" => struct(:z) }])
+                    "M::K::Mine" => struct(:m), "M::Z" => struct(:z), "M::SArgument" => struct(:sa) }])
       end
 
       it "records below `class <<` only what is rooted, and the operand in the enclosing class" do
@@ -904,6 +925,7 @@ end
                 class self::D < Data.define(:d); end
               end
               class_eval { self::N = Data.define(:n) }
+              self::Y.class_eval { self::V = Data.define(:v); self::T = Struct.new(:t) }
             end
           end
         RUBY

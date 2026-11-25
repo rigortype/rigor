@@ -163,11 +163,11 @@ end
 # - (iii) references a constant, in this file or another covered one, whose assignment contains (i), (ii) or (iv);
 # - (iv) names a visibility or mixin keyword as a symbol (`:private`, `:include`, …), except as a Hash key or among
 #   Array/String mutator names (`%i[<< push prepend unshift]` names methods, not the keyword);
-# - (v) in `scope_indexer.rb` or `scope_indexer/node_propagation.rb`, is reachable through same-file calls (in its
-#   body or default arguments) from one of `DeclarationWriterScan::ROOTS` or a method another covered file calls as
-#   `ScopeIndexer.x`, and writes into one of its parameters, a `*rest` or `**rest` included: an indexed assignment
-#   or a `<<` / `merge!` / `add?`-style call into it, or passing it (by position, keyword or splat) to a same-file
-#   method that does.
+# - (v) in a file `DeclarationWriterScan::SOURCES` lists, is reachable through same-file calls (in its body or
+#   default arguments) from one of the roots that table gives the file or a method another covered file calls on
+#   the file's module (`ScopeIndexer.x`), and writes into one of its parameters, a `*rest` or `**rest` included: an
+#   indexed assignment or a `<<` / `merge!` / `add?`-style call into it, or passing it (by position, keyword or
+#   splat) to a same-file method that does.
 #
 # A class that includes `DeclarationWalk::Collector` is a producer as a whole, found from the `include` statement, and
 # so is a class in a covered file whose superclass is one (`class X < SuperclassesCollector`).
@@ -178,16 +178,14 @@ module DeclarationProducerScan
   KEYWORDS = %i[private protected public module_function include extend prepend].freeze
   # Names only an Array or String mutator catalogue lists; a keyword symbol beside one of them names a method.
   MUTATORS = %i[<< push append unshift insert concat pop shift replace clear fill delete_at slice! sub! gsub!].freeze
+  # Rule (v)'s first file. `DeclarationWriterScan::SOURCES` lists every file the rule follows.
   RULE_V_FILE = "lib/rigor/inference/scope_indexer.rb"
-  # The per-node propagation moved out of `scope_indexer.rb` (ADR-116 WD10); its `table` writers stay rule (v)'s.
-  # Its entry points are called from `scope_indexer.rb`'s delegators as `NodePropagation.x`.
-  RULE_V_FILES = [RULE_V_FILE, "lib/rigor/inference/scope_indexer/node_propagation.rb"].freeze
   DEFINE_METHOD_CALLS = %i[define_method define_singleton_method].freeze
 
   module_function
 
-  # `{"path#scope" => [reasons]}` over the parsed files.
-  def producers(parsed)
+  # `{"path#scope" => [reasons]}` over the parsed files; `sources` is rule (v)'s table.
+  def producers(parsed, sources = DeclarationWriterScan::SOURCES)
     tainted = tainted_constants(parsed)
     found = Hash.new { |table, key| table[key] = [] }
     parsed.each do |path, root|
@@ -195,11 +193,8 @@ module DeclarationProducerScan
       scan(root, [], nil, tainted, skipped) { |scope, reason| found["#{path}##{scope}"] << reason }
     end
     collectors(parsed) { |path, scope, why| found["#{path}##{scope}"] << why }
-    RULE_V_FILES.each do |file|
-      roots = DeclarationWriterScan.external_roots(parsed, file)
-      DeclarationWriterScan.rule_v(parsed.fetch(file, nil), roots) do |scope|
-        found["#{file}##{scope}"] << "writes a table (rule v)"
-      end
+    DeclarationWriterScan.each_writer(parsed, sources) do |path, scope|
+      found["#{path}##{scope}"] << "writes a table (rule v)"
     end
     found.transform_values(&:uniq)
   end
@@ -374,61 +369,137 @@ module DeclarationProducerScan
   end
 end
 
-# ADR-119 WD6's rule (v): the methods of `RULE_V_FILES` that are reachable, through same-file calls (a default
-# argument's included), from `ROOTS` or from a method another covered file calls as `ScopeIndexer.x` (or
-# `NodePropagation.x`), and write into
-# one of their parameters: an indexed assignment or a `<<` / `merge!`-style call into it, or passing it to a
-# same-file method that does.
+# ADR-119 WD6's rule (v): the methods of each file `SOURCES` lists that are reachable, through same-file calls (a
+# default argument's included), from the file's roots or from a method another covered file calls on the file's
+# module (`ScopeIndexer.x`, `NodePropagation.x`), and write into one of their parameters: an indexed assignment or a
+# `<<` / `merge!`-style call into it, or passing it to a same-file method that does.
 module DeclarationWriterScan
   # The Hash / Set / Array writers, then the visibility table's own (`ScopeIndexer::VisibilityTable#write` and the
   # contest writers beside it), which write a slot or its contest as `[]=` does (#1984).
   WRITE_CALLS = %i[
     []= << push unshift concat merge! store add add? update write wrote contest_slot contest_class
   ].freeze
-  # ADR-119's three roots, then the multi-file entry points: their folds (`finalize_project_index`,
-  # `fold_def_tables`, `fold_def_sources`, …) are reachable from no other root. A method another file calls is a
-  # root as well, so a new entry point needs no edit here.
-  ROOTS = %i[
-    index accumulate_project_index finalize_def_index
-    discovered_classes_for_paths discovered_def_index_for_paths discovered_project_index_for_paths
-    discovered_project_index_incremental scan_summary_for_paths
-  ].freeze
+  # Rule (v)'s table, a row per file: the module whose functions the file defines, by its full name, and the roots
+  # the rule starts from in that file. A method another covered file calls on the module (`names?`) is a root as
+  # well, whether or not its caller is reachable, so a new entry point needs no edit here, and a file entered only
+  # that way (`roots: []`) is a root set of its own: reachability is followed inside a file and never from one file
+  # into the next. A module that leaves `scope_indexer.rb` with a table writer is one more row, without which the
+  # rule no longer follows it. `source_problems` fails a row whose file, module or root is gone.
+  #
+  # - `scope_indexer.rb`: ADR-119's three roots, then the multi-file entry points, whose folds
+  #   (`finalize_project_index`, `fold_def_tables`, `fold_def_sources`, …) are reachable from no other root.
+  # - `node_propagation.rb`: the per-node propagation, moved out of `scope_indexer.rb` (ADR-116 WD10); its `table`
+  #   writers stay rule (v)'s. `scope_indexer.rb`'s delegators enter it as `NodePropagation.x`.
+  SOURCES = {
+    DeclarationProducerScan::RULE_V_FILE => {
+      module: "Rigor::Inference::ScopeIndexer",
+      roots: %i[
+        index accumulate_project_index finalize_def_index
+        discovered_classes_for_paths discovered_def_index_for_paths discovered_project_index_for_paths
+        discovered_project_index_incremental scan_summary_for_paths
+      ]
+    },
+    "lib/rigor/inference/scope_indexer/node_propagation.rb" => {
+      module: "Rigor::Inference::ScopeIndexer::NodePropagation", roots: []
+    }
+  }.freeze
 
   module_function
 
-  # The `ScopeIndexer` (or `ScopeIndexer::NodePropagation`) methods the covered files other than `rule_v_file` call
-  # (`ScopeIndexer.x(…)`).
-  def external_roots(parsed, rule_v_file)
-    parsed.except(rule_v_file).flat_map do |_, root|
-      DeclarationFactSources.each_node(root).select do |node|
-        node.is_a?(Prism::CallNode) &&
-          DeclarationFactSources.constant_name(node.receiver).to_s.end_with?("ScopeIndexer", "NodePropagation")
-      end.map(&:name)
-    end.uniq
+  # Rule (v) over the table: yields `path, key` for each method of a listed file that is reachable from the file's
+  # entry points and writes into a parameter. A file `parsed` does not hold yields nothing, and a root its file does
+  # not define starts nothing, so that a part of the tree can be scanned; `source_problems` reports both.
+  def each_writer(parsed, sources = SOURCES)
+    calls = module_calls(parsed)
+    sources.each do |path, source|
+      root = parsed[path]
+      next unless root
+
+      rule_v(root, source.fetch(:module), entry_points(calls, path, source)) { |key| yield path, key }
+    end
   end
 
-  # Rule (v): yields the keys of a rule (v) file's methods that are reachable from its entry points and write
-  # into a parameter.
-  def rule_v(root, extra_roots = [])
-    return unless root
+  # What makes a row follow less than it says, a line each: a file that is not covered (moved or renamed), a file
+  # that defines no method of the row's module, a root that is not a method of that module there (moved out or
+  # renamed), and a file the rule starts nowhere in.
+  def source_problems(parsed, sources = SOURCES)
+    calls = module_calls(parsed)
+    sources.flat_map do |path, source|
+      root = parsed[path]
+      next ["#{path}: listed for rule (v), but not a covered file"] unless root
 
-    # Every definition of a name counts: a reopening or a `def self.x` beside a `module_function` copy.
-    defs = Hash.new { |table, name| table[name] = [] }
-    DeclarationFactSources.each_with_owners(root) do |node, owners|
-      defs[node.name] << [node, owners] if node.is_a?(Prism::DefNode)
+      row_problems(path, source, definitions(root), entry_points(calls, path, source))
     end
-    calls = defs.transform_values { |sites| sites.flat_map { |node, _| same_file_calls(node, defs) } }
+  end
+
+  def row_problems(path, source, defs, entries)
+    name = source.fetch(:module)
+    own = defs.select { |_, sites| sites.any? { |_, owners| owners.join("::") == name } }.keys
+    return ["#{path}: defines no method of #{name}"] if own.empty?
+
+    problems = (source.fetch(:roots) - own).map { |root| "#{path}: root #{root} is not a method of #{name} here" }
+    unless entries.intersect?(defs.keys)
+      problems << "#{path}: rule (v) starts nowhere, no root of its row and no call on #{name} from another " \
+                  "covered file naming a method here"
+    end
+    problems
+  end
+
+  # `[[path, method name, the receiver's constant name]]` for every call on a constant in the parsed files.
+  def module_calls(parsed)
+    parsed.flat_map do |path, root|
+      DeclarationFactSources.each_node(root).filter_map do |node|
+        name = DeclarationFactSources.constant_name(node.receiver) if node.is_a?(Prism::CallNode)
+        [path, node.name, name] if name
+      end
+    end
+  end
+
+  # A file's entry points: the roots its row lists, and the methods the other covered files call on its module.
+  def entry_points(calls, path, source)
+    called = calls.filter_map do |caller_path, method, name|
+      method if caller_path != path && names?(name, source.fetch(:module))
+    end
+    source.fetch(:roots) | called
+  end
+
+  # Whether a constant reference names the module: by its full name or a trailing part of it that starts at a `::`
+  # (`Rules`, `DeclarationWalk::Rules`), so that `CheckRules` and `Analysis::Rules` do not name
+  # `Rigor::Inference::DeclarationWalk::Rules`; a reference anchored with a leading `::`, by the full name only. The
+  # spelling alone decides: a module of another namespace written with the same trailing name is taken too, and an
+  # alias constant spelled otherwise is not seen.
+  def names?(reference, module_name)
+    return reference.delete_prefix("::") == module_name if reference.start_with?("::")
+
+    module_name == reference || module_name.end_with?("::#{reference}")
+  end
+
+  # Rule (v) in one file: yields the keys of its methods that are reachable from `entries` and write into a
+  # parameter.
+  def rule_v(root, module_name, entries)
+    defs = definitions(root)
+    calls = defs.transform_values { |sites| sites.flat_map { |node, _| same_file_calls(node, defs, module_name) } }
     writers = parameter_writers(defs, calls)
-    reachable(calls, ROOTS | extra_roots).each do |name|
+    reachable(calls, entries).each do |name|
       next if writers.fetch(name).empty?
 
       defs.fetch(name).each { |node, owners| yield DeclarationProducerScan.def_key(owners, node, node.receiver) }
     end
   end
 
-  def same_file_calls(def_node, defs)
+  # `{method name => [[def node, owners]]}` for a file. Every definition of a name counts: a reopening or a
+  # `def self.x` beside a `module_function` copy.
+  def definitions(root)
+    defs = Hash.new { |table, name| table[name] = [] }
+    DeclarationFactSources.each_with_owners(root) do |node, owners|
+      defs[node.name] << [node, owners] if node.is_a?(Prism::DefNode)
+    end
+    defs
+  end
+
+  def same_file_calls(def_node, defs, module_name)
     def_code(def_node).select do |node|
-      node.is_a?(Prism::CallNode) && defs.key?(node.name) && self_receiver?(node.receiver)
+      node.is_a?(Prism::CallNode) && defs.key?(node.name) && self_receiver?(node.receiver, module_name)
     end
   end
 
@@ -437,9 +508,12 @@ module DeclarationWriterScan
     [def_node.parameters, def_node.body].compact.flat_map { |part| DeclarationFactSources.each_node(part).to_a }
   end
 
-  def self_receiver?(receiver)
-    receiver.nil? || receiver.is_a?(Prism::SelfNode) ||
-      DeclarationFactSources.constant_name(receiver).to_s.end_with?("ScopeIndexer")
+  # A call on the implicit receiver, on `self`, or on the file's module by name.
+  def self_receiver?(receiver, module_name)
+    return true if receiver.nil? || receiver.is_a?(Prism::SelfNode)
+
+    name = DeclarationFactSources.constant_name(receiver)
+    !name.nil? && names?(name, module_name)
   end
 
   def reachable(calls, roots)

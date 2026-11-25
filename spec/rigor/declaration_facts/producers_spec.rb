@@ -21,11 +21,13 @@ require "yaml"
 # evasion. It does not see dispatch on `node.class.name` or other strings, on `Prism::Node#type` through a variable,
 # `Prism.const_get(:ClassNode)`, duck typing (`respond_to?(:superclass)`), a keyword spelled as a String, a constant
 # reached through a variable or `const_get`, a collector subclassed through a variable or `Class.new`, or rule (v)'s
-# writes outside `scope_indexer.rb` and `scope_indexer/node_propagation.rb`, through a local alias of a parameter,
-# through `...` forwarding, or from a method reached only through `send`, a block handed to another file, or an
-# entry point neither in `DeclarationWriterScan::ROOTS` nor called as `ScopeIndexer.x` (or `NodePropagation.x`) from
-# another covered file. Plugin specs and demo apps are not scanned. The list freezes the set and certifies nothing
-# about how an entry computes its context.
+# writes outside the files `DeclarationWriterScan::SOURCES` lists, through a local alias of a parameter, through
+# `...` forwarding, into a parameter handed to a writer in another file, or from a method reached only through
+# `send`, a block handed to another file, or an entry point that is neither a root of its file in that table nor
+# called from another covered file on the file's module, spelled as its full name or a trailing part of it
+# (`ScopeIndexer.x`, `Inference::ScopeIndexer.x`; an alias constant spelled otherwise is not seen). A module that
+# leaves a listed file is followed only once it has a row of its own. Plugin specs and demo apps are not scanned.
+# The list freezes the set and certifies nothing about how an entry computes its context.
 RSpec.describe "Declaration producers" do
   let(:snapshot) { File.join(__dir__, "producers.yml") }
   # The closed grandfathered list. Lower it when an entry goes; never raise it for a new producer.
@@ -137,6 +139,17 @@ RSpec.describe "Declaration producers" do
 
     expect(missing).to eq([]), "Replace TODO in producers.yml: say what each file computes, and why each entry " \
                                "computes a declaration context itself.\n#{missing.join("\n")}"
+  end
+
+  # Rule (v) follows only the files its table lists, each from its own roots, and skips a root or a file it does not
+  # find. A row whose file was renamed, or whose root or module moved to another file, would follow less, and the
+  # list above would pass again once the entries it stopped finding were dropped from producers.yml.
+  it "follows every rule (v) file from roots that are still there" do
+    problems = DeclarationWriterScan.source_problems(DeclarationFactSources.parsed_under)
+
+    expect(problems).to eq([]), "#{problems.join("\n")}\nRule (v) follows less than DeclarationWriterScan::SOURCES " \
+                                "says. Give a root or a module that moved to the row of the file that now " \
+                                "defines it (a new file is a new row), and fix or drop the row of a file that is gone."
   end
 
   it "keeps the grandfathered list closed" do
@@ -261,8 +274,10 @@ RSpec.describe "Declaration producers" do
         RUBY
         "lib/rigor/caller.rb" => Prism.parse("Rigor::ScopeIndexer.summary_for(root, {})").value
       }
+      # The fixture's module is `Rigor::ScopeIndexer`; the committed row names `Rigor::Inference::ScopeIndexer`.
+      table = { DeclarationProducerScan::RULE_V_FILE => { module: "Rigor::ScopeIndexer", roots: [] } }
 
-      expect(DeclarationProducerScan.producers(parsed).keys.map { |key| key.split("#", 2).last })
+      expect(DeclarationProducerScan.producers(parsed, table).keys.map { |key| key.split("#", 2).last })
         .to contain_exactly("Rigor::ScopeIndexer#summary_for", "Rigor::ScopeIndexer#walk", "Rigor::ScopeIndexer#record")
     end
 
@@ -277,6 +292,85 @@ RSpec.describe "Declaration producers" do
         .to eq("lib/rigor/a.rb#Rigor::A" => ["include DeclarationWalk::Collector"],
                "lib/rigor/b.rb#Rigor::B" => ["A (a DeclarationWalk::Collector subclass)"],
                "lib/rigor/b.rb#Rigor::C" => ["Rigor::B (a DeclarationWalk::Collector subclass)"])
+    end
+
+    describe "rule (v)'s table" do
+      def parse(sources) = sources.transform_values { |source| Prism.parse(source).value }
+
+      def rule_v_keys(sources, table) = DeclarationProducerScan.producers(parse(sources), table).keys
+
+      def problems(sources, table) = DeclarationWriterScan.source_problems(parse(sources), table)
+
+      it "starts each file from its own roots" do
+        sources = { "lib/a.rb" => "module A; def enter(t) = t << 1; end",
+                    "lib/b.rb" => "module B; def enter(t) = t << 2; end" }
+        table = { "lib/a.rb" => { module: "A", roots: %i[enter] }, "lib/b.rb" => { module: "B", roots: [] } }
+
+        expect(DeclarationProducerScan.producers(parse(sources), table))
+          .to eq("lib/a.rb#A#enter" => ["writes a table (rule v)"])
+      end
+
+      it "takes as a root what another file calls on the file's module, and on no other" do
+        sources = { "lib/a.rb" => "module Rigor; module A; def enter(t) = t << 1; end; end",
+                    "lib/b.rb" => "module Rigor; module B; def enter(t) = t << 2; end; end",
+                    "lib/c.rb" => "module Rigor; B.enter([]); end" }
+        table = { "lib/a.rb" => { module: "Rigor::A", roots: [] }, "lib/b.rb" => { module: "Rigor::B", roots: [] } }
+
+        expect(rule_v_keys(sources, table)).to eq(["lib/b.rb#Rigor::B#enter"])
+      end
+
+      # `CheckRules` ends in `Rules` and `Analysis::Rules` has its last segment, but neither spells a trailing part
+      # of `Rigor::Walk::Rules`; `::Walk::Rules` is anchored at the top level, where the module is not.
+      it "reads a receiver as the module by its full name or a trailing part of it, from a segment's start" do
+        rules = "module Rigor; module Walk; module Rules; def bare(t) = t << 1; def partial(t) = t << 2; " \
+                "def full(t) = t << 3; def anchored(t) = t << 4; def suffix(t) = t << 5; def segment(t) = t << 6; " \
+                "def rooted(t) = t << 7; end; end; end"
+        callers = "Rules.bare([]); Walk::Rules.partial([]); Rigor::Walk::Rules.full([]); " \
+                  "::Rigor::Walk::Rules.anchored([]); CheckRules.suffix([]); Analysis::Rules.segment([]); " \
+                  "::Walk::Rules.rooted([])"
+        table = { "lib/rules.rb" => { module: "Rigor::Walk::Rules", roots: [] } }
+
+        expect(rule_v_keys({ "lib/rules.rb" => rules, "lib/callers.rb" => callers }, table))
+          .to contain_exactly("lib/rules.rb#Rigor::Walk::Rules#bare", "lib/rules.rb#Rigor::Walk::Rules#partial",
+                              "lib/rules.rb#Rigor::Walk::Rules#full", "lib/rules.rb#Rigor::Walk::Rules#anchored")
+      end
+
+      it "follows a call a file makes on its own module by name, and not one on another module" do
+        source = "module Rigor; module B; def enter(t) = B.record(t); def record(t) = t << 1; " \
+                 "def far(t) = Other::B.lost(t); def lost(t) = t << 2; end; end"
+        table = { "lib/b.rb" => { module: "Rigor::B", roots: %i[enter far] } }
+
+        expect(rule_v_keys({ "lib/b.rb" => source }, table))
+          .to contain_exactly("lib/b.rb#Rigor::B#enter", "lib/b.rb#Rigor::B#record")
+      end
+
+      it "reports a root that is not a method of the module in its file" do
+        sources = { "lib/a.rb" => "module A; def enter(t) = t << 1; class Inner; def nested = 1; end; end" }
+
+        expect(problems(sources, { "lib/a.rb" => { module: "A", roots: %i[enter] } })).to eq([])
+        expect(problems(sources, { "lib/a.rb" => { module: "A", roots: %i[enter nested moved] } }))
+          .to eq(["lib/a.rb: root nested is not a method of A here", "lib/a.rb: root moved is not a method of A here"])
+      end
+
+      it "reports a listed file that is not covered, and a file that defines no method of its module" do
+        sources = { "lib/a.rb" => "module A; def enter(t) = t << 1; end" }
+
+        expect(problems(sources, { "lib/gone.rb" => { module: "A", roots: [] } }))
+          .to eq(["lib/gone.rb: listed for rule (v), but not a covered file"])
+        expect(problems(sources, { "lib/a.rb" => { module: "Rigor::A", roots: %i[enter] } }))
+          .to eq(["lib/a.rb: defines no method of Rigor::A"])
+      end
+
+      it "reports a file the rule starts nowhere in, which a call from the file itself does not enter" do
+        sources = { "lib/b.rb" => "module B; def unused(t) = B.record(t); def record(t) = t << 1; end" }
+        table = { "lib/b.rb" => { module: "B", roots: [] } }
+
+        expect(rule_v_keys(sources, table)).to eq([])
+        expect(problems(sources, table))
+          .to eq(["lib/b.rb: rule (v) starts nowhere, no root of its row and no call on B from another covered " \
+                  "file naming a method here"])
+        expect(problems(sources.merge("lib/c.rb" => "B.record([])"), table)).to eq([])
+      end
     end
 
     it "reports a new producer and a vanished one" do

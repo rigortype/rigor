@@ -398,6 +398,12 @@ module DeclarationWriterScan
   #   The walk behind the declared-names oracle (`collect_declared_constant_names` and its arms) writes its `names`
   #   set and stays rule (v)'s. Every caller spells the module out, as `DeclarationWalk::Rules.x` or, inside the walk,
   #   `Rules.x`; a call through an alias of the module would not be a root.
+  # - `class_declarations.rb`, `literal_receiver_mutations.rb` and `published_constant_ivars.rb`: the class-declaration
+  #   walk, the mutation census and the published-constant ivar census, moved out of `scope_indexer.rb` (ADR-116 WD9,
+  #   U1 to U3). The writers of each walk's accumulator, census or table stay rule (v)'s. Each is entered through its
+  #   one function, spelled on the module: `ClassDeclarations.collect_class_decls`,
+  #   `LiteralReceiverMutations.collect_literal_receiver_mutations` (which `constant_ivar_value.rb` calls too) and
+  #   `PublishedConstantIvars.seed_published_constant_ivars`.
   SOURCES = {
     DeclarationProducerScan::RULE_V_FILE => {
       module: "Rigor::Inference::ScopeIndexer",
@@ -415,6 +421,15 @@ module DeclarationWriterScan
     },
     "lib/rigor/inference/scope_indexer/program_globals.rb" => {
       module: "Rigor::Inference::ScopeIndexer::ProgramGlobals", roots: []
+    },
+    "lib/rigor/inference/scope_indexer/class_declarations.rb" => {
+      module: "Rigor::Inference::ScopeIndexer::ClassDeclarations", roots: []
+    },
+    "lib/rigor/inference/scope_indexer/literal_receiver_mutations.rb" => {
+      module: "Rigor::Inference::ScopeIndexer::LiteralReceiverMutations", roots: []
+    },
+    "lib/rigor/inference/scope_indexer/published_constant_ivars.rb" => {
+      module: "Rigor::Inference::ScopeIndexer::PublishedConstantIvars", roots: []
     },
     "lib/rigor/inference/declaration_walk/rules.rb" => { module: "Rigor::Inference::DeclarationWalk::Rules", roots: [] }
   }.freeze

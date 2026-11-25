@@ -13,8 +13,8 @@ module Rigor
       # chain, and widens only the element those steps reach, so the outer `Tuple`'s arity and its untouched sibling
       # slots keep their pins.
       #
-      # {.path} reads the chain and decides nothing about what its root is; `record_literal_receiver_mutation`
-      # decides which roots (a constant, a class variable) the census tracks.
+      # {.path} reads the chain and decides nothing about what its root is; {LiteralReceiverMutations}, which
+      # calls it, decides which roots (a constant, a class variable) the census tracks.
       module MutatedElementCensus
         # The calls that read ONE element of a container, with the argument counts that make them one. `first` /
         # `last` take none here (with one they return a sub-array), `[]` / `at` one, `fetch` one or two (the second

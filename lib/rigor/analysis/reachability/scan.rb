@@ -237,7 +237,7 @@ module Rigor
         end
 
         # `Const = Class.new` / `Module.new` / `Data.define(...)` / `Struct.new(...)` declare a class under a
-        # constant, and `ScopeIndexer#record_class_new_constant_decl` already treats them as class declarations
+        # constant, and `ScopeIndexer::ClassDeclarations` already treats them as class declarations
         # for cross-file resolution. The report must agree, or every such constant reads as an unreferenced
         # value rather than a class.
         META_NEW = { "Class" => :new, "Module" => :new, "Data" => :define, "Struct" => :new }.freeze

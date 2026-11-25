@@ -1488,6 +1488,18 @@ RSpec.describe "plugins/rigor-activerecord" do
           x = User.find(id).completed_at || table[:a]
           x
         end
+
+        def mixed_loop(id)
+          x = User.find(id).completed_at
+          %i[a b].each { |key| x = table[key] }
+          x
+        end
+
+        def mixed_ivar_loop(id)
+          @y = User.find(id).completed_at
+          %i[a b].each { |key| @y = table[key] }
+          @y
+        end
       end
     RUBY
 
@@ -1549,7 +1561,9 @@ RSpec.describe "plugins/rigor-activerecord" do
       expect(reader_signatures).to include(
         mixed_join: "def mixed_join: (untyped, untyped) -> (Integer | Time | nil)",
         mixed_ivar_join: "def mixed_ivar_join: (untyped, untyped) -> (Integer | Time | nil)",
-        mixed_or: "def mixed_or: (untyped) -> (Integer | Time | nil)"
+        mixed_or: "def mixed_or: (untyped) -> (Integer | Time | nil)",
+        mixed_loop: "def mixed_loop: (untyped) -> (Integer | Time | nil)",
+        mixed_ivar_loop: "def mixed_ivar_loop: (untyped) -> (Integer | Time | nil)"
       )
     end
 

@@ -111,13 +111,13 @@ module Rigor
       # that one comes without its answer, so the pair's cannot be told.
       def carry_local_mark(scope, rebound, name, optimistic)
         miss = optimistic ? UNKNOWN_MISS : scope.optimistic_local_miss(name)
-        rebound.with_optimistic_local(name, scope.optimistic_local(name) || optimistic, miss: miss)
+        rebound.with_optimistic_local(name, stronger_cause(scope.optimistic_local(name), optimistic), miss: miss)
       end
 
       # {.carry_local_mark} for an instance variable.
       def carry_ivar_mark(scope, rebound, name, optimistic)
         miss = optimistic ? UNKNOWN_MISS : scope.optimistic_ivar_miss(name)
-        rebound.with_optimistic_ivar(name, scope.optimistic_ivar(name) || optimistic, miss: miss)
+        rebound.with_optimistic_ivar(name, stronger_cause(scope.optimistic_ivar(name), optimistic), miss: miss)
       end
 
       # The effective optimistic-nil-free cause of an expression under `scope`, or nil when its nil-freeness is

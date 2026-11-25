@@ -293,7 +293,8 @@ RSpec.describe "Mutated constant census widening", type: :runner do
     end
   end
 
-  # `build_class_cvar_index` records the writes a `def` body makes, so the seed is written in one.
+  # `ScopeIndexer::ClassCvarCensus.build_class_cvar_index` records the writes a `def` body makes, so the seed is
+  # written in one.
   describe "a class variable" do
     it "does not fold a missing key after a sibling method sets a default or stores" do
       expect(rules(<<~RUBY)).to eq([[23, "flow.always-truthy-condition"]])

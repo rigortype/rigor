@@ -71,9 +71,9 @@ module Rigor
       #
       # - `factory_block` — a bare `Class.new { … }` / `Module.new` / `Struct.new` / `Data.define` block.
       #   `:unnamed_self` walks the factory's receiver and arguments, then the body with an unnamed `self`,
-      #   and skips the block's parameters (`walk_class_cvars`' rule). `:ordinary_call` walks the call's
-      #   children like any call's — receiver, arguments, the block's parameters and body — under the
-      #   enclosing context, so a `self::` header in the body anchors on the enclosing self
+      #   and skips the block's parameters (`walk_class_cvars`' rule, in `ScopeIndexer::ClassCvarCensus`).
+      #   `:ordinary_call` walks the call's children like any call's — receiver, arguments, the block's parameters
+      #   and body — under the enclosing context, so a `self::` header in the body anchors on the enclosing self
       #   (`walk_class_superclasses`' rule; `class C; Class.new { class self::E < S; end }; end` files
       #   `C::E`, a class Ruby never creates; #1521 item 8).
       # - `anonymous_class_path` — the file path an anonymous class's synthetic name carries; answered by

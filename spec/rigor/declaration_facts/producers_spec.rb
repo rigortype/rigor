@@ -69,8 +69,15 @@ RSpec.describe "Declaration producers" do
   # `walk_published_constant_ivars`, `walk_published_ivar_declaration?`, `walk_published_ivar_eval_call?`,
   # `walk_published_ivar_leaf?`, `walk_published_ivar_meta_new?` and `walk_singleton_published_ivars`. None was
   # renamed.
+  # Digest change, count still 366 (#3346, ADR-116 WD9 U5): eight grandfathered keys moved from
+  # `lib/rigor/inference/scope_indexer.rb#Rigor::Inference::ScopeIndexer#` to
+  # `lib/rigor/inference/scope_indexer/class_cvar_census.rb#Rigor::Inference::ScopeIndexer::ClassCvarCensus#`:
+  # `collect_def_cvar_writes`, `gather_cvar_writes`, `record_cvar_write`, `walk_class_cvars`,
+  # `walk_cvars_declaration?`, `walk_cvars_eval_call?`, `walk_cvars_meta_call?` and `walk_cvars_meta_new?`. None was
+  # renamed. Two rows that were never grandfathered moved with them and keep their reasons (#3204):
+  # `collect_body_cvar_writes` and `record_reflective_cvar_write`.
   let(:grandfathered_pin) do
-    { count: 366, digest: "c8986ec3826271b133fa10806b9546d19ff20850284b8b7614425633594df3bd" }
+    { count: 366, digest: "b246dd9baa95d59df446c4d5254405b8baf3c9b381d08fe425011d6d7600f30d" }
   end
 
   define_method(:found) do |parsed = DeclarationFactSources.parsed_under|

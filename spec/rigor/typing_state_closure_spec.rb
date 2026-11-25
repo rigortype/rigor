@@ -40,7 +40,9 @@ require "prism"
 #
 # Stage 1 converts files a PR at a time; each conversion adds its files to {#covered_files}.
 RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
-  def covered_files = analysis_files + check_rules_files + inference_files + dispatcher_files + other_files
+  def covered_files
+    analysis_files + check_rules_files + inference_files + scope_indexer_files + dispatcher_files + other_files
+  end
 
   def analysis_files
     %w[
@@ -108,15 +110,29 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       lib/rigor/inference/rbs_type_translator.rb
       lib/rigor/inference/refined_dispatch/constructed_class.rb
       lib/rigor/inference/refined_dispatch/own_method.rb
-      lib/rigor/inference/reflective_ivar_write.rb lib/rigor/inference/scope_indexer/class_declarations.rb
-      lib/rigor/inference/remover_holder_scan.rb lib/rigor/inference/scope_indexer/literal_receiver_mutations.rb
-      lib/rigor/inference/scope_indexer.rb lib/rigor/inference/scope_indexer/declaration_signature.rb
-      lib/rigor/inference/scope_indexer/declared_param_writes.rb lib/rigor/inference/scope_indexer/program_globals.rb
-      lib/rigor/inference/scope_indexer/ivar_contributions.rb lib/rigor/inference/scope_indexer/node_propagation.rb
-      lib/rigor/inference/self_call_ivar_writes.rb lib/rigor/inference/scope_indexer/published_constant_ivars.rb
+      lib/rigor/inference/reflective_ivar_write.rb
+      lib/rigor/inference/remover_holder_scan.rb
+      lib/rigor/inference/self_call_ivar_writes.rb
       lib/rigor/inference/statement_evaluator.rb lib/rigor/inference/statement_evaluator/pattern_bindings.rb
       lib/rigor/inference/toplevel_def_census.rb
       lib/rigor/inference/void_tail_summary.rb lib/rigor/inference/statement_evaluator/def_arguments_and_assertions.rb
+    ]
+  end
+
+  # `scope_indexer.rb` and the covered files under `scope_indexer/`, one path a line, sorted. A module ADR-116 WD9
+  # moves out of the indexer gets its row here, so code that leaves a covered file stays covered.
+  def scope_indexer_files
+    %w[
+      lib/rigor/inference/scope_indexer.rb
+      lib/rigor/inference/scope_indexer/class_cvar_census.rb
+      lib/rigor/inference/scope_indexer/class_declarations.rb
+      lib/rigor/inference/scope_indexer/declaration_signature.rb
+      lib/rigor/inference/scope_indexer/declared_param_writes.rb
+      lib/rigor/inference/scope_indexer/ivar_contributions.rb
+      lib/rigor/inference/scope_indexer/literal_receiver_mutations.rb
+      lib/rigor/inference/scope_indexer/node_propagation.rb
+      lib/rigor/inference/scope_indexer/program_globals.rb
+      lib/rigor/inference/scope_indexer/published_constant_ivars.rb
     ]
   end
 

@@ -176,10 +176,10 @@ module Rigor
         # `nesting.first` and `qualified_prefix.join("::")` are in fact always equal, since
         # `.declaration_prefix` and `.pushed_nesting` branch on the same `rooted?` and qualify against the same
         # parent. `qualified_prefix` is what a class variable must key on because it is the join key with
-        # `build_class_cvar_index`, which derives its own key from the same `declaration_prefix` — so the two
-        # tables agree by construction. `nesting` is what a constant name must resolve through because the
-        # ladder walks every rung, not just the innermost, and a rooted header drops the outer rungs from the
-        # prefix while Ruby keeps them ([#708](https://github.com/rigortype/rigor/issues/708)).
+        # {ClassCvarCensus.build_class_cvar_index}, which derives its own key from the same `declaration_prefix`
+        # — so the two tables agree by construction. `nesting` is what a constant name must resolve through
+        # because the ladder walks every rung, not just the innermost, and a rooted header drops the outer rungs
+        # from the prefix while Ruby keeps them ([#708](https://github.com/rigortype/rigor/issues/708)).
         #
         # Issue #3243 — a receiver that is an element read (`S[0] << "b"`, `@@n.dig(0, 0)[1] = 2`) mutates the element
         # the read reaches, and is recorded under the read's root with its steps, for the element widening.

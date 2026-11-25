@@ -4,7 +4,8 @@ require "spec_helper"
 require "prism"
 
 # ADR-116 WD5 — `class_cvars` is the first discovery table built by a {DeclarationWalk} collector. The walker it
-# replaced stays as the oracle (`legacy_class_cvar_index`), and these sources drive every arm that walker had
+# replaced stays as the oracle (`legacy_class_cvar_index`, a private function of `ScopeIndexer::ClassCvarCensus`
+# since ADR-116 WD9's U5, which the specs reach through `send`), and these sources drive every arm that walker had
 # through both: `class <<`, every meta-new write spelling (`.freeze` tail, `||=`, `K = K || …`, `self::K =`),
 # bare factory blocks, the eval family with bare, `self`, `self::` and unnamed receivers, `def` barriers, and
 # the unnameable cref a nameable header re-anchors. The corpus-scale half is `RIGOR_SHADOW_RULE_WALK=1`.
@@ -163,6 +164,7 @@ end
 
 RSpec.describe Rigor::Inference::ScopeIndexer do
   let(:shadow) { Rigor::Inference::DeclarationWalk::Shadow }
+  let(:census) { described_class::ClassCvarCensus }
 
   around do |example|
     saved = ENV.fetch("RIGOR_SHADOW_RULE_WALK", nil)
@@ -178,7 +180,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
 
   def tables(source, scope = Rigor::Scope.empty)
     root = parse(source)
-    [described_class.legacy_class_cvar_index(root, scope), described_class.build_class_cvar_index(root, scope)]
+    [census.send(:legacy_class_cvar_index, root, scope), census.build_class_cvar_index(root, scope)]
   end
 
   def described(table)
@@ -242,9 +244,9 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     let(:source) { "class C\n  def m = (@@x = 1)\nend\n" }
 
     it "never runs the legacy walker while RIGOR_SHADOW_RULE_WALK is unset" do
-      allow(described_class).to receive(:legacy_class_cvar_index).and_call_original
-      expect(described_class.build_class_cvar_index(parse(source), Rigor::Scope.empty).keys).to eq(%w[C])
-      expect(described_class).not_to have_received(:legacy_class_cvar_index)
+      allow(census).to receive(:legacy_class_cvar_index).and_call_original
+      expect(census.build_class_cvar_index(parse(source), Rigor::Scope.empty).keys).to eq(%w[C])
+      expect(census).not_to have_received(:legacy_class_cvar_index)
     end
 
     it "raises through ScopeIndexer.index when the walk's table diverges" do

@@ -42,8 +42,8 @@ module Rigor
                                                     context.nesting]
         end
 
-        # `accumulator` (the census before {ScopeIndexer#finished_cvar_census}) with each class's entries joined
-        # along its tree, as a new Hash; `scope` answers whether a name is declared outside the file.
+        # `accumulator` (the census before {ClassCvarCensus.finished_cvar_census}) with each class's entries
+        # joined along its tree, as a new Hash; `scope` answers whether a name is declared outside the file.
         def join(accumulator, headers, scope)
           return accumulator if accumulator.empty?
 
@@ -65,7 +65,7 @@ module Rigor
         # (`key`) and cvar for every member to share.
         def joined_entries(entries, key, tree, accumulator, unions)
           entries.to_h do |cvar, type|
-            next [cvar, type] if type.is_a?(JoinOnlyCvarWrite)
+            next [cvar, type] if type.is_a?(ClassCvarCensus::JoinOnlyCvarWrite)
 
             [cvar, unions[[key, cvar]] ||= tree_union(tree, cvar, accumulator, key[1])]
           end
@@ -76,7 +76,7 @@ module Rigor
         def tree_union(tree, cvar, accumulator, open)
           writes = tree.filter_map do |member|
             write = accumulator.dig(member, cvar)
-            write.is_a?(JoinOnlyCvarWrite) ? write.type : write
+            write.is_a?(ClassCvarCensus::JoinOnlyCvarWrite) ? write.type : write
           end
           writes << Type::Combinator.untyped if open
           Type::Combinator.union(*writes)

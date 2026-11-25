@@ -22,7 +22,7 @@ module Rigor
         # each only joins an entry a `def` body's write creates. An unnameable cref (a header below
         # `class << expr`) leaves the prefix empty, and the gather skips it.
         def on_declaration(node, context, body)
-          ScopeIndexer.collect_body_cvar_writes(node.body, body.prefix, body.scope, @table)
+          ClassCvarCensus.collect_body_cvar_writes(node.body, body.prefix, body.scope, @table)
           CvarHierarchy.record(@headers, node, context, body)
           DeclarationWalk::DESCEND
         end
@@ -33,16 +33,16 @@ module Rigor
         # gather reads the body with `def`, `class` and `module` as barriers, and nothing below a `def` reaches
         # this table.
         def on_def(node, context)
-          ScopeIndexer.collect_def_cvar_writes(node, context.prefix, context.scope, @table)
+          ClassCvarCensus.collect_def_cvar_writes(node, context.prefix, context.scope, @table)
           DeclarationWalk::DECLINE
         end
 
-        # The table as the discovery index holds it ({ScopeIndexer#finished_cvar_census}).
-        def table = ScopeIndexer.finished_cvar_census(@table)
+        # The table as the discovery index holds it ({ClassCvarCensus.finished_cvar_census}).
+        def table = ClassCvarCensus.finished_cvar_census(@table)
 
         # Issue #3219 — {#table} with each class's entries joined along its in-file superclass tree
         # ({CvarHierarchy.join}); the walk's root context must track `Module.nesting` for a superclass to resolve.
-        def hierarchy_table(scope) = ScopeIndexer.finished_cvar_census(CvarHierarchy.join(@table, @headers, scope))
+        def hierarchy_table(scope) = ClassCvarCensus.finished_cvar_census(CvarHierarchy.join(@table, @headers, scope))
       end
     end
   end

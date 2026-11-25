@@ -404,6 +404,12 @@ module DeclarationWriterScan
   #   one function, spelled on the module: `ClassDeclarations.collect_class_decls`,
   #   `LiteralReceiverMutations.collect_literal_receiver_mutations` (which `constant_ivar_value.rb` calls too) and
   #   `PublishedConstantIvars.seed_published_constant_ivars`.
+  # - `class_cvar_census.rb`: the class-variable census, moved out of `scope_indexer.rb` (ADR-116 WD9, U5). The
+  #   writers of its accumulator stay rule (v)'s. It is entered through four functions, each spelled on the module:
+  #   `ClassCvarCensus.build_class_cvar_index` from `scope_indexer.rb`, and `collect_def_cvar_writes`,
+  #   `collect_body_cvar_writes` and `finished_cvar_census` from `class_cvars_collector.rb`. Its two calls of
+  #   `ScopeIndexer.census_body_scope` make that function an entry point of `scope_indexer.rb`, where the row's
+  #   roots reached it already and it writes no table.
   SOURCES = {
     DeclarationProducerScan::RULE_V_FILE => {
       module: "Rigor::Inference::ScopeIndexer",
@@ -413,24 +419,20 @@ module DeclarationWriterScan
         discovered_project_index_incremental scan_summary_for_paths
       ]
     },
-    "lib/rigor/inference/scope_indexer/node_propagation.rb" => {
-      module: "Rigor::Inference::ScopeIndexer::NodePropagation", roots: []
-    },
-    "lib/rigor/inference/scope_indexer/declaration_signature.rb" => {
-      module: "Rigor::Inference::ScopeIndexer::DeclarationSignature", roots: []
-    },
-    "lib/rigor/inference/scope_indexer/program_globals.rb" => {
-      module: "Rigor::Inference::ScopeIndexer::ProgramGlobals", roots: []
-    },
-    "lib/rigor/inference/scope_indexer/class_declarations.rb" => {
-      module: "Rigor::Inference::ScopeIndexer::ClassDeclarations", roots: []
-    },
-    "lib/rigor/inference/scope_indexer/literal_receiver_mutations.rb" => {
-      module: "Rigor::Inference::ScopeIndexer::LiteralReceiverMutations", roots: []
-    },
-    "lib/rigor/inference/scope_indexer/published_constant_ivars.rb" => {
-      module: "Rigor::Inference::ScopeIndexer::PublishedConstantIvars", roots: []
-    },
+    "lib/rigor/inference/scope_indexer/node_propagation.rb" =>
+      { module: "Rigor::Inference::ScopeIndexer::NodePropagation", roots: [] },
+    "lib/rigor/inference/scope_indexer/declaration_signature.rb" =>
+      { module: "Rigor::Inference::ScopeIndexer::DeclarationSignature", roots: [] },
+    "lib/rigor/inference/scope_indexer/program_globals.rb" =>
+      { module: "Rigor::Inference::ScopeIndexer::ProgramGlobals", roots: [] },
+    "lib/rigor/inference/scope_indexer/class_declarations.rb" =>
+      { module: "Rigor::Inference::ScopeIndexer::ClassDeclarations", roots: [] },
+    "lib/rigor/inference/scope_indexer/literal_receiver_mutations.rb" =>
+      { module: "Rigor::Inference::ScopeIndexer::LiteralReceiverMutations", roots: [] },
+    "lib/rigor/inference/scope_indexer/published_constant_ivars.rb" =>
+      { module: "Rigor::Inference::ScopeIndexer::PublishedConstantIvars", roots: [] },
+    "lib/rigor/inference/scope_indexer/class_cvar_census.rb" =>
+      { module: "Rigor::Inference::ScopeIndexer::ClassCvarCensus", roots: [] },
     "lib/rigor/inference/declaration_walk/rules.rb" => { module: "Rigor::Inference::DeclarationWalk::Rules", roots: [] }
   }.freeze
 

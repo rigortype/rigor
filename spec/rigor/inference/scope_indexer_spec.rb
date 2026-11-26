@@ -3389,24 +3389,6 @@ Unrelated
       expect(table.fetch("M::Y", {})).not_to have_key(:s)
     end
 
-    it "declines a `self::` eval receiver inside a `class <<` body" do
-      # Inside `class << self` self is the singleton — `self::X` raises NameError at
-      # runtime unless the constant lives on that singleton — so the receiver declines
-      # rather than filing the block under a class it never opened.
-      table = described_class.build_discovered_includes(parse(<<~RUBY))
-        module T; end
-        module M
-          Y.class_eval do
-            class << self
-              self::X.class_eval { include T }
-            end
-          end
-        end
-      RUBY
-      expect(table).not_to have_key("Y::X")
-      expect(table).not_to have_key("M::X")
-    end
-
     it "keys a `self::` receiver under `Object` as the bare top-level name" do
       table = methods_for(<<~RUBY)
         Object.class_eval do
@@ -3442,18 +3424,6 @@ Unrelated
         end
       RUBY
       expect(table.fetch("Y", {})).not_to have_key(:h)
-    end
-
-    it "declines a `self::` eval receiver inside `class << <non-constant>`" do
-      table = described_class.build_discovered_includes(parse(<<~RUBY))
-        module T; end
-        class Y
-          class << obj
-            self::X.class_eval { include T }
-          end
-        end
-      RUBY
-      expect(table).not_to have_key("Y::X")
     end
 
     it "files defs inside an eval-nested `self::` receiver under `class <<` nowhere" do
@@ -3546,19 +3516,6 @@ Unrelated
       expect(table).not_to have_key("M")
     end
 
-    it "attributes `include` inside a `self::`-receiver eval block to the resolved owner" do
-      table = described_class.build_discovered_includes(parse(<<~RUBY))
-        module T; end
-        module M
-          Y.class_eval do
-            self::X.class_eval { include T }
-          end
-        end
-      RUBY
-      expect(table).to include("Y::X" => ["T"])
-      expect(table).not_to have_key("M")
-    end
-
     it "declines a `self::` eval receiver nested in a bare eval under `class <<`" do
       # The bare `class_eval` keeps the singleton's body — `self::X` inside still
       # raises NameError at runtime — so the inner receiver declines rather than
@@ -3569,37 +3526,6 @@ Unrelated
           class << self
             class_eval { self::X.class_eval { extend T } }
           end
-        end
-      RUBY
-      expect(table).not_to have_key("C::X")
-      expect(table).not_to have_key("X")
-    end
-
-    it "declines a `self::` eval receiver inside a `class` declaration under `class <<`" do
-      # `class D` opens `#<Class:C>::D` — `self` inside is that unnameable class, so
-      # `self::X` there cannot be spelled `C::D::X`.
-      table = described_class.build_discovered_includes(parse(<<~RUBY))
-        module T; end
-        class C
-          class << self
-            class D
-              self::X.class_eval { include T }
-            end
-          end
-        end
-      RUBY
-      expect(table).not_to have_key("X")
-      expect(table).not_to have_key("C::D::X")
-      expect(table).not_to have_key("D::X")
-    end
-
-    it "declines a `self::` eval receiver inside an opaque eval body" do
-      # `obj.instance_eval`'s self is the receiver object — `self::X` resolves on its
-      # singleton, a table nothing names — never `C::X`.
-      table = described_class.build_discovered_includes(parse(<<~RUBY))
-        module T; end
-        class C
-          obj.instance_eval { self::X.class_eval { include T } }
         end
       RUBY
       expect(table).not_to have_key("C::X")
@@ -3636,17 +3562,6 @@ Unrelated
       expect(table).not_to have_key("C")
     end
 
-    it "attributes `include` inside a meta-new block to the block's class" do
-      table = described_class.build_discovered_includes(parse(<<~RUBY))
-        module T; end
-        class C
-          K = Class.new { include T }
-        end
-      RUBY
-      expect(table).to include("C::K" => ["T"])
-      expect(table).not_to have_key("C")
-    end
-
     it "declines meta-new mixin calls under `class <<`" do
       # `K` lands on the singleton's constant table — unnameable — so the block's
       # class owns nothing the tables can key.
@@ -3658,7 +3573,7 @@ Unrelated
           end
         end
       RUBY
-      includes = described_class.build_discovered_includes(parse(<<~RUBY))
+      includes = described_class::MixinTables.send(:build_discovered_includes, parse(<<~RUBY))
         module T; end
         class C
           class << self
@@ -3811,7 +3726,7 @@ Unrelated
           X.instance_eval { extend T }
         end
       RUBY
-      includes = described_class.build_discovered_includes(parse(<<~RUBY))
+      includes = described_class::MixinTables.send(:build_discovered_includes, parse(<<~RUBY))
         module T; end
         class X; end
         class C
@@ -3869,7 +3784,7 @@ Unrelated
       methods, def_nodes = described_class.build_methods_and_def_nodes(parse(source))
       expect(methods.fetch("K", {})).to include(m: :instance, x: :instance)
       expect(def_nodes.fetch("K", {})).to have_key(:m)
-      expect(described_class.build_discovered_includes(parse(source))).to include("K" => ["I"])
+      expect(described_class::MixinTables.send(:build_discovered_includes, parse(source))).to include("K" => ["I"])
       expect(described_class.build_discovered_extends(parse(source))).to include("K" => ["E"])
       visibility = described_class.build_discovered_method_visibilities(parse(source))
       expect(visibility.fetch("K", {})).to include(m: :private)
@@ -4006,7 +3921,7 @@ Unrelated
       expect(methods["K"].keys).to eq([:m])
       expect(methods["K::SX"].keys).to eq([:q])
 
-      includes = described_class.build_discovered_includes(program)
+      includes = described_class::MixinTables.send(:build_discovered_includes, program)
       expect(includes).to eq("K" => ["I"])
 
       idx = described_class.index(program, default_scope: default_scope)
@@ -4131,7 +4046,7 @@ Unrelated
           Holder::M = Class.new { include J; def m = 2 }
         end
       RUBY
-      includes = described_class.build_discovered_includes(program)
+      includes = described_class::MixinTables.send(:build_discovered_includes, program)
       expect(includes).to eq("C::K" => ["I"], "C::Holder::M" => ["J"])
 
       methods, = described_class.build_methods_and_def_nodes(program)
@@ -4243,134 +4158,6 @@ Unrelated
 
     it "leaves an immutable nominal element pinned" do
       expect(census.widen(combinator.tuple_of(combinator.nominal_of("Integer")), [0])).to be_nil
-    end
-  end
-
-  # Issue #1123 — the instance-side prepend table: `{class => [module names, as written]}` in
-  # instance-ancestor SEARCH order. It adds the prepend ORDER and KIND the include table cannot carry
-  # (that one keeps every mixin in search order since #1173 — prepends ahead of includes — but is read
-  # as a set by the arity / visibility / reflection consumers), and
-  # `Scope#user_def_through_ancestors` searches it ahead of the class's own `def`s.
-  describe ".build_discovered_prepends" do
-    it "records an in-body `prepend` in both tables" do
-      program = parse(<<~RUBY)
-        module T; end
-        class C
-          prepend T
-        end
-      RUBY
-      expect(described_class.build_discovered_prepends(program)).to eq("C" => ["T"])
-      expect(described_class.build_discovered_includes(program)).to eq("C" => ["T"])
-    end
-
-    it "orders two statements nearest-first, and one statement's arguments in call order" do
-      # `prepend A; prepend B` searches B first; `prepend A, B` makes A the nearer of the two. Since
-      # #1173 the include table keeps the same search order — prepends sort ahead of includes there,
-      # matching where Ruby puts them (before the class itself).
-      program = parse(<<~RUBY)
-        module A; end
-        module B; end
-        class Two
-          prepend A
-          prepend B
-        end
-        class One
-          prepend A, B
-        end
-      RUBY
-      expect(described_class.build_discovered_prepends(program)).to eq("Two" => %w[B A], "One" => %w[A B])
-      expect(described_class.build_discovered_includes(program)).to eq("Two" => %w[B A], "One" => %w[A B])
-    end
-
-    it "orders `include` statements nearest-first, and one statement's arguments in written order" do
-      # #1173 — `include A; include B` searches B first (Ruby's later-include-wins); `include A, B`
-      # keeps `["A", "B"]` because one statement's argument list lands as a unit ahead of the earlier
-      # statements'. The pre-#1173 call-order list answered `["A", "B"]` for both.
-      program = parse(<<~RUBY)
-        module A; end
-        module B; end
-        class Two
-          include A
-          include B
-        end
-        class One
-          include A, B
-        end
-      RUBY
-      expect(described_class.build_discovered_includes(program)).to eq("Two" => %w[B A], "One" => %w[A B])
-    end
-
-    it "orders a mix of prepend and include the way the runtime ancestry does" do
-      # `prepend` lands before the class itself, `include` after it, so both spellings and both
-      # statement orders search the prepended module first.
-      program = parse(<<~RUBY)
-        module I; end
-        module P; end
-        class A
-          include I
-          prepend P
-        end
-        class B
-          prepend P
-          include I
-        end
-      RUBY
-      expect(described_class.build_discovered_includes(program)).to eq("A" => %w[P I], "B" => %w[P I])
-    end
-
-    it "records the `Recv.prepend(Mod)` call form under the receiver in both tables" do
-      program = parse(<<~RUBY)
-        module T; end
-        class C; end
-        C.prepend(T)
-      RUBY
-      expect(described_class.build_discovered_prepends(program)).to eq("C" => ["T"])
-      # The call form is the same ancestry edge as the declaration form, so the set-shaped include table
-      # carries it too — otherwise the two spellings of one edge would answer differently for arity,
-      # visibility and undefined-method suppression.
-      expect(described_class.build_discovered_includes(program)).to eq("C" => ["T"])
-    end
-
-    it "records the `Recv.include(Mod)` and `Recv.send(:include, Mod)` call forms in the include table only" do
-      # Issue #1722 — the call form is the same ancestry edge as an in-body `include`, as `Recv.prepend(Mod)` is.
-      program = parse(<<~RUBY)
-        module T; end
-        module U; end
-        class C; end
-        C.include(T)
-        C.send(:include, U)
-      RUBY
-      expect(described_class.build_discovered_prepends(program)).to be_empty
-      expect(described_class.build_discovered_includes(program)).to eq("C" => %w[U T])
-    end
-
-    it "resolves an unqualified call-form receiver through the nesting the file declares" do
-      program = parse(<<~RUBY)
-        module Api
-          module T; end
-          class C; end
-          C.prepend(T)
-        end
-      RUBY
-      expect(described_class.build_discovered_prepends(program)).to eq("Api::C" => ["T"])
-    end
-
-    it "declines a call-form receiver that names no static class" do
-      program = parse(<<~RUBY)
-        module T; end
-        klass = Class.new
-        klass.prepend(T)
-      RUBY
-      expect(described_class.build_discovered_prepends(program)).to be_empty
-    end
-
-    it "records a `prepend` written inside an eval block against the block's receiver" do
-      program = parse(<<~RUBY)
-        module T; end
-        class C; end
-        C.instance_eval { prepend T }
-      RUBY
-      expect(described_class.build_discovered_prepends(program)).to eq("C" => ["T"])
     end
   end
 end

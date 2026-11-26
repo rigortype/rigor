@@ -524,7 +524,7 @@ end
     end
 
     # The unkeyed entry stays the pre-#728 per-class union, because it is what answers a name neither site
-    # wrote — the mixin `walk_class_includes` attributes to a class from outside its declaration.
+    # wrote — the mixin `MixinTables.walk_class_includes` attributes to a class from outside its declaration.
     it "unions every ancestor-naming site under the unkeyed entry" do
       source = "class Foo < Base; end\nmodule Outer\n  class ::Foo\n    include Helper\n  end\nend\n"
       expect(chain_for(source, "Foo")).to eq(["Outer"])

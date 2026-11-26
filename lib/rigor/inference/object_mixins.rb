@@ -28,7 +28,7 @@ module Rigor
     module ObjectMixins
       OWNER = "Object"
       # The owner key `ScopeIndexer` files a top-level `include` under, beside `Object`'s own key, so that
-      # no ancestry walk that types a call reaches it (see `ScopeIndexer#toplevel_include_owner`).
+      # no ancestry walk that types a call reaches it (see `ScopeIndexer::MixinTables.toplevel_include_owner`).
       TOPLEVEL_INCLUDE_KEY = "<toplevel-include>"
 
       module_function

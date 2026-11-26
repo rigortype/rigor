@@ -2428,7 +2428,7 @@ module Rigor
     #
     # The unkeyed entry is the union, and answers a name no site recorded under its own key: an `include`
     # attributed to this class from OUTSIDE its declaration (`Recv.class_eval { include M }`, which
-    # `Inference::ScopeIndexer#walk_class_includes` names but the header walk cannot see), or a dynamic
+    # `Inference::ScopeIndexer::MixinTables.walk_class_includes` names but the header walk cannot see), or a dynamic
     # mixin argument. It is the pre-#728 answer, so those are unchanged rather than degraded.
     def recorded_header_nesting(bucket, raw)
       bucket[raw] || bucket[DiscoveryIndex::UNKEYED_HEADER_NESTING] || EMPTY_HEADER_NESTING

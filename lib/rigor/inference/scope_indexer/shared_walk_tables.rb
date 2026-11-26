@@ -458,7 +458,7 @@ module Rigor
         # body, and a block `ConstantTables.rebound_block_self` classifies as rebinding — the `Class.new` / `Module.new`
         # / `Struct.new` / `Data.define` and `class_eval` family. An `include` written in any of those attaches to
         # something other than this class, so treating it as this site's ancestor name reinstates exactly the defect
-        # above with a different spelling. {ScopeIndexer.walk_class_includes} classifies the same shapes the same way
+        # above with a different spelling. {MixinTables.walk_class_includes} classifies the same shapes the same way
         # since [#749](https://github.com/rigortype/rigor/pull/749), so the two walks agree on which site owns a mixin.
         #
         # It stays structural rather than exhaustive: `self.include M` and `send(:include, M)` are recorded by neither
@@ -481,7 +481,7 @@ module Rigor
 
         # Appends each mixin argument this body names to `names`, and answers whether it writes a mixin call at all — a
         # `include some_method` writes one while naming nothing renderable, and the site still owns a chain for the
-        # names it does write. Arguments are rendered exactly as {ScopeIndexer.record_mixin_call} renders them, so a
+        # names it does write. Arguments are rendered exactly as {MixinTables.record_mixin_call} renders them, so a
         # name recorded here is the same String the includes table stores and the resolver asks for.
         def collect_mixin_names(node, names)
           return false unless node.is_a?(Prism::Node)

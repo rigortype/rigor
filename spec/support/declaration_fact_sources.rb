@@ -449,6 +449,21 @@ module DeclarationWriterScan
   #   `scope_indexer.rb`, where the row's roots reached it already. The artifacts' calls of
   #   `ScopeIndexer.compact_header_renames`, `rename_compact_name` and `synthesize_namespace_prefixes` make those
   #   three entry points of `scope_indexer.rb`, where none writes a table it is handed.
+  # - `mixin_effects.rb` and `mixin_tables.rb`: what the include walk and the extend walk both ask about a mixin
+  #   call, and the include walk with its two tables, moved out of `scope_indexer.rb` (ADR-116 WD9, #3400). The ten
+  #   writers of the mixin accumulator in `mixin_tables.rb` stay rule (v)'s: `write_mixin_targets` and the nine
+  #   functions that hand it the accumulator. It is entered through `MixinTables.mixin_tables`, from
+  #   `scope_indexer.rb`. `mixin_effects.rb` is entered through eight functions, each spelled on the module from
+  #   `mixin_tables.rb` and from the extend walk in `scope_indexer.rb`: `MixinEffects.program_statements`,
+  #   `taint_unrecorded_mixin`, `taint_computed_mixin_send`, `mixin_effects`, `hook_def_params`,
+  #   `taint_opaque_eval`, `prepend_call_receiver` and `meta_new_mixin_owner`. None of the eight writes a table it
+  #   is handed: a taint is a call of `MixinAccumulator#taint`, which the rule does not read as a write, so the
+  #   walks' rows are as they were, and the one rule (v) writer of the file is `collect_local_send_names`, into a
+  #   list of its own, which is listed for the node classes it reads too. So the file's row adds no producer
+  #   today. It has one all the same, as `mutated_carrier_widening.rb` has: a function of it that wrote the
+  #   accumulator it is handed would be listed, and without the row it would not be (#3398). Their calls of
+  #   `ScopeIndexer.mixin_call_view`, `lexical_self_receiver?` and `opaque_mixin_argument?` make those three entry
+  #   points of `scope_indexer.rb`, where none writes a table.
   SOURCES = {
     DeclarationProducerScan::RULE_V_FILE => {
       module: "Rigor::Inference::ScopeIndexer",
@@ -486,6 +501,10 @@ module DeclarationWriterScan
       { module: "Rigor::Inference::ScopeIndexer::AliasDefNodes", roots: [] },
     "lib/rigor/inference/scope_indexer/declaration_artifacts.rb" =>
       { module: "Rigor::Inference::ScopeIndexer::DeclarationArtifacts", roots: [] },
+    "lib/rigor/inference/scope_indexer/mixin_effects.rb" =>
+      { module: "Rigor::Inference::ScopeIndexer::MixinEffects", roots: [] },
+    "lib/rigor/inference/scope_indexer/mixin_tables.rb" =>
+      { module: "Rigor::Inference::ScopeIndexer::MixinTables", roots: [] },
     "lib/rigor/inference/declaration_walk/rules.rb" => { module: "Rigor::Inference::DeclarationWalk::Rules", roots: [] }
   }.freeze
 

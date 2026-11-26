@@ -117,6 +117,13 @@ RSpec.describe Rigor::MCP::Server do
       end
     end
 
+    it "reads a tools/call with no params as one with empty params, so it names no tool" do
+      resp = request(id: 5, method: "tools/call")
+
+      expect(resp.dig("error", "code")).to eq(-32_602)
+      expect(resp.dig("error", "message")).to eq("Unknown tool: nil")
+    end
+
     it "still answers ping whose params is not an object" do
       expect(request(id: 4, method: "ping", params: [1])).to eq("jsonrpc" => "2.0", "id" => 4, "result" => {})
     end

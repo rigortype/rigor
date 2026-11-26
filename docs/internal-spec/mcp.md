@@ -35,11 +35,13 @@ rigor mcp [--transport=stdio] [--config=PATH]
 - `--transport` accepts only `stdio`, its default. Any other value writes an error to stderr and exits
   64 before reading input. The flag exists so that another transport does not change the CLI
   ([ADR-33](../adr/33-mcp-server.md) WD2); none is specified.
-- `--config=PATH` sets the session default configuration (§ Configuration).
+- `--config=PATH` sets the session default configuration (§ Configuration). A path that names no file
+  is refused at boot: the error goes to stderr and the process exits 64 before reading input. Whether
+  the file loads is not checked until a tool call reads it.
 - The process runs until its input reaches end of file, then exits 0.
 - One process serves many requests ([ADR-33](../adr/33-mcp-server.md) WD3). The session `--config` is
-  its only state that shapes an answer. *Implementation:* loaded Ruby code is reused across calls, and
-  YJIT is enabled at boot.
+  its only per-session setting. Ruby code the process has loaded (Rigor, plugin gems, the bundle) is
+  kept across calls and not reloaded (§ Tools). *Implementation:* YJIT is enabled at boot.
 
 ## Transport
 
@@ -60,11 +62,11 @@ stdout, with no `Content-Length` framing.
   how any later request is answered. *Implementation:* it is dropped without reading its `method`, so
   `notifications/initialized`, `notifications/cancelled` and the rest have no effect.
 - **Malformed messages.** A line that parses but is not a request object (a JSON array, such as a
-  JSON-RPC batch, or a number), and a request whose `params` is not an object, MUST NOT stop the
-  server. The server SHOULD answer `-32600` with `"id": null` for the first and `-32602` for the
-  second. *Today the server exits on both* ([#3411](https://github.com/rigortype/rigor/issues/3411)).
-  A bare JSON string is dropped as a notification. The `jsonrpc` member is not checked; clients MUST
-  send `"jsonrpc": "2.0"`.
+  JSON-RPC batch, a number, a string, `true`, `false` or `null`), and a `tools/call` whose `params` is
+  not an object, MUST NOT stop the server. The server SHOULD answer `-32600` with `"id": null` for
+  the first and `-32602` for the second. *Today the server exits on both, and misreads a string line*
+  ([#3411](https://github.com/rigortype/rigor/issues/3411)). Other methods ignore their `params` other
+  than `_meta`. The `jsonrpc` member is not checked; clients MUST send `"jsonrpc": "2.0"`.
 
 ## Protocol eras
 
@@ -104,7 +106,8 @@ Every successful 2026-07-28 result is an object that MUST carry:
   the result already has a `_meta`, its keys are kept beside this one, and a key both name keeps the
   result's value.
 
-An error response carries neither: the envelope is for results.
+An error response carries neither: the envelope is for results. The server-info key is the server's:
+no result the server builds MAY put another value under it.
 
 ### Legacy requests
 
@@ -187,13 +190,16 @@ of `"type": "object"`. No tool declares `title`, `outputSchema` or annotations, 
 A tool is its CLI command run in the server process ([ADR-33](../adr/33-mcp-server.md) WD4): the server
 builds the command's argv from the arguments and runs it with stdout and stderr captured. **A tool call
 MUST answer what its command, run with that argv from the server's working directory at that moment,
-would print.** Anything the server holds across calls (ADR-33's deferred environment caching included)
-MUST NOT make an answer differ from that.
+would print, given the Ruby code already loaded into the process.** The project's sources, signatures
+and configuration are read as they are on disk when the call runs: a cache the server holds across
+calls (ADR-33's deferred environment caching included) MUST be invalidated by a change to any file the
+answer read. Ruby code is the exception: a plugin gem or the bundle changed under a running server
+takes effect when the server restarts.
 
 Each tool runs exactly one command, with a fixed prefix, the options its arguments set, then `--` and
-the operands. The `--` is always written, so an operand shaped like a flag (`--version`, `-`, `--`) is
-read as a path, a position or a rule. *Implementation:* `--format`, then `--config`, then the tool's
-own flags.
+the operands. The `--` MUST be written whenever there is an operand, so an operand shaped like a flag
+(`--version`, `-`, `--`) is read as a path, a position or a rule; `rigor_explain` without `rule` has
+neither.
 
 | Tool | Command prefix | Option properties | Operand properties | `required` |
 | --- | --- | --- | --- | --- |
@@ -212,7 +218,8 @@ none: `rigor_triage` and `rigor_sig_gen` read the configured `paths:`, and `rigo
 rule.
 
 Every write-side or side-effecting command is excluded ([ADR-33](../adr/33-mcp-server.md) WD5). A tool
-MUST NOT write to the project tree; a command's own cache writes under `.rigor/` are not project writes.
+MUST NOT write to the project tree; a command's own writes to its configured cache directory are not
+project writes.
 
 ### Arguments
 
@@ -228,9 +235,9 @@ MUST NOT write to the project tree; a command's own cache writes under `.rigor/`
 - What a `rigor_check` or `rigor_coverage` call without `paths` does is unspecified: the schemas mark
   it required, and the server today runs the command over the configured `paths:`
   ([#3412](https://github.com/rigortype/rigor/issues/3412)). Clients MUST send it.
-- Clients MUST send arguments their schema allows. *Implementation:* other argument types are not
-  checked, and a value reaches the CLI as its string form (a string `paths` is one path); `arguments`
-  that is not an object gets an `isError` result ([#3412](https://github.com/rigortype/rigor/issues/3412)).
+- Clients MUST send arguments their schema allows, in an `arguments` object. How anything else is
+  answered is unspecified ([#3412](https://github.com/rigortype/rigor/issues/3412),
+  [#3413](https://github.com/rigortype/rigor/issues/3413)).
 
 ### Configuration
 
@@ -243,7 +250,9 @@ The configuration a tool call reads is, first match wins ([ADR-33](../adr/33-mcp
 
 A blank `config` (empty or whitespace only) names no file, so the session default applies; it MUST NOT
 reach the CLI as `--config=`. A `config` naming no file is the command's usage error, so the call is
-`isError: true`. Relative paths, in `config` and in operands alike, resolve against the server's
+`isError: true`, with the command's error as `content[0]` (*today a `config` that is a directory, is
+unreadable or is not a string is reported as an internal error instead:*
+[#3413](https://github.com/rigortype/rigor/issues/3413)). Relative paths, in `config` and in operands alike, resolve against the server's
 working directory.
 
 ## Tool results
@@ -287,6 +296,7 @@ the position of `content[0]` is fixed.
 
 ## Gates
 
-`spec/rigor/mcp/server_spec.rb` and `spec/rigor/mcp/loop_spec.rb` pin this page's behaviour, including
-the exact argv of each tool. `spec/rigor/cli/catalogue_spec.rb` ties every tool to a catalogued command
+`spec/rigor/mcp/server_spec.rb` and `spec/rigor/mcp/loop_spec.rb` pin this page's behaviour: the exact
+argv of `rigor_check`, `rigor_type_of`, `rigor_triage` and `rigor_sig_gen`, and the `--` before the
+operands of every tool. `spec/rigor/cli/catalogue_spec.rb` ties every tool to a catalogued command
 (ADR-126 WD3) and every input property to that command's flags (#2511).

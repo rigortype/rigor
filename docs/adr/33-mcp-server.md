@@ -122,7 +122,8 @@ open with `initialize`.
 `rigor mcp` serves both eras, and picks one **per request, from that request alone**:
 
 - `server/discover`, or any request other than `initialize` whose `_meta` names a protocol
-  version, takes the 2026-07-28 rules: the version checks, the error codes, the result
+  version, takes the 2026-07-28 rules, and its results carry the `resultType` and server info
+  the revision asks of every result: the version checks, the error codes, the result
   envelope and the cache hints are in
   [`mcp.md` § Protocol eras](../internal-spec/mcp.md#protocol-eras).
 - Everything else, `initialize` included, is the legacy protocol, byte-for-byte as before.

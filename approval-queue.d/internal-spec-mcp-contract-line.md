@@ -32,8 +32,9 @@ around it.
 The third. Made contract:
 
 - a tool call answers what its CLI command, run with the listed argv from the server's working
-  directory at that moment, would print; any cross-call caching (ADR-33's deferred slice 3) must be
-  invisible;
+  directory at that moment, would print, given the Ruby code already loaded: a cross-call cache
+  (ADR-33's deferred slice 3) must be invalidated by a change to any file the answer read, while a
+  changed plugin gem or bundle takes effect at restart (WD3 keeps loaded code);
 - `content[0]` is the command's stdout (or stderr when stdout is empty), byte for byte; the extra
   blocks come after it in a fixed order, and clients must tolerate text blocks they do not recognise
   (ADR-5: a later block is not a break);
@@ -42,11 +43,13 @@ The third. Made contract:
   it: #3411, recorded on the page as a deviation);
 - `cacheScope: "public"`, `listChanged: false`, `server/discover` omitting an empty `extensions`, and
   the reserved `io.modelcontextprotocol/skills` identifier, specified by #3402's slice and not here;
+- the server-info `_meta` key is the server's own, which #3402's results must not reuse;
 - `-32602` for the three tools whose missing arguments the server checks today.
 
 Left out: JSON-RPC error and server-written message texts, descriptions, `ttlMs`'s value, member and
 option order, wrong-typed arguments, and a `rigor_check` / `rigor_coverage` call without `paths`
-(unspecified until #3412 picks enforcing or documenting the fallback).
+(unspecified until #3412 picks enforcing or documenting the fallback). Config load failures that
+replace the CLI's error with an internal error (#3413) are recorded as a deviation.
 
 The page also says it does not make the tool catalogue a row of `docs/compatibility.md`. That would be
 a new public-contract commitment, which is the maintainer's call; the page only notes that each tool's

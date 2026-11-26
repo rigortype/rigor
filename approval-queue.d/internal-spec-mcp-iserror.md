@@ -10,7 +10,7 @@
 
 ADR-33 WD6 says `isError: true` is set "only when the CLI exits with EXIT_USAGE (64)". The code
 (`Rigor::MCP::Server#tool_result`) also sets it for exit 70 and for any non-zero exit with nothing on
-stdout; the empty-stdout case came with `rigor_lens` and the missing-path work of #2206, and the
+stdout; the empty-stdout case came with the `rigor_lens` hardening (7ccd331b2), and the
 manual already describes the wider rule ("a usage or runtime failure"). Writing the binding page
 meant choosing which one binds.
 

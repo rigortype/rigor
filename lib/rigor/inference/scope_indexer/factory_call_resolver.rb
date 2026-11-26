@@ -9,12 +9,12 @@ module Rigor
       # {.resolve_meta_factory_call} answers the `Data.define` or `Struct.new` call under any `Class.new(...)`
       # wrappers, or nil; the other two functions are its private steps.
       #
-      # Two files call it, at two sites each: `scope_indexer.rb` from the methods table
-      # (`ScopeIndexer.record_meta_members`) and from the declaration artifacts
-      # (`ScopeIndexer.record_meta_new_constant?`), and {SharedWalkTables} from its two layout recorders. It asks
-      # {DeclarationWalk::Rules} which call is which factory, calls nothing left in `scope_indexer.rb` and reads
-      # none of the indexer's constants. Both callers require this file, and it requires neither back, so it loads
-      # and answers alone.
+      # Three files call it, at four sites: `scope_indexer.rb` from the methods table
+      # (`ScopeIndexer.record_meta_members`), {DeclarationArtifacts} from the arm that takes a constant write
+      # (`DeclarationArtifacts.record_meta_new_constant?`), and {SharedWalkTables} from its two layout recorders. It
+      # asks {DeclarationWalk::Rules} which call is which factory, calls nothing left in `scope_indexer.rb` and reads
+      # none of the indexer's constants. Each caller requires this file, and it requires none back, so it loads and
+      # answers alone.
       module FactoryCallResolver
         module_function
 

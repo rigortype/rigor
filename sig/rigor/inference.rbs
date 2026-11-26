@@ -417,8 +417,6 @@ module Rigor
 
     module ScopeIndexer
       def self?.index: (untyped root, default_scope: Scope) -> Hash[untyped, Scope]
-      def self?.build_declaration_artifacts: (untyped root) -> [Hash[untyped, Type::t], Hash[String, Type::t]]
-      def self?.record_declarations: (untyped node, Array[String] qualified_prefix, Hash[untyped, Type::t] identity_table, Hash[String, Type::t] discovered) -> void
       def self?.discovered_classes_for_paths: (Array[String] paths, ?buffer: untyped) -> Hash[String, Type::t]
       def self?.discovered_def_index_for_paths: (Array[String] paths, ?buffer: untyped) -> Hash[Symbol, untyped]
       def self?.scan_summary_for_paths: (Array[String] paths, ?buffer: untyped) -> Hash[Symbol, untyped]
@@ -438,6 +436,11 @@ module Rigor
         def self?.build_in_source_constants: (untyped root, Scope default_scope) -> Hash[String, Type::t]
         def self?.constant_writes_for_file: (untyped root) -> Hash[String, untyped]
         def self?.constant_literal_value: (untyped rvalue) -> Array[untyped]?
+      end
+
+      module DeclarationArtifacts
+        def self?.build_declaration_artifacts: (untyped root, ?untyped declared_names) -> [Hash[untyped, Type::t], Hash[String, Type::t]]
+        def self?.record_declarations: (untyped node, Array[String] qualified_prefix, Hash[untyped, Type::t] identity_table, Hash[String, Type::t] discovered, ?untyped renames, ?untyped self_prefix, ?singleton_cref: untyped) -> void
       end
 
       class LayeredDefNestings

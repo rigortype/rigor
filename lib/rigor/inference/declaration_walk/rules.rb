@@ -194,8 +194,8 @@ module Rigor
 
         # The qualified prefix a meta-new constant write names its class under, given the lexical prefix the write sits
         # in — the segments every scope-free pre-pass pushes before descending into the block, and the key
-        # {ScopeIndexer#record_meta_new_constant?} files the discovered class under. Nil for a target that is neither
-        # form.
+        # {ScopeIndexer::DeclarationArtifacts.record_meta_new_constant?} files the discovered class under. Nil for a
+        # target that is neither form.
         #
         # A PATH write takes exactly what a compact `class Holder::Thing` header at the same position takes
         # ({Source::ConstantPath.declaration_prefix}), rooted reset included. These pre-passes run before any scope

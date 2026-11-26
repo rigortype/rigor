@@ -338,7 +338,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#add_header_nesting: grandfathered
     Rigor::Inference::ScopeIndexer#add_module_function_entries: 'issue #2161, copies every named deferred-range def row whose kind is not :instance (a :both row from ModuleFunctionState.deferred_module_function?, a :singleton row from a named module_function call or from a def that record_deferred_def / def_side places on the singleton side, such as def self.x, class << self or instance_eval) into the file''s visibility entries, the rows DefinerResolution.module_function_row? counts, so the --incremental diff sees one appear or vanish; it reads finished rows and decides no owner or side'
     Rigor::Inference::ScopeIndexer#alias_renamed_header_nestings: grandfathered
-    Rigor::Inference::ScopeIndexer#apply_alias_def_nodes: grandfathered
     Rigor::Inference::ScopeIndexer#apply_class_method_visibility: 'issue #1984, applies a private_class_method / public_class_method call to the class''s singleton visibility slots as the grandfathered apply_visibility_call applies private / public to the instance ones; the owner is the visibility walk''s prefix and it derives no context'
     Rigor::Inference::ScopeIndexer#apply_compact_header_renames!: grandfathered
     Rigor::Inference::ScopeIndexer#apply_dynamic_target_writes: grandfathered
@@ -350,14 +349,9 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#build_method_visibility_tables: the grandfathered visibility walk's entry point, moved from build_discovered_method_visibilities (now a projection of it) so the walk also returns ADR-119 WD3's contested visibility slots; it starts the walk at the top level with the same default and adds no context of its own
     Rigor::Inference::ScopeIndexer#census_scan: ADR-121 WD7's census over a def or refine body the method walk does not descend; a nested def, class, module or singleton class only moves the module a `refine` there is charged to to the wildcard, so it derives no declaration context
     Rigor::Inference::ScopeIndexer#class_method_visibility_parts: 'issue #1984, the private_class_method / public_class_method twin of visibility_call_parts; it maps the call name to its visibility in the walk''s own spellings (receiverless, self., send) and derives no context'
-    Rigor::Inference::ScopeIndexer#collect_alias_map_block_call?: grandfathered
-    Rigor::Inference::ScopeIndexer#collect_alias_map_declaration: grandfathered
-    Rigor::Inference::ScopeIndexer#collect_alias_map_meta_new?: grandfathered
-    Rigor::Inference::ScopeIndexer#collect_alias_map_singleton: grandfathered
     Rigor::Inference::ScopeIndexer#collect_anonymous_meta_defs?: grandfathered
     Rigor::Inference::ScopeIndexer#collect_block_ivar_writes: grandfathered
     Rigor::Inference::ScopeIndexer#collect_call_method_defs?: grandfathered
-    Rigor::Inference::ScopeIndexer#collect_class_alias_map: grandfathered
     Rigor::Inference::ScopeIndexer#collect_class_body_ivar_writes: grandfathered
     Rigor::Inference::ScopeIndexer#collect_class_method_defs: grandfathered
     Rigor::Inference::ScopeIndexer#collect_decl_method_defs: grandfathered
@@ -453,28 +447,22 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#own_sibling_table: copy on write for one sibling table of the extends fold; it adds no entry, it only makes the table the fold writes into private to that fold
     Rigor::Inference::ScopeIndexer#per_file_siblings: ADR-119 WD3, the per-file merge of the slot siblings under the members' own merges (the file wins every slot it writes, envelope contests union); it combines walk products and decides no context
     Rigor::Inference::ScopeIndexer#receiver_mixin_effects: names the ancestry sides a receiver-form mixin call reshapes; it computes no declaration context
-    Rigor::Inference::ScopeIndexer#record_alias_call_entry: the alias_method call's alias-map write, split out of record_alias_leaf? so the AliasMap can note the writer's certainty (ADR-119 WD3); the owner is the caller's
-    Rigor::Inference::ScopeIndexer#record_alias_leaf?: grandfathered
-    Rigor::Inference::ScopeIndexer#record_alias_map_entry: grandfathered
     Rigor::Inference::ScopeIndexer#record_aliased_ivar_mutations!: grandfathered
     Rigor::Inference::ScopeIndexer#record_anonymous_body_def_as_toplevel: grandfathered
     Rigor::Inference::ScopeIndexer#record_attr_visibility: 'issue #1911, records the attr_reader / attr_writer / attr_accessor members in the visibility table beside the grandfathered record_def_visibility; the owner is the visibility walk''s prefix and the names are each_attr_macro_name''s, so it derives no context'
     Rigor::Inference::ScopeIndexer#record_attr_writer_ivars: grandfathered
-    Rigor::Inference::ScopeIndexer#record_class_or_module?: grandfathered
     Rigor::Inference::ScopeIndexer#record_class_sources: grandfathered
     Rigor::Inference::ScopeIndexer#record_collected_method_def: grandfathered
     Rigor::Inference::ScopeIndexer#record_compound_ivar_write: grandfathered
     Rigor::Inference::ScopeIndexer#record_concern_class_methods: 'issue #2986, files a concern module''s hook-extend entry for its ClassMethods and records each def of its class_methods blocks (and, #1592, its def node; #2997, in every body of the module, not only one that extends ActiveSupport::Concern) on Owner::ClassMethods, the module ActiveSupport evaluates that block in, and files the hook-body-call entry of each call on self in its included or prepended blocks (#3005, in every body too, under the gated hook in a body without the extend), under the module prefix the walk passes in; the instance side is the side those defs have there, and it derives no other context'
     Rigor::Inference::ScopeIndexer#record_constant_class_method_calls: 'issue #1984, records a `K.public_class_method(:x)` (or `send` of it) as K''s public singleton slot and contests K''s singleton slots for a call on `K.singleton_class`, on each class constant_receiver_candidates gives for K; it derives no context'
     Rigor::Inference::ScopeIndexer#record_declaration_facts: grandfathered
-    Rigor::Inference::ScopeIndexer#record_declarations: grandfathered
     Rigor::Inference::ScopeIndexer#record_def_body_evidence: grandfathered
     Rigor::Inference::ScopeIndexer#record_def_node: grandfathered
     Rigor::Inference::ScopeIndexer#record_def_visibility: grandfathered
     Rigor::Inference::ScopeIndexer#record_deferred_def: grandfathered
     Rigor::Inference::ScopeIndexer#record_definer_name_row: 'issue #2184, adds a deferred-range row naming the literal first argument of a define_method / define_singleton_method / alias_method call (or the same call through send) on any receiver, with no owner and no side, so a by-name reader (RebindingBlockCallees, the defines: edge) sees a body no def table holds; it reads the call as written and decides no owner, side or nesting'
     Rigor::Inference::ScopeIndexer#record_envelope: grandfathered
-    Rigor::Inference::ScopeIndexer#record_eval_declarations?: grandfathered
     Rigor::Inference::ScopeIndexer#record_extend_call: grandfathered
     Rigor::Inference::ScopeIndexer#record_extend_targets: grandfathered
     Rigor::Inference::ScopeIndexer#receiver_extend_recorded?: writes one receiver-form `Const.extend(M)` call into the extend accumulator under the class the constant receiver names (#2094), as instance_mixin_recorded? does for `Const.include(M)`; it computes no declaration context
@@ -484,7 +472,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#record_ivar_operator_write: grandfathered
     Rigor::Inference::ScopeIndexer#record_ivar_or_write: grandfathered
     Rigor::Inference::ScopeIndexer#record_ivar_write: grandfathered
-    Rigor::Inference::ScopeIndexer#record_meta_new_constant?: grandfathered
     Rigor::Inference::ScopeIndexer#record_method_kind: grandfathered
     Rigor::Inference::ScopeIndexer#record_mixin_call: grandfathered
     Rigor::Inference::ScopeIndexer#record_module_function: writes the bare module_function edge under the owner the walk passes in; it computes no declaration context
@@ -498,7 +485,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#recording_evaluator: 'builds the per-node scope index''s recording evaluation, for the file and for each construct the walk reaches unentered (#2196, #2056); it records which scope a node is typed under, not what a declaration is'
     Rigor::Inference::ScopeIndexer#runs_computed_self_definer?: 'issue #2901, whether a method body runs a computed define_method on its own self; it names the declaration node classes only to stop at a body where self changes, and answers a Boolean, never an owner or a side'
     Rigor::Inference::ScopeIndexer#seed_operator_only_ivars!: grandfathered
-    Rigor::Inference::ScopeIndexer#settle_alias_slot: ADR-119 WD3 (#2006), writes an alias copy into the walk's own def-node slot and settles its contest from the new name's last writer in source order (through follow_slot_writer); it takes the owner name the alias map computed and decides no declaration context
     Rigor::Inference::ScopeIndexer#singleton_class_rewrite_tainted?: taints the singleton side of the class a surface call on `singleton_class` or `Const.singleton_class` reshapes (#1752); the owner is the enclosing class the extends walk passes in, or the constant by the eval-receiver lexical rule, and the call decides no other owner or side
     Rigor::Inference::ScopeIndexer#singleton_constant_segments: collects the last segment of every constant write in a `class << …` body for loose_constant_segments; the segments are names a `refine` target is matched against, and it decides no declaration context
     Rigor::Inference::ScopeIndexer#singleton_mixin_recorded?: writes one singleton-side mixin call under the owner the walk passes in; it computes no declaration context
@@ -560,6 +546,19 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#write_singleton_slot: ADR-119 WD3, the singleton walk's one slot write, routed through SingletonDefTable so the slot's contest follows its writer; the owner and side are the walk's, it adds no context of its own
     Rigor::Inference::ScopeIndexer#toplevel_include_owner: 'names `Object` as the owner of a receiverless `include` written as a direct statement of the program (`main.include`, issue #1697); it reads only whether the call is a top-level statement, and the walk''s own empty prefix and owner'
     Rigor::Inference::ScopeIndexer#supersede_def_nodes: ADR-119 WD3 (#1989), a later implicit-self non-def definer (attr_*, a literal define_method, alias_method / alias) of a name contests the walk's own def-node slot, certain or possible, keeping the replaced def so no sibling file fills it (through follow_slot_writer); it takes the owner prefix and certainty the walk already computed and decides no declaration context
+lib/rigor/inference/scope_indexer/alias_def_nodes.rb:
+  computes: per class, the def node the new name of each alias and alias_method runs, which is the one its old name held at the alias in source order, written into the methods table's def-node slots with each slot's contest; the walk that fills the alias map threads its own prefix, alias owner and cref through every declaration and asks DeclarationWalk::Rules for each declaration context
+  producers:
+    Rigor::Inference::ScopeIndexer::AliasDefNodes#apply_alias_def_nodes: grandfathered
+    Rigor::Inference::ScopeIndexer::AliasDefNodes#collect_alias_map_block_call?: grandfathered
+    Rigor::Inference::ScopeIndexer::AliasDefNodes#collect_alias_map_declaration: grandfathered
+    Rigor::Inference::ScopeIndexer::AliasDefNodes#collect_alias_map_meta_new?: grandfathered
+    Rigor::Inference::ScopeIndexer::AliasDefNodes#collect_alias_map_singleton: grandfathered
+    Rigor::Inference::ScopeIndexer::AliasDefNodes#collect_class_alias_map: grandfathered
+    Rigor::Inference::ScopeIndexer::AliasDefNodes#record_alias_call_entry: the alias_method call's alias-map write, split out of record_alias_leaf? so the AliasMap can note the writer's certainty (ADR-119 WD3); the owner is the caller's
+    Rigor::Inference::ScopeIndexer::AliasDefNodes#record_alias_leaf?: grandfathered
+    Rigor::Inference::ScopeIndexer::AliasDefNodes#record_alias_map_entry: grandfathered
+    Rigor::Inference::ScopeIndexer::AliasDefNodes#settle_alias_slot: ADR-119 WD3 (#2006), writes an alias copy into the walk's own def-node slot and settles its contest from the new name's last writer in source order (through follow_slot_writer); it takes the owner name the alias map computed and decides no declaration context
 lib/rigor/inference/scope_indexer/certainty.rb:
   computes: ADR-119 WD3's certainty, the identity Set of a file's possible def contributions
   producers:
@@ -604,6 +603,13 @@ lib/rigor/inference/scope_indexer/cvar_hierarchy.rb:
   computes: 'issue #3219, the in-file superclass tree the class-cvar census joins each class''s cvar entries along'
   producers:
     Rigor::Inference::ScopeIndexer::CvarHierarchy#record: 'issue #3219, records, for the class-cvar census, the name a class or module header declares and a class header''s as-written superclass with the Module.nesting outside the header; it takes the prefix and nesting from the walk''s DeclarationWalk::Context and body context and derives none of its own'
+lib/rigor/inference/scope_indexer/declaration_artifacts.rb:
+  computes: one file's declaration artifacts, which are the identity table that types the outermost path node of each class or module header as the singleton of the class it declares, and the classes the file declares by qualified name, a constant write that creates a class among them, with the namespaces its compact names imply; the walk threads its own prefix, rebound self and cref through every declaration and asks DeclarationWalk::Rules for each declaration context
+  producers:
+    Rigor::Inference::ScopeIndexer::DeclarationArtifacts#record_class_or_module?: grandfathered
+    Rigor::Inference::ScopeIndexer::DeclarationArtifacts#record_declarations: grandfathered
+    Rigor::Inference::ScopeIndexer::DeclarationArtifacts#record_eval_declarations?: grandfathered
+    Rigor::Inference::ScopeIndexer::DeclarationArtifacts#record_meta_new_constant?: grandfathered
 lib/rigor/inference/scope_indexer/declaration_signature.rb:
   computes: the ADR-89 declaration signature, a digest of the declaration surfaces one file's index already holds; it renders the tables it is handed and derives no declaration context
   producers:

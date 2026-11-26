@@ -103,8 +103,19 @@ RSpec.describe "Declaration producers" do
   # `record_constant_write`, `walk_constant_write_census`, `walk_constant_write_children`, `walk_constant_writes`,
   # `walk_singleton_class_writes` and `walk_typed_declaration?`. None was renamed, and the other 34 functions of the
   # module were no producers.
+  # Digest change, count still 366 (#3400, ADR-116 WD9, the alias def-node pass and the declaration artifacts):
+  # twelve grandfathered keys moved from `lib/rigor/inference/scope_indexer.rb#Rigor::Inference::ScopeIndexer#`.
+  # Eight moved to
+  # `lib/rigor/inference/scope_indexer/alias_def_nodes.rb#Rigor::Inference::ScopeIndexer::AliasDefNodes#`:
+  # `apply_alias_def_nodes`, `collect_alias_map_block_call?`, `collect_alias_map_declaration`,
+  # `collect_alias_map_meta_new?`, `collect_alias_map_singleton`, `collect_class_alias_map`, `record_alias_leaf?` and
+  # `record_alias_map_entry`. Four moved to
+  # `lib/rigor/inference/scope_indexer/declaration_artifacts.rb#Rigor::Inference::ScopeIndexer::DeclarationArtifacts#`:
+  # `record_class_or_module?`, `record_declarations`, `record_eval_declarations?` and `record_meta_new_constant?`.
+  # None was renamed. `record_alias_call_entry` and `settle_alias_slot` moved with the reasons they had, and the
+  # other three functions of the two modules were no producers.
   let(:grandfathered_pin) do
-    { count: 366, digest: "d7dbc88cad690b32fd7d0c4e8e453c17e0509a160aad31f3bed2ca91271801b6" }
+    { count: 366, digest: "2250ac3a66d40e69e0eb081c5472550cf7af2296b8f5ae2aacf63e1a6c32d655" }
   end
 
   define_method(:found) do |parsed = DeclarationFactSources.parsed_under|

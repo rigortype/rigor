@@ -101,7 +101,7 @@ module Rigor
         # `Struct.new(:a, :b)` synthesises an anonymous Struct *subclass* (a class object), not a
         # Struct *instance* — so the chained idiom `Struct.new(:a, :b).new(1, 2)` must resolve
         # `.new` again on a class-like carrier. The constant-bound form (`S = Struct.new(:a);
-        # S.new(1)`) already records `Singleton[S]` via `ScopeIndexer#record_meta_new_constant?`;
+        # S.new(1)`) already records `Singleton[S]` via `ScopeIndexer::DeclarationArtifacts.record_meta_new_constant?`;
         # this lift gives the *chained* (anonymous) position the same class-like carrier so the
         # trailing `.new` dispatches instead of firing a spurious `undefined method 'new' for
         # Struct`.

@@ -1,4 +1,4 @@
-# Slice 1 of #3400 names three modules `MutatedCarrierWidening`, `FactoryCallResolver` and `SingletonClassSources`, shows of each only what another file calls, lets `index` pass RuboCop's method length under its directive, gives each module a row in rule (v)'s table, and accepts two `Dynamic` call sites in the self-typing scan
+# Slice 1 of #3400 names three modules `MutatedCarrierWidening`, `FactoryCallResolver` and `SingletonClassSources`, shows of each only what another file calls, lets `index` pass RuboCop's method length under its directive, gives each module a row in rule (v)'s table, and accepts two `Dynamic` call sites in the self-typing scan (net +1)
 
 - **PR:** [#3405](https://github.com/rigortype/rigor/pull/3405)
 - **Issue:** [#3400](https://github.com/rigortype/rigor/issues/3400)
@@ -82,9 +82,11 @@ it names.
 
 **The ratchet.** `singleton_side_call?` asks `ScopeIndexer.surface_rewriting_call?`, a recogniser that stays because
 three other walkers ask it. Its body tests a call's name against four constants of `scope_indexer.rb`, and called
-on the module from another file it types `Dynamic[top]` where it typed `constant` in its own. That is the limit
-#3400 said to expect ([#3392](https://github.com/rigortype/rigor/issues/3392), which records it for an Array
-constant; three of these four are Sets), met through a call. So that call and `singleton_side_call?(node)`, whose
+on the module from another file it types `Dynamic[top]` where it typed `constant` in its own. That is the
+project-wide constant publication rule (a `Set[...].freeze`, a mutable literal or a Regexp publishes nothing
+across files), met through a call. It is not [#3392](https://github.com/rigortype/rigor/issues/3392)'s shape:
+that issue covers a constant bound to another file's Array or String, and its landing would leave these Sets
+and the Regexp `Dynamic`. So that call and `singleton_side_call?(node)`, whose
 answer it decides, read `Dynamic` at the head. The deletion takes one `Dynamic` call site with it, so the scan
 reads 50,953 → 50,954 `Dynamic` call sites, both arms from `git archive`. A move may not change a body to avoid
 them.
@@ -127,6 +129,7 @@ each from `SOURCES` and say so in its comment; no row of `producers.yml` moves. 
 `SharedWalkTables`, cut its three functions into that module, add `resolve_meta_factory_call` to the list its
 mirror spec pins, and spell the two calls in `scope_indexer.rb` on it. To make a constant of the widening
 private, add `private_constant` to the module and drop the name from the mirror spec's list. To win the two
-call sites back without #3392, declare `ScopeIndexer.surface_rewriting_call?` in `sig/rigor/inference.rbs`.
+call sites back, declare `ScopeIndexer.surface_rewriting_call?` in `sig/rigor/inference.rbs`, or widen the
+constant publication rule to frozen Sets and Regexps; #3392 alone does not.
 Nothing outside this pull request depends on any of these yet; the next slice of #3400, the constant tables,
 reads `SharedWalkTables`' two calls back as they are here, and meets `index` at 32 lines.

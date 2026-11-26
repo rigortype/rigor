@@ -250,7 +250,7 @@ are the CLI's, so read them exactly as above.
 | `rigor_type_of` | `file` (string), `line` (integer, 1-based), `col` (integer, 1-based) | `config` | The inferred type at that location. |
 | `rigor_annotate` | `file` (string) | `config` | The source with each line's last-expression type appended. |
 | `rigor_sig_gen` | — (defaults to the configured paths) | `paths` (array of strings), `params` (`"untyped"` \| `"observed"`), `config` | The JSON candidate report — classifications, `rbs`, `inferred_return`, `skip_reason`. |
-| `rigor_check` | `paths` (array of strings) | `config` | The JSON diagnostic report. |
+| `rigor_check` | — (defaults to the configured paths) | `paths` (array of strings), `config` | The JSON diagnostic report. |
 | `rigor_explain` | — (omit `rule` to list every rule) | `rule` (string) | The rule catalogue entry, as JSON. |
 
 Two shape differences from the CLI worth knowing:

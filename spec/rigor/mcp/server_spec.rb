@@ -648,6 +648,29 @@ RSpec.describe Rigor::MCP::Server do
       expect(resp.dig("error", "message")).to eq("Invalid argument for rigor_lens: files")
     end
 
+    [nil, :absent].each do |arguments|
+      it "reads #{arguments.inspect} arguments as an empty object, so an argument-less tool runs" do
+        params = { "name" => "rigor_explain" }
+        params["arguments"] = arguments unless arguments == :absent
+        allow(Rigor::CLI).to receive(:new).and_return(instance_double(Rigor::CLI, run: 0))
+
+        resp = JSON.parse(JSON.generate(server.handle({ "id" => 7, "method" => "tools/call", "params" => params })))
+
+        expect(resp).to have_key("result")
+        expect(Rigor::CLI).to have_received(:new).with(%w[explain --format=json], out: anything, err: anything)
+      end
+    end
+
+    it "answers non-object arguments with -32602 under revision 2026-07-28 too" do
+      meta = { "io.modelcontextprotocol/protocolVersion" => "2026-07-28",
+               "io.modelcontextprotocol/clientCapabilities" => {} }
+      resp = request(id: 8, method: "tools/call",
+                     params: { "name" => "rigor_explain", "arguments" => [], "_meta" => meta })
+
+      expect(resp.dig("error", "code")).to eq(-32_602)
+      expect(resp).not_to have_key("result")
+    end
+
     [[], "x", 5, false].each do |arguments|
       it "answers arguments #{arguments.inspect} with -32602" do
         resp = request(id: 6, method: "tools/call", params: { "name" => "rigor_explain", "arguments" => arguments })

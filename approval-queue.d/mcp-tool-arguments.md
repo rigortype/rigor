@@ -3,7 +3,7 @@
 - **PR:** [#3430](https://github.com/rigortype/rigor/pull/3430)
 - **Issue:** [#3412](https://github.com/rigortype/rigor/issues/3412)
 - **Class:** open-choice
-- **Precedent:** [ADR-5](../docs/adr/5-robustness-principle.md)
+- **Precedent:** none — sets one
 - **Decided:** 2026-11-27
 
 ## Background
@@ -27,14 +27,18 @@ open. `docs/internal-spec/mcp.md` § Arguments recorded the case as unspecified.
 ## Decision
 
 Drop `required` for both tools; their `paths` descriptions now say "defaults to configured paths",
-as `rigor_triage` and `rigor_sig_gen` do. ADR-5 (be liberal in what is accepted) and the
-false-positives-first rule both weigh against refusing a call that has a well-defined, read-only
-answer. The binding page now says a tool's `required` lists exactly what the server refuses a call
+as `rigor_triage` and `rigor_sig_gen` do. The decision rests on its own grounds: it matches the CLI,
+the two sibling tools (which have defaulted since ADR-33's first commit, 81fe708c8), and what the
+server already did, and the call it keeps accepting is read-only (ADR-33 WD5). ADR-5 (lenient
+inputs) and the false-positives-first rule point the same way only by analogy: one governs type
+signatures and the other diagnostics, so neither is cited as the precedent. The binding page now says a tool's `required` lists exactly what the server refuses a call
 without, and a spec in `spec/rigor/mcp/server_spec.rb` pins that for every tool.
 
 ## To undo
 
 Restore `required: ["paths"]` on the two tools in `lib/rigor/mcp/server.rb`'s `TOOLS` and add a
 `return nil unless` guard for `paths` in their `build_argv` branches. The per-tool spec then expects
-the refusal without further change; drop the example that runs the two tools without `paths`, and update `docs/internal-spec/mcp.md` § Tools and § Arguments and
-the two tables in `docs/manual/10-mcp-server.md`. Nothing else depends on the decision.
+the refusal without further change; drop the example that runs the two tools without `paths`, and
+update `docs/internal-spec/mcp.md` § Tools and § Arguments, the two tables in
+`docs/manual/10-mcp-server.md`, and the `rigor_check` row in
+`skills/rigor-type-oracle/references/01-oracle-commands.md`. Nothing else depends on the decision.

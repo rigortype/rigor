@@ -167,7 +167,8 @@ end
 #   default arguments) from one of the roots that table gives the file or a method another covered file calls on
 #   the file's module (`ScopeIndexer.x`), and writes into one of its parameters, a `*rest` or `**rest` included: an
 #   indexed assignment or a `<<` / `merge!` / `add?`-style call into it, or passing it (by position, keyword or
-#   splat) to a same-file method that does.
+#   splat) to a method that does, of the same file or of another listed file, called on that file's module by name
+#   (`ScopeIndexer.add_header_nesting(table, …)` from a module under `scope_indexer/`, #3398).
 #
 # A class that includes `DeclarationWalk::Collector` is a producer as a whole, found from the `include` statement, and
 # so is a class in a covered file whose superclass is one (`class X < SuperclassesCollector`).
@@ -372,7 +373,8 @@ end
 # ADR-119 WD6's rule (v): the methods of each file `SOURCES` lists that are reachable, through same-file calls (a
 # default argument's included), from the file's roots or from a method another covered file calls on the file's
 # module (`ScopeIndexer.x`, `NodePropagation.x`), and write into one of their parameters: an indexed assignment or a
-# `<<` / `merge!`-style call into it, or passing it to a same-file method that does.
+# `<<` / `merge!`-style call into it, or passing it to a method that does, of the same file or of another listed file
+# called on its module by name (#3398).
 module DeclarationWriterScan
   # The Hash / Set / Array writers, then the visibility table's own (`ScopeIndexer::VisibilityTable#write` and the
   # contest writers beside it), which write a slot or its contest as `[]=` does (#1984).
@@ -383,8 +385,10 @@ module DeclarationWriterScan
   # the rule starts from in that file. A method another covered file calls on the module (`names?`) is a root as
   # well, whether or not its caller is reachable, so a new entry point needs no edit here, and a file entered only
   # that way (`roots: []`) is a root set of its own: reachability is followed inside a file and never from one file
-  # into the next. A module that leaves `scope_indexer.rb` with a table writer is one more row, without which the
-  # rule no longer follows it. `source_problems` fails a row whose file, module or root is gone.
+  # into the next. A parameter write is followed across rows: handing a table to a writer of another row's file,
+  # called on that row's module by name, writes it (#3398). A module that leaves `scope_indexer.rb` with a table
+  # writer is one more row, without which the rule no longer follows it. `source_problems` fails a row whose file,
+  # module or root is gone.
   #
   # - `scope_indexer.rb`: ADR-119's three roots, then the multi-file entry points, whose folds
   #   (`finalize_project_index`, `fold_def_tables`, `fold_def_sources`, …) are reachable from no other root.
@@ -417,8 +421,8 @@ module DeclarationWriterScan
   #   `superclasses_collector.rb` and `member_layouts_collector.rb`, and `recorded_ancestor_name` from
   #   `cvar_hierarchy.rb`. Its calls of `ScopeIndexer.add_header_nesting`, `rebound_block_self` and
   #   `resolve_meta_factory_call` make those three entry points of `scope_indexer.rb`. The first writes the
-  #   header-nesting table and keeps its row there: left in this file it would hand that table to a writer in
-  #   another, which the rule does not follow.
+  #   header-nesting table and keeps its row there; moved into this file, it would keep it here, since it hands the
+  #   table to `ScopeIndexer.merge_header_nesting_bucket` and rule (v) follows a write into another row (#3398).
   SOURCES = {
     DeclarationProducerScan::RULE_V_FILE => {
       module: "Rigor::Inference::ScopeIndexer",
@@ -450,15 +454,23 @@ module DeclarationWriterScan
   module_function
 
   # Rule (v) over the table: yields `path, key` for each method of a listed file that is reachable from the file's
-  # entry points and writes into a parameter. A file `parsed` does not hold yields nothing, and a root its file does
-  # not define starts nothing, so that a part of the tree can be scanned; `source_problems` reports both.
+  # entry points and writes into a parameter, directly or by handing it to a writer of its own file or of another
+  # listed file. A file `parsed` does not hold yields nothing, and a root its file does not define starts nothing, so
+  # that a part of the tree can be scanned; `source_problems` reports both.
   def each_writer(parsed, sources = SOURCES)
-    calls = module_calls(parsed)
-    sources.each do |path, source|
-      root = parsed[path]
-      next unless root
+    rows = sources.select { |path, _| parsed.key?(path) }
+    defs = rows.to_h { |path, _| [path, definitions(parsed.fetch(path))] }
+    calls = rows.to_h { |path, _| [path, file_calls(path, defs, rows)] }
+    writers = parameter_writers(defs, calls)
+    outside = module_calls(parsed)
+    rows.each do |path, source|
+      reachable(path, calls.fetch(path), entry_points(outside, path, source)).each do |name|
+        next if writers.fetch([path, name]).empty?
 
-      rule_v(root, source.fetch(:module), entry_points(calls, path, source)) { |key| yield path, key }
+        defs[path].fetch(name).each do |node, owners|
+          yield path, DeclarationProducerScan.def_key(owners, node, node.receiver)
+        end
+      end
     end
   end
 
@@ -517,19 +529,6 @@ module DeclarationWriterScan
     module_name == reference || module_name.end_with?("::#{reference}")
   end
 
-  # Rule (v) in one file: yields the keys of its methods that are reachable from `entries` and write into a
-  # parameter.
-  def rule_v(root, module_name, entries)
-    defs = definitions(root)
-    calls = defs.transform_values { |sites| sites.flat_map { |node, _| same_file_calls(node, defs, module_name) } }
-    writers = parameter_writers(defs, calls)
-    reachable(calls, entries).each do |name|
-      next if writers.fetch(name).empty?
-
-      defs.fetch(name).each { |node, owners| yield DeclarationProducerScan.def_key(owners, node, node.receiver) }
-    end
-  end
-
   # `{method name => [[def node, owners]]}` for a file. Every definition of a name counts: a reopening or a
   # `def self.x` beside a `module_function` copy.
   def definitions(root)
@@ -540,9 +539,16 @@ module DeclarationWriterScan
     defs
   end
 
-  def same_file_calls(def_node, defs, module_name)
-    def_code(def_node).select do |node|
-      node.is_a?(Prism::CallNode) && defs.key?(node.name) && self_receiver?(node.receiver, module_name)
+  # `{method name => [[callee path, call node]]}` for a listed file: the calls its defs make on the implicit
+  # receiver or `self`, into its own file, and on a listed module by name (`names?`), into that module's file, each
+  # where the callee file defines the method.
+  def file_calls(path, defs, rows)
+    defs.fetch(path).transform_values do |sites|
+      sites.flat_map do |def_node, _|
+        def_code(def_node).grep(Prism::CallNode).flat_map do |node|
+          callee_paths(path, node.receiver, rows).filter_map { |callee| [callee, node] if defs[callee].key?(node.name) }
+        end
+      end
     end
   end
 
@@ -551,44 +557,51 @@ module DeclarationWriterScan
     [def_node.parameters, def_node.body].compact.flat_map { |part| DeclarationFactSources.each_node(part).to_a }
   end
 
-  # A call on the implicit receiver, on `self`, or on the file's module by name.
-  def self_receiver?(receiver, module_name)
-    return true if receiver.nil? || receiver.is_a?(Prism::SelfNode)
+  # The listed files a receiver sends a call into: its own on the implicit receiver or `self`, else each file whose
+  # row's module the receiver's constant names.
+  def callee_paths(path, receiver, rows)
+    return [path] if receiver.nil? || receiver.is_a?(Prism::SelfNode)
 
     name = DeclarationFactSources.constant_name(receiver)
-    !name.nil? && names?(name, module_name)
+    name.nil? ? [] : rows.filter_map { |callee, source| callee if names?(name, source.fetch(:module)) }
   end
 
-  def reachable(calls, roots)
+  # The methods of `path` reachable from `roots` through its calls into its own file.
+  def reachable(path, calls, roots)
     seen = Set.new
     pending = roots.select { |root| calls.key?(root) }
     until pending.empty?
       name = pending.pop
       next unless seen.add?(name)
 
-      pending.concat(calls.fetch(name).map(&:name))
+      pending.concat(calls.fetch(name).filter_map { |callee, site| site.name if callee == path })
     end
     seen
   end
 
-  # `{method name => Set[parameter names it writes]}`, directly or by passing one to a same-file writer.
+  # `{[path, method name] => Set[parameter names it writes]}`, directly or by passing one to a writer it calls.
   def parameter_writers(defs, calls)
-    params = defs.transform_values { |sites| sites.flat_map { |node, _| parameter_names(node) }.uniq }
-    writes = defs.to_h do |name, sites|
-      [name, sites.map { |node, _| direct_writes(node, params.fetch(name)) }.reduce(Set.new, :|)]
+    params = defs.flat_map { |path, file| file.map { |name, sites| [[path, name], sites] } }.to_h do |key, sites|
+      [key, sites.flat_map { |node, _| parameter_names(node) }.uniq]
     end
-    loop do
-      grown = false
-      calls.each do |name, sites|
-        sites.each do |site|
-          passed_writes(site, defs.fetch(site.name), params, writes).each do |param|
-            next unless params.fetch(name).include?(param) && writes[name].add?(param)
+    writes = params.to_h do |key, names|
+      [key, defs.dig(*key).map { |node, _| direct_writes(node, names) }.reduce(Set.new, :|)]
+    end
+    loop { return writes if grow_writes(defs, calls, params, writes).empty? }
+  end
 
-            grown = true
-          end
+  # One pass of `parameter_writers`' fixpoint: adds to `writes` each parameter a caller hands to one its callee
+  # writes, and returns those it added.
+  def grow_writes(defs, calls, params, writes)
+    calls.flat_map do |path, file|
+      file.flat_map do |name, sites|
+        key = [path, name]
+        sites.flat_map do |callee, site|
+          callee_key = [callee, site.name]
+          passed_writes(site, defs.dig(*callee_key), params.fetch(key), writes.fetch(callee_key))
+            .select { |param| writes.fetch(key).add?(param) }
         end
       end
-      return writes unless grown
     end
   end
 
@@ -644,11 +657,9 @@ module DeclarationWriterScan
     end
   end
 
-  # The caller's parameters a same-file call hands to a parameter the callee writes: by position or keyword, into a
-  # `*rest` or `**rest` that absorbs the argument, or as a `*splat` / `**splat`.
-  def passed_writes(site, callee_sites, params, writes)
-    callee_writes = writes.fetch(site.name)
-    caller_params = params.values.flatten
+  # The caller's parameters a call hands to a parameter the callee writes: by position or keyword, into a `*rest` or
+  # `**rest` that absorbs the argument, or as a `*splat` / `**splat`.
+  def passed_writes(site, callee_sites, caller_params, callee_writes)
     lists = callee_sites.map { |node, _| node.parameters }
     (site.arguments&.arguments || []).each_with_index.flat_map do |arg, index|
       handed(arg, index, lists).filter_map do |value, targets|

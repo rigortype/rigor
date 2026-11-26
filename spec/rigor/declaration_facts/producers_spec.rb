@@ -114,8 +114,17 @@ RSpec.describe "Declaration producers" do
   # `record_class_or_module?`, `record_declarations`, `record_eval_declarations?` and `record_meta_new_constant?`.
   # None was renamed. `record_alias_call_entry` and `settle_alias_slot` moved with the reasons they had, and the
   # other three functions of the two modules were no producers.
+  # Digest change, count still 366 (#3400, ADR-116 WD9, the mixin tables): ten grandfathered keys moved from
+  # `lib/rigor/inference/scope_indexer.rb#Rigor::Inference::ScopeIndexer#` to
+  # `lib/rigor/inference/scope_indexer/mixin_tables.rb#Rigor::Inference::ScopeIndexer::MixinTables#`:
+  # `mixin_call_recorded?`, `mixin_names_for`, `mixin_tables`, `record_mixin_call`, `walk_class_includes`,
+  # `walk_includes_declaration?`, `walk_includes_meta_new?`, `walk_mixin_call_children`,
+  # `walk_singleton_class_includes` and `write_mixin_targets`. None was renamed. The module's other five rows, and the
+  # twelve of the mixin effects and taints (`mixin_effects.rb`), moved with the reasons they had; none of those was
+  # grandfathered. One row is new and has a reason of its own: the body of `MixinEffects`, which names node classes
+  # since `LOCAL_SCOPE_BOUNDARIES` moved into it.
   let(:grandfathered_pin) do
-    { count: 366, digest: "2250ac3a66d40e69e0eb081c5472550cf7af2296b8f5ae2aacf63e1a6c32d655" }
+    { count: 366, digest: "152238d9ca04c4a5d808a24e377cef7824bf9abb623ba948758634bc79a06493" }
   end
 
   define_method(:found) do |parsed = DeclarationFactSources.parsed_under|

@@ -3,7 +3,7 @@
 module Rigor
   module Inference
     module ScopeIndexer
-      # The accumulator the mixin walks ({ScopeIndexer#mixin_tables}, {ScopeIndexer#extend_tables}) fill: the
+      # The accumulator the mixin walks ({MixinTables.mixin_tables}, {ScopeIndexer#extend_tables}) fill: the
       # per-class module lists as before, plus which mixin edges have no position the tables can vouch for
       # (`Scope::DiscoveryIndex#unpositioned_mixins`).
       #

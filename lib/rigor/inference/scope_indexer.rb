@@ -69,6 +69,8 @@ require_relative "scope_indexer/singleton_class_sources"
 require_relative "scope_indexer/constant_tables"
 require_relative "scope_indexer/alias_def_nodes"
 require_relative "scope_indexer/declaration_artifacts"
+require_relative "scope_indexer/mixin_effects"
+require_relative "scope_indexer/mixin_tables"
 
 module Rigor
   module Inference
@@ -404,12 +406,12 @@ module Rigor
       # instance-ancestor search order — its `include`s are therefore NEARER than the seed's (the
       # {#accumulate_extend_lists} convention, which exists for the same ordering reason).
       def merge_mixin_tables(default_scope, root)
-        file = mixin_tables(root)
+        file = MixinTables.mixin_tables(root)
         [
           default_scope.discovered_includes.merge(file[:includes]) do |_class, cross_file, per_file|
             (per_file + cross_file).uniq
           end,
-          # ADR-129 G4 — each merged list is frozen as the per-file walk's lists are ({#freeze_mixin_lists}).
+          # ADR-129 G4 — each merged list is frozen as the per-file walk's lists are ({MixinTables.freeze_mixin_lists}).
           default_scope.discovered_prepends.merge(file[:prepends]) do |_class, cross_file, per_file|
             (per_file + cross_file).uniq.freeze
           end,
@@ -5500,552 +5502,16 @@ module Rigor
 
       MIXIN_CALL_NAMES = %i[include prepend].freeze
 
-      # ADR-24 slice 2 — per-class/module table mapping a fully qualified user class or module to the list of module
-      # names it `include`s / `prepend`s, AS WRITTEN at the mixin call (`include Foo` / `include Foo::Bar`). Only
-      # constant arguments are recorded; dynamic mixins (`include some_method`) produce no entry. The names are
-      # spelled as written but ordered in instance-ancestor SEARCH order since #1173: prepended modules first
-      # (Ruby puts them ahead of the class itself), then includes nearest-first (`include A; include B` searches
-      # B first; `include A, B` keeps `["A", "B"]`). `prepend` is ALSO recorded in its own
-      # {#build_discovered_prepends} table, which is what tells the two apart at `def`-priority level. `extend` is NOT
-      # tracked (it adds singleton methods; ADR-24 slice 2 resolves the instance-side chain).
-      def build_discovered_includes(root)
-        mixin_tables(root).fetch(:includes)
-      end
-
-      # Issue #1123 — `{qualified class or module name => [module names it `prepend`s, as written]}`,
-      # stored in instance-ancestor SEARCH order: a later `prepend` statement puts its module NEARER than
-      # an earlier one (`prepend A; prepend B` searches B before A) while the arguments of ONE
-      # `prepend A, B` keep call order — exactly the convention {#record_extend_targets} documents for
-      # `extend`, and the order `Scope::ResolutionChain` reads a body's prepends in. Ruby inserts a
-      # prepended module, and its own ancestry, immediately BEFORE the class that prepends it, so these
-      # names outrank the class's own `def`s; without the kind recorded separately from {#build_discovered_includes}
-      # there was nothing to order on and `prepend` was silently an `include`.
-      def build_discovered_prepends(root)
-        mixin_tables(root).fetch(:prepends)
-      end
-
-      # One descent, both instance-side mixin tables: the walk classifies each mixin call it sees, so the
-      # two tables cost one walk rather than two. Each value is frozen and de-duplicated per class, as the
-      # single-table builder always did. `:unpositioned` names the recorded edges whose order is not a fact
-      # ({MixinAccumulator}).
-      def mixin_tables(root)
-        accumulator = MixinAccumulator.new
-        accumulator.direct_body(program_statements(root))
-        accumulator.program_body(program_statements(root))
-        walk_class_includes(root, [], nil, accumulator)
-        {
-          includes: freeze_mixin_lists(accumulator, :include),
-          prepends: freeze_mixin_lists(accumulator, :prepend),
-          unpositioned: accumulator.unpositioned
-        }
-      end
-
-      # The `{include: [...], prepend: [...]}`-valued accumulator {#mixin_tables} fills is keyed by class
-      # first and kind second, because one walk feeds both tables; this projects one kind out of it. A class
-      # with no names of that kind is DROPPED rather than stored as an empty list, which is the shape the
-      # single-table builder always had (consumers take the absence of an entry as "mixes nothing in").
-      #
-      # Issue #1173 — the `:include` projection prepends the `:prepend` names: a prepended module sits
-      # ahead of the class ITSELF in the runtime ancestry, and therefore ahead of every include, so the
-      # instance-ancestor search order this table now keeps is `prepends ++ includes`. Both buckets
-      # already store nearest-first (see {#write_mixin_targets}), so the concat preserves MRO.
-      def freeze_mixin_lists(accumulator, kind)
-        accumulator.each_with_object({}) do |(class_name, kinds), out|
-          names = mixin_names_for(kinds, kind)
-          # The instance-side projection is a SET in search order; the prepend table keeps every statement.
-          names = names.uniq if kind == :include
-          names = names.freeze
-          out[class_name] = names unless names.empty?
-        end.freeze
-      end
-
-      # One bucket's frozen list: `:include` is every instance-side mixin in search order (prepends
-      # first), `:prepend` the wedge table alone.
-      def mixin_names_for(kinds, kind)
-        if kind == :include
-          (kinds[:prepend] || []) + (kinds[:include] || [])
-        else
-          kinds[kind] || []
-        end
-      end
-
-      # The top-level statements of a parsed file: the one body whose declarations need no enclosing
-      # declaration to be direct ({MixinAccumulator}).
-      def program_statements(root)
-        root.is_a?(Prism::ProgramNode) ? root.statements : root
-      end
-
-      def walk_class_includes(node, qualified_prefix, current_class, accumulator,
-                              singleton_self: false, singleton_cref: false)
-        return unless node.is_a?(Prism::Node)
-
-        case node
-        when Prism::ClassNode, Prism::ModuleNode
-          return if walk_includes_declaration?(node, qualified_prefix, current_class, accumulator,
-                                               singleton_cref)
-        when Prism::SingletonClassNode
-          # Issue #728 — `class << self; include M; end` mixes M into the SINGLETON: it contributes class
-          # methods, not the instance surface this table feeds. Descending with no owner keeps any nested
-          # declaration walked (a `ClassNode` child sets its own owner) while the mixin calls in the
-          # singleton body record nothing, which is what `extends` is for — and since #915 the extend walk
-          # does take them, so the form is recorded rather than dropped. `self` inside is
-          # the singleton — a `self::` receiver below raises NameError at runtime, so it
-          # declines rather than resolving against the enclosing class. The `class <<`
-          # EXPRESSION itself evaluates in the enclosing context, so it walks without
-          # either marker.
-          return walk_singleton_class_includes(node, qualified_prefix, current_class, accumulator,
-                                               singleton_self, singleton_cref)
-        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantOrWriteNode,
-             Prism::ConstantPathOrWriteNode
-          return if walk_includes_meta_new?(node, qualified_prefix, current_class, accumulator,
-                                            singleton_self, singleton_cref)
-        when Prism::CallNode
-          record_mixin_call(node, qualified_prefix, current_class, accumulator)
-          return walk_mixin_call_children(node, qualified_prefix, current_class, accumulator,
-                                          singleton_self, singleton_cref)
-        end
-
-        walk_includes_children(node, qualified_prefix, current_class, accumulator, singleton_self, singleton_cref)
-      end
-
-      # The generic descent of {#walk_class_includes}; a `self.included(base)`-style hook's body walks with
-      # its parameters in scope ({MixinAccumulator#with_hook_params}).
-      def walk_includes_children(node, qualified_prefix, current_class, accumulator, singleton_self, singleton_cref)
-        hook_params = hook_def_params(node)
-        if hook_params
-          return accumulator.with_hook_params(hook_params) do
-            walk_includes_children_plain(node, qualified_prefix, current_class, accumulator, singleton_self,
-                                         singleton_cref)
-          end
-        end
-
-        walk_includes_children_plain(node, qualified_prefix, current_class, accumulator, singleton_self, singleton_cref)
-      end
-
-      def walk_includes_children_plain(node, qualified_prefix, current_class, accumulator, singleton_self,
-                                       singleton_cref)
-        node.rigor_each_child do |child|
-          walk_class_includes(child, qualified_prefix, current_class, accumulator,
-                              singleton_self: singleton_self, singleton_cref: singleton_cref)
-        end
-      end
-
-      # The class/module arm of {#walk_class_includes}: under an unnameable cref a
-      # bare/`self::` header opens `#<singleton>::Name` — ownerless; nameable headers
-      # re-anchor at a real cref.
-      def walk_includes_declaration?(node, qualified_prefix, current_class, accumulator,
-                                     singleton_cref)
-        ctx = DeclarationWalk::Rules.decl_body_context(node, qualified_prefix, current_class && [current_class],
-                                                       singleton_cref)
-        return false unless ctx
-        return true unless node.body
-
-        _self_decl, child_prefix, child_cref = ctx
-        accumulator.direct_body(node.body) if accumulator.direct?(node)
-        accumulator.class_body(node.body)
-        walk_class_includes(node.body, child_cref ? [] : child_prefix,
-                            child_cref ? nil : child_prefix.join("::"), accumulator,
-                            singleton_cref: child_cref)
-        true
-      end
-
-      # The `class <<` arm of {#walk_class_includes}: the expression evaluates in the enclosing
-      # context while the body is the singleton's — ownerless here (`extends` owns its mixins),
-      # with `self` unnameable and an unnameable cref.
-      def walk_singleton_class_includes(node, qualified_prefix, current_class, accumulator,
-                                        singleton_self, singleton_cref)
-        walk_class_includes(node.expression, qualified_prefix, current_class, accumulator,
-                            singleton_self: singleton_self, singleton_cref: singleton_cref)
-        return unless node.body
-
-        walk_class_includes(node.body, qualified_prefix, nil, accumulator,
-                            singleton_self: true, singleton_cref: true)
-      end
-
-      # `K = Class.new { include T }` mixes T into the block's class — the nameable `K`, or
-      # ownerless when the write lands on an unnameable cref. Returns whether a meta-new block
-      # body was found (the write's other children are left to the caller).
-      def walk_includes_meta_new?(node, qualified_prefix, current_class, accumulator, singleton_self,
-                                  singleton_cref)
-        call = DeclarationWalk::Rules.meta_new_block_call(node)
-        return false unless call
-
-        meta_owner = meta_new_mixin_owner(node, qualified_prefix, singleton_cref,
-                                          current_class && [current_class])
-        # The block rebinds only `self` — `Module.nesting` stays lexical — so the cref
-        # flag passes through unchanged: a nested `class Inner` under `class <<` still
-        # lands on the singleton's table, while mixin leaves attribute to `meta_owner`.
-        body_cref = singleton_cref
-        # The factory call's receiver and arguments evaluate in the ENCLOSING context —
-        # `K = Class.new(X.class_eval { include T })` still mixes T into X — while the
-        # block is the class body of the class the write names.
-        if call.receiver
-          walk_class_includes(call.receiver, qualified_prefix, current_class, accumulator,
-                              singleton_self: singleton_self, singleton_cref: singleton_cref)
-        end
-        call.arguments&.arguments&.each do |arg|
-          walk_class_includes(arg, qualified_prefix, current_class, accumulator,
-                              singleton_self: singleton_self, singleton_cref: singleton_cref)
-        end
-        if (body = DeclarationWalk::Rules.meta_new_block_body(node))
-          walk_class_includes(body, qualified_prefix, meta_owner, accumulator,
-                              singleton_cref: body_cref)
-        end
-        true
-      end
-
-      # Issue #728 — a block that REBINDS `self` owns the mixin calls written in it, not the lexically enclosing
-      # declaration: `Thing = Class.new { include Taggable }` inside `class Outer` must not register `Taggable` on
-      # `Outer`, where `Outer.new.tag` raises `NoMethodError` in MRI. The classification is
-      # {ConstantTables.rebound_block_self}, the same one #721 gave its own mixin scan.
-      #
-      # `Recv.class_eval { include M }` resolves to `Recv` and records there. An OPAQUE rebinding — `Class.new` /
-      # `Module.new` / a non-constant `class_eval` receiver — records nothing: the class exists but this walk cannot
-      # name it, and naming the lexical enclosure instead is the one answer Ruby is guaranteed not to have written.
-      def walk_mixin_call_children(node, qualified_prefix, current_class, accumulator, singleton_self,
-                                   singleton_cref)
-        # `self` is unnameable whenever the singleton marker is set OR the body is ownerless
-        # under an unnameable cref (`class D` inside `class <<`, a declined eval body) — a
-        # `self::` receiver inside either raises NameError or resolves on a table nothing
-        # names, so it declines rather than re-anchoring to the lexical class.
-        unnameable_self = singleton_self || (singleton_cref && current_class.nil?)
-        rebound = ConstantTables.rebound_block_self(node, qualified_prefix, nil, nil,
-                                                    unnameable_self ? OPAQUE_SELF : current_class)
-        node.rigor_each_child do |child|
-          rebinds_self = rebound && child.is_a?(Prism::BlockNode)
-          owner =
-            if rebinds_self
-              rebound == OPAQUE_SELF ? nil : rebound
-            else
-              current_class
-            end
-          # A rebound block's own self is the receiver again — nameable only when the rebound
-          # is; an OPAQUE rebound keeps the self unnameable — but `Module.nesting` never
-          # rebinds, so the unnameable-cref marker crosses the block unchanged.
-          child_unnameable = rebinds_self ? rebound == OPAQUE_SELF : unnameable_self
-          walk_class_includes(child, qualified_prefix, owner, accumulator,
-                              singleton_self: child_unnameable, singleton_cref: singleton_cref)
-        end
-      end
-
-      # A receiverless `include Foo` / `prepend Foo` written in a declaration body contributes both tables;
-      # the receiver form (`Base.prepend(Loud)`, issue #1123) does too — a call form puts the module in the
-      # class's instance ancestry exactly as the declaration form does, so `discovered_includes` must carry
-      # it or the set-shaped consumers (arity, visibility, undefined-method suppression) would answer
-      # differently for the two spellings of one edge.
-      def record_mixin_call(node, qualified_prefix, current_class, accumulator)
-        taint_opaque_eval(node, current_class, accumulator)
-        view = mixin_call_view(node)
-        return taint_computed_mixin_send(node, current_class, accumulator, INSTANCE_MIXIN_NAMES, :include) if view.nil?
-        return if view.first.nil?
-
-        kind = view.first
-        current_class ||= toplevel_include_owner(node, qualified_prefix, current_class, accumulator)
-        effects = mixin_effects(node, kind, qualified_prefix, current_class, accumulator, in_singleton: false)
-                  .select { |_owner, side| side == :include }
-        return if effects.empty?
-        return if instance_mixin_recorded?(node, view, qualified_prefix, current_class, accumulator)
-
-        # A mixin call the tables cannot hold still reshapes the ancestry: taint the whole owner side.
-        taint_unrecorded_mixin(node, kind, view[1], effects, accumulator)
-      end
-
-      # Issue #2991 — an unrecorded `include` / `prepend` that reaches the instance side (its receiver is not a
-      # `singleton_class` call) leaves that side's module SET unknown when an argument is not a constant
-      # (`include(*MODS)`, `include helper`) or the receiver is a hook parameter (`base.include M`), which lists
-      # {MixinAccumulator::UNNAMED}. A `Module.new { … }` argument keeps its #2975 reading. A hook's `base.extend M` or
-      # `base.singleton_class.include M` taints the instance side's order alone: it mixes nothing into it.
-      #
-      # Issue #2995 — an instance-side call whose arguments are all constants is recorded wherever the walk names its
-      # owner (`self.include M` and a receiverless `send(:include, M)` included), so none reaches here with a module
-      # the tables do not hold. The extends walk's taint of `Const.include M` inside `class << self` is the one
-      # constant-argument call that does, and the include walk records that edge under `Const`.
-      #
-      # Issue #2994 — the singleton side lists {MixinAccumulator::UNNAMED} too when an unrecorded call reaching it has
-      # an argument that is not a constant: `extend(*EMODS)`, `extend helper`, `include(*MODS)` inside `class << self`,
-      # or a `self` argument. A hook parameter's `base.extend(*X)` extends the includer, not the module the hook is
-      # written in, so it leaves that module's singleton side unnamed-free.
-      def taint_unrecorded_mixin(node, kind, arguments, effects, accumulator)
-        opaque = arguments.any? { |arg| opaque_mixin_argument?(arg) }
-        hook = hook_parameter_receiver?(node.receiver, accumulator)
-        unnamed = INSTANCE_MIXIN_NAMES.include?(kind) && !singleton_class_eval_receiver?(node.receiver) &&
-                  (hook || opaque)
-        effects.each do |owner, side|
-          accumulator.taint(owner, side, unnamed: side == :include ? unnamed : opaque && !hook)
-        end
-      end
-
       # A `self` argument counts as opaque, as the instance side reads it: a `Target.send(:extend, self)` written in a
       # module body reaches here with the module no table records under `Target`.
       def opaque_mixin_argument?(arg)
         Source::ConstantPath.qualified_name(arg).nil? && !DeclarationWalk::Rules.module_new_call?(arg)
       end
 
-      # A hook parameter itself (`base` in `def self.included(base)`): its class is the includer, which the walk cannot
-      # name, so a mixin on it is read as unnamed rather than by its constant (#2991).
-      def hook_parameter_receiver?(receiver, accumulator)
-        receiver.is_a?(Prism::LocalVariableReadNode) && accumulator.hook_local?(receiver.name)
-      end
-
-      # Records the instance-side edges of an `include` / `prepend` call. False when it recorded nothing — the caller
-      # then taints the owner instead. `view` is {#mixin_call_view}'s, so `Integer.send(:include, Ext)` records `Ext` as
-      # `Integer.include(Ext)` does (issue #1722).
-      #
-      # A receiverless `include` / `prepend` needs an enclosing declaration to file the edge under, and the RECEIVER
-      # form (`Base.prepend(Loud)`, issue #1123; `Integer.include(Ext)` and `Integer.send(:include, Ext)`, issue
-      # #1722) files it under the class the receiver names. A receiver-form edge is unpositioned wherever it is written
-      # ({MixinAccumulator#note}), so a reader that depends on ORDER declines on it, while the set-shaped readers
-      # (undefined-method suppression, arity, visibility) see the module as they see an in-body `include`.
-      #
-      # Issue #2995 — `self.include M`, `self.prepend M` and a receiverless or `self.` `send` / `public_send` /
-      # `__send__(:include | :prepend, M)` are the same call on the same `self` as a bare `include M`, so they file
-      # the edge under the enclosing class as it does, positioned where it would be ({MixinAccumulator#note}). The
-      # walk names that `self` exactly where it names a bare `include`'s: `current_class` is nil wherever it cannot.
-      def instance_mixin_recorded?(node, view, qualified_prefix, current_class, accumulator)
-        kind, arguments, = view
-        return false unless mixin_call_recorded?(kind)
-
-        targets = arguments.filter_map { |arg| Source::ConstantPath.qualified_name(arg) }
-        return false if targets.empty?
-
-        owner = lexical_self_receiver?(node.receiver) ? current_class : prepend_call_receiver(node, qualified_prefix)
-        return false if owner.nil?
-
-        write_mixin_targets(accumulator, owner, targets, prepend: kind == :prepend)
-        accumulator.note(node, owner, :include, targets, complete: targets.size == arguments.size)
-        true
-      end
-
       MIXIN_KINDS = %i[include prepend extend].freeze
       SEND_CALL_NAMES = %i[send public_send __send__].freeze
       EXTEND_MIXIN_NAMES = %i[extend].freeze
       private_constant :MIXIN_KINDS, :SEND_CALL_NAMES, :EXTEND_MIXIN_NAMES
-
-      # Issue #3006 — a receiverless or `self.` `send` / `public_send` / `__send__` written in a class body
-      # ({MixinAccumulator#class_body_scope}) whose name is computed and which passes at least one further argument
-      # may be an `include`, `prepend` or `extend` the walk cannot record: it lists {MixinAccumulator::UNNAMED} on
-      # `side` of the enclosing class when the name may be one of `kinds`. A name that is a local of the call's scope
-      # bound only to name literals is read as those names ({#local_send_names}), so `m = :attr_reader; send(m, :x)`
-      # marks nothing. A hook parameter's `base.send(meth, M)` is read wherever the hook is, as
-      # {#taint_unrecorded_mixin} reads `base.send(:include, M)`.
-      def taint_computed_mixin_send(node, current_class, accumulator, kinds, side, in_singleton: false)
-        return unless current_class
-
-        name = computed_send_name(node, accumulator)
-        return if name.nil?
-
-        scope = accumulator.class_body_scope(node)
-        hook = hook_parameter_receiver?(node.receiver, accumulator)
-        return if scope.nil? && !hook
-
-        names = scope && local_send_names(name, scope)
-        # Inside `class << self` the instance walk is ownerless, so this walk keeps the hook's instance-side taint too,
-        # as {#record_extend_call} does for `base.send(:include, M)`.
-        sides = in_singleton ? [side, :include] : [side]
-        return taint_computed_hook_send(current_class, accumulator, names, sides) if hook
-        return if names&.none? { |literal| kinds.any? { |kind| kind.name == literal } }
-
-        accumulator.taint(current_class, side, unnamed: true)
-      end
-
-      # A hook parameter's computed `send`, read as {#taint_unrecorded_mixin} reads the literal one: it taints the
-      # enclosing module's `sides` when the name may be any mixin's, and lists the unnamed marker on the instance side
-      # alone, when the name may be `include` or `prepend`.
-      def taint_computed_hook_send(current_class, accumulator, names, sides)
-        return if names&.none? { |literal| MIXIN_KINDS.any? { |kind| kind.name == literal } }
-
-        instance = names.nil? || names.any? { |literal| INSTANCE_MIXIN_NAMES.any? { |kind| kind.name == literal } }
-        sides.each { |side| accumulator.taint(current_class, side, unnamed: side == :include && instance) }
-      end
-
-      # The name argument of a receiverless, `self.` or hook-parameter `send`-family call that passes at least one
-      # further argument, when no literal spells it; else nil.
-      def computed_send_name(node, accumulator)
-        return unless SEND_CALL_NAMES.include?(node.name)
-        return unless lexical_self_receiver?(node.receiver) || hook_parameter_receiver?(node.receiver, accumulator)
-
-        arguments = node.arguments&.arguments
-        return if arguments.nil? || arguments.size < 2
-
-        first = arguments.first
-        first unless literal_send_name(first)
-      end
-
-      LOCAL_SCOPE_BOUNDARIES = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode].freeze
-      private_constant :LOCAL_SCOPE_BOUNDARIES
-
-      # The names a local `send` argument can hold: every literal a `local = :name` / `local = "name"` in `scope`
-      # writes, or nil when the argument is not a local, or when the local has no such write or any other binding in
-      # `scope` — a parameter (the `def`'s or a block's, which may shadow it), a multiple or operator write, a pattern
-      # or a regexp capture. Blocks share their scope's locals, so they are searched; a nested `def` or declaration
-      # opens a scope of its own, so it is not.
-      #
-      # Issue #3024 — one block parameter is not opaque: as the FIRST parameter of `each` / `each_with_index` /
-      # `map` over a literal array (or a constant the same scope assigns a literal array), it holds each element in
-      # turn, so the elements are read as the candidate names ({#iterated_element_source}). An element that is not
-      # a name literal still means "may be anything".
-      def local_send_names(argument, scope)
-        return nil unless argument.is_a?(Prism::LocalVariableReadNode)
-
-        names = []
-        root = scope.is_a?(Prism::DefNode) ? scope.compact_child_nodes : [scope]
-        return nil unless collect_local_send_names(root, argument.name, names, root)
-
-        names.empty? ? nil : names
-      end
-
-      def collect_local_send_names(nodes, local, names, scope_nodes)
-        nodes.all? do |node|
-          next true if LOCAL_SCOPE_BOUNDARIES.any? { |kind| node.is_a?(kind) }
-
-          iterated = iterated_element_names(node, local, scope_nodes)
-          next false if iterated == false
-
-          if iterated
-            names.concat(iterated)
-            next collect_local_send_names(iterated_element_children(node), local, names, scope_nodes)
-          end
-
-          literal = local_send_name_literal(node, local)
-          next false if literal == :clash
-
-          names << literal if literal
-
-          collect_local_send_names(node.compact_child_nodes, local, names, scope_nodes)
-        end
-      end
-
-      # Issue #3024 — the `each` / `each_with_index` / `map` arm of {#collect_local_send_names}: when `node` is
-      # such an iterator whose first block parameter is `local`, the iterated array's elements are `local`'s
-      # candidate names ({#iterated_element_source}), each read as {#literal_send_name}. False when an element
-      # may spell any name; nil when `node` is not that iterator, so the caller's plain-write and binding checks
-      # apply.
-      def iterated_element_names(node, local, scope_nodes)
-        elements = iterated_element_source(node, local, scope_nodes)
-        return if elements.nil?
-        return false if elements == :unknown
-
-        names = elements.map { |element| literal_send_name(element) }
-        return false if names.any?(&:nil?)
-
-        names
-      end
-
-      # The name literal a `local = :name` / `local = "name"` write binds `local` to for
-      # {#collect_local_send_names}, `:clash` when `node` binds `local` to anything else — a non-literal write,
-      # a target, an operator write, a parameter — or nil when `node` does not bind `local` at all.
-      def local_send_name_literal(node, local)
-        if node.is_a?(Prism::LocalVariableWriteNode) && node.name == local
-          name = literal_send_name(node.value)
-          return :clash if name.nil?
-
-          return name
-        end
-        :clash if local_binding?(node, local)
-      end
-
-      # Issue #3024 — the array elements `node` iterates when it is an `each` / `each_with_index` / `map` call
-      # whose FIRST block parameter is `local`: a literal `ArrayNode` receiver's elements, or a bare constant the
-      # same scope assigns a literal array exactly once ({#constant_array_elements}). `:unknown` when the call is
-      # such an iterator on `local` but its elements cannot be read — a non-literal receiver, or a constant that
-      # is unwritten, multiply written or not array-valued — so the parameter may hold anything; nil when `node`
-      # is not the iterator or `local` is not its first parameter.
-      def iterated_element_source(node, local, scope_nodes)
-        return unless node.is_a?(Prism::CallNode) && ARRAY_ITERATORS.include?(node.name)
-
-        block = node.block
-        return unless block.is_a?(Prism::BlockNode)
-        return unless iterated_first_parameter?(block, local)
-
-        iterated_receiver_elements(node.receiver, scope_nodes) || :unknown
-      end
-
-      # Whether `local` is the first parameter of `block` and no other parameter binds it too (`|m, m = x|` — the
-      # later binding wins, so the first is not the element).
-      def iterated_first_parameter?(block, local)
-        declared = block.parameters
-        return false unless declared.is_a?(Prism::BlockParametersNode)
-
-        parameters = declared.parameters
-        first = parameters&.requireds&.first
-        return false unless first.is_a?(Prism::RequiredParameterNode) && first.name == local
-
-        Source::NodeWalker.each(parameters).none? do |param|
-          !param.equal?(first) && local_binding?(param, local)
-        end
-      end
-
-      # The elements of the array `receiver` denotes for {#iterated_element_source}: a literal array's own, or a
-      # bare constant's when the same scope assigns it a literal array exactly once. Nil when it denotes anything
-      # else — a qualified or rooted constant, a local, a call — so the iterated value may be anything.
-      def iterated_receiver_elements(receiver, scope_nodes)
-        return receiver.elements if receiver.is_a?(Prism::ArrayNode)
-        return unless receiver.is_a?(Prism::ConstantReadNode)
-
-        constant_array_elements(receiver.name, scope_nodes)
-      end
-
-      # The elements of the literal array `name` is assigned in `nodes`' scope, or nil when it is written any
-      # other number of times or its value is not an array literal — the constant may then hold anything. Only
-      # a single plain `NAME = […]` write closes; in-place mutation (`KINDS << :include`) is unmodeled.
-      def constant_array_elements(name, nodes)
-        writes = constant_write_nodes(nodes, name)
-        return unless writes.one? && writes.first.is_a?(Prism::ConstantWriteNode)
-
-        value = writes.first.value
-        value.elements if value.is_a?(Prism::ArrayNode)
-      end
-
-      # Every write binding the bare constant `name` in `nodes`' scope — a plain `NAME = …`, a multi-assign
-      # target or an operator / `&&=` / `||=` write, mirroring {#local_binding?} — stopping where
-      # {#collect_local_send_names} stops, since a nested `def` or declaration binds its own constants — so
-      # {#constant_array_elements} can tell one literal-array assignment from none or several.
-      def constant_write_nodes(nodes, name)
-        nodes.flat_map do |node|
-          next [] if LOCAL_SCOPE_BOUNDARIES.any? { |kind| node.is_a?(kind) }
-
-          own = constant_binding?(node, name) ? [node] : []
-          own + constant_write_nodes(node.compact_child_nodes, name)
-        end
-      end
-
-      # A node that binds the bare constant `name`: every `Prism::Constant*` binding class — write, target,
-      # operator, `&&=` and `||=` — except the `ConstantReadNode` and `ConstantPath*` spellings, which read
-      # `name` or bind a qualified `A::NAME` rather than `name` itself.
-      def constant_binding?(node, name)
-        return false unless node.respond_to?(:name) && node.name == name
-
-        klass = node.class.name
-        klass.start_with?("Prism::Constant") && !klass.start_with?("Prism::ConstantPath") &&
-          !node.is_a?(Prism::ConstantReadNode)
-      end
-
-      # The children of an iterator call {#iterated_element_source} matched, minus its block's parameters — the
-      # first is `local` bound to the elements and the rest bind other names — so the usual scan still sees every
-      # other binding of `local` in the receiver, arguments and body.
-      def iterated_element_children(node)
-        [node.receiver, node.arguments, node.block.body].compact
-      end
-
-      # The method name a `send` argument spells: a name literal's, or `""` — no mixin's — for an interpolation with a
-      # literal part no mixin name contains (`"#{name}_from_params"`). Nil when it may spell any name.
-      def literal_send_name(value)
-        return value.unescaped if value.is_a?(Prism::SymbolNode) || value.is_a?(Prism::StringNode)
-        return nil unless value.is_a?(Prism::InterpolatedStringNode) || value.is_a?(Prism::InterpolatedSymbolNode)
-
-        excluded = value.parts.any? do |part|
-          part.is_a?(Prism::StringNode) && MIXIN_KINDS.none? { |kind| kind.name.include?(part.unescaped) }
-        end
-        excluded ? "" : nil
-      end
-
-      # A node other than a plain write that binds `local`: a target, an operator write or a parameter.
-      def local_binding?(node, local)
-        return false if node.is_a?(Prism::LocalVariableReadNode) || !node.respond_to?(:name) || node.name != local
-
-        node.class.name.start_with?("Prism::LocalVariable") || node.class.name.end_with?("ParameterNode") ||
-          node.is_a?(Prism::BlockLocalVariableNode)
-      end
 
       # `[kind, arguments, via_send]` for a call that mixes modules in — `include` / `prepend` / `extend`, or
       # `send(:include, M)` and its `public_send` / `__send__` twins with a literal first argument — else nil.
@@ -6063,200 +5529,11 @@ module Rigor
         [kind, arguments.drop(1), true] if kind
       end
 
-      # `[[owner, side], …]` — the ancestry sides a mixin call reshapes. `self` and the implicit receiver
-      # are the enclosing class (`:include` for `include` / `prepend`, `:extend` for `extend`; inside
-      # `class << self` `include` / `prepend` flip to `:extend` and `extend` names no owner); `singleton_class` is the
-      # singleton side; a constant is that class; any other receiver reshapes nothing, except a hook parameter
-      # (`base.include M` in `self.included(base)`), which taints both sides of the enclosing class.
-      def mixin_effects(node, kind, qualified_prefix, current_class, accumulator, in_singleton:)
-        receiver = node.receiver
-        side = kind == :extend ? :extend : :include
-        pairs =
-          if receiver.nil? || receiver.is_a?(Prism::SelfNode)
-            own_mixin_effects(kind, side, current_class, in_singleton)
-          else
-            receiver_mixin_effects(node, side, qualified_prefix, current_class, accumulator)
-          end
-        pairs.reject { |owner, _side| owner.nil? }
-      end
-
-      # The implicit-receiver / `self` arm of {#mixin_effects}: inside `class << self`, `include` / `prepend`
-      # are singleton-side and `extend` reaches the singleton's own singleton, which nothing names.
-      def own_mixin_effects(kind, side, current_class, in_singleton)
-        return [] if in_singleton && kind == :extend
-
-        [[current_class, in_singleton ? :extend : side]]
-      end
-
-      # A receiver that is not `self` reshapes the class it names, or the singleton of `singleton_class`. Any
-      # other receiver is an object of its own (`ids.prepend(1)`, `obj.extend(Decorator)`) and reshapes none of
-      # the enclosing class's ancestry — except in a `self.included(base)`-style hook, where `base` IS the
-      # class that includes the enclosing module and a call on it taints both sides of the enclosing class.
-      def receiver_mixin_effects(node, side, qualified_prefix, current_class, accumulator)
-        receiver = node.receiver
-        return [[current_class, :extend]] if singleton_class_receiver?(receiver)
-
-        owner = prepend_call_receiver(node, qualified_prefix)
-        return [[owner, side]] if owner
-        return [] unless hook_receiver?(receiver, accumulator)
-
-        [[current_class, :include], [current_class, :extend]]
-      end
-
-      HOOK_DEFS = %i[included extended prepended inherited].freeze
       INSTANCE_MIXIN_NAMES = %i[include prepend].freeze
-      MIXIN_EVAL_CALLS = %i[class_eval module_eval class_exec module_exec instance_eval instance_exec].freeze
-      private_constant :HOOK_DEFS, :MIXIN_EVAL_CALLS, :INSTANCE_MIXIN_NAMES
-
-      # The parameter names of a `def included(base)`-style hook (a hook is written `def self.included`, or
-      # `def included` inside `class << self`), else nil.
-      def hook_def_params(node)
-        return nil unless node.is_a?(Prism::DefNode) && HOOK_DEFS.include?(node.name)
-
-        parameters = node.parameters
-        return [] unless parameters
-
-        (parameters.requireds + parameters.optionals).filter_map do |parameter|
-          parameter.name if parameter.respond_to?(:name)
-        end
-      end
-
-      # Whether `receiver` is a hook parameter, or `singleton_class` / a no-argument call chain off one.
-      def hook_receiver?(receiver, accumulator)
-        case receiver
-        when Prism::LocalVariableReadNode then accumulator.hook_local?(receiver.name)
-        when Prism::CallNode
-          receiver.arguments.nil? && receiver.receiver && hook_receiver?(receiver.receiver, accumulator)
-        else false
-        end
-      end
-
-      # `base.class_eval { include X }` in a hook, and `opaque.module_eval { include B }` anywhere: the block
-      # opens a class this walk cannot name, so its mixin calls record nowhere, yet the enclosing class's
-      # ancestry is what the reader was asked about. Taint both sides of the enclosing class. Outside a hook
-      # the block is scanned for a mixin call first, so an ordinary `obj.instance_eval { … }` DSL taints nothing.
-      def taint_opaque_eval(node, current_class, accumulator)
-        return unless current_class && node.block.is_a?(Prism::BlockNode) && MIXIN_EVAL_CALLS.include?(node.name)
-
-        receiver = node.receiver
-        return if receiver.nil? || receiver.is_a?(Prism::SelfNode)
-        return if Source::ConstantPath.qualified_name_or_nil(receiver)
-
-        hook = hook_receiver?(receiver, accumulator)
-        return unless hook || block_mixes_in?(node.block)
-
-        # Issue #2991 — the set is unknown only where the block may mix into the class itself: a hook's `base`, or a
-        # receiverless `include` / `prepend` in the block of a receiver other than a `singleton_class`.
-        unnamed = hook || (!singleton_class_eval_receiver?(receiver) && block_mixes_into_self?(node.block))
-        accumulator.taint(current_class, :include, unnamed: unnamed)
-        accumulator.taint(current_class, :extend)
-      end
-
-      def block_mixes_in?(node)
-        return true if node.is_a?(Prism::CallNode) && (MIXIN_KINDS.include?(node.name) || mixin_call_view(node))
-
-        found = false
-        node.rigor_each_child { |child| found ||= block_mixes_in?(child) }
-        found
-      end
-
-      # A receiverless or `self.` `include` / `prepend` (or its `send` spelling) anywhere in `node`.
-      def block_mixes_into_self?(node)
-        if node.is_a?(Prism::CallNode) && (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
-          view = mixin_call_view(node)
-          return true if view && INSTANCE_MIXIN_NAMES.include?(view.first)
-        end
-
-        found = false
-        node.rigor_each_child { |child| found ||= block_mixes_into_self?(child) }
-        found
-      end
-
-      def singleton_class_eval_receiver?(receiver)
-        receiver.is_a?(Prism::CallNode) && receiver.name == :singleton_class
-      end
-
-      def singleton_class_receiver?(receiver)
-        receiver.is_a?(Prism::CallNode) && receiver.name == :singleton_class && receiver.arguments.nil? &&
-          (receiver.receiver.nil? || receiver.receiver.is_a?(Prism::SelfNode))
-      end
-
-      # Issue #1123 — one class's contribution to the two tables. A prepended module lands in BOTH: the
-      # include list is the SET of modules a class carries (arity, visibility, reflection and constant-scope
-      # consumers read it that way), while the prepend table adds the ORDER and the KIND.
-      #
-      # Issue #1173 — `include` now stores instance-ancestor SEARCH order too, the same convention
-      # `prepend` already keeps: each statement's argument list lands as one unit (`include A, B` keeps
-      # `["A", "B"]`, the order Ruby searches them) AHEAD of the earlier statements' (`include A;
-      # include B` searches B first). Call order was never a semantic — it is where this list happened
-      # to be written — and every order-sensitive consumer (the BFS mixin step, the external-ancestor
-      # walk, override visibility) reads nearer-first. A re-`include` of an already-carried name is a
-      # runtime no-op (`Module#append_features` is skipped when the module is already an ancestor), so
-      # a present target does not re-position itself. The prepend names still join the include list at
-      # freeze time — ahead of every include, where Ruby puts them.
-      def write_mixin_targets(accumulator, owner, targets, prepend:)
-        bucket = accumulator[owner] ||= {}
-        kind, other = prepend ? %i[prepend include] : %i[include prepend]
-        list = (bucket[kind] ||= [])
-        # A target the OTHER kind already carries (`include M; prepend M`) is one body the two tables cannot
-        # represent (Ruby's `[M, C, M]`), so the instance side is named unpositioned.
-        accumulator.taint(owner, :include) if targets.any? { |target| bucket[other]&.include?(target) }
-        # A repeated `include` keeps its first position (Ruby skips it). A repeated `prepend` is KEPT: the
-        # prepend table holds every statement, nearest first, so the readers that walk the raw list see what
-        # they always saw, and the resolution chain dedupes per owner, first statement winning.
-        list.unshift(*(prepend ? targets : targets.reject { |target| list.include?(target) }))
-      end
-
-      # Whether a mixin call's kind reaches the instance-side tables: `include` and `prepend`.
-      def mixin_call_recorded?(kind) = MIXIN_CALL_NAMES.include?(kind)
-
-      # Issue #1697 — a receiverless `include M` written as a statement of the file's own top level is
-      # `main.include`, which is `Object.include`: it mixes M into `Object`. It is recorded under its own
-      # owner key, `ObjectMixins::TOPLEVEL_INCLUDE_KEY`, rather than on `Object`, so it rides every table an include
-      # rides (the declaration signature, `discovered_class_sources`, the seed bundle) while no ancestry
-      # walk that types a call reaches it: what Ruby reaches first for a name such an include supplies
-      # depends on more than the chain shows (a block that rebinds `self`, an `extend` or a singleton `def`
-      # on `main`), so only the diagnostic silences read it (`Inference::ObjectMixins`), and typing is
-      # issue #1715's. `main` has no `prepend`, and a top-level `extend M` reaches `main`'s singleton alone, so
-      # neither is recorded.
-      #
-      # Issue #3007 — the call counts wherever {MixinAccumulator::MainSelfCalls} takes its `self` to be `main`: a
-      # program statement, or a call under top-level control flow (`if`, `begin`, `case`, …) or in a top-level
-      # `def` body. Such a call may not run, so its edge is in the set with no position ({MixinAccumulator#note}),
-      # as ADR-119 WD7 records an `include` in a method body. The same call inside a top-level block stays
-      # unrecorded: its `self` may not be `main` (a `describe do include M end` or `class_exec` block rebinds it,
-      # while `[1].each do include M end` does not, and the walk cannot tell them apart).
-      #
-      # Issue #2995 — `self.include M`, a receiverless or `self.` `send(:include, M)` and its `__send__` twin are the
-      # same `main.include`. `public_send(:include, M)` is not: `main`'s `include` is private, so it raises.
-      def toplevel_include_owner(node, qualified_prefix, current_class, accumulator)
-        return nil unless current_class.nil? && qualified_prefix.empty?
-        return nil unless lexical_self_receiver?(node.receiver) && node.name != :public_send
-        return nil unless mixin_call_view(node)&.first == :include
-
-        accumulator.program_statement?(node) ? ObjectMixins::TOPLEVEL_INCLUDE_KEY : nil
-      end
-
-      # Issue #1123 — the class a `Recv.prepend(M)` call form targets, as the qualified name the prepend
-      # table is keyed by, or nil when the receiver names no static class. The receiver is a constant READ
-      # at the call site, so it resolves in the `Module.nesting` the call is written in — the same rule (and
-      # the same helper) `class_eval` receivers follow: `::B` names the top level wherever it is written, an
-      # unqualified `X` is `<nesting entry>::X` for the innermost entry the FILE declares, and the
-      # as-written name stands when no rung declares it. A receiver that names no project class keys a table
-      # entry nothing reads, which is the same silence as not recording it at all.
-      def prepend_call_receiver(node, lexical_prefix)
-        receiver = node.receiver
-        return nil if receiver.is_a?(Prism::SelfNode)
-
-        rendered = Source::ConstantPath.qualified_name_or_nil(receiver)
-        return nil if rendered.nil?
-        return rendered if Source::ConstantPath.rooted?(receiver) || lexical_prefix.empty?
-
-        DeclarationWalk::Rules.eval_constant_receiver_prefix(node, receiver, rendered, lexical_prefix).join("::")
-      end
+      private_constant :INSTANCE_MIXIN_NAMES
 
       # Issue #526 — `extend M` / `extend self` / bare `module_function`, the singleton-side siblings of
-      # {#build_discovered_includes}. `extend self` and the bare `module_function` toggle both map the
+      # {MixinTables.build_discovered_includes}. `extend self` and the bare `module_function` toggle both map the
       # module's own instance defs onto its singleton (recorded as extending ITSELF); `module_function`
       # with symbol arguments already resolves through the existing recording, and the toggle's
       # order-sensitivity (only SUBSEQUENT defs become module functions) is deliberately over-approximated
@@ -6273,7 +5550,7 @@ module Rigor
       # one descent.
       def extend_tables(root)
         accumulator = MixinAccumulator.new
-        accumulator.direct_body(program_statements(root))
+        accumulator.direct_body(MixinEffects.program_statements(root))
         walk_class_extends(root, [], nil, accumulator)
         {
           extends: accumulator.transform_values { |mods| mods.uniq.freeze }.freeze,
@@ -6325,7 +5602,7 @@ module Rigor
       # The generic descent of {#walk_class_extends}; a hook's body walks with its parameters in scope.
       def walk_extends_children(node, qualified_prefix, current_class, accumulator, in_singleton, singleton_self,
                                 singleton_cref)
-        hook_params = hook_def_params(node)
+        hook_params = MixinEffects.hook_def_params(node)
         if hook_params
           return accumulator.with_hook_params(hook_params) do
             walk_extends_children_plain(node, qualified_prefix, current_class, accumulator, in_singleton,
@@ -6390,7 +5667,8 @@ module Rigor
       end
 
       # Each candidate class past the owner takes the body's prepends unpositioned; an argument that names no module
-      # (`prepend(*MODS)`) leaves its singleton set unknown, as {#taint_unrecorded_mixin} reads it on the owner.
+      # (`prepend(*MODS)`) leaves its singleton set unknown, as {MixinEffects.taint_unrecorded_mixin} reads it on the
+      # owner.
       def record_constant_singleton_candidates(body, candidates, accumulator)
         return if candidates.empty?
 
@@ -6665,8 +5943,8 @@ module Rigor
         call = DeclarationWalk::Rules.meta_new_block_call(node)
         return false unless call
 
-        meta_owner = meta_new_mixin_owner(node, qualified_prefix, singleton_cref,
-                                          current_class && [current_class])
+        meta_owner = MixinEffects.meta_new_mixin_owner(node, qualified_prefix, singleton_cref,
+                                                       current_class && [current_class])
         # The block rebinds only `self` — `Module.nesting` stays lexical — so the cref
         # flag passes through unchanged, matching the includes twin.
         body_cref = singleton_cref
@@ -6753,7 +6031,7 @@ module Rigor
       def record_extend_call(node, qualified_prefix, current_class, accumulator, in_singleton: false)
         return record_module_function(node, current_class, accumulator, in_singleton) if node.name == :module_function
 
-        taint_opaque_eval(node, current_class, accumulator)
+        MixinEffects.taint_opaque_eval(node, current_class, accumulator)
         return if singleton_class_rewrite_tainted?(node, qualified_prefix, current_class, accumulator,
                                                    in_singleton: in_singleton)
 
@@ -6762,19 +6040,21 @@ module Rigor
           # Inside `class << self` a computed `include` / `prepend` reaches the singleton side; an `extend` reaches the
           # singleton's own singleton, which nothing names.
           kinds = in_singleton ? INSTANCE_MIXIN_NAMES : EXTEND_MIXIN_NAMES
-          return taint_computed_mixin_send(node, current_class, accumulator, kinds, :extend, in_singleton: in_singleton)
+          return MixinEffects.taint_computed_mixin_send(node, current_class, accumulator, kinds, :extend,
+                                                        in_singleton: in_singleton)
         end
 
-        effects = mixin_effects(node, kind, qualified_prefix, current_class, accumulator, in_singleton: in_singleton)
-                  .select { |_owner, side| side == :extend || in_singleton }
+        effects = MixinEffects.mixin_effects(node, kind, qualified_prefix, current_class, accumulator,
+                                             in_singleton: in_singleton)
+                              .select { |_owner, side| side == :extend || in_singleton }
         return if effects.empty?
         # A `send` spelling is recorded only on the lexical `self` (#2995); `Const.send(:extend, M)` stays a taint.
         return if (!via_send || lexical_self_receiver?(node.receiver)) &&
                   singleton_mixin_recorded?(node, kind, qualified_prefix, current_class, accumulator, in_singleton)
 
-        # Issue #2991 — as in {#record_mixin_call}: an unrecorded instance-side call (a hook's `base.include M` written
-        # in `class << self`) lists its names, or the unnamed marker.
-        taint_unrecorded_mixin(node, kind, arguments, effects, accumulator)
+        # Issue #2991 — as in {MixinTables.record_mixin_call}: an unrecorded instance-side call (a hook's
+        # `base.include M` written in `class << self`) lists its names, or the unnamed marker.
+        MixinEffects.taint_unrecorded_mixin(node, kind, arguments, effects, accumulator)
       end
 
       # Issue #1752 — a call that rewrites a singleton class reached through `singleton_class` (`singleton_class.
@@ -6804,7 +6084,7 @@ module Rigor
         end
 
         # Issue #2994 — an `include` / `prepend` whose argument names no module (`singleton_class.include(*MODS)`)
-        # leaves the owner's singleton set unknown, as {#taint_unrecorded_mixin} reads an `extend(*EMODS)`.
+        # leaves the owner's singleton set unknown, as {MixinEffects.taint_unrecorded_mixin} reads an `extend(*EMODS)`.
         accumulator.taint(owner, :extend, unnamed: unnamed_singleton_include?(node))
         true
       end
@@ -6921,7 +6201,7 @@ module Rigor
       end
 
       # Issue #2094 — the receiver form, `Float.extend(Ext)`: the singleton twin of #1722's `Integer.include(Ext)`,
-      # filed under the class the constant receiver names ({#prepend_call_receiver}) and, like that form,
+      # filed under the class the constant receiver names ({MixinEffects.prepend_call_receiver}) and, like that form,
       # unpositioned wherever it is written ({MixinAccumulator#note}). A `self` argument names the receiver, not the
       # enclosing class, so a call with one stays a taint. A constant receiver names the same class inside
       # `class << self`, so the walk's singleton flag does not matter here.
@@ -6929,7 +6209,7 @@ module Rigor
         return false if kind != :extend
         return false if (node.arguments&.arguments || []).any?(Prism::SelfNode)
 
-        owner = prepend_call_receiver(node, qualified_prefix)
+        owner = MixinEffects.prepend_call_receiver(node, qualified_prefix)
         return false if owner.nil?
 
         !record_extend_targets(node, owner, accumulator).empty?
@@ -9034,7 +8314,7 @@ module Rigor
       # The `extends` half stores singleton-ancestor search order ({#record_extend_targets}), so a file
       # scanned later contributes NEARER entries for a reopened class — prepend, matching the
       # per-statement convention. `includes` shares the shape since #1173, when its table switched to
-      # instance-ancestor search order too ({#write_mixin_targets}).
+      # instance-ancestor search order too ({MixinTables.write_mixin_targets}).
       def accumulate_extend_lists(target, additions)
         additions.each { |cn, mods| target[cn] = (mods + (target[cn] || [])).uniq }
       end
@@ -9049,7 +8329,7 @@ module Rigor
 
       # Issue #1123 — the same near-side accumulation for the prepends table, which stores
       # instance-ancestor search order for the same reason the extends table stores singleton-ancestor
-      # order ({#record_mixin_call}): a file scanned later contributes NEARER prepends for a reopened
+      # order ({MixinTables.record_mixin_call}): a file scanned later contributes NEARER prepends for a reopened
       # class. Shared with {#accumulate_extend_lists}' shape deliberately — the two tables answer the
       # `prepend` question on the two sides of the class object, and both fold nearest-first.
       def accumulate_prepend_lists(target, additions)
@@ -9349,7 +8629,7 @@ module Rigor
       # unchanged — only the key set the attribution reads widens. Split out of
       # {#accumulate_project_index} to hold its ABC budget.
       def fold_file_mixin_tables(acc, root)
-        mixin = mixin_tables(root)
+        mixin = MixinTables.mixin_tables(root)
         extend_side = extend_tables(root)
         accumulate_include_lists(acc[:includes], mixin[:includes])
         accumulate_prepend_lists(acc[:prepends], mixin[:prepends])
@@ -9729,19 +9009,6 @@ module Rigor
         return discovered if additions.empty?
 
         discovered.merge(additions)
-      end
-
-      # The owner a meta-new write gives the block for the MIXIN tables — every definite
-      # write form, including `||=` and path-or-write: an `||=` block still runs on the
-      # class the write names when it runs, so `K ||= Class.new { include I }` mixes I
-      # into K exactly the way its `def`s land `K#m`. The census keeps the narrower
-      # {ConstantTables.meta_new_block_owner} / {ConstantTables.meta_new_owner_under_cref} pair because its `||=`
-      # rows are unpublished (#963). Nil where the write names nothing below an
-      # unnameable cref.
-      def meta_new_mixin_owner(node, qualified_prefix, singleton_cref, self_base = nil)
-        return nil if singleton_cref && !DeclarationWalk::Rules.meta_new_path_target_nameable?(node, self_base)
-
-        DeclarationWalk::Rules.meta_new_child_prefix(node, qualified_prefix, self_base)&.join("::")
       end
 
       # The per-node propagation lives in {NodePropagation}; these three delegate to it. {#index} calls {#propagate} and

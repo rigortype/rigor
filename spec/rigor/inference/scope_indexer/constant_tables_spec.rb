@@ -679,7 +679,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer::ConstantTables do
       source = "class Outer < Base; Class.new { include T }; Other.class_eval { include T }; " \
                "x.class_eval { include T }; each { include U }; end\n"
 
-      expect(indexer.build_discovered_includes(parse(source))).to eq("Other" => ["T"], "Outer" => ["U"])
+      expect(indexer::MixinTables.send(:build_discovered_includes, parse(source)))
+        .to eq("Other" => ["T"], "Outer" => ["U"])
       _supers, nestings = indexer::SharedWalkTables.send(:build_superclass_tables, parse(source))
       expect(nestings.fetch("Outer").keys).to eq([nil, "Base", "U"])
     end

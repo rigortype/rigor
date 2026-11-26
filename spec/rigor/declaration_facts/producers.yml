@@ -344,8 +344,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#apply_named_visibility: grandfathered
     Rigor::Inference::ScopeIndexer#apply_visibility_argument: 'issues #1911 and #1633, one argument of the grandfathered apply_visibility_call split out to hold its size: a wrapped def or attr_* call takes the call''s visibility, a literal name is applied, anything else is walked contested; the owner is the caller''s qualified prefix and it derives no context'
     Rigor::Inference::ScopeIndexer#apply_visibility_call: grandfathered
-    Rigor::Inference::ScopeIndexer#block_mixes_in?: scans an eval block for a mixin call; it answers a question and derives no declaration context
-    Rigor::Inference::ScopeIndexer#block_mixes_into_self?: 'issue #2991, scans an opaque eval block for a receiverless or self. include / prepend; it answers a question and derives no declaration context'
     Rigor::Inference::ScopeIndexer#build_method_visibility_tables: the grandfathered visibility walk's entry point, moved from build_discovered_method_visibilities (now a projection of it) so the walk also returns ADR-119 WD3's contested visibility slots; it starts the walk at the top level with the same default and adds no context of its own
     Rigor::Inference::ScopeIndexer#census_scan: ADR-121 WD7's census over a def or refine body the method walk does not descend; a nested def, class, module or singleton class only moves the module a `refine` there is charged to to the wildcard, so it derives no declaration context
     Rigor::Inference::ScopeIndexer#class_method_visibility_parts: 'issue #1984, the private_class_method / public_class_method twin of visibility_call_parts; it maps the call name to its visibility in the walk''s own spellings (receiverless, self., send) and derives no context'
@@ -362,7 +360,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#collect_eval_method_defs?: grandfathered
     Rigor::Inference::ScopeIndexer#collect_explicit_return_ivars: grandfathered
     Rigor::Inference::ScopeIndexer#collect_initializer_block_ivars: grandfathered
-    Rigor::Inference::ScopeIndexer#collect_local_send_names: 'issue #3006, a consumer, not a declaration producer; it collects the name literals a local of a class-body `send` is bound to, stopping at a nested `def` or declaration (a new local scope), and records no table and derives no owner or side'
     Rigor::Inference::ScopeIndexer#collect_meta_new_method_defs?: grandfathered
     Rigor::Inference::ScopeIndexer#collect_nil_test_ivars: grandfathered
     Rigor::Inference::ScopeIndexer#collect_read_before_write_evidence: grandfathered
@@ -372,7 +369,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#concern_dependency_arguments: 'issue #2995, the constant arguments of an include or prepend statement on the module''s own self (bare, self., or a receiverless or self. send spelling), which record_concern_dependencies files as concern-dependency entries after the body''s own extend ActiveSupport::Concern (#2992); it reads one statement''s shape and decides no owner or side'
     Rigor::Inference::ScopeIndexer#concern_extend?: 'issue #2986 (moved out of concern_body? by #2992), whether one statement of a module body is extend ActiveSupport::Concern (or extend Concern under module ActiveSupport); it answers a Boolean from the statement and prefix the walk passes in, and decides no owner or side'
     Rigor::Inference::ScopeIndexer#concern_hook_blocks: 'issue #3015, the blocks of the included, prepended and class_methods statements of a module body that itself runs extend ActiveSupport::Concern, which the def, singleton-def and visibility walks mark so a def self.x or class << self def there is not filed on the module''s own singleton; it reads the body and prefix the walk passes in and decides no owner or side'
-    Rigor::Inference::ScopeIndexer#constant_write_nodes: 'issue #3024, a consumer, not a declaration producer; it collects the writes binding `NAME` (plain, multi-assign target, operator, `&&=` / `||=`) of a class-body `send` argument''s scope so a constant receiver of `each` / `each_with_index` / `map` can be read as a literal array, stopping at a nested `def` or declaration, and records no table and derives no owner or side'
     Rigor::Inference::ScopeIndexer#contest_foreign_singleton_visibility: 'issue #1984, contests the singleton visibility slot a `def Other.x` makes public on each class constant_receiver_candidates gives for the receiver; it derives no context'
     Rigor::Inference::ScopeIndexer#contest_replaced_visibility: 'issue #1989, contests the visibility slot a define_method or alias replaces (on the instance or, since #1984, the singleton side); the owner is the visibility walk''s prefix and it derives no context'
     Rigor::Inference::ScopeIndexer#contest_singleton_rewrites: 'issue #1984, contests the singleton visibility slots a define_singleton_method or a call on the body''s own singleton_class may make public; the owner is the visibility walk''s prefix and it derives no context'
@@ -404,11 +400,9 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#fold_refinements: grandfathered
     Rigor::Inference::ScopeIndexer#follow_extend_siblings: ADR-119 WD1, the sibling half of one name the extends fold copies onto a singleton; it marks the slot contested and the name possible when the extend edge is unpositioned or the source is, and writes only the singleton side
     Rigor::Inference::ScopeIndexer#follow_slot_writer: ADR-119 WD3, a single-valued slot's contest follows the write that holds it (a certain write clears the key, a possible one sets it); the certainty comes from Certainty, it decides no declaration context
-    Rigor::Inference::ScopeIndexer#freeze_mixin_lists: it freezes the mixin accumulator's per-class lists into the include and prepend tables; it is the one place the two are projected, and the include projection alone is a set (#1587)
     Rigor::Inference::ScopeIndexer#gather_aliased_mutations: grandfathered
     Rigor::Inference::ScopeIndexer#gather_ivar_writes: grandfathered
     Rigor::Inference::ScopeIndexer#hook_singleton_reshape?: 'issue #1592, whether a call in a self.included(base) or self.prepended(base) hook body mixes into the parameter''s singleton class other than through a plain base.extend (base.send(:extend, M), base.singleton_class.include M); it reads the call''s shape and the hook''s parameter name and derives no declaration context'
-    Rigor::Inference::ScopeIndexer#literal_send_name: 'issue #3006, a consumer, not a declaration producer; it reads the method name a `send` argument spells, or rules out every mixin name for an interpolation, and derives no declaration context'
     Rigor::Inference::ScopeIndexer#propagate: 'issue #3398, the one-line delegator that hands the per-node scope table to NodePropagation.propagate, which writes it; rule (v) marks it now that it follows a table into a writer of another listed file. It records which scope a node is typed under, not what a declaration is'
     Rigor::Inference::ScopeIndexer#record_binding_target_ivars: 'issue #1217, records each ivar a rescue reference or for index writes into the class-ivar census of the class its caller passes in, typed by the clause''s exception or the Dynamic[top] floor; it decides no owner or side of its own'
     Rigor::Inference::ScopeIndexer#record_class_methods_block: 'issue #2997, split out of record_concern_class_methods: records each def of one class_methods block (and its def node and body evidence) on Owner::ClassMethods, the prefix its caller passes in, on the instance side those defs have there; it derives no other context'
@@ -420,10 +414,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#scan_hook_body: 'issue #2975, issue #1592, the shared walk of a self.included(base) / self.prepended(base) hook body and of a concern''s included or prepended block (record_hook_extends and record_concern_hook_block call it), files each constant a self.included(base) or self.prepended(base) hook passes to base.extend, as written and with the hook''s name (#1592), and the open entry for an extend it cannot place (nested, conditional, after an early exit, not a constant) or another singleton mixin of the includer, under the module prefix the walk passes in, for call.undefined-method''s macro reader and the singleton resolution chain; it reads only the hook''s own name, side and first parameter, and decides no owner or side'
     Rigor::Inference::ScopeIndexer#singleton_body_visibility_call?: 'issue #3015, whether one statement of a class << self body in an included or prepended block is a receiverless visibility call, which keeps that body''s defs off the hook-block module and opens the hook; it reads the statement''s shape and derives no declaration context'
     Rigor::Inference::ScopeIndexer#singleton_mixin_body?: 'issue #1592, whether a class << self body under a hook body or block mixes in with include, prepend or extend, which opens the hook; it reads the node''s shape and derives no declaration context'
-    Rigor::Inference::ScopeIndexer#taint_computed_hook_send: 'issue #3006, taints the sides a hook parameter''s computed `send` may reshape on the enclosing module the walk passes in, listing the unnamed marker on the :include side as taint_unrecorded_mixin does for the literal call; it reads a call''s names and derives no declaration context'
-    Rigor::Inference::ScopeIndexer#taint_computed_mixin_send: 'issue #3006, taints the side a class-body computed-name `send` may reshape on the owner the walk passes in, with the unnamed marker; it reads a call''s shape and names and derives no declaration context'
-    Rigor::Inference::ScopeIndexer#taint_unrecorded_mixin: 'issue #2991, taints the sides an unrecorded mixin call reshapes, on the owners {#mixin_effects} already resolved, listing the unnamed marker on the :include side; it reads a call''s shape and derives no declaration context'
-    Rigor::Inference::ScopeIndexer#instance_mixin_recorded?: writes one instance-side mixin call into the include/prepend accumulator under the owner the walk passes in; it computes no declaration context
     Rigor::Inference::ScopeIndexer#ivar_write_targets: grandfathered
     Rigor::Inference::ScopeIndexer#loose_constant_segments: A6 (#1749), the last segments of the constants a file binds by `||=`, a literal `const_set` or any write in a `class << …` body, for whether a `refine` target names a class the constant census cannot; it reads each singleton class body only for the constants it writes and decides no declaration context
     Rigor::Inference::ScopeIndexer#make_reflective_classes_gradual!: the reflective-write finish of the ivar census walk (#1931); it rewrites the entries of the classes record_reflective_ivar_write named, after the walk, deriving no declaration context of its own
@@ -437,16 +427,10 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#merge_member_layout_tables: grandfathered
     Rigor::Inference::ScopeIndexer#merge_renamed_header_bucket: grandfathered
     Rigor::Inference::ScopeIndexer#method_definite_assigns: grandfathered
-    Rigor::Inference::ScopeIndexer#mixin_call_recorded?: grandfathered
     Rigor::Inference::ScopeIndexer#mixin_call_view: classifies a call as an include, prepend or extend (or a send of one); it reads the call's own name and arguments, not a declaration context
-    Rigor::Inference::ScopeIndexer#mixin_effects: names which ancestry side of which owner a mixin call reshapes, from the call's receiver and the owner the walk already resolved; it computes no declaration context
-    Rigor::Inference::ScopeIndexer#mixin_names_for: grandfathered
-    Rigor::Inference::ScopeIndexer#mixin_tables: grandfathered
     Rigor::Inference::ScopeIndexer#note_forwardable_extend: 'issue #2793, notes which of Forwardable and SingleForwardable a receiverless extend in the lexical body names, so an ambiguous delegator macro (def_delegators, delegate) records its names on the side Ruby defines them; it computes no declaration context'
-    Rigor::Inference::ScopeIndexer#own_mixin_effects: names the ancestry side a receiverless mixin call reshapes on the owner the walk passes in; it computes no declaration context
     Rigor::Inference::ScopeIndexer#own_sibling_table: copy on write for one sibling table of the extends fold; it adds no entry, it only makes the table the fold writes into private to that fold
     Rigor::Inference::ScopeIndexer#per_file_siblings: ADR-119 WD3, the per-file merge of the slot siblings under the members' own merges (the file wins every slot it writes, envelope contests union); it combines walk products and decides no context
-    Rigor::Inference::ScopeIndexer#receiver_mixin_effects: names the ancestry sides a receiver-form mixin call reshapes; it computes no declaration context
     Rigor::Inference::ScopeIndexer#record_aliased_ivar_mutations!: grandfathered
     Rigor::Inference::ScopeIndexer#record_anonymous_body_def_as_toplevel: grandfathered
     Rigor::Inference::ScopeIndexer#record_attr_visibility: 'issue #1911, records the attr_reader / attr_writer / attr_accessor members in the visibility table beside the grandfathered record_def_visibility; the owner is the visibility walk''s prefix and the names are each_attr_macro_name''s, so it derives no context'
@@ -473,7 +457,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#record_ivar_or_write: grandfathered
     Rigor::Inference::ScopeIndexer#record_ivar_write: grandfathered
     Rigor::Inference::ScopeIndexer#record_method_kind: grandfathered
-    Rigor::Inference::ScopeIndexer#record_mixin_call: grandfathered
     Rigor::Inference::ScopeIndexer#record_module_function: writes the bare module_function edge under the owner the walk passes in; it computes no declaration context
     Rigor::Inference::ScopeIndexer#record_module_function_names: grandfathered
     Rigor::Inference::ScopeIndexer#record_multi_write_ivars: grandfathered
@@ -492,14 +475,12 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#strip_possible_singleton: ADR-119 WD1, a certain extend copy makes the singleton name certain, so this removes the singleton half of the name's possible kind; it adds no fact
     Rigor::Inference::ScopeIndexer#subtract_sibling_methods!: rewrites only the possible_discovered_methods sibling in the finalize pass, dropping the names a def declares; it derives no declaration context
     Rigor::Inference::ScopeIndexer#surface_mixin_call?: grandfathered
-    Rigor::Inference::ScopeIndexer#taint_opaque_eval: taints the enclosing owner the walk passes in when an eval block on an opaque receiver mixes a module in; it computes no declaration context
     Rigor::Inference::ScopeIndexer#taint_skipped_singleton_rewrites: taints the singleton side a singleton_class surface call in a block the extends walk skips may rewrite (#1906), on the enclosing owner the walk passes in or every name a constant receiver can denote; it computes no declaration context
     Rigor::Inference::ScopeIndexer#unnamed_singleton_include?: 'issue #2994, a consumer, not a declaration producer; it reads whether an `include` / `prepend` call on `singleton_class` has an argument that names no module, for the unnamed marker on the :extend side, and derives no declaration context'
     Rigor::Inference::ScopeIndexer#visibility_call_parts: 'ADR-119 WD3 and #1633, names the `private` / `protected` / `public` / `module_function` call the visibility walk applies (receiverless, on `self`, or sent with a literal name; a block ignored) and its arguments; it reads a call''s shape and decides no owner or side'
     Rigor::Inference::ScopeIndexer#walk_anonymous_meta_block: grandfathered
     Rigor::Inference::ScopeIndexer#walk_anonymous_meta_visibilities: PR 1981, the visibility walk's arm for a factory block no constant names (AnonymousMetaClass.block_form_receiver); it walks the body as a fresh ownerless body starting public, so it records nothing for the enclosing class and derives no owner
     Rigor::Inference::ScopeIndexer#walk_class_extends: grandfathered
-    Rigor::Inference::ScopeIndexer#walk_class_includes: grandfathered
     Rigor::Inference::ScopeIndexer#walk_class_ivars: grandfathered
     Rigor::Inference::ScopeIndexer#walk_class_methods_visibilities: 'issue #1592, walks a concern''s class_methods block for visibility under Owner::ClassMethods, the module ActiveSupport evaluates that block in, starting public; the owner is the concern prefix the walk passes in, and it derives no other context'
     Rigor::Inference::ScopeIndexer#walk_conditional_ivar_writes: grandfathered
@@ -523,10 +504,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#walk_extends_meta_new?: grandfathered
     Rigor::Inference::ScopeIndexer#walk_extends_opaque_block: grandfathered
     Rigor::Inference::ScopeIndexer#walk_extends_singleton_class: grandfathered
-    Rigor::Inference::ScopeIndexer#walk_includes_children: the generic child descent of the include walk, adding a hook's parameters to scope; it derives no declaration context
-    Rigor::Inference::ScopeIndexer#walk_includes_children_plain: the generic child descent of the include walk; the owner and cref arrive from the caller
-    Rigor::Inference::ScopeIndexer#walk_includes_declaration?: grandfathered
-    Rigor::Inference::ScopeIndexer#walk_includes_meta_new?: grandfathered
     Rigor::Inference::ScopeIndexer#walk_ivars_declaration: grandfathered
     Rigor::Inference::ScopeIndexer#walk_ivars_eval_call?: grandfathered
     Rigor::Inference::ScopeIndexer#walk_ivars_leaf?: grandfathered
@@ -534,17 +511,13 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#walk_ivars_meta_new?: grandfathered
     Rigor::Inference::ScopeIndexer#walk_method_visibilities: grandfathered
     Rigor::Inference::ScopeIndexer#walk_methods_and_def_nodes: grandfathered
-    Rigor::Inference::ScopeIndexer#walk_mixin_call_children: grandfathered
     Rigor::Inference::ScopeIndexer#singleton_class_eval_walked?: 'issue #1984, walks a `singleton_class.class_eval` block as the grandfathered walk_method_visibilities walks a `class << self` body (the same owner prefix, a fresh :public default); it adds no context of its own'
     Rigor::Inference::ScopeIndexer#walk_singleton_body: grandfathered
-    Rigor::Inference::ScopeIndexer#walk_singleton_class_includes: grandfathered
     Rigor::Inference::ScopeIndexer#walk_singleton_class_ivars: grandfathered
     Rigor::Inference::ScopeIndexer#walk_singleton_def_nodes: grandfathered
     Rigor::Inference::ScopeIndexer#walk_singleton_meta_new?: grandfathered
     Rigor::Inference::ScopeIndexer#walk_visibility_singleton_class: grandfathered
-    Rigor::Inference::ScopeIndexer#write_mixin_targets: grandfathered
     Rigor::Inference::ScopeIndexer#write_singleton_slot: ADR-119 WD3, the singleton walk's one slot write, routed through SingletonDefTable so the slot's contest follows its writer; the owner and side are the walk's, it adds no context of its own
-    Rigor::Inference::ScopeIndexer#toplevel_include_owner: 'names `Object` as the owner of a receiverless `include` written as a direct statement of the program (`main.include`, issue #1697); it reads only whether the call is a top-level statement, and the walk''s own empty prefix and owner'
     Rigor::Inference::ScopeIndexer#supersede_def_nodes: ADR-119 WD3 (#1989), a later implicit-self non-def definer (attr_*, a literal define_method, alias_method / alias) of a name contests the walk's own def-node slot, certain or possible, keeping the replaced def so no sibling file fills it (through follow_slot_writer); it takes the owner prefix and certainty the walk already computed and decides no declaration context
 lib/rigor/inference/scope_indexer/alias_def_nodes.rb:
   computes: per class, the def node the new name of each alias and alias_method runs, which is the one its old name held at the alias in source order, written into the methods table's def-node slots with each slot's contest; the walk that fills the alias map threads its own prefix, alias owner and cref through every declaration and asks DeclarationWalk::Rules for each declaration context
@@ -652,6 +625,40 @@ lib/rigor/inference/scope_indexer/mixin_accumulator.rb:
   producers:
     Rigor::Inference::ScopeIndexer::MixinAccumulator: holds the walks' per-owner mixin lists and the unpositioned edges; the owner is resolved by the walk that fills it
     Rigor::Inference::ScopeIndexer::MixinAccumulator#direct_body: marks the statements of a body the caller already judged direct; it resolves no declaration context
+lib/rigor/inference/scope_indexer/mixin_effects.rb:
+  computes: what the include walk and the extend walk both ask about a call that mixes a module in or may, which is the ancestry sides it reshapes with their owners, and the taint of an owner side for a call the tables cannot hold (a mixin call the walk did not record, a send whose name is computed, an eval block on a receiver nothing names); the owner and the accumulator are the walk's, and it asks DeclarationWalk::Rules for a constant receiver's prefix and for the owner a class-creating constant write gives its block
+  producers:
+    Rigor::Inference::ScopeIndexer::MixinEffects: 'issue #3006, LOCAL_SCOPE_BOUNDARIES lists the nodes that open a local scope of their own (a def, a class, a module, a class << self), where the scan for the name literals a computed send argument can hold stops; the constant moved here from scope_indexer.rb with the two functions that read it (ADR-116 WD9, #3400), whose module body is a row for the node-class lists that stay; it bounds a scan and derives no declaration context'
+    Rigor::Inference::ScopeIndexer::MixinEffects#block_mixes_in?: scans an eval block for a mixin call; it answers a question and derives no declaration context
+    Rigor::Inference::ScopeIndexer::MixinEffects#block_mixes_into_self?: 'issue #2991, scans an opaque eval block for a receiverless or self. include / prepend; it answers a question and derives no declaration context'
+    Rigor::Inference::ScopeIndexer::MixinEffects#collect_local_send_names: 'issue #3006, a consumer, not a declaration producer; it collects the name literals a local of a class-body `send` is bound to, stopping at a nested `def` or declaration (a new local scope), and records no table and derives no owner or side'
+    Rigor::Inference::ScopeIndexer::MixinEffects#constant_write_nodes: 'issue #3024, a consumer, not a declaration producer; it collects the writes binding `NAME` (plain, multi-assign target, operator, `&&=` / `||=`) of a class-body `send` argument''s scope so a constant receiver of `each` / `each_with_index` / `map` can be read as a literal array, stopping at a nested `def` or declaration, and records no table and derives no owner or side'
+    Rigor::Inference::ScopeIndexer::MixinEffects#literal_send_name: 'issue #3006, a consumer, not a declaration producer; it reads the method name a `send` argument spells, or rules out every mixin name for an interpolation, and derives no declaration context'
+    Rigor::Inference::ScopeIndexer::MixinEffects#mixin_effects: names which ancestry side of which owner a mixin call reshapes, from the call's receiver and the owner the walk already resolved; it computes no declaration context
+    Rigor::Inference::ScopeIndexer::MixinEffects#own_mixin_effects: names the ancestry side a receiverless mixin call reshapes on the owner the walk passes in; it computes no declaration context
+    Rigor::Inference::ScopeIndexer::MixinEffects#receiver_mixin_effects: names the ancestry sides a receiver-form mixin call reshapes; it computes no declaration context
+    Rigor::Inference::ScopeIndexer::MixinEffects#taint_computed_hook_send: 'issue #3006, taints the sides a hook parameter''s computed `send` may reshape on the enclosing module the walk passes in, listing the unnamed marker on the :include side as taint_unrecorded_mixin does for the literal call; it reads a call''s names and derives no declaration context'
+    Rigor::Inference::ScopeIndexer::MixinEffects#taint_computed_mixin_send: 'issue #3006, taints the side a class-body computed-name `send` may reshape on the owner the walk passes in, with the unnamed marker; it reads a call''s shape and names and derives no declaration context'
+    Rigor::Inference::ScopeIndexer::MixinEffects#taint_opaque_eval: taints the enclosing owner the walk passes in when an eval block on an opaque receiver mixes a module in; it computes no declaration context
+    Rigor::Inference::ScopeIndexer::MixinEffects#taint_unrecorded_mixin: 'issue #2991, taints the sides an unrecorded mixin call reshapes, on the owners {#mixin_effects} already resolved, listing the unnamed marker on the :include side; it reads a call''s shape and derives no declaration context'
+lib/rigor/inference/scope_indexer/mixin_tables.rb:
+  computes: per class or module, the modules one file includes and the ones it prepends, as written and in instance-ancestor search order, with the edges whose order is not a fact; the walk threads its own prefix, owner and cref through every declaration, asks DeclarationWalk::Rules for each declaration context and ConstantTables for the self a block runs under, and hands each mixin call to MixinEffects
+  producers:
+    Rigor::Inference::ScopeIndexer::MixinTables#freeze_mixin_lists: it freezes the mixin accumulator's per-class lists into the include and prepend tables; it is the one place the two are projected, and the include projection alone is a set (#1587)
+    Rigor::Inference::ScopeIndexer::MixinTables#instance_mixin_recorded?: writes one instance-side mixin call into the include/prepend accumulator under the owner the walk passes in; it computes no declaration context
+    Rigor::Inference::ScopeIndexer::MixinTables#mixin_call_recorded?: grandfathered
+    Rigor::Inference::ScopeIndexer::MixinTables#mixin_names_for: grandfathered
+    Rigor::Inference::ScopeIndexer::MixinTables#mixin_tables: grandfathered
+    Rigor::Inference::ScopeIndexer::MixinTables#record_mixin_call: grandfathered
+    Rigor::Inference::ScopeIndexer::MixinTables#toplevel_include_owner: 'names `Object` as the owner of a receiverless `include` written as a direct statement of the program (`main.include`, issue #1697); it reads only whether the call is a top-level statement, and the walk''s own empty prefix and owner'
+    Rigor::Inference::ScopeIndexer::MixinTables#walk_class_includes: grandfathered
+    Rigor::Inference::ScopeIndexer::MixinTables#walk_includes_children: the generic child descent of the include walk, adding a hook's parameters to scope; it derives no declaration context
+    Rigor::Inference::ScopeIndexer::MixinTables#walk_includes_children_plain: the generic child descent of the include walk; the owner and cref arrive from the caller
+    Rigor::Inference::ScopeIndexer::MixinTables#walk_includes_declaration?: grandfathered
+    Rigor::Inference::ScopeIndexer::MixinTables#walk_includes_meta_new?: grandfathered
+    Rigor::Inference::ScopeIndexer::MixinTables#walk_mixin_call_children: grandfathered
+    Rigor::Inference::ScopeIndexer::MixinTables#walk_singleton_class_includes: grandfathered
+    Rigor::Inference::ScopeIndexer::MixinTables#write_mixin_targets: grandfathered
 lib/rigor/inference/scope_indexer/node_propagation.rb:
   computes: the per-node scope table's entries for the nodes the evaluator did not visit; it records no declaration
   producers:

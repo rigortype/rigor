@@ -23,7 +23,7 @@ module Rigor
       # walk's entry, which `ScopeIndexer.index`, {PreEvalConstants} and {ConstantIvarValue} call.
       # {.constant_write_census} is the census's: `ScopeIndexer.seed_constant_tables` and the cross-file fold
       # (`ScopeIndexer.merge_constant_literal_tables`) read the tables it answers. {.rebound_block_self} is the
-      # one rule other walks ask: the mixin tables (`ScopeIndexer.walk_mixin_call_children`) and
+      # one rule other walks ask: the mixin tables (`MixinTables.walk_mixin_call_children`) and
       # {SharedWalkTables}. {.dynamic_target_key} spells the wildcard key of a write through a base nothing names,
       # which the fold files too (`ScopeIndexer.apply_dynamic_target_writes`). The other 36 are private: the two
       # walks with their arms and recording steps, the rest of the rules, and {.constant_writes_for_file}, which

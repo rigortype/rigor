@@ -415,11 +415,17 @@ module Rigor
 
       # Only a configuration that does not load is "no warnings to show": the CLI has already reported that error.
       # A failure in ConfigAudit itself is a bug and surfaces as an internal error rather than reading as clean.
+      #
+      # The path is the one the command read: `build_argv` wrote it into `--config=` as a string, and the command
+      # refused it by `CLI::Options.config_path` before loading anything. The same check runs here first, so a
+      # directory, an unreadable file or a non-string value is the command's usage error rather than an `Errno` or a
+      # `TypeError` out of `Configuration.load` (#3413).
       def config_warnings(config_path)
         require_relative "../configuration"
         require_relative "../config_audit"
+        require_relative "../cli/options"
         begin
-          configuration = Configuration.load(config_path)
+          configuration = Configuration.load(config_path && CLI::Options.config_path(config_path.to_s))
         rescue ConfigurationError
           return []
         end

@@ -238,7 +238,7 @@ project writes.
 - `arguments` that is present, not `null` and not an object MUST be answered `-32602`; absent or `null`,
   it is read as `{}`.
 - Clients MUST send arguments their schema allows. How a value outside its schema is answered is
-  unspecified ([#3413](https://github.com/rigortype/rigor/issues/3413)).
+  unspecified, except `config` (§ Configuration).
 
 ### Configuration
 
@@ -250,11 +250,12 @@ The configuration a tool call reads is, first match wins ([ADR-33](../adr/33-mcp
    the server's working directory, as the CLI does.
 
 A blank `config` (empty or whitespace only) names no file, so the session default applies; it MUST NOT
-reach the CLI as `--config=`. A `config` naming no file is the command's usage error, so the call is
-`isError: true`, with the command's error as `content[0]` (*today a `config` that is a directory, is
-unreadable or is not a string is reported as an internal error instead:*
-[#3413](https://github.com/rigortype/rigor/issues/3413)). Relative paths, in `config` and in operands alike, resolve against the server's
-working directory.
+reach the CLI as `--config=`. A `config` the command refuses (one naming no file, a directory or an
+unreadable file) is the command's usage error, so the call MUST be `isError: true`, with the command's
+error as `content[0]`. A `config` that is not a string reaches the command as its string form
+(`5` as `--config=5`) and is answered the same way
+([#3413](https://github.com/rigortype/rigor/issues/3413)). Relative paths, in `config` and in operands
+alike, resolve against the server's working directory.
 
 ## Tool results
 

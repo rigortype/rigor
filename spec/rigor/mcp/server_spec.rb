@@ -543,6 +543,57 @@ RSpec.describe Rigor::MCP::Server do
     end
   end
 
+  # #3413 — a config the command refuses before loading (a directory, an unreadable file, a value that is not a
+  # string) is the command's usage error, not an internal error out of the second, audit-only load.
+  describe "config argument the command refuses" do
+    def unusable_configs(dir)
+      locked = File.join(dir, "locked.yml")
+      File.write(locked, "paths: []\n")
+      File.chmod(0o000, locked)
+      configs = { "a directory" => dir, "a non-string" => 5 }
+      configs["an unreadable file"] = locked unless File.readable?(locked) # root reads anything
+      configs
+    end
+
+    it "loads none of them for the warnings block, so no Errno or TypeError escapes" do
+      Dir.mktmpdir do |dir|
+        unusable_configs(dir).each do |label, config|
+          expect(server.send(:config_warnings, config)).to eq([]), label
+        end
+      end
+    end
+
+    it "still surfaces a failure inside ConfigAudit" do
+      Dir.mktmpdir do |dir|
+        config = File.join(dir, "rigor.yml")
+        File.write(config, "paths: []\n")
+        allow(Rigor::ConfigAudit).to receive(:warnings).and_raise(RuntimeError, "audit bug")
+
+        expect { server.send(:config_warnings, config) }.to raise_error(RuntimeError, "audit bug")
+      end
+    end
+
+    it "returns the command's own usage error with isError for rigor_annotate" do
+      Dir.mktmpdir do |dir|
+        file = File.join(dir, "ok.rb")
+        File.write(file, "x = 1\n")
+        expected = {
+          "a directory" => "config path is a directory: #{dir}",
+          "a non-string" => "config file not found: 5",
+          "an unreadable file" => "config file not readable: "
+        }
+
+        unusable_configs(dir).each do |label, config|
+          resp = tool_call("rigor_annotate", { "file" => file, "config" => config })
+
+          expect(resp.dig("result", "isError")).to be(true), label
+          expect(resp.dig("result", "content", 0, "text")).to include(expected.fetch(label)), label
+          expect(resp.dig("result", "content", 0, "text")).not_to include("Internal error"), label
+        end
+      end
+    end
+  end
+
   describe "config_path session default" do
     # A blank per-call `config` names no file: the session default applies, and `--config=` never reaches the CLI.
     it "is used when the per-call config is blank" do

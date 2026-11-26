@@ -480,11 +480,11 @@ module Rigor
         end
 
         # Mirrors {.walk_constant_writes}'s traversal for the forms it shares — the lexical class/module prefix
-        # qualifies a bare `ConstantWriteNode` — and extends it to the four forms that walk misses, each
-        # censused as unpublishable: an operator / `&&=` /
-        # `||=` constant write, a `ConstantTargetNode` under a `MultiWriteNode` (`A, B = :x, :y`), a `self::X =`
-        # whose target renders no qualified name, and the inner write of a chain (`C = D = :x`), which is why a
-        # `ConstantWriteNode` descends into its own rvalue instead of returning.
+        # qualifies a bare `ConstantWriteNode` — and extends it to the forms that walk misses, each censused as
+        # unpublishable: an operator / `&&=` / `||=` constant write, a constant target wherever Prism holds one
+        # (see {.census_constant_target}), a `self::X =` whose target renders no qualified name, and the inner
+        # write of a chain (`C = D = :x`), which is why a `ConstantWriteNode` descends into its own rvalue instead
+        # of returning.
         def walk_constant_write_census(node, qualified_prefix, tables, self_owner = nil, meta_owner = nil,
                                        singleton_cref: false)
           return unless node.is_a?(Prism::Node)
@@ -566,6 +566,14 @@ module Rigor
             when String then [rebound_self]
             when Symbol then [] # OPAQUE_SELF — a `self::` header names nothing
             end
+          # Issue #3407 — the header runs under the enclosing cref, before the body opens: a write in a dynamic
+          # header path (`class (A = M)::B`) or in the superclass expression (`class C < (A = Base)`) lands there.
+          walk_constant_write_census(node.constant_path, qualified_prefix, tables, self_owner, meta_owner,
+                                     singleton_cref: singleton_cref)
+          if node.is_a?(Prism::ClassNode)
+            walk_constant_write_census(node.superclass, qualified_prefix, tables, self_owner, meta_owner,
+                                       singleton_cref: singleton_cref)
+          end
           self_decl = DeclarationWalk::Rules.self_anchored_decl_prefix(node.constant_path, self_base)
           child_prefix = self_decl ||
                          Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
@@ -624,8 +632,8 @@ module Rigor
                                          memo: node.is_a?(Prism::ConstantOrWriteNode))
           when Prism::ConstantPathOperatorWriteNode, Prism::ConstantPathOrWriteNode, Prism::ConstantPathAndWriteNode
             census_path_write(node, qualified_prefix, tables, self_owner, singleton_cref: singleton_cref)
-          when Prism::MultiWriteNode
-            census_multi_write_constants(node, qualified_prefix, tables, self_owner, singleton_cref: singleton_cref)
+          when Prism::ConstantTargetNode, Prism::ConstantPathTargetNode
+            census_constant_target(node, qualified_prefix, tables, self_owner, singleton_cref: singleton_cref)
           end
         end
 
@@ -645,24 +653,23 @@ module Rigor
           self_owner == OPAQUE_SELF && !DeclarationWalk::Rules.self_anchored_tail(target).nil?
         end
 
-        # `A, B = :x, :y` and `A, *rest = …`. A destructured element's value is a projection of the right-hand
-        # side, which this syntactic walk does not evaluate, so every constant target is censused unpublishable.
-        def census_multi_write_constants(node, qualified_prefix, tables, self_owner = nil,
-                                         singleton_cref: false)
-          targets = node.lefts + node.rights
-          targets << node.rest if node.rest
-          targets.each do |target|
-            case target
-            when Prism::ConstantTargetNode
-              next if singleton_cref
+        # Issue #3407 — a constant target, reached by the walk's ordinary descent wherever Prism holds one: a
+        # multiple assignment's lefts, rights and splat (`A, *B = …`), a nested target list (`(A, B), c = …`), a
+        # `for` index (`for A in …`) and a `rescue => A` reference. Prism's node set puts a target in no other
+        # position: a pattern capture and a block parameter bind locals only. A target's value is a projection or
+        # a runtime value this syntactic walk does not evaluate, so every one is censused unpublishable. A path
+        # target is keyed by {.constant_path_write_name}, which renders no `ConstantPathTargetNode` and so files
+        # it under the wildcard key, the over-retracting direction.
+        def census_constant_target(target, qualified_prefix, tables, self_owner = nil, singleton_cref: false)
+          if target.is_a?(Prism::ConstantTargetNode)
+            return if singleton_cref
 
-              record_constant_write_census(qualified_write_name(qualified_prefix, target.name.to_s), nil, tables)
-            when Prism::ConstantPathTargetNode
-              next if singleton_cref && singleton_self_write?(target, self_owner)
+            record_constant_write_census(qualified_write_name(qualified_prefix, target.name.to_s), nil, tables)
+          else
+            return if singleton_cref && singleton_self_write?(target, self_owner)
 
-              record_constant_write_census(constant_path_write_name(target, qualified_prefix, self_owner),
-                                           nil, tables, nameable: nameable_write_target?(target, self_owner))
-            end
+            record_constant_write_census(constant_path_write_name(target, qualified_prefix, self_owner),
+                                         nil, tables, nameable: nameable_write_target?(target, self_owner))
           end
         end
 
@@ -812,7 +819,7 @@ module Rigor
                              :record_namespace_probe, :meta_new_constant_type, :constant_writes_for_file,
                              :walk_constant_write_census, :census_ivar_owner, :census_receiver_owner,
                              :walk_census_declaration, :walk_census_singleton_class, :census_constant_write,
-                             :census_path_write, :singleton_self_write?, :census_multi_write_constants,
+                             :census_path_write, :singleton_self_write?, :census_constant_target,
                              :constant_path_write_name, :constant_path_write_literal, :nameable_write_target?,
                              :qualified_write_name, :record_constant_write_census, :census_descriptor,
                              :record_constant_alias_census, :constant_alias_source, :constant_literal_value,

@@ -58,15 +58,16 @@ stdout, with no `Content-Length` framing.
 - **One response per request.** Every request (a message with a non-null `id`) MUST get exactly one
   response, carrying its `id`. *Implementation:* requests are handled one at a time, in arrival order,
   and each response is written before the next line is read. Clients match responses by `id`.
-- **Notifications.** A message with no `id`, or a null `id`, MUST NOT be answered, and MUST NOT change
+- **Notifications.** A request object with no `id`, or a null `id`, MUST NOT be answered, and MUST NOT change
   how any later request is answered. *Implementation:* it is dropped without reading its `method`, so
   `notifications/initialized`, `notifications/cancelled` and the rest have no effect.
 - **Malformed messages.** A line that parses but is not a request object (a JSON array, such as a
   JSON-RPC batch, a number, a string, `true`, `false` or `null`), and a `tools/call` whose `params` is
-  not an object, MUST NOT stop the server. The server SHOULD answer `-32600` with `"id": null` for
-  the first and `-32602` for the second. *Today the server exits on both, and misreads a string line*
-  ([#3411](https://github.com/rigortype/rigor/issues/3411)). Other methods ignore their `params` other
-  than `_meta`. The `jsonrpc` member is not checked; clients MUST send `"jsonrpc": "2.0"`.
+  not an object, MUST NOT stop the server. The server MUST answer `-32600` with `"id": null` for the
+  first, a batch as one message, and `-32602` with the request's `id` for the second
+  ([#3411](https://github.com/rigortype/rigor/issues/3411)). A `tools/call` with no `params` is read as
+  one with empty `params`. Other methods ignore their `params` other than `_meta`. The `jsonrpc`
+  member is not checked; clients MUST send `"jsonrpc": "2.0"`.
 
 ## Protocol eras
 
@@ -172,9 +173,9 @@ its errors here. An extension is advertised and served only to 2026-07-28 reques
 | Code | Sent for |
 | --- | --- |
 | `-32700` | A line that is not valid JSON (`"id": null`). |
-| `-32600` | Reserved for a message that is not a request object ([#3411](https://github.com/rigortype/rigor/issues/3411)); not sent today. |
+| `-32600` | A line that parses but is not a request object, a JSON-RPC batch included (`"id": null`). |
 | `-32601` | A method neither era serves. |
-| `-32602` | A 2026-07-28 request with a missing or non-string protocol version, or without `clientCapabilities`; a `tools/call` naming no tool this server has, or missing an argument § Arguments says is checked. |
+| `-32602` | A 2026-07-28 request with a missing or non-string protocol version, or without `clientCapabilities`; a `tools/call` whose `params` is not an object; a `tools/call` naming no tool this server has, or missing an argument § Arguments says is checked. |
 | `-32022` | A 2026-07-28 request naming a version not in `SUPPORTED_VERSIONS`, with `data.supported` and `data.requested`. |
 | `-32021` | Never sent (§ 2026-07-28 requests). |
 

@@ -1,0 +1,2 @@
+- **[mcp]** `rigor mcp` answers a JSON line that is not a request object with `-32600`, and a `tools/call` whose `params` is not an object with `-32602`, instead of exiting. ([#3425](https://github.com/rigortype/rigor/pull/3425))
+  - A JSON-RPC batch, a number, a string, `true`, `false` or `null` line used to raise out of the read loop and drop every later request ([#3411](https://github.com/rigortype/rigor/issues/3411)).

@@ -47,8 +47,8 @@ Two pieces of work ended here; neither leaves a queue to work down.
   #3331–#3334, #3336, #3343 (loop content join), #3351 (known limitation: a non-empty fact stale after
   a mutation through an alias the engine does not link), #3352, #3342 and #3350 (tooling).
 - **Approval-queue entries from this work await ratification**: `statement-evaluator-clusters.md`,
-  `expression-typer-clusters.md`, `non-empty-fact-invalidation.md` (the three process and scope
-  entries were ratified on 2026-11-27).
+  `expression-typer-clusters.md` (the process, scope and non-empty-fact entries were ratified on
+  2026-11-27).
 
 ## Next
 

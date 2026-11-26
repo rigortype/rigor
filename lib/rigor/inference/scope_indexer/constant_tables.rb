@@ -566,12 +566,12 @@ module Rigor
             when String then [rebound_self]
             when Symbol then [] # OPAQUE_SELF — a `self::` header names nothing
             end
-          # Issue #3407 — the header runs under the enclosing cref, before the body opens: a write in a dynamic
-          # header path (`class (A = M)::B`) or in the superclass expression (`class C < (A = Base)`) lands there.
-          walk_constant_write_census(node.constant_path, qualified_prefix, tables, self_owner, meta_owner,
-                                     singleton_cref: singleton_cref)
-          if node.is_a?(Prism::ClassNode)
-            walk_constant_write_census(node.superclass, qualified_prefix, tables, self_owner, meta_owner,
+          # Issue #3407 — the header, every child but the body, runs under the enclosing cref before the body opens:
+          # a write in a dynamic header path (`class (A = M)::B`) or a superclass expression (`class C < (A = Base)`).
+          node.rigor_each_child do |child|
+            next if child.equal?(node.body)
+
+            walk_constant_write_census(child, qualified_prefix, tables, self_owner, meta_owner,
                                        singleton_cref: singleton_cref)
           end
           self_decl = DeclarationWalk::Rules.self_anchored_decl_prefix(node.constant_path, self_base)

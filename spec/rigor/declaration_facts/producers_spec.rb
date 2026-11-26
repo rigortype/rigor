@@ -418,6 +418,40 @@ RSpec.describe "Declaration producers" do
                               "lib/rigor/b.rb#Rigor::B#merge")
       end
 
+      # `Rigor::B.put` runs `B`'s own `put`, which writes nothing; `Helper#put`, a nested class's def of the same
+      # name, writes its parameter but is not what the call runs, so `A#entry` is no writer. Inside `B`'s file the rule
+      # still goes by name and lists every def of a reached name, as it did before #3398, so both `put`s are listed.
+      it "follows a call on another listed module into that module's own defs of the name only" do
+        sources = {
+          "lib/rigor/a.rb" => "module Rigor; module A; def entry(t) = Rigor::B.put(t); end; end",
+          "lib/rigor/b.rb" => "module Rigor; module B; def put(t) = t.size; " \
+                              "class Helper; def put(t) = (t[1] = 1); end; end; end",
+          "lib/rigor/c.rb" => "Rigor::A.entry({})"
+        }
+        table = { "lib/rigor/a.rb" => { module: "Rigor::A", roots: [] },
+                  "lib/rigor/b.rb" => { module: "Rigor::B", roots: [] } }
+
+        expect(rule_v_keys(sources, table))
+          .to contain_exactly("lib/rigor/b.rb#Rigor::B#put", "lib/rigor/b.rb#Rigor::B::Helper#put")
+      end
+
+      # `B#relay` writes its table only by handing it on to `D#store`, so `A#entry` writes it two files away.
+      it "follows a table through two listed files in turn" do
+        sources = {
+          "lib/rigor/a.rb" => "module Rigor; module A; def entry(t) = Rigor::B.relay(t); end; end",
+          "lib/rigor/b.rb" => "module Rigor; module B; def relay(t) = Rigor::D.store(t); end; end",
+          "lib/rigor/d.rb" => "module Rigor; module D; def store(t) = t << 1; end; end",
+          "lib/rigor/c.rb" => "Rigor::A.entry([])"
+        }
+        table = { "lib/rigor/a.rb" => { module: "Rigor::A", roots: [] },
+                  "lib/rigor/b.rb" => { module: "Rigor::B", roots: [] },
+                  "lib/rigor/d.rb" => { module: "Rigor::D", roots: [] } }
+
+        expect(rule_v_keys(sources, table))
+          .to contain_exactly("lib/rigor/a.rb#Rigor::A#entry", "lib/rigor/b.rb#Rigor::B#relay",
+                              "lib/rigor/d.rb#Rigor::D#store")
+      end
+
       it "reports a root that is not a method of the module in its file" do
         sources = { "lib/a.rb" => "module A; def enter(t) = t << 1; class Inner; def nested = 1; end; end" }
 

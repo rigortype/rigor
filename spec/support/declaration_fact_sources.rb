@@ -376,11 +376,6 @@ end
 # `<<` / `merge!`-style call into it, or passing it to a method that does, of the same file or of another listed file
 # called on its module by name (#3398).
 module DeclarationWriterScan
-  # The Hash / Set / Array writers, then the visibility table's own (`ScopeIndexer::VisibilityTable#write` and the
-  # contest writers beside it), which write a slot or its contest as `[]=` does (#1984).
-  WRITE_CALLS = %i[
-    []= << push unshift concat merge! store add add? update write wrote contest_slot contest_class
-  ].freeze
   # Rule (v)'s table, a row per file: the module whose functions the file defines, by its full name, and the roots
   # the rule starts from in that file. A method another covered file calls on the module (`names?`) is a root as
   # well, whether or not its caller is reachable, so a new entry point needs no edit here, and a file entered only
@@ -459,15 +454,15 @@ module DeclarationWriterScan
   # that a part of the tree can be scanned; `source_problems` reports both.
   def each_writer(parsed, sources = SOURCES)
     rows = sources.select { |path, _| parsed.key?(path) }
-    defs = rows.to_h { |path, _| [path, definitions(parsed.fetch(path))] }
-    calls = rows.to_h { |path, _| [path, file_calls(path, defs, rows)] }
-    writers = parameter_writers(defs, calls)
+    units = units(rows.to_h { |path, _| [path, definitions(parsed.fetch(path))] }, rows)
+    calls = unit_calls(units, rows)
+    writers = parameter_writers(units, calls)
     outside = module_calls(parsed)
     rows.each do |path, source|
-      reachable(path, calls.fetch(path), entry_points(outside, path, source)).each do |name|
+      reachable(path, calls, entry_points(outside, path, source)).each do |name|
         next if writers.fetch([path, name]).empty?
 
-        defs[path].fetch(name).each do |node, owners|
+        units.fetch([path, name]).each do |node, owners|
           yield path, DeclarationProducerScan.def_key(owners, node, node.receiver)
         end
       end
@@ -539,16 +534,33 @@ module DeclarationWriterScan
     defs
   end
 
-  # `{method name => [[callee path, call node]]}` for a listed file: the calls its defs make on the implicit
-  # receiver or `self`, into its own file, and on a listed module by name (`names?`), into that module's file, each
-  # where the callee file defines the method.
-  def file_calls(path, defs, rows)
-    defs.fetch(path).transform_values do |sites|
-      sites.flat_map do |def_node, _|
-        def_code(def_node).grep(Prism::CallNode).flat_map do |node|
-          callee_paths(path, node.receiver, rows).filter_map { |callee| [callee, node] if defs[callee].key?(node.name) }
-        end
+  # Rule (v)'s units, each `key => [[def node, owners]]`: `[path, name]` holds every def of the name in a listed
+  # file, which a call from the same file reaches; `[path, name, module]` holds those of the row's module (an owner
+  # `names?` reads as it), which a call on the module by name from another listed file reaches, so that a nested
+  # class's def of the name is not taken for the module's.
+  def units(defs, rows)
+    defs.each_with_object({}) do |(path, file), units|
+      module_name = rows.fetch(path).fetch(:module)
+      file.each do |name, sites|
+        units[[path, name]] = sites
+        own = sites.select { |_, owners| names?(owners.join("::"), module_name) }
+        units[[path, name, module_name]] = own unless own.empty?
       end
+    end
+  end
+
+  # `{unit key => [[callee unit key, call node]]}`: the calls each unit's defs make into a unit, worked out once per
+  # def.
+  def unit_calls(units, rows)
+    made = {}.compare_by_identity
+    units.to_h do |key, sites|
+      [key, sites.flat_map { |def_node, _| made[def_node] ||= def_calls(key.first, def_node, units, rows) }]
+    end
+  end
+
+  def def_calls(path, def_node, units, rows)
+    def_code(def_node).grep(Prism::CallNode).flat_map do |node|
+      callee_keys(path, node, rows).filter_map { |callee| [callee, node] if units.key?(callee) }
     end
   end
 
@@ -557,53 +569,73 @@ module DeclarationWriterScan
     [def_node.parameters, def_node.body].compact.flat_map { |part| DeclarationFactSources.each_node(part).to_a }
   end
 
-  # The listed files a receiver sends a call into: its own on the implicit receiver or `self`, else each file whose
-  # row's module the receiver's constant names.
-  def callee_paths(path, receiver, rows)
-    return [path] if receiver.nil? || receiver.is_a?(Prism::SelfNode)
+  # The units a call can run: on the implicit receiver or `self`, or on the file's own module by name, the file's
+  # defs of the name; on another listed module by name, that module's own defs of it in its file.
+  def callee_keys(path, node, rows)
+    receiver = node.receiver
+    return [[path, node.name]] if receiver.nil? || receiver.is_a?(Prism::SelfNode)
 
     name = DeclarationFactSources.constant_name(receiver)
-    name.nil? ? [] : rows.filter_map { |callee, source| callee if names?(name, source.fetch(:module)) }
+    return [] if name.nil?
+
+    rows.filter_map do |callee, source|
+      module_name = source.fetch(:module)
+      next unless names?(name, module_name)
+
+      callee == path ? [path, node.name] : [callee, node.name, module_name]
+    end
   end
 
   # The methods of `path` reachable from `roots` through its calls into its own file.
   def reachable(path, calls, roots)
     seen = Set.new
-    pending = roots.select { |root| calls.key?(root) }
+    pending = roots.select { |root| calls.key?([path, root]) }
     until pending.empty?
       name = pending.pop
       next unless seen.add?(name)
 
-      pending.concat(calls.fetch(name).filter_map { |callee, site| site.name if callee == path })
+      pending.concat(calls.fetch([path, name]).filter_map { |callee, _| callee[1] if callee.first == path })
     end
     seen
   end
 
-  # `{[path, method name] => Set[parameter names it writes]}`, directly or by passing one to a writer it calls.
-  def parameter_writers(defs, calls)
-    params = defs.flat_map { |path, file| file.map { |name, sites| [[path, name], sites] } }.to_h do |key, sites|
-      [key, sites.flat_map { |node, _| parameter_names(node) }.uniq]
+  # `{unit key => Set[parameter names it writes]}`, directly or by passing one to a writer it calls.
+  def parameter_writers(units, calls)
+    params = units.transform_values do |sites|
+      sites.flat_map { |node, _| DeclarationParameterWrites.parameter_names(node) }.uniq
     end
-    writes = params.to_h do |key, names|
-      [key, defs.dig(*key).map { |node, _| direct_writes(node, names) }.reduce(Set.new, :|)]
+    writes = units.to_h do |key, sites|
+      written = sites.map { |node, _| DeclarationParameterWrites.direct_writes(node, params.fetch(key)) }
+      [key, written.reduce(Set.new, :|)]
     end
-    loop { return writes if grow_writes(defs, calls, params, writes).empty? }
+    loop { return writes unless grow_writes(units, calls, params, writes) }
   end
 
   # One pass of `parameter_writers`' fixpoint: adds to `writes` each parameter a caller hands to one its callee
-  # writes, and returns those it added.
-  def grow_writes(defs, calls, params, writes)
-    calls.flat_map do |path, file|
-      file.flat_map do |name, sites|
-        key = [path, name]
-        sites.flat_map do |callee, site|
-          callee_key = [callee, site.name]
-          passed_writes(site, defs.dig(*callee_key), params.fetch(key), writes.fetch(callee_key))
-            .select { |param| writes.fetch(key).add?(param) }
-        end
+  # writes, and answers whether it added any.
+  def grow_writes(units, calls, params, writes)
+    grown = false
+    calls.each do |key, sites|
+      sites.each do |callee, site|
+        handed = DeclarationParameterWrites.passed_writes(site, units.fetch(callee), params.fetch(key),
+                                                          writes.fetch(callee))
+        handed.each { |param| grown = true if writes.fetch(key).add?(param) }
       end
     end
+    grown
   end
+end
+
+# Rule (v)'s parameter writes: which parameters a def writes into itself, and which of a caller's parameters a call
+# hands to a parameter its callee writes. `DeclarationWriterScan` runs the fixpoint over them.
+module DeclarationParameterWrites
+  # The Hash / Set / Array writers, then the visibility table's own (`ScopeIndexer::VisibilityTable#write` and the
+  # contest writers beside it), which write a slot or its contest as `[]=` does (#1984).
+  WRITE_CALLS = %i[
+    []= << push unshift concat merge! store add add? update write wrote contest_slot contest_class
+  ].freeze
+
+  module_function
 
   # Every named parameter, a `*rest` and a `**rest` included.
   def parameter_names(def_node)
@@ -632,7 +664,7 @@ module DeclarationWriterScan
   # The parameters `def_node` writes into itself.
   def direct_writes(def_node, params)
     written = Set.new
-    def_code(def_node).each do |node|
+    DeclarationWriterScan.def_code(def_node).each do |node|
       target = case node
                when Prism::IndexOperatorWriteNode, Prism::IndexOrWriteNode, Prism::IndexAndWriteNode then node.receiver
                when Prism::CallNode then node.receiver if WRITE_CALLS.include?(node.name)

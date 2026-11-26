@@ -542,6 +542,7 @@ lib/rigor/inference/scope_indexer/class_ivar_index.rb:
     Rigor::Inference::ScopeIndexer::ClassIvarIndex#exempt_class_body_writes!: folds the class-body ivar writes into the read-before-write exemption per class name the census walk already keyed them under, minus the ivars a define_method block writes (#1768); it derives no declaration context
     Rigor::Inference::ScopeIndexer::ClassIvarIndex#gather_aliased_mutations: grandfathered
     Rigor::Inference::ScopeIndexer::ClassIvarIndex#gather_ivar_writes: grandfathered
+    Rigor::Inference::ScopeIndexer::ClassIvarIndex#holds_return?: 'answers whether a statement of the transient-nil summary holds a return that leaves the method (#3419), stopping at a nested def, class, module or lambda, whose return leaves another method; it reads no declaration context and derives none'
     Rigor::Inference::ScopeIndexer::ClassIvarIndex#ivar_write_targets: grandfathered
     Rigor::Inference::ScopeIndexer::ClassIvarIndex#make_reflective_classes_gradual!: the reflective-write finish of the ivar census walk (#1931); it rewrites the entries of the classes record_reflective_ivar_write named, after the walk, deriving no declaration context of its own
     Rigor::Inference::ScopeIndexer::ClassIvarIndex#merge_held_ivar_writes!: grandfathered
@@ -558,6 +559,7 @@ lib/rigor/inference/scope_indexer/class_ivar_index.rb:
     Rigor::Inference::ScopeIndexer::ClassIvarIndex#record_ivar_write: grandfathered
     Rigor::Inference::ScopeIndexer::ClassIvarIndex#record_multi_write_ivars: grandfathered
     Rigor::Inference::ScopeIndexer::ClassIvarIndex#record_reflective_ivar_write: the instance_variable_set arm of the ivar census walk (#1931); it reads the class gather_ivar_writes passes in, as record_ivar_write does, and decides only whether the call is an implicit or self instance_variable_set with a literal name, deriving no declaration context of its own
+    Rigor::Inference::ScopeIndexer::ClassIvarIndex#runs_object_code?: 'answers whether a top-level statement of initialize may run other code of the object (a super, a yield, a call on self) before a later read (#3419), stopping at a nested def, class, module or lambda, whose code does not run there; it reads no declaration context and derives none'
     Rigor::Inference::ScopeIndexer::ClassIvarIndex#seed_operator_only_ivars!: grandfathered
     Rigor::Inference::ScopeIndexer::ClassIvarIndex#walk_class_ivars: grandfathered
     Rigor::Inference::ScopeIndexer::ClassIvarIndex#walk_conditional_ivar_writes: grandfathered

@@ -262,7 +262,7 @@ undefined methods, arity mismatches, and nil-receiver risks.
 
 | Argument | Type | Required | Default |
 |---|---|---|---|
-| `paths` | `string[]` | yes | — |
+| `paths` | `string[]` | no | configured paths |
 | `config` | `string` | no | session default |
 
 **Returns:** JSON — the same structure as `rigor check --format json`.
@@ -546,7 +546,7 @@ as `Constant` / `Nominal` / shaped / refined (precise) versus
 
 | Argument | Type | Required |
 |---|---|---|
-| `paths` | `string[]` | yes |
+| `paths` | `string[]` | no |
 | `config` | `string` | no |
 
 **Returns:** JSON — the same as `rigor coverage --format json`.

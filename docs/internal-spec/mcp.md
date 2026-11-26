@@ -175,7 +175,7 @@ its errors here. An extension is advertised and served only to 2026-07-28 reques
 | `-32700` | A line that is not valid JSON (`"id": null`). |
 | `-32600` | A line that parses but is not a request object, a JSON-RPC batch included (`"id": null`). |
 | `-32601` | A method neither era serves. |
-| `-32602` | A 2026-07-28 request with a missing or non-string protocol version, or without `clientCapabilities`; a `tools/call` whose `params` is not an object; a `tools/call` naming no tool this server has, or missing an argument § Arguments says is checked. |
+| `-32602` | A 2026-07-28 request with a missing or non-string protocol version, or without `clientCapabilities`; a `tools/call` whose `params` or `arguments` is not an object; a `tools/call` naming no tool this server has, or missing an argument § Arguments says is checked. |
 | `-32022` | A 2026-07-28 request naming a version not in `SUPPORTED_VERSIONS`, with `data.supported` and `data.requested`. |
 | `-32021` | Never sent (§ 2026-07-28 requests). |
 
@@ -204,19 +204,19 @@ neither.
 
 | Tool | Command prefix | Option properties | Operand properties | `required` |
 | --- | --- | --- | --- | --- |
-| `rigor_check` | `check --format=json --no-stats` | `config` | `paths` (each) | `paths` |
+| `rigor_check` | `check --format=json --no-stats` | `config` | `paths` (each) | — |
 | `rigor_type_of` | `type-of --format=json` | `config` | `file`, `line`, `col` as one `FILE:LINE:COL` | `file`, `line`, `col` |
 | `rigor_triage` | `triage --format=json` | `config`, `top` → `--top=N` | `paths` (each) | — |
 | `rigor_lens` | `lens --format=json` | `config` | `files` (each) | `files` |
 | `rigor_annotate` | `annotate --no-color` | `config` | `file` | `file` |
 | `rigor_sig_gen` | `sig-gen --print --format=json` | `config`, `params` → `--params=V` | `paths` (each) | — |
 | `rigor_explain` | `explain --format=json` | — | `rule`, when given | — |
-| `rigor_coverage` | `coverage --format=json` | `config` | `paths` (each) | `paths` |
+| `rigor_coverage` | `coverage --format=json` | `config` | `paths` (each) | — |
 
 `config` becomes `--config=PATH` by § Configuration. `rigor_explain` reads no configuration and takes no
 `config`. An operand property left out adds no operand, and the command then does what it does with
-none: `rigor_triage` and `rigor_sig_gen` read the configured `paths:`, and `rigor_explain` lists every
-rule.
+none: `rigor_check`, `rigor_triage`, `rigor_sig_gen` and `rigor_coverage` read the configured `paths:`,
+and `rigor_explain` lists every rule.
 
 Every write-side or side-effecting command is excluded ([ADR-33](../adr/33-mcp-server.md) WD5). A tool
 MUST NOT write to the project tree; a command's own writes to its configured cache directory are not
@@ -230,15 +230,15 @@ project writes.
   properties so a new one is a deliberate addition. An `enum` property (`rigor_sig_gen`'s `params`)
   MUST advertise only values the flag accepts; that is not gated yet
   ([#2553](https://github.com/rigortype/rigor/issues/2553)).
-- The server MUST answer `-32602` for a `rigor_type_of` call without all of `file`, `line` and `col`, a
-  `rigor_lens` call whose `files` is not a non-empty array of strings, and a `rigor_annotate` call
-  without `file`.
-- What a `rigor_check` or `rigor_coverage` call without `paths` does is unspecified: the schemas mark
-  it required, and the server today runs the command over the configured `paths:`
-  ([#3412](https://github.com/rigortype/rigor/issues/3412)). Clients MUST send it.
-- Clients MUST send arguments their schema allows, in an `arguments` object. How anything else is
-  answered is unspecified ([#3412](https://github.com/rigortype/rigor/issues/3412),
-  [#3413](https://github.com/rigortype/rigor/issues/3413)).
+- A tool's `inputSchema.required` MUST list exactly the arguments the server refuses a call without
+  ([#3412](https://github.com/rigortype/rigor/issues/3412)). The server MUST answer `-32602` for a
+  `rigor_type_of` call without all of `file`, `line` and `col`, a `rigor_lens` call whose `files` is not
+  a non-empty array of strings, and a `rigor_annotate` call without `file`. No other argument is
+  required: a call that leaves out `paths` runs its command over the configured `paths:`.
+- `arguments` that is present, not `null` and not an object MUST be answered `-32602`; absent or `null`,
+  it is read as `{}`.
+- Clients MUST send arguments their schema allows. How a value outside its schema is answered is
+  unspecified ([#3413](https://github.com/rigortype/rigor/issues/3413)).
 
 ### Configuration
 

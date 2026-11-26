@@ -29,6 +29,22 @@ RSpec.describe "the transient nil the generated attribute keeps (#3419)", type: 
 
   def loaded(source, name) = Module.new.tap { it.module_eval(source) }.const_get(name)
 
+  # An instance of the class, with the thread its `initialize` may start joined: that thread's `return` raises
+  # LocalJumpError inside it, which Ruby would otherwise report on stderr.
+  def constructed(source, name)
+    reporting = Thread.report_on_exception
+    Thread.report_on_exception = false
+    instance = loaded(source, name).new
+    begin
+      instance.instance_variable_get(:@t)&.join
+    rescue LocalJumpError
+      nil
+    end
+    instance
+  ensure
+    Thread.report_on_exception = reporting
+  end
+
   # The signature sig-gen proposes for `name`.
   def rbs_of(path, name)
     Rigor::SigGen::Generator.new(configuration: configuration, paths: [path]).run.find { it.method_name == name }.rbs
@@ -61,6 +77,25 @@ RSpec.describe "the transient nil the generated attribute keeps (#3419)", type: 
 
     expect(loaded(source, :H3c).new.y).to be_nil
     expect(rbs_of(path, :y)).to eq("def y: () -> (1 | nil)")
+  end
+
+  # A `return` in a block that runs as its own frame leaves that frame, so `initialize` still sets the ivar on every
+  # path it completes: no `nil` in the signature, and the always-truthy finding on a correct program's dead branch
+  # stays.
+  {
+    "a lambda" => ["L1", "@cb = lambda { |v| return v * 2 }"],
+    "a define_method through send" => ["D1", "self.class.send(:define_method, :foo) { return 3 }"],
+    "a thread" => ["T1", "@t = Thread.new { return }"]
+  }.each do |shape, (name, call)|
+    it "drops the `nil` past a `return` in #{shape}'s block" do
+      source = "class #{name}\n  def initialize\n    @y = nil\n    #{call}\n    @y = 1\n  end\n\n  " \
+               "def yy = @y\n  def t = @y ? 1 : 0\nend\n"
+      path = write("lib/#{name.downcase}.rb", source)
+
+      expect(constructed(source, name.to_sym).yy).to eq(1)
+      expect(rbs_of(path, :yy)).to eq("def yy: () -> 1")
+      expect(diagnostics).to eq([["flow.always-truthy-condition", 9]])
+    end
   end
 
   # An ivar every path of `initialize` sets keeps no `nil`, so a sibling's call on it is no call on `nil`.

@@ -1143,6 +1143,28 @@ RSpec.describe Rigor::Inference::ScopeIndexer::ClassIvarIndex do
 
     # A statement that is no conditional may return through a `&&`, a loop, a block or a `begin`; a lambda's
     # `return` leaves the lambda alone.
+    # A `return` in the block of a call that runs it as a frame of its own leaves that frame, not the method.
+    it "drops one past a `return` in a lambda, method, thread, fiber, ractor or handler block" do
+      calls = ["lambda { |v| return v }", "define_method(:m) { return 3 }", "self.class.define_method(:m) { return 3 }",
+               "self.class.send(:define_method, :m) { return 3 }",
+               "public_send(\"define_singleton_method\", :m) { return }",
+               "Thread.new { return }", "::Thread.start { return }", "Fiber.new { return }", "Ractor.new { return }",
+               "at_exit { return }", "Signal.trap(\"INT\") { return }"]
+      body = calls.each_with_index.map { |call, i| "def m#{i}; @x#{i} = nil; #{call}; @x#{i} = 1; end" }
+
+      expect(c(body.join("\n")).values.uniq).to eq(["1"])
+    end
+
+    # `proc` and `Proc.new` make a proc, whose `return` leaves the method that made it; so does any other block.
+    it "keeps one past a `return` in a proc, a `Proc.new`, another call's block, or a barrier name's argument" do
+      body = "def a; @a = nil; proc { return }; @a = 1; end\ndef b; @b = nil; Proc.new { return }; @b = 1; end\n" \
+             "def d; @d = nil; Other.new { return }; @d = 1; end\n" \
+             "def e; @e = nil; send(:each) { return }; @e = 1; end\n" \
+             "def f; @f = nil; lambda((return)) { 1 }; @f = 1; end"
+
+      expect(c(body)).to eq(:@a => "1?", :@b => "1?", :@d => "1?", :@e => "1?", :@f => "1?")
+    end
+
     it "keeps one any other statement may return in before overwriting, and drops one past a lambda's `return`" do
       body = "def a; @a = nil; c and return; @a = 1; end\ndef b; @b = nil; while c; return; end; @b = 1; end\n" \
              "def d; @d = nil; [1].each { return }; @d = 1; end\ndef e; @e = nil; begin; return; end; @e = 1; end\n" \
@@ -1656,14 +1678,15 @@ RSpec.describe Rigor::Inference::ScopeIndexer::ClassIvarIndex do
     expect(described_class::ATTR_WRITER_MACROS).to eq(%i[attr_writer attr_accessor])
   end
 
-  it "leaves none of its 99 functions and none of its 18 constants on ScopeIndexer" do
+  it "leaves none of its 100 functions and none of its 20 constants on ScopeIndexer" do
     functions = described_class.private_instance_methods(false)
     constants = %i[IVAR_WRITE_NODES IVAR_BARRIER_NODES EMPTY_GUARDED_IVARS EMPTY_IVAR_SET TAIL_VALUE_DEPTH_CAP
                    SAME_CLASS_CALL_DEPTH_CAP MethodEffectResolver OPERATOR_CHAIN_UNION_CAP AND_WRITE_CONTRIBUTIONS
                    OPERATOR_WRITE_CONTRIBUTIONS DEFINE_METHOD_WRITES CLASS_BODY_WRITES REFLECTIVE_OPAQUE_CLASSES
-                   CONSTANT_IVAR_VALUES SINGLETON_IVAR_WRITES BindingTargets ATTR_WRITER_MACROS OBJECT_CODE_BARRIERS]
+                   CONSTANT_IVAR_VALUES SINGLETON_IVAR_WRITES BindingTargets ATTR_WRITER_MACROS OBJECT_CODE_BARRIERS
+                   BLOCK_RETURN_BARRIERS SEND_CALLS]
 
-    expect(functions.size).to eq(99)
+    expect(functions.size).to eq(100)
     expect(functions.select { |name| indexer.respond_to?(name, true) }).to eq([])
     expect(constants.select { |name| indexer.const_defined?(name, false) }).to eq([])
     expect(constants.reject { |name| described_class.const_defined?(name, false) }).to eq([])

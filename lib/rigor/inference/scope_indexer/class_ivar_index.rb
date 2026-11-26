@@ -35,7 +35,7 @@ module Rigor
       # {.build_class_ivar_index} is the entry, which `ScopeIndexer.index` calls once. It walks every class and
       # module body and types each write's rvalue with no local bound; then it widens the entries for the mutations
       # the file observes, adds the read-before-write `nil`, and joins what other files and the ancestor chain
-      # contribute ({IvarContributions}) and what a signature declares ({DeclaredIvarTypes}). The other 98 functions
+      # contribute ({IvarContributions}) and what a signature declares ({DeclaredIvarTypes}). The other 99 functions
       # are private: the walk with its arms, the collectors of each kind of body, the recording steps, the held
       # `&&=` and `op=` writes, the censuses of the mutations and of the ivars a method hands back, and the
       # definite-assignment summary that finds a transient `@x = nil` ({.dead_transient_nil_writes}), with the
@@ -804,6 +804,15 @@ module Rigor
         OBJECT_CODE_BARRIERS = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::LambdaNode].freeze
         private_constant :OBJECT_CODE_BARRIERS
 
+        # #3419 — the calls whose literal block a `return` leaves without leaving the method: by name on any receiver
+        # (the `nil` key), and by name on the receiver constant the other keys name.
+        BLOCK_RETURN_BARRIERS = {
+          nil => %i[lambda define_method define_singleton_method at_exit trap],
+          "Thread" => %i[new start fork], "Fiber" => %i[new], "Ractor" => %i[new]
+        }.freeze
+        SEND_CALLS = %i[send public_send __send__].freeze
+        private_constant :BLOCK_RETURN_BARRIERS, :SEND_CALLS
+
         # ADR-38 — true when a loaded plugin declares `method_name` an additional initializer for `class_name` (or an
         # ancestor). Reads the plugin registry off the pre-pass scope's environment; the receiver-constraint match
         # reuses `Environment#class_ordering` (the same mechanism ADR-16 Tier A's `MacroBlockSelfType` uses). The whole
@@ -1536,13 +1545,33 @@ module Rigor
           end
         end
 
-        # True when `node` holds a `return` that leaves the method: outside a nested def, class, module or lambda.
+        # True when `node` holds a `return` that leaves the method: outside a nested def, class, module or lambda,
+        # and outside the block of a {BLOCK_RETURN_BARRIERS} call, whose `return` leaves that block's own frame.
         def holds_return?(node)
           return false unless node.is_a?(Prism::Node)
           return true if node.is_a?(Prism::ReturnNode)
           return false if OBJECT_CODE_BARRIERS.any? { |klass| node.is_a?(klass) }
 
-          node.compact_child_nodes.any? { |c| holds_return?(c) }
+          children = node.compact_child_nodes
+          children -= [node.block] if block_return_barrier?(node)
+          children.any? { |c| holds_return?(c) }
+        end
+
+        # True when `node` is a call whose literal block runs as a frame of its own (#3419): a lambda, a method body
+        # (`define_method`, called directly or through `send` / `public_send` / `__send__` with the literal name), a
+        # thread, fiber or ractor, or an exit or signal handler. A `proc { … }` or `Proc.new { … }` is no barrier.
+        def block_return_barrier?(node)
+          return false unless node.is_a?(Prism::CallNode) && node.block.is_a?(Prism::BlockNode)
+
+          name = node.name
+          if SEND_CALLS.include?(name)
+            first = node.arguments&.arguments&.first
+            name = first.unescaped.to_sym if first.is_a?(Prism::SymbolNode) || first.is_a?(Prism::StringNode)
+          end
+          receiver = node.receiver
+          constant = receiver.is_a?(Prism::ConstantReadNode) || receiver.is_a?(Prism::ConstantPathNode)
+          owner = receiver.name.to_s if constant
+          BLOCK_RETURN_BARRIERS.fetch(nil).include?(name) || BLOCK_RETURN_BARRIERS.fetch(owner, []).include?(node.name)
         end
 
         # True when a branch body (a StatementsNode / single node) definitely assigns `target` non-nil on every path
@@ -1983,6 +2012,7 @@ module Rigor
                              :suffix_definitely_assigns_with_resolver?, :dead_transient_nil_writes,
                              :top_level_statements, :nil_literal_value?, :suffix_definitely_assigns?,
                              :statement_assignment_outcome, :simple_statement_outcome, :holds_return?,
+                             :block_return_barrier?,
                              :branch_assignment_outcome, :join_arm_outcomes,
                              :conditional_assignment_outcome, :case_assignment_outcome, :always_raises?,
                              :unconditional_call_assigns?, :record_ivar_write, :record_compound_ivar_write,

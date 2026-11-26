@@ -67,6 +67,8 @@ require_relative "scope_indexer/mutated_carrier_widening"
 require_relative "scope_indexer/factory_call_resolver"
 require_relative "scope_indexer/singleton_class_sources"
 require_relative "scope_indexer/constant_tables"
+require_relative "scope_indexer/alias_def_nodes"
+require_relative "scope_indexer/declaration_artifacts"
 
 module Rigor
   module Inference
@@ -108,10 +110,6 @@ module Rigor
 
       module_function
 
-      # The no-op re-anchoring table (#722 residue 2): shared so the overwhelmingly common
-      # nothing-to-re-anchor walk allocates none.
-      EMPTY_RENAMES = {}.freeze
-
       # No path whose contributions are all `possible` (issue #2021), the cross-file walks' default.
       EMPTY_PATH_SET = Set.new.freeze
       # The {IvarWriterCensus} entry kinds the project pre-pass tags with the file that records them.
@@ -152,7 +150,7 @@ module Rigor
         # reading, but it names files rather than settled declarations, and the fold has already applied its
         # own re-anchoring to this table.
         declared_types, discovered_classes =
-          build_declaration_artifacts(root, default_scope.discovered_classes.keys.to_set)
+          DeclarationArtifacts.build_declaration_artifacts(root, default_scope.discovered_classes.keys.to_set)
         # Merge the indexer's findings on top of whatever the base scope already carries so callers that seed cross-file
         # class knowledge (e.g. the ADR-14 `SigGen::ObservationCollector` pre-walking project `lib/` before scanning
         # `spec/`) keep their seeds alongside the per-file declarations the indexer itself discovers. Indexer-found
@@ -2516,7 +2514,7 @@ module Rigor
         tables.census = census
         def_nodes = {}
         walk_methods_and_def_nodes(root, [], false, tables, def_nodes, source_path)
-        apply_alias_def_nodes(root, def_nodes, tables)
+        AliasDefNodes.apply_alias_def_nodes(root, def_nodes, tables)
         [tables.existence.transform_values(&:freeze).freeze, def_nodes.transform_values(&:freeze).freeze,
          tables.envelopes.transform_values(&:freeze).freeze, freeze_refinements(tables.refinements),
          tables.siblings]
@@ -2574,7 +2572,7 @@ module Rigor
 
         # Issue #2006 — records, in walk order, that a definer other than an alias wrote the instance method `name`
         # of `class_name` at `node`: `def_node` for a `def`, nil for a `define_method(:x)` or an `attr_*` reader or
-        # writer, and whether the write is {#certain}. {ScopeIndexer#apply_alias_def_nodes} reads the history to copy
+        # writer, and whether the write is {#certain}. {AliasDefNodes.apply_alias_def_nodes} reads the history to copy
         # what an alias's old name held at the alias, and to tell an alias a later definer replaced.
         def wrote_definer(class_name, name, node, def_node)
           entry = [node.location.start_offset, def_node, certain ? true : false].freeze
@@ -3634,7 +3632,7 @@ module Rigor
 
       # The `alias_method :new, :old` CallNode twin of {#record_alias_method} (#533): the NEW name joins
       # the discovered-methods table so calls to it stop reading undefined, and
-      # {#apply_alias_def_nodes}'s map walk gives it the ORIGINAL def node for return inference.
+      # {AliasDefNodes.apply_alias_def_nodes}'s map walk gives it the ORIGINAL def node for return inference.
       def record_alias_method_call(call_node, qualified_prefix, in_singleton_class, accumulator)
         return if qualified_prefix.empty?
 
@@ -4682,8 +4680,9 @@ module Rigor
       end
 
       # Issue #2006 — a `define_method(:x)` or `attr_*` call is a definer the alias pass reads in source order
-      # ({#apply_alias_def_nodes}). An `alias_method` call, whose new name {#call_superseded_names} also lists, is
-      # itself an alias: the pass records its copy, so the history must not hold it as a definer with no `def`.
+      # ({AliasDefNodes.apply_alias_def_nodes}). An `alias_method` call, whose new name {#call_superseded_names} also
+      # lists, is itself an alias: the pass records its copy, so the history must not hold it as a definer with no
+      # `def`.
       def note_call_definers(call_node, names, qualified_prefix, tables)
         return if names.empty? || qualified_prefix.empty? || call_node.name == :alias_method
 
@@ -8137,274 +8136,6 @@ module Rigor
         qualified_prefix.length.downto(1).map { |i| (qualified_prefix[0, i] + [written]).join("::") } << written
       end
 
-      # Post-pass over the `def_nodes` accumulator: for every `alias` declaration inside a class body, if the original
-      # method name maps to a `Prism::DefNode`, register the new name pointing to the same node so inter-procedural
-      # return-type inference works for the aliased name.
-      #
-      # ADR-119 WD3 — the alias is the slot's writer: the new name's slot is contested when the alias is possible
-      # or the slot it copies is contested, and cleared otherwise.
-      #
-      # Issue #2006 — in source order. An alias copies what its old name held AT the alias, read from the walk's
-      # definer history ({MethodTables#wrote_definer}) and the copies earlier aliases made: a `def` of the old name
-      # written after the alias (`alias old_x x; def x = 1`) is not what `old_x` runs, and nothing before the alias
-      # copies nothing. The new name's slot then follows its last writer: a later `def` keeps the slot the walk
-      # gave it, and a later `define_method` / `attr_*` leaves the copy contested, as {#supersede_def_nodes} leaves
-      # a replaced `def`.
-      def apply_alias_def_nodes(root, accumulator, tables)
-        alias_map = collect_class_alias_map(root, [], AliasMap.new.track(tables.certainty))
-        history = (tables.definer_history || {}).transform_values(&:dup)
-        alias_map.copy_into(history).each { |key| settle_alias_slot(accumulator, tables, key, history[key]) }
-      end
-
-      # Writes the new name's slot from its last writer `writes.last` ({#apply_alias_def_nodes}): an alias copy or a
-      # later `def` writes its `def` with its certainty (for the `def`, what the walk wrote already). A last writer
-      # with no `def` this file holds — a later `define_method` / `attr_*`, or an alias that copies nothing this file
-      # defines (an inherited or core method, an attr reader, a name it cannot read) — contests the slot, which keeps
-      # what it holds or else the latest copy, so no sibling file's `def` fills it.
-      def settle_alias_slot(accumulator, tables, (class_name, new_name), writes)
-        last = writes.last
-        slot = (accumulator[class_name] ||= {})
-        if last[1]
-          slot[new_name] = last[1]
-          follow_slot_writer(tables, :contested_def_nodes, [class_name, new_name], last[2])
-        else
-          copy = writes.rfind { |write| write[1] }
-          slot[new_name] ||= copy[1] if copy
-          follow_slot_writer(tables, :contested_def_nodes, [class_name, new_name], false)
-        end
-      end
-
-      # The `{class => {new name => old name}}` map {#collect_class_alias_map} fills, which also lists every alias it
-      # met as an event `[class, new name, old name, start offset, possible?]` ({Certainty}).
-      class AliasMap < Hash
-        attr_reader :events
-
-        def track(certainty)
-          @certainty = certainty || Certainty::EMPTY
-          @events = []
-          self
-        end
-
-        # Records that `node` wrote the `[class_name, new_name]` entry, aliasing `old_name`.
-        def wrote(class_name, new_name, old_name, node)
-          return if @certainty.nil?
-
-          @events << [class_name, new_name, old_name, node.location.start_offset, Certainty.possible?(@certainty, node)]
-        end
-
-        # Issue #2006 — adds every alias to `history` (`{[class, name] => [[offset, def node or nil, certain,
-        # (:alias)], ...]}`, ascending), in source order. An alias whose old name held a `def` at the alias copies it,
-        # certain when that write and the alias are. Any other alias — an old name with no `def` of this file before
-        # it (inherited, core, an attr reader, a sibling file's), or one it cannot read — adds a write with no `def`,
-        # which leaves the slot contested ({ScopeIndexer#settle_alias_slot}). An alias whose new name it cannot read
-        # adds one to every name of the class written before it. Returns the `[class, name]` keys it wrote.
-        def copy_into(history)
-          @events.sort_by { |event| event[3] }.flat_map do |class_name, new_name, old_name, at, possible|
-            source = old_name && history[[class_name, old_name]]&.rfind { |write| write.first < at }
-            write = if source&.[](1) then [at, source[1], source[2] && !possible, :alias].freeze
-                    else [at, nil, false, :alias].freeze
-                    end
-            keys = new_name ? [[class_name, new_name]] : names_before(history, class_name, at)
-            keys.each { |key| (history[key] ||= []).push(write).sort_by!(&:first) }
-          end.uniq
-        end
-
-        private
-
-        def names_before(history, class_name, at)
-          history.filter_map { |key, writes| key if key.first == class_name && writes.first.first < at }
-        end
-      end
-
-      # Builds a map `{class_name => {new_name_sym => old_name_sym}}` by walking the tree for `AliasMethodNode` nodes
-      # inside class bodies. `leaf_owner` is the meta-new override: inside `K = Class.new { … }` the
-      # block's aliases bind on the class the write names — it overrides `qualified_prefix`, which
-      # keeps naming the enclosing lexical cref for declarations.
-      def collect_class_alias_map(node, qualified_prefix, accumulator, leaf_owner = nil,
-                                  singleton_cref: false, defs_singleton: false)
-        return accumulator unless node.is_a?(Prism::Node)
-
-        case node
-        when Prism::ClassNode, Prism::ModuleNode
-          return collect_alias_map_declaration(node, qualified_prefix, accumulator, leaf_owner,
-                                               singleton_cref)
-        when Prism::SingletonClassNode
-          return collect_alias_map_singleton(node, qualified_prefix, accumulator, leaf_owner,
-                                             singleton_cref)
-        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantOrWriteNode,
-             Prism::ConstantPathOrWriteNode
-          return accumulator if collect_alias_map_meta_new?(node, qualified_prefix, accumulator,
-                                                            leaf_owner, singleton_cref)
-        when Prism::AliasMethodNode, Prism::CallNode
-          return accumulator if record_alias_leaf?(node, qualified_prefix, accumulator,
-                                                   leaf_owner, singleton_cref,
-                                                   defs_singleton: defs_singleton)
-          return accumulator if collect_alias_map_block_call?(node, qualified_prefix, accumulator,
-                                                              leaf_owner, singleton_cref)
-        end
-
-        node.rigor_each_child do |child|
-          collect_class_alias_map(child, qualified_prefix, accumulator, leaf_owner,
-                                  singleton_cref: singleton_cref,
-                                  defs_singleton: defs_singleton)
-        end
-        accumulator
-      end
-
-      # The alias-leaf arm of {#collect_class_alias_map}: inside a `class <<` body the alias binds
-      # on the singleton — the map files nothing; a re-anchored declaration below it clears the
-      # flag again, and a meta-new block's `leaf_owner` re-anchors it onto the named class.
-      # Returns true when the leaf was consumed (AliasMethodNode always; a recognised
-      # `alias_method` call), false when the node is an ordinary call to keep walking.
-      def record_alias_leaf?(node, qualified_prefix, accumulator, leaf_owner, singleton_cref,
-                             defs_singleton: false)
-        rec_prefix = leaf_owner || qualified_prefix
-        if node.is_a?(Prism::AliasMethodNode)
-          # `defs_singleton` is the instance_eval split: the `alias` keyword binds on the
-          # receiver's singleton, while `alias_method` — a call on the receiver-as-module —
-          # stays instance-side and still records.
-          unless defs_singleton || (singleton_cref && leaf_owner.nil?)
-            record_alias_map_entry(node, rec_prefix, accumulator)
-          end
-          return true
-        end
-        return false unless node.is_a?(Prism::CallNode)
-
-        # `alias_method :new, :old` — the CallNode twin of the `alias` keyword (#533; liquid's i18n
-        # `t` alias was the corpus case). Unlike AliasMethodNode a call's children can carry further
-        # class bodies (`Class.new do … end`), so the walk continues below it either way.
-        names = Source::AliasNames.alias_method_call_names(node)
-        if (names || unread_alias_method?(node)) && !rec_prefix.empty? && !(singleton_cref && leaf_owner.nil?)
-          record_alias_call_entry(accumulator, rec_prefix.join("::"), names, node)
-        end
-        false
-      end
-
-      # Issue #2006 — an `alias_method` call on no receiver or `self` whose names {Source::AliasNames} cannot read
-      # (`alias_method n, :to_s`, `self.alias_method :x, :y`, a splat): it still replaces a method, which
-      # {AliasMap#copy_into} contests.
-      def unread_alias_method?(node)
-        node.name == :alias_method && (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
-      end
-
-      # The rebinding-block call arm of {#collect_class_alias_map}: an anonymous meta-new call
-      # (`Class.new { … }` no write names) files its block's aliases nowhere, and an eval-family
-      # call binds them on the receiver — a nameable receiver re-anchors the owner while a
-      # receiver that names nothing, or an unnameable self below `class <<`, walks ownerless.
-      def collect_alias_map_block_call?(node, qualified_prefix, accumulator, leaf_owner,
-                                        singleton_cref)
-        return false unless node.is_a?(Prism::CallNode) && node.block.is_a?(Prism::BlockNode)
-
-        if DeclarationWalk::Rules.meta_new_constant_rvalue?(node)
-          block_owner = []
-        elsif DeclarationWalk::Rules.receiver_eval_call?(node)
-          self_prefix = leaf_owner || qualified_prefix
-          unnameable = DeclarationWalk::Rules.unnameable_eval_self?(false, leaf_owner, qualified_prefix,
-                                                                    singleton_cref)
-          block_owner = DeclarationWalk::Rules.eval_receiver_prefix(node, self_prefix, qualified_prefix,
-                                                                    unnameable_self: unnameable) || []
-        else
-          return false
-        end
-
-        [node.receiver, *node.arguments&.arguments.to_a].compact.each do |part|
-          collect_class_alias_map(part, qualified_prefix, accumulator, leaf_owner,
-                                  singleton_cref: singleton_cref)
-        end
-        if (body = node.block.body)
-          collect_class_alias_map(body, qualified_prefix, accumulator, block_owner,
-                                  singleton_cref: singleton_cref,
-                                  defs_singleton: INSTANCE_EVAL_CALLS.include?(node.name))
-        end
-        true
-      end
-
-      # The meta-new arm of {#collect_class_alias_map}: the write's receiver and arguments keep
-      # the enclosing context; the block's aliases bind on the class the write names, or file
-      # nothing when the write is unnameable below an unnameable cref.
-      def collect_alias_map_meta_new?(node, qualified_prefix, accumulator, leaf_owner,
-                                      singleton_cref)
-        call = DeclarationWalk::Rules.meta_new_block_call(node)
-        return false unless call
-
-        child_prefix = DeclarationWalk::Rules.meta_new_child_prefix(node, qualified_prefix, leaf_owner)
-        meta_ownerless = singleton_cref && !DeclarationWalk::Rules.meta_new_path_target_nameable?(node, leaf_owner)
-        [call.receiver, *call.arguments&.arguments.to_a].compact.each do |part|
-          collect_class_alias_map(part, qualified_prefix, accumulator, leaf_owner,
-                                  singleton_cref: singleton_cref)
-        end
-        if (body = DeclarationWalk::Rules.meta_new_block_body(node))
-          collect_class_alias_map(body, qualified_prefix, accumulator,
-                                  (meta_ownerless ? nil : child_prefix) || [],
-                                  singleton_cref: singleton_cref)
-        end
-        true
-      end
-
-      # The class/module arm of {#collect_class_alias_map}: under an unnameable cref a
-      # bare/`self::` header opens `#<singleton>::Name` — the map files nothing for it;
-      # a rooted or explicit-base header re-anchors at a nameable prefix.
-      def collect_alias_map_declaration(node, qualified_prefix, accumulator, leaf_owner,
-                                        singleton_cref)
-        self_decl = DeclarationWalk::Rules.self_anchored_decl_prefix(node.constant_path, leaf_owner)
-        child_prefix = self_decl ||
-                       Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
-        return accumulator unless child_prefix
-
-        child_cref = DeclarationWalk::Rules.unnameable_decl?(node, self_decl, singleton_cref)
-        if node.body
-          collect_class_alias_map(node.body, child_cref ? [] : child_prefix, accumulator,
-                                  singleton_cref: child_cref)
-        end
-        accumulator
-      end
-
-      # The `class <<` arm of {#collect_class_alias_map}: the expression evaluates in the
-      # enclosing context (`class << (class D; self; end)` → `C::D`), while the body is a
-      # singleton context the map files nothing for directly — a nameable declaration
-      # inside still re-anchors through the flag.
-      def collect_alias_map_singleton(node, qualified_prefix, accumulator, leaf_owner,
-                                      singleton_cref)
-        collect_class_alias_map(node.expression, qualified_prefix, accumulator, leaf_owner,
-                                singleton_cref: singleton_cref)
-        if node.body
-          # `self` below `class <<` is the singleton class — `self::`-anchored receivers
-          # decline; a named eval receiver still re-anchors to a real class.
-          collect_class_alias_map(node.body, qualified_prefix, accumulator, [],
-                                  singleton_cref: true)
-        end
-        accumulator
-      end
-
-      def record_alias_call_entry(accumulator, class_name, names, node)
-        if names.nil?
-          # Issue #2006 — an unread `alias_method` maps nothing, but still replaces a method ({AliasMap#copy_into}).
-          new_name = Source::AliasNames.literal_name(node.arguments&.arguments&.first)
-          accumulator.wrote(class_name, new_name, nil, node) if accumulator.is_a?(AliasMap)
-          return
-        end
-
-        (accumulator[class_name] ||= {})[names.first] = names.last
-        accumulator.wrote(class_name, names.first, names.last, node) if accumulator.is_a?(AliasMap)
-      end
-
-      def record_alias_map_entry(alias_node, qualified_prefix, accumulator)
-        return if qualified_prefix.empty?
-
-        names = Source::AliasNames.keyword_names(alias_node)
-        class_name = qualified_prefix.join("::")
-        if names.nil?
-          # Issue #2006 — an `alias` whose names are not plain symbols still replaces a method ({AliasMap#copy_into}).
-          new_name = Source::AliasNames.symbol_name(alias_node.new_name)
-          accumulator.wrote(class_name, new_name, nil, alias_node) if accumulator.is_a?(AliasMap)
-          return
-        end
-
-        new_name, old_name = names
-        (accumulator[class_name] ||= {})[new_name] = old_name
-        accumulator.wrote(class_name, new_name, old_name, alias_node) if accumulator.is_a?(AliasMap)
-      end
-
       def record_define_method(call_node, qualified_prefix, in_singleton_class, accumulator)
         return if call_node.arguments.nil? || call_node.arguments.arguments.empty?
 
@@ -8668,12 +8399,12 @@ module Rigor
       # reads for the bound logical path to the buffer's physical path so editor-mode pre-passes see the in-flight
       # bytes.
       #
-      # Modules are registered on the same terms as classes, matching `record_declarations`' per-file behaviour (ADR-57
-      # WD3). An earlier revision excluded them, fearing an undiscovered `M.x` would fall through to `Kernel#x`; the
-      # exclusion was retired once measurement showed Kernel's private instance methods (`select`, `puts`, `load`, …)
-      # resolve to nothing on a `Singleton[M]` receiver, and that a project-side `def self.x` body wins over the lenient
-      # `Singleton[Object]` fallback anyway. The residual leak is `Class`-only (`M.new`, `M.superclass`), which mistypes
-      # only code that raises `NoMethodError` at runtime.
+      # Modules are registered on the same terms as classes, matching `DeclarationArtifacts.record_declarations`'
+      # per-file behaviour (ADR-57 WD3). An earlier revision excluded them, fearing an undiscovered `M.x` would fall
+      # through to `Kernel#x`; the exclusion was retired once measurement showed Kernel's private instance methods
+      # (`select`, `puts`, `load`, …) resolve to nothing on a `Singleton[M]` receiver, and that a project-side
+      # `def self.x` body wins over the lenient `Singleton[Object]` fallback anyway. The residual leak is `Class`-only
+      # (`M.new`, `M.superclass`), which mistypes only code that raises `NoMethodError` at runtime.
       #
       def discovered_classes_for_paths(paths, buffer: nil)
         accumulator = {}
@@ -9975,35 +9706,6 @@ module Rigor
         end
       end
 
-      # Walks the program once for `Prism::ModuleNode` and `Prism::ClassNode`, recording the `Singleton[<qualified>]`
-      # type for the outermost `constant_path` node of each declaration. Inner segments of a `class Foo::Bar::Baz` path
-      # remain real references (resolved through the ordinary lexical walk), so we annotate ONLY the topmost path node.
-      # Nested declarations contribute their fully qualified path: `class A::B; class C; ...` produces `A::B` for the
-      # outer and `A::B::C` for the inner.
-      # @param declared_names — the project's RAW declared-class names, the oracle
-      #   {#compact_header_renames} adjudicates this file's compact headers against.
-      def build_declaration_artifacts(root, declared_names = nil)
-        identity_table = {}.compare_by_identity
-        discovered = {}
-        record_declarations(root, [], identity_table, discovered,
-                            file_compact_header_renames(root, declared_names))
-        [identity_table.freeze, synthesize_namespace_prefixes(discovered).freeze]
-      end
-
-      # Issue #722 residue 2 — this file's share of the fold's re-anchoring, adjudicated against the project
-      # names the fold has already settled. Empty (so the per-node answer stands) whenever the caller has no
-      # project table to consult: a `Scope.empty` probe sees one file and cannot know what else declares
-      # `Wrap::Outer`, and guessing there is the false positive the whole rule is bounded to avoid.
-      def file_compact_header_renames(root, declared_names)
-        return EMPTY_RENAMES if declared_names.nil? || declared_names.empty?
-
-        compacts = {}
-        ClassDeclarations.collect_class_decls(root, [], {}, compacts)
-        return EMPTY_RENAMES if compacts.empty?
-
-        compact_header_renames(compacts, declared_names)
-      end
-
       # Issue #528 — every proper prefix of a discovered COMPACT class name is a namespace module that
       # provably exists at runtime, even when no `module X` declaration is anywhere in the source
       # (Zeitwerk derives it from the directory: mastodon writes `class Api::V1::AccountsController`
@@ -10027,148 +9729,6 @@ module Rigor
         return discovered if additions.empty?
 
         discovered.merge(additions)
-      end
-
-      # `self_prefix` names a REBOUND self for `self::`-anchored declarations — a meta-new
-      # block's named class, or `[]` for a self nothing names. nil leaves `self` lexical.
-      def record_declarations(node, qualified_prefix, identity_table, discovered, renames = EMPTY_RENAMES,
-                              self_prefix = nil, singleton_cref: false)
-        return unless node.is_a?(Prism::Node)
-
-        case node
-        when Prism::ModuleNode, Prism::ClassNode
-          return if record_class_or_module?(node, qualified_prefix, identity_table, discovered, renames,
-                                            self_prefix, singleton_cref: singleton_cref)
-        when Prism::SingletonClassNode
-          # The expression evaluates in the enclosing cref; the body's cref is unnameable —
-          # and `self` below it is the singleton class, which `self::` headers decline on.
-          record_declarations(node.expression, qualified_prefix, identity_table, discovered, renames,
-                              self_prefix, singleton_cref: singleton_cref)
-          if node.body
-            record_declarations(node.body, qualified_prefix, identity_table, discovered, renames,
-                                EMPTY_PREFIX, singleton_cref: true)
-          end
-          return
-        when Prism::ConstantWriteNode, Prism::ConstantPathWriteNode, Prism::ConstantOrWriteNode,
-             Prism::ConstantPathOrWriteNode
-          return if record_meta_new_constant?(node, qualified_prefix, identity_table, discovered,
-                                              self_prefix, singleton_cref: singleton_cref)
-        when Prism::CallNode
-          return if record_eval_declarations?(node, qualified_prefix, identity_table, discovered,
-                                              renames, self_prefix, singleton_cref)
-        end
-
-        node.rigor_each_child do |child|
-          record_declarations(child, qualified_prefix, identity_table, discovered, renames,
-                              self_prefix, singleton_cref: singleton_cref)
-        end
-      end
-
-      def record_class_or_module?(node, qualified_prefix, identity_table, discovered, renames = EMPTY_RENAMES,
-                                  self_prefix = nil, singleton_cref: false)
-        self_decl = DeclarationWalk::Rules.self_anchored_decl_prefix(node.constant_path, self_prefix)
-        child_prefix = self_decl ||
-                       Source::ConstantPath.declaration_prefix(qualified_prefix, node.constant_path)
-        return false unless child_prefix
-
-        if self_decl&.empty? ||
-           (singleton_cref && !DeclarationWalk::Rules.decl_nameable_under_cref?(node) && !self_decl&.any?)
-          # `class D` below `class <<` opens `#<singleton>::D` — a real class nothing can
-          # name — so nothing is registered; the body still walks so nameable headers
-          # below it re-anchor at a real cref. The same holds for `class self::D` where
-          # `self` is opaque (`REGISTRY.first.class_eval { … }`): `self_decl` is `[]`.
-          if node.body
-            record_declarations(node.body, [], identity_table, discovered, renames,
-                                nil, singleton_cref: true)
-          end
-          return true
-        end
-
-        # Issue #722 residue 2 — the per-file twin of the fold's re-anchoring. The file's own declaration
-        # table merges OVER the project seed, so without this a compact header would re-publish the key the
-        # fold already moved and a reference written INSIDE the enclosing namespace would resolve to it
-        # again. The adjudication itself is the project's: `renames` arrives already settled.
-        full = rename_compact_name(renames, child_prefix.join("::"))
-        child_prefix = full.split("::")
-        singleton = Type::Combinator.singleton_of(full)
-        identity_table[node.constant_path] = singleton
-        discovered[full] = singleton
-        record_declarations(node.body, child_prefix, identity_table, discovered, renames) if node.body
-        true
-      end
-
-      # Recognises class-creating meta calls at constant-write rvalue position and registers `Const` (qualified by the
-      # surrounding class/module path) as a discovered class. `Const.new(...)` then resolves to a fresh `Nominal[Const]`
-      # via `meta_new`, instead of the un-narrowed `Dynamic[top]` returned by the default `Class#new` envelope.
-      #
-      # The recognised meta forms are {DeclarationWalk::Rules.meta_new_constant_rvalue?}'s four —
-      # `Data.define`, `Struct.new`, `Class.new`, `Module.new` — plus the
-      # `Class.new(<factory>)` wrapper {FactoryCallResolver.resolve_meta_factory_call} unwraps:
-      #
-      # - `Const = Data.define(*Symbol) [do ... end]`
-      # - `Const = Struct.new(*Symbol [, keyword_init: ...]) [do ... end]`
-      # - `Const = Class.new [(super)] [do ... end]` / `Const = Module.new [do ... end]`
-      #
-      # Issue [#703](https://github.com/rigortype/rigor/issues/703) — and their `Holder::Const = …` spellings, which
-      # name a class just as unconditionally. Until this arm took them, `Holder::Thing.new(1)` fell to the default
-      # `Class#new` envelope on `singleton(Struct)` and handed every reader a bare `Struct`.
-      #
-      # The block body, if present, is recursed into so any nested class/module declarations in the override block (rare
-      # but legal) still feed the discovered table.
-      def record_meta_new_constant?(node, qualified_prefix, identity_table, discovered,
-                                    self_prefix = nil, singleton_cref: false)
-        rvalue = DeclarationWalk::Rules.meta_new_rvalue(node)
-        factory_call = rvalue.is_a?(Prism::CallNode) &&
-                       (FactoryCallResolver.resolve_meta_factory_call(rvalue) ||
-                        DeclarationWalk::Rules.meta_new_constant_rvalue?(rvalue))
-        return false unless factory_call
-
-        child_prefix = DeclarationWalk::Rules.meta_new_child_prefix(node, qualified_prefix, self_prefix)
-        return false if child_prefix.nil?
-        # A bare write below `class <<` lands on the singleton's own constant table —
-        # `#<singleton>::K` names nothing — so the discovered-class entry is declined.
-        # A path write (`::K`, `C::K`, `Foo::F`) resolves its base lexically and stays nameable.
-        return false if singleton_cref && !DeclarationWalk::Rules.meta_new_path_target_nameable?(node, self_prefix)
-
-        full = child_prefix.join("::")
-        discovered[full] = Type::Combinator.singleton_of(full) unless full.empty?
-        # The rvalue's receiver and arguments evaluate BEFORE the write lands — under the
-        # enclosing self — while the block runs with `self` rebound to the class the write
-        # names (`K = Class.new(class self::Y; self; end)` opens `C::Y`, not `C::K::Y`).
-        [rvalue.receiver, *rvalue.arguments&.arguments.to_a].compact.each do |part|
-          record_declarations(part, qualified_prefix, identity_table, discovered,
-                              EMPTY_RENAMES, self_prefix, singleton_cref: singleton_cref)
-        end
-        if (body = rvalue.block.is_a?(Prism::BlockNode) && rvalue.block.body)
-          record_declarations(body, qualified_prefix, identity_table, discovered,
-                              EMPTY_RENAMES, child_prefix, singleton_cref: singleton_cref)
-        end
-        true
-      end
-
-      # The eval-family arm of {#record_declarations}: the receiver and arguments keep the
-      # enclosing self; the block's `self` is the receiver for `self::` headers —
-      # `Foo.class_eval { class self::Inner }` opens `Foo::Inner`, never `M::Inner` — while
-      # `Module.nesting`, and so every bare header, stays lexical. `instance_eval` belongs
-      # too: it rebinds `self` for constant anchoring even though its `def`s bind on the
-      # receiver's singleton.
-      def record_eval_declarations?(node, qualified_prefix, identity_table, discovered, renames,
-                                    self_prefix, singleton_cref)
-        return false unless node.block.is_a?(Prism::BlockNode) &&
-                            RECEIVER_EVAL_CALLS.include?(node.name)
-
-        [node.receiver, *node.arguments&.arguments.to_a].compact.each do |part|
-          record_declarations(part, qualified_prefix, identity_table, discovered, renames,
-                              self_prefix, singleton_cref: singleton_cref)
-        end
-        unnameable = DeclarationWalk::Rules.unnameable_eval_self?(false, self_prefix, qualified_prefix, singleton_cref)
-        eval_self = DeclarationWalk::Rules.eval_receiver_prefix(node, self_prefix || qualified_prefix, qualified_prefix,
-                                                                unnameable_self: unnameable) || []
-        if (body = node.block.body)
-          record_declarations(body, qualified_prefix, identity_table, discovered, renames,
-                              eval_self, singleton_cref: singleton_cref)
-        end
-        true
       end
 
       # The owner a meta-new write gives the block for the MIXIN tables — every definite

@@ -87,7 +87,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer::FactoryCallResolver do
 
   # The four sites that call it, each through the table it feeds: the reader a member gets in the methods table
   # (`ScopeIndexer.record_meta_members`), the class a wrapped factory declares
-  # (`ScopeIndexer.record_meta_new_constant?`), and the two member layouts (`SharedWalkTables`).
+  # (`DeclarationArtifacts.record_meta_new_constant?`), and the two member layouts (`SharedWalkTables`).
   it "is what the methods table, the declaration artifacts and the two layout tables ask" do
     root = Prism.parse("K = Class.new(Struct.new(:a))\nD = Class.new(Data.define(:b))\n").value
     scope = indexer.index(root, default_scope: Rigor::Scope.empty)[root]

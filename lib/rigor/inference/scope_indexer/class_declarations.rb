@@ -21,10 +21,10 @@ module Rigor
       module ClassDeclarations
         module_function
 
-        # Cross-file counterpart of `record_declarations` — registers every `class` / `module` declaration under its
-        # qualified name and descends into the body (so `module Foo; class Bar` registers both `Foo` and `Foo::Bar`).
-        # `self_prefix` names a REBOUND self for `self::`-anchored declarations — see
-        # {ScopeIndexer#record_declarations}.
+        # Cross-file counterpart of `DeclarationArtifacts.record_declarations` — registers every `class` / `module`
+        # declaration under its qualified name and descends into the body (so `module Foo; class Bar` registers both
+        # `Foo` and `Foo::Bar`). `self_prefix` names a REBOUND self for `self::`-anchored declarations — see
+        # {DeclarationArtifacts.record_declarations}.
         def collect_class_decls(node, qualified_prefix, accumulator, compacts = nil,
                                 self_prefix = nil, singleton_cref: false)
           return unless node.is_a?(Prism::Node)
@@ -87,7 +87,7 @@ module Rigor
         end
 
         # The eval-family arm of {#collect_class_decls}: same dual context as
-        # {ScopeIndexer#record_eval_declarations?} — `self::` headers anchor on the receiver, bare
+        # {DeclarationArtifacts.record_eval_declarations?} — `self::` headers anchor on the receiver, bare
         # headers stay lexical.
         def collect_eval_class_decls?(node, qualified_prefix, accumulator, compacts, self_prefix,
                                       singleton_cref)

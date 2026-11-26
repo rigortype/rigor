@@ -438,6 +438,17 @@ module DeclarationWriterScan
   #   `pre_eval_constants.rb` too), and `rebound_block_self` from `scope_indexer.rb` and `shared_walk_tables.rb`. Its
   #   calls of `ScopeIndexer.census_body_scope` and `census_nesting` make those two entry points of
   #   `scope_indexer.rb`, where neither writes a table.
+  # - `alias_def_nodes.rb` and `declaration_artifacts.rb`: the alias def-node pass, and the declaration artifacts of
+  #   one file, moved out of `scope_indexer.rb` (ADR-116 WD9, #3400). The writers of the alias map and of the
+  #   def-node slots stay rule (v)'s, and so do those of the identity table and the discovered-class table. Each is
+  #   entered through its one function, spelled on the module: `AliasDefNodes.apply_alias_def_nodes` from
+  #   `scope_indexer.rb`, and `DeclarationArtifacts.build_declaration_artifacts` from `scope_indexer.rb` and
+  #   `pre_eval_constants.rb`. The pass hands the methods table's `tables` to `ScopeIndexer.follow_slot_writer`,
+  #   which writes it, so `settle_alias_slot` and `apply_alias_def_nodes` write `tables` as well as the accumulator:
+  #   rule (v) follows a write into another row (#3398). That call makes `follow_slot_writer` an entry point of
+  #   `scope_indexer.rb`, where the row's roots reached it already. The artifacts' calls of
+  #   `ScopeIndexer.compact_header_renames`, `rename_compact_name` and `synthesize_namespace_prefixes` make those
+  #   three entry points of `scope_indexer.rb`, where none writes a table it is handed.
   SOURCES = {
     DeclarationProducerScan::RULE_V_FILE => {
       module: "Rigor::Inference::ScopeIndexer",
@@ -471,6 +482,10 @@ module DeclarationWriterScan
       { module: "Rigor::Inference::ScopeIndexer::SingletonClassSources", roots: [] },
     "lib/rigor/inference/scope_indexer/constant_tables.rb" =>
       { module: "Rigor::Inference::ScopeIndexer::ConstantTables", roots: [] },
+    "lib/rigor/inference/scope_indexer/alias_def_nodes.rb" =>
+      { module: "Rigor::Inference::ScopeIndexer::AliasDefNodes", roots: [] },
+    "lib/rigor/inference/scope_indexer/declaration_artifacts.rb" =>
+      { module: "Rigor::Inference::ScopeIndexer::DeclarationArtifacts", roots: [] },
     "lib/rigor/inference/declaration_walk/rules.rb" => { module: "Rigor::Inference::DeclarationWalk::Rules", roots: [] }
   }.freeze
 

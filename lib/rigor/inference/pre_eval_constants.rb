@@ -150,7 +150,7 @@ module Rigor
       # classes onto the project-seeded scope so a `CONST = SomeClassDefinedRightHere.new` rvalue types the
       # same way it does during real analysis.
       def declaration_seeded_scope(root, scope)
-        declared_types, discovered_classes = ScopeIndexer.build_declaration_artifacts(root)
+        declared_types, discovered_classes = ScopeIndexer::DeclarationArtifacts.build_declaration_artifacts(root)
         scope.with_discovery(
           scope.discovery.with(
             declared_types: declared_types,

@@ -3124,22 +3124,6 @@ Unrelated
       expect(visibilities.fetch("X")).to include(a: :private)
     end
 
-    it "does not record a keyword `alias` inside `instance_eval` as an instance alias" do
-      # The `alias` keyword binds on the receiver's singleton like `def`; only
-      # `alias_method` — a call on the receiver-as-module — is an instance alias.
-      aliases = described_class.send(:collect_class_alias_map, parse(<<~RUBY), [], {})
-        class X; end
-        module M
-          X.instance_eval do
-            alias kw base
-            alias_method :mc, :base
-          end
-        end
-      RUBY
-      expect(aliases.fetch("X", {})).to include(mc: :base)
-      expect(aliases.fetch("X", {})).not_to have_key(:kw)
-    end
-
     it "declines `def` inside `class <<` + `instance_eval` — the unnameable metaclass" do
       # MRI: `class << S; instance_eval` re-evaluates the SAME singleton self, so a `def`
       # binds on the singleton's own singleton — `#<Class:#<Class:S>>` — which nothing

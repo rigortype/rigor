@@ -807,8 +807,8 @@ module Rigor
         # #3419 — the calls whose literal block a `return` leaves without leaving the method: by name on any receiver
         # (the `nil` key), and by name on the receiver constant the other keys name.
         BLOCK_RETURN_BARRIERS = {
-          nil => %i[lambda define_method define_singleton_method at_exit trap],
-          "Thread" => %i[new start fork], "Fiber" => %i[new], "Ractor" => %i[new]
+          nil => %i[lambda define_method define_singleton_method at_exit trap].freeze,
+          "Thread" => %i[new start fork].freeze, "Fiber" => %i[new].freeze, "Ractor" => %i[new].freeze
         }.freeze
         SEND_CALLS = %i[send public_send __send__].freeze
         private_constant :BLOCK_RETURN_BARRIERS, :SEND_CALLS
@@ -1553,7 +1553,7 @@ module Rigor
           return false if OBJECT_CODE_BARRIERS.any? { |klass| node.is_a?(klass) }
 
           children = node.compact_child_nodes
-          children -= [node.block] if block_return_barrier?(node)
+          children -= [node.block] if node.is_a?(Prism::CallNode) && block_return_barrier?(node)
           children.any? { |c| holds_return?(c) }
         end
 
@@ -1561,7 +1561,7 @@ module Rigor
         # (`define_method`, called directly or through `send` / `public_send` / `__send__` with the literal name), a
         # thread, fiber or ractor, or an exit or signal handler. A `proc { … }` or `Proc.new { … }` is no barrier.
         def block_return_barrier?(node)
-          return false unless node.is_a?(Prism::CallNode) && node.block.is_a?(Prism::BlockNode)
+          return false unless node.block.is_a?(Prism::BlockNode)
 
           name = node.name
           if SEND_CALLS.include?(name)

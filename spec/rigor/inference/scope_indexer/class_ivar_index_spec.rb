@@ -497,9 +497,11 @@ RSpec.describe Rigor::Inference::ScopeIndexer::ClassIvarIndex do
       expect(seeds("X.class_eval do\nself::L = Class.new do\n#{body}\nend\nend\n")).to eq("X::L" => census)
     end
 
-    # The table of instance defs holds no def of an `instance_eval` block, so no call there is credited.
-    it "is the census less the same-class call's credit in an `instance_eval` block" do
-      expect(seeds("class X; end\nX.instance_eval do\n#{body}\nend\n")).to eq("X" => census.merge(:@i => "1?"))
+    # The table of instance defs holds no def of an `instance_eval` block, so no call there is credited. Its
+    # `def initialize` is `X.initialize`, which `new` never calls, so its writes exempt nothing (#3419).
+    it "is the census less the same-class call's credit and the initializer in an `instance_eval` block" do
+      expect(seeds("class X; end\nX.instance_eval do\n#{body}\nend\n"))
+        .to eq("X" => census.merge(:@i => "1?", :@t => "Array[Dynamic[top]]?"))
     end
 
     it "is the whole census in the expression of a `class <<`, under the class a write gave the block around it" do
@@ -865,8 +867,39 @@ RSpec.describe Rigor::Inference::ScopeIndexer::ClassIvarIndex do
       expect(c(body)).to eq(:@v => "1?")
     end
 
-    it "takes no evidence from an initializer's own reads" do
-      expect(c("def initialize; @y.foo; end\ndef set; @y = 1; end")).to eq(:@y => "1")
+    # #3419 — nothing runs on the instance before `initialize`, so its read of an ivar it never writes is `nil`.
+    it "takes evidence from an initializer's read of an ivar it never writes" do
+      expect(c("def initialize; @y.foo; end\ndef set; @y = 1; end")).to eq(:@y => "1?")
+      expect(c("def initialize(c); raise unless @y; end\ndef set; @y = 1; end")).to eq(:@y => "1?")
+    end
+
+    # What the ivar holds once `initialize` has written it is not `nil`, whatever an earlier read of it saw. A guard:
+    # the `initialize` write exempts the ivar, as it exempts a sibling's read.
+    it "takes none from an initializer's read of an ivar it writes later" do
+      expect(c("def initialize; @y.foo; @y = 2; end\ndef set; @y = 1; end")).to eq(:@y => "1 | 2")
+    end
+
+    # A `super`, a `yield` or a call on the object may set the ivar before the read.
+    it "takes none from an initializer's read after a statement that may run other code of the object" do
+      body = "def initialize; super; @a.x; end\ndef initialize; yield; @b.x; end\ndef initialize; setup; @c.x; end\n" \
+             "def initialize; self.prepare; @d.x; end\ndef initialize; foo(1); @e.x; end\n" \
+             "def set; @a = 1; @b = 1; @c = 1; @d = 1; @e = 1; end"
+
+      expect(c(body)).to eq(:@a => "1", :@b => "1", :@c => "1", :@d => "1", :@e => "1")
+    end
+
+    it "takes the initializer's reads before that statement, and those in a lambda or a call on another object" do
+      body = "def initialize; @a.x; setup; end\ndef initialize; f = -> { setup }; @b.x; end\n" \
+             "def initialize(obj); obj.setup; @c.x; end\ndef set; @a = 1; @b = 1; @c = 1; end"
+
+      expect(c(body)).to eq(:@a => "1?", :@b => "1?", :@c => "1?")
+    end
+
+    # #3419 — `new` calls the instance `initialize` alone: a singleton-side one is a method like any other.
+    it "takes a singleton-side `initialize` as no initializer" do
+      expect(c("def self.initialize; @a = 1; end\ndef a; @a; end\ndef n; @a = 2; end")).to eq(:@a => "1 | 2 | nil")
+      expect(c("class << self\ndef initialize; @b = 1; end\nend\ndef b; @b; end\ndef n; @b = 2; end"))
+        .to eq(:@b => "2?")
     end
 
     it "takes each compound form for a write the reads after it follow, a `||=` that stores nothing included" do
@@ -893,6 +926,15 @@ RSpec.describe Rigor::Inference::ScopeIndexer::ClassIvarIndex do
 
       expect(seeds(setup)).to eq("FooTest" => { :@conn => "1?" })
       expect(seeds(setup, declared)).to eq("FooTest" => { :@conn => "1" })
+    end
+
+    # #3419 — unlike `initialize`, a declared initializer may run after code that sets the ivar it reads.
+    it "takes no evidence from a declared initializer's own reads" do
+      declared = plugin_scope(additional_initializers: [initializer(receiver_constraint: "FooTest", methods: [:setup])])
+      source = "class FooTest\ndef setup; @db.x; end\ndef connect; @db = 1; end\nend\n"
+
+      expect(seeds(source, declared)).to eq("FooTest" => { :@db => "1" })
+      expect(seeds(source)).to eq("FooTest" => { :@db => "1?" })
     end
 
     it "keeps it when the entry names another method or another class" do
@@ -1079,11 +1121,56 @@ RSpec.describe Rigor::Inference::ScopeIndexer::ClassIvarIndex do
       expect(c(body)).to eq(:@x => "1", :@y => "1", :@z => "1?", :@w => "1?", :@v => "1?", :@u => "1?")
     end
 
-    # An `if` with no `else` is read as falling through, whatever its body holds: a `return` in it is not seen, so
-    # the `nil` that path leaves the method with is dropped. The reading the function had in `scope_indexer.rb`.
-    it "reads a conditional with no `else` as falling through, a `return` in it included" do
+    # #3419 — the path a `return` in a conditional with no `else` takes leaves the method with the `nil`.
+    it "keeps one a conditional with no `else` may return before overwriting" do
       expect(c("def b; @y = nil; return if c; @y = 1; end\ndef e; @w = nil; return unless c; @w = 1; end"))
-        .to eq(:@y => "1", :@w => "1")
+        .to eq(:@y => "1?", :@w => "1?")
+    end
+
+    it "keeps one an `elsif` arm or a `case` arm with no `else` may return before overwriting" do
+      body = "def a\n@x = nil\nif c\n@x = 1\nelsif d\nreturn\nend\n@x = 2\nend\n" \
+             "def b\n@y = nil\ncase v\nwhen 1 then return\nend\n@y = 1\nend"
+
+      expect(c(body)).to eq(:@x => "1 | 2 | nil", :@y => "1?")
+    end
+
+    it "drops one an arm overwrites before it returns, and one an `elsif` arm without a `return` leaves" do
+      body = "def a\n@x = nil\nif c\n@x = 1\nreturn\nend\n@x = 2\nend\n" \
+             "def b\n@y = nil\nif c\n1\nelsif d\n2\nend\n@y = 1\nend"
+
+      expect(c(body)).to eq(:@x => "1 | 2", :@y => "1")
+    end
+
+    # A statement that is no conditional may return through a `&&`, a loop, a block or a `begin`; a lambda's
+    # `return` leaves the lambda alone.
+    # A `return` in the block of a call that runs it as a frame of its own leaves that frame, not the method.
+    it "drops one past a `return` in a lambda, method, thread, fiber, ractor or handler block" do
+      calls = ["lambda { |v| return v }", "define_method(:m) { return 3 }", "self.class.define_method(:m) { return 3 }",
+               "self.class.send(:define_method, :m) { return 3 }",
+               "public_send(\"define_singleton_method\", :m) { return }",
+               "Thread.new { return }", "::Thread.start { return }", "Fiber.new { return }", "Ractor.new { return }",
+               "at_exit { return }", "Signal.trap(\"INT\") { return }"]
+      body = calls.each_with_index.map { |call, i| "def m#{i}; @x#{i} = nil; #{call}; @x#{i} = 1; end" }
+
+      expect(c(body.join("\n")).values.uniq).to eq(["1"])
+    end
+
+    # `proc` and `Proc.new` make a proc, whose `return` leaves the method that made it; so does any other block.
+    it "keeps one past a `return` in a proc, a `Proc.new`, another call's block, or a barrier name's argument" do
+      body = "def a; @a = nil; proc { return }; @a = 1; end\ndef b; @b = nil; Proc.new { return }; @b = 1; end\n" \
+             "def d; @d = nil; Other.new { return }; @d = 1; end\n" \
+             "def e; @e = nil; send(:each) { return }; @e = 1; end\n" \
+             "def f; @f = nil; lambda((return)) { 1 }; @f = 1; end"
+
+      expect(c(body)).to eq(:@a => "1?", :@b => "1?", :@d => "1?", :@e => "1?", :@f => "1?")
+    end
+
+    it "keeps one any other statement may return in before overwriting, and drops one past a lambda's `return`" do
+      body = "def a; @a = nil; c and return; @a = 1; end\ndef b; @b = nil; while c; return; end; @b = 1; end\n" \
+             "def d; @d = nil; [1].each { return }; @d = 1; end\ndef e; @e = nil; begin; return; end; @e = 1; end\n" \
+             "def f; @f = nil; g = -> { return }; @f = 1; end"
+
+      expect(c(body)).to eq(:@a => "1?", :@b => "1?", :@d => "1?", :@e => "1?", :@f => "1")
     end
 
     it "looks at the statements of the body alone: a write in a block, a loop or a `begin` does not overwrite" do
@@ -1178,6 +1265,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer::ClassIvarIndex do
 
       it "does not when the callee returns before its write" do
         expect(c("def setup; return 0; @x = 1; end\ndef use; @x = nil; setup; end")).to eq(:@x => "1?")
+        expect(c("def setup; return if c; @x = 1; end\ndef use; @x = nil; setup; end")).to eq(:@x => "1?")
       end
     end
 
@@ -1590,14 +1678,15 @@ RSpec.describe Rigor::Inference::ScopeIndexer::ClassIvarIndex do
     expect(described_class::ATTR_WRITER_MACROS).to eq(%i[attr_writer attr_accessor])
   end
 
-  it "leaves none of its 94 functions and none of its 17 constants on ScopeIndexer" do
+  it "leaves none of its 100 functions and none of its 20 constants on ScopeIndexer" do
     functions = described_class.private_instance_methods(false)
     constants = %i[IVAR_WRITE_NODES IVAR_BARRIER_NODES EMPTY_GUARDED_IVARS EMPTY_IVAR_SET TAIL_VALUE_DEPTH_CAP
                    SAME_CLASS_CALL_DEPTH_CAP MethodEffectResolver OPERATOR_CHAIN_UNION_CAP AND_WRITE_CONTRIBUTIONS
                    OPERATOR_WRITE_CONTRIBUTIONS DEFINE_METHOD_WRITES CLASS_BODY_WRITES REFLECTIVE_OPAQUE_CLASSES
-                   CONSTANT_IVAR_VALUES SINGLETON_IVAR_WRITES BindingTargets ATTR_WRITER_MACROS]
+                   CONSTANT_IVAR_VALUES SINGLETON_IVAR_WRITES BindingTargets ATTR_WRITER_MACROS OBJECT_CODE_BARRIERS
+                   BLOCK_RETURN_BARRIERS SEND_CALLS]
 
-    expect(functions.size).to eq(94)
+    expect(functions.size).to eq(100)
     expect(functions.select { |name| indexer.respond_to?(name, true) }).to eq([])
     expect(constants.select { |name| indexer.const_defined?(name, false) }).to eq([])
     expect(constants.reject { |name| described_class.const_defined?(name, false) }).to eq([])

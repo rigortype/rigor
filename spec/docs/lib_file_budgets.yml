@@ -22,7 +22,7 @@ lib/rigor/inference/method_dispatcher/rbs_dispatch.rb: 2600
 lib/rigor/inference/method_dispatcher/shape_dispatch.rb: 2400
 lib/rigor/inference/narrowing.rb: 3000
 lib/rigor/inference/scope_indexer.rb: 7300
-lib/rigor/inference/scope_indexer/class_ivar_index.rb: 2000
+lib/rigor/inference/scope_indexer/class_ivar_index.rb: 2100
 lib/rigor/inference/statement_evaluator.rb: 9500
 lib/rigor/plugin/base.rb: 1400
 lib/rigor/scope.rb: 3300

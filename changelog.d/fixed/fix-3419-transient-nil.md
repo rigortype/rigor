@@ -1,0 +1,3 @@
+- **[sig-gen]** `rigor sig-gen` now keeps `nil` in an attribute type when `initialize` may leave the ivar unset, so `@y = nil; return if c; @y = 1` proposes `def y: () -> (1 | nil)` instead of `-> 1`. ([#3428](https://github.com/rigortype/rigor/pull/3428))
+  - The same holds for an ivar only `def self.initialize` writes, which `new` never calls, and for an ivar `initialize` reads before anything sets it.
+  - In `rigor check`, a sibling's `@y ? @y.size : 0` on such an ivar no longer reports `flow.always-truthy-condition`.

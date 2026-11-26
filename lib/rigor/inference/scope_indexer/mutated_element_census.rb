@@ -111,14 +111,14 @@ module Rigor
             inner = widen(type.base, steps)
             inner && Type::Combinator.difference(inner, type.removed)
           # A nominal names no position, so whichever element was mutated, every one of them stops being pinned.
-          when Type::Nominal then changed(type, ScopeIndexer.census_unpinned_content(type))
+          when Type::Nominal then changed(type, MutatedCarrierWidening.census_unpinned_content(type))
           end
         end
 
         def leaf(type)
           return nil unless mutable?(type)
 
-          changed(type, ScopeIndexer.census_mutated_type(type))
+          changed(type, MutatedCarrierWidening.census_mutated_type(type))
         end
 
         def changed(before, after) = after == before ? nil : after

@@ -92,6 +92,11 @@ RSpec.describe "Declaration producers" do
   # Count and digest unchanged (#3398): following a table into another listed file added one producer,
   # `lib/rigor/inference/scope_indexer.rb#Rigor::Inference::ScopeIndexer#propagate`, recorded with a reason; no
   # grandfathered entry moved.
+  # Count and digest unchanged (#3400, ADR-116 WD9): `collect_singleton_class_targets` and
+  # `record_singleton_class_sources` moved from `lib/rigor/inference/scope_indexer.rb` to
+  # `lib/rigor/inference/scope_indexer/singleton_class_sources.rb`, as functions of
+  # `Rigor::Inference::ScopeIndexer::SingletonClassSources`, each with its reason. Neither was grandfathered, and
+  # the two other modules that slice moved hold no producer.
   let(:grandfathered_pin) do
     { count: 366, digest: "e45f5472596e7f917befc405e2479e13b9daa72791641c4bb3a12f8feb405c27" }
   end

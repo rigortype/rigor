@@ -6,8 +6,9 @@
 # cold, adds the writer file, then removes it, and expects the warm rows to equal a cold run's at both steps.
 #
 # These are labelled guards. Four mechanisms re-check the reader, and the examples fail only with all of them removed:
-# - the writer file joins `Base`'s per-file class-declaration set (`ScopeIndexer#record_singleton_class_sources`,
-#   #1752 and #1941), so the declaration diff fires `class:Base`;
+# - the writer file joins `Base`'s per-file class-declaration set
+#   (`ScopeIndexer::SingletonClassSources.record_singleton_class_sources`, #1752 and #1941), so the declaration diff
+#   fires `class:Base`;
 # - the moved class mark or unpositioned mixin fires `mark:` / `mixin:` (`IncrementalSession#mark_affected`, #1833
 #   and #1661);
 # - the file starts or stops defining `bar`, firing `defines:bar` (`#defined_name_affected`, #1459);

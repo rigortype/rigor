@@ -414,10 +414,22 @@ module DeclarationWriterScan
   #   entered through eight functions, each spelled on the module: `SharedWalkTables.declaration_walk_tables`,
   #   `meta_member_names` and `meta_members_open?` from `scope_indexer.rb`, the four recorders from
   #   `superclasses_collector.rb` and `member_layouts_collector.rb`, and `recorded_ancestor_name` from
-  #   `cvar_hierarchy.rb`. Its calls of `ScopeIndexer.add_header_nesting`, `rebound_block_self` and
-  #   `resolve_meta_factory_call` make those three entry points of `scope_indexer.rb`. The first writes the
-  #   header-nesting table and keeps its row there; moved into this file, it would keep it here, since it hands the
-  #   table to `ScopeIndexer.merge_header_nesting_bucket` and rule (v) follows a write into another row (#3398).
+  #   `cvar_hierarchy.rb`. Its calls of `ScopeIndexer.add_header_nesting` and `rebound_block_self` make those two
+  #   entry points of `scope_indexer.rb`. The first writes the header-nesting table and keeps its row there; moved
+  #   into this file, it would keep it here, since it hands the table to `ScopeIndexer.merge_header_nesting_bucket`
+  #   and rule (v) follows a write into another row (#3398).
+  # - `mutated_carrier_widening.rb`, `factory_call_resolver.rb` and `singleton_class_sources.rb`: the widening of the
+  #   carriers a file mutates in place, the factory call an expression unwinds to, and the constants whose singleton
+  #   side a file writes to without declaring them, moved out of `scope_indexer.rb` (ADR-116 WD9, #3400). The last
+  #   writes the `sources` table it is handed, and that writer stays rule (v)'s. The first two write no parameter
+  #   today: the wideners answer a copy of the table they take, and the resolver takes none. Each has a row all the
+  #   same, so that the rule reads what it read while they were in `scope_indexer.rb`: a write into a table handed
+  #   to one of them would be listed, there and in the caller that handed it over (#3398). Each is entered through
+  #   the functions other covered files spell on its module: `MutatedCarrierWidening.widen_mutated_constants`,
+  #   `widen_mutated_cvars`, `census_mutated_type` and `census_unpinned_content`;
+  #   `FactoryCallResolver.resolve_meta_factory_call`; `SingletonClassSources.record_singleton_class_sources`. The
+  #   last module's calls of `ScopeIndexer.singleton_receiver_constant_name` and `surface_rewriting_call?` make
+  #   those two entry points of `scope_indexer.rb`, where neither writes a table.
   SOURCES = {
     DeclarationProducerScan::RULE_V_FILE => {
       module: "Rigor::Inference::ScopeIndexer",
@@ -443,6 +455,12 @@ module DeclarationWriterScan
       { module: "Rigor::Inference::ScopeIndexer::ClassCvarCensus", roots: [] },
     "lib/rigor/inference/scope_indexer/shared_walk_tables.rb" =>
       { module: "Rigor::Inference::ScopeIndexer::SharedWalkTables", roots: [] },
+    "lib/rigor/inference/scope_indexer/mutated_carrier_widening.rb" =>
+      { module: "Rigor::Inference::ScopeIndexer::MutatedCarrierWidening", roots: [] },
+    "lib/rigor/inference/scope_indexer/factory_call_resolver.rb" =>
+      { module: "Rigor::Inference::ScopeIndexer::FactoryCallResolver", roots: [] },
+    "lib/rigor/inference/scope_indexer/singleton_class_sources.rb" =>
+      { module: "Rigor::Inference::ScopeIndexer::SingletonClassSources", roots: [] },
     "lib/rigor/inference/declaration_walk/rules.rb" => { module: "Rigor::Inference::DeclarationWalk::Rules", roots: [] }
   }.freeze
 

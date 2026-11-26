@@ -569,8 +569,8 @@ RSpec.describe "Mutated constant census widening", type: :runner do
     # The twin of the example above, and the one the arm exists for. An element mutation rewrites the String the
     # element holds, so `Array[String]` stays true and needs no `Dynamic[top]` arm. A WHOLE-NAME mutation stores
     # something else into the carrier, so the element claim has to admit it — and the pin that licenses the arm is
-    # only visible before the literal is floored to its class, which is why the order in `census_unpinned_carrier`
-    # is load-bearing.
+    # only visible before the literal is floored to its class, which is why the order in
+    # `MutatedCarrierWidening.census_unpinned_carrier` is load-bearing.
     it "keeps a Dynamic arm when a whole-name mutation stores into a nominal whose element literal is floored" do
       expect(dumped_types(<<~RUBY)).to eq(["Dynamic[Array[Dynamic[top] | String]]", 'Array["a"]'])
         NW = ["a"].shuffle

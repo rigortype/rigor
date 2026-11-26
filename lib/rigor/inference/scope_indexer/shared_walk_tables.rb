@@ -10,6 +10,7 @@ require_relative "../declaration_walk/rules"
 require_relative "superclasses_collector"
 require_relative "member_layouts_collector"
 require_relative "def_nestings_collector"
+require_relative "factory_call_resolver"
 
 module Rigor
   module Inference
@@ -25,22 +26,22 @@ module Rigor
       # {.record_data_member_layout} and {.record_struct_member_layout} the second. {CvarHierarchy} asks
       # {.recorded_ancestor_name} for a superclass as the table spells it. And `ScopeIndexer.record_meta_member_names`
       # asks {.meta_member_names} and {.meta_members_open?} for the member list of a factory call: that reading
-      # moved here with the layout tables, which are its table, so that the module calls back three functions and
+      # moved here with the layout tables, which are its table, so that the module called back three functions and
       # not five. The rest is private: a builder per table that runs its collector alone, for the specs
       # ({.build_superclass_tables}, {.build_def_nestings}, {.build_data_member_layouts},
       # {.build_struct_member_layouts}); the `verified_*` step that hands each table to `RIGOR_SHADOW_RULE_WALK`;
       # and the walkers the collectors replaced, kept as that check's oracles ({.legacy_superclass_tables},
       # {.legacy_def_nestings}, {.legacy_data_member_layouts}, {.legacy_struct_member_layouts} and their arms).
       #
-      # It asks {DeclarationWalk::Rules} for each declaration context and calls three functions left in
-      # `scope_indexer.rb`: `ScopeIndexer.rebound_block_self` (which block rebinds `self`, for the mixin names a
-      # header nesting is keyed by), `ScopeIndexer.add_header_nesting` (the insert of the header-nesting table,
-      # which stays beside the merges the cross-file fold shares with it) and
-      # `ScopeIndexer.resolve_meta_factory_call` (the factory call an expression unwinds to, which the methods
-      # table and the discovered-classes walk ask too). `scope_indexer.rb` requires this file, and this file does
-      # not require it back. It reads `ScopeIndexer::EMPTY_NESTING`, `EMPTY_PREFIX`, `RECEIVER_EVAL_CALLS` and
+      # It asks {DeclarationWalk::Rules} for each declaration context and {FactoryCallResolver}, a sibling file it
+      # requires, for the factory call an expression unwinds to (the third function it called back, until #3400
+      # moved it). It calls two functions left in `scope_indexer.rb`: `ScopeIndexer.rebound_block_self` (which
+      # block rebinds `self`, for the mixin names a header nesting is keyed by) and
+      # `ScopeIndexer.add_header_nesting` (the insert of the header-nesting table, which stays beside the merges
+      # the cross-file fold shares with it). `scope_indexer.rb` requires this file, and this file does not require
+      # it back. It reads `ScopeIndexer::EMPTY_NESTING`, `EMPTY_PREFIX`, `RECEIVER_EVAL_CALLS` and
       # `MIXIN_CALL_NAMES` lexically, as {NodePropagation} reads the indexer's constants. So the file loads
-      # alone, and until `scope_indexer.rb` has loaded only the functions that reach none of those seven names
+      # alone, and until `scope_indexer.rb` has loaded only the functions that reach none of those six names
       # answer.
       module SharedWalkTables # rubocop:disable Metrics/ModuleLength
         module_function
@@ -650,7 +651,7 @@ module Rigor
         # Records `qualified -> [members]` when `expr` is a `Data.define(*Symbol)` call with at least one literal-Symbol
         # member.
         def record_data_member_layout(accumulator, qualified_parts, expr, allow_outer_block: true)
-          expr = ScopeIndexer.resolve_meta_factory_call(expr, allow_outer_block: allow_outer_block)
+          expr = FactoryCallResolver.resolve_meta_factory_call(expr, allow_outer_block: allow_outer_block)
           return unless expr && DeclarationWalk::Rules.data_define_call?(expr)
           return if meta_members_open?(expr)
 
@@ -775,7 +776,7 @@ module Rigor
         # Records `qualified -> { members:, keyword_init: }` when `expr` is a `Struct.new(*Symbol [, keyword_init:
         # <bool>])` call with at least one literal-Symbol member.
         def record_struct_member_layout(accumulator, qualified_parts, expr, allow_outer_block: true)
-          expr = ScopeIndexer.resolve_meta_factory_call(expr, allow_outer_block: allow_outer_block)
+          expr = FactoryCallResolver.resolve_meta_factory_call(expr, allow_outer_block: allow_outer_block)
           return unless expr && DeclarationWalk::Rules.struct_new_call?(expr)
           return if meta_members_open?(expr)
 

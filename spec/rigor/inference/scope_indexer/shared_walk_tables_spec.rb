@@ -960,21 +960,21 @@ end
   end
 
   # The #3318 cut-off counts the functions a moved cluster calls back in what stays, and allows four. This one
-  # calls three: the insert of the header-nesting table, which block rebinds `self`, and the factory call an
-  # expression unwinds to.
-  it "calls three functions of the indexer, at four sites" do
+  # calls two: the insert of the header-nesting table, and which block rebinds `self`. The factory call an
+  # expression unwinds to, the third until #3400, is `FactoryCallResolver`'s, a sibling file.
+  it "calls two functions of the indexer, at two sites" do
     path = File.join(DeclarationFactSources::REPO_ROOT, "lib/rigor/inference/scope_indexer/shared_walk_tables.rb")
     calls = DeclarationFactSources.each_node(Prism.parse_file(path).value).filter_map do |node|
       node.name if node.is_a?(Prism::CallNode) && DeclarationFactSources.constant_name(node.receiver) == "ScopeIndexer"
     end
 
-    expect(calls).to eq(%i[add_header_nesting rebound_block_self resolve_meta_factory_call
-                           resolve_meta_factory_call])
+    expect(calls).to eq(%i[add_header_nesting rebound_block_self])
   end
 
   # The module reads `EMPTY_NESTING`, `EMPTY_PREFIX`, `RECEIVER_EVAL_CALLS` and `MIXIN_CALL_NAMES` through
-  # `ScopeIndexer`'s own names and calls three of its functions, all of which `scope_indexer.rb` defines: the file
-  # requires what else it names, and until the indexer has loaded only a call that reaches none of the seven answers.
+  # `ScopeIndexer`'s own names and calls two of its functions, all of which `scope_indexer.rb` defines: the file
+  # requires what else it names, `FactoryCallResolver` included, and until the indexer has loaded only a call that
+  # reaches none of the six answers.
   def alone_probe
     <<~RUBY
       require "rigor/inference/scope_indexer/shared_walk_tables"
@@ -982,7 +982,8 @@ end
       tables = indexer::SharedWalkTables
       walk = Rigor::Inference::DeclarationWalk
       named = [defined?(indexer::SuperclassesCollector), defined?(indexer::MemberLayoutsCollector),
-               defined?(indexer::DefNestingsCollector), defined?(walk::Rules), defined?(walk::Shadow),
+               defined?(indexer::DefNestingsCollector), defined?(indexer::FactoryCallResolver),
+               defined?(walk::Rules), defined?(walk::Shadow),
                walk.respond_to?(:run), defined?(Rigor::Inference::AnonymousMetaClass),
                defined?(Rigor::Source::ConstantPath), Prism::ProgramNode.method_defined?(:rigor_each_child)]
       statement = ->(source) { Prism.parse(source).value.statements.body.first }
@@ -1010,10 +1011,9 @@ end
     out, err, status = RubyRun.capture("-I", lib, "-e", alone_probe)
 
     expect(status).to be_success, err
-    expect(out).to eq('[false, ["constant", "constant", "constant", "constant", "constant", true, "constant", ' \
-                      '"constant", true], ["NameError", :EMPTY_NESTING], ' \
-                      '["NoMethodError", :add_header_nesting], ["NameError", :EMPTY_PREFIX], ' \
-                      '["NoMethodError", :resolve_meta_factory_call], ' \
+    expect(out).to eq('[false, ["constant", "constant", "constant", "constant", "constant", "constant", true, ' \
+                      '"constant", "constant", true], ["NameError", :EMPTY_NESTING], ' \
+                      '["NoMethodError", :add_header_nesting], ["NameError", :EMPTY_PREFIX], [:x], ' \
                       '[{"#<Class:1:0>" => "P"}, [:a], true, "::B"]]')
   end
 end

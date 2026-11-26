@@ -11,6 +11,7 @@ require_relative "superclasses_collector"
 require_relative "member_layouts_collector"
 require_relative "def_nestings_collector"
 require_relative "factory_call_resolver"
+require_relative "constant_tables"
 
 module Rigor
   module Inference
@@ -33,16 +34,17 @@ module Rigor
       # and the walkers the collectors replaced, kept as that check's oracles ({.legacy_superclass_tables},
       # {.legacy_def_nestings}, {.legacy_data_member_layouts}, {.legacy_struct_member_layouts} and their arms).
       #
-      # It asks {DeclarationWalk::Rules} for each declaration context and {FactoryCallResolver}, a sibling file it
-      # requires, for the factory call an expression unwinds to (the third function it called back, until #3400
-      # moved it). It calls two functions left in `scope_indexer.rb`: `ScopeIndexer.rebound_block_self` (which
-      # block rebinds `self`, for the mixin names a header nesting is keyed by) and
-      # `ScopeIndexer.add_header_nesting` (the insert of the header-nesting table, which stays beside the merges
-      # the cross-file fold shares with it). `scope_indexer.rb` requires this file, and this file does not require
-      # it back. It reads `ScopeIndexer::EMPTY_NESTING`, `EMPTY_PREFIX`, `RECEIVER_EVAL_CALLS` and
-      # `MIXIN_CALL_NAMES` lexically, as {NodePropagation} reads the indexer's constants. So the file loads
-      # alone, and until `scope_indexer.rb` has loaded only the functions that reach none of those six names
-      # answer.
+      # It asks {DeclarationWalk::Rules} for each declaration context, and two sibling files it requires for what
+      # were the second and third functions it called back, until #3400 moved them: {FactoryCallResolver} for the
+      # factory call an expression unwinds to, and {ConstantTables} for which block rebinds `self`
+      # (`ConstantTables.rebound_block_self`, for the mixin names a header nesting is keyed by). It calls one
+      # function left in `scope_indexer.rb`: `ScopeIndexer.add_header_nesting` (the insert of the header-nesting
+      # table, which stays beside the merges the cross-file fold shares with it). `scope_indexer.rb` requires this
+      # file, and this file does not require it back. It reads `ScopeIndexer::EMPTY_NESTING`, `EMPTY_PREFIX`,
+      # `RECEIVER_EVAL_CALLS` and `MIXIN_CALL_NAMES` lexically, as {NodePropagation} reads the indexer's constants,
+      # and `ConstantTables.rebound_block_self` reads `RECEIVER_EVAL_CALLS` and `OPAQUE_SELF` the same way. So the
+      # file loads alone, and until `scope_indexer.rb` has loaded only the functions that reach none of those six
+      # names answer.
       module SharedWalkTables # rubocop:disable Metrics/ModuleLength
         module_function
 
@@ -453,8 +455,8 @@ module Rigor
         #
         # The mixin scan counts only a call whose `self` is the declaration itself, so it stops at every construct that
         # rebinds `self`: a nested `class` / `module` (that body's calls belong to the nested class), a `class << self`
-        # body, and a block `ScopeIndexer.rebound_block_self` classifies as rebinding — the `Class.new` / `Module.new` /
-        # `Struct.new` / `Data.define` and `class_eval` family. An `include` written in any of those attaches to
+        # body, and a block `ConstantTables.rebound_block_self` classifies as rebinding — the `Class.new` / `Module.new`
+        # / `Struct.new` / `Data.define` and `class_eval` family. An `include` written in any of those attaches to
         # something other than this class, so treating it as this site's ancestor name reinstates exactly the defect
         # above with a different spelling. {ScopeIndexer.walk_class_includes} classifies the same shapes the same way
         # since [#749](https://github.com/rigortype/rigor/pull/749), so the two walks agree on which site owns a mixin.
@@ -488,7 +490,7 @@ module Rigor
 
           found = mixin_call?(node)
           record_mixin_names(node, names) if found
-          rebinds = ScopeIndexer.rebound_block_self(node, EMPTY_PREFIX)
+          rebinds = ConstantTables.rebound_block_self(node, EMPTY_PREFIX)
           node.rigor_each_child do |child|
             next if rebinds && child.is_a?(Prism::BlockNode)
 

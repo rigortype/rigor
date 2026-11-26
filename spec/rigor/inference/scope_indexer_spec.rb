@@ -2788,7 +2788,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer do
     it "records the block form under the constant's OWN name, not its superclass's" do
       with_files({ "a.rb" => "module M\n  Blk = Class.new(Object) do\n    def x; end\n  end\nend\n" }) do |discovered|
         # A block body declares methods of its own, so the constant cannot borrow `Object`'s identity the way a
-        # block-less `Class.new(Super)` does — the same answer the per-file `meta_new_constant_type` gives.
+        # block-less `Class.new(Super)` does — the same answer the per-file `ConstantTables.meta_new_constant_type`
+        # gives.
         expect(discovered["M::Blk"]).to eq(Rigor::Type::Combinator.singleton_of("M::Blk"))
       end
     end
@@ -3432,20 +3433,6 @@ Unrelated
       expect(table).not_to have_key("Object::X")
     end
 
-    it "declines `self::` and bare constant writes inside a `class <<` body" do
-      # Both forms write the singleton's own constant table — `#<Class:Y>::X` — a name
-      # nothing else can produce, so neither files under `Y` nor retracts `X`.
-      writes = described_class.send(:constant_writes_for_file, parse(<<~RUBY))
-        class Y
-          class << self
-            self::X = 1
-            W = 2
-          end
-        end
-      RUBY
-      expect(writes).to be_empty
-    end
-
     it "declines `self::` constant writes inside `class <<` in the typed table" do
       program = parse(<<~RUBY)
         class Y
@@ -3483,35 +3470,6 @@ Unrelated
         end
       RUBY
       expect(table).not_to have_key("Y::X")
-    end
-
-    it "declines bare writes inside eval/meta blocks under `class <<` — cref never rebinds" do
-      # `Module.nesting` stays lexical through every block: the write lands on
-      # `#<Class:C>::X`, a name nothing else can produce, in each form.
-      writes = described_class.send(:constant_writes_for_file, parse(<<~RUBY))
-        class Foo; end
-        class C
-          class << self
-            Foo.class_eval { X = 1 }
-            obj.instance_eval { Y = 1 }
-            K = Class.new { Z = 1 }
-          end
-        end
-      RUBY
-      expect(writes.keys).to be_empty
-    end
-
-    it "declines `self::` writes inside a meta-new block under `class <<`" do
-      # `K` itself is unnameable, so the block's anonymous class is too — `self::Y`
-      # there cannot be spelled `C::K::Y`.
-      writes = described_class.send(:constant_writes_for_file, parse(<<~RUBY))
-        class C
-          class << self
-            K = Class.new { self::Y = 1 }
-          end
-        end
-      RUBY
-      expect(writes.keys).to be_empty
     end
 
     it "files defs inside an eval-nested `self::` receiver under `class <<` nowhere" do
@@ -3772,7 +3730,7 @@ Unrelated
 
     it "declines `class D` under `class <<` in the per-file declaration tables" do
       # `class D` opens `#<Class:C>::D` — a real class nothing can name — so neither the
-      # identity table nor `discovered_classes` may publish `C::D` (a `known_namespace?`
+      # identity table nor `discovered_classes` may publish `C::D` (a `ConstantTables.known_namespace?`
       # hit there would cross-contaminate every `D`-family resolution in the project).
       program = parse(<<~RUBY)
         class C
@@ -3906,22 +3864,6 @@ Unrelated
       expect(table).to include("X" => ["T"])
     end
 
-    it "keys a path write inside `class D` under `class <<` as written, never `C::D`-qualified" do
-      # `Foo::BAR` inside `#<Class:C>::D` resolves `Foo` through `[C, Object]` — the census
-      # keys the write AS WRITTEN; what it must never fabricate is a `C::D::Foo::BAR` rung.
-      writes = described_class.send(:constant_writes_for_file, parse(<<~RUBY))
-        class C
-          class << self
-            class D
-              Foo::BAR = 1
-            end
-          end
-        end
-      RUBY
-      expect(writes.keys).to include("Foo::BAR")
-      expect(writes.keys).not_to include("C::D::Foo::BAR")
-    end
-
     it "keeps a ROOTED meta-new class's whole body nameable under `class <<`" do
       # `::K` lands at the top level — the block is `K`'s ordinary class body: member,
       # mixin, visibility, `def`, and `self::V` facts all file under `K`.
@@ -3949,20 +3891,6 @@ Unrelated
       expect(visibility.fetch("K", {})).to include(m: :private)
       struct = described_class::SharedWalkTables.send(:build_struct_member_layouts, parse(source))
       expect(struct.fetch("K", {}).fetch(:members, [])).to include(:x)
-    end
-
-    it "keys `self::V` inside a rooted meta-new block under the class it names" do
-      # `self` inside `::K = Struct.new do … end` is `K` — `self::V` writes `K::V`.
-      writes = described_class.send(:constant_writes_for_file, parse(<<~RUBY))
-        class C
-          class << self
-            ::K = Struct.new(:x) do
-              self::V = 1
-            end.freeze
-          end
-        end
-      RUBY
-      expect(writes.keys).to include("K::V")
     end
 
     it "discovers `::K = Class.new` under `class <<` in both discovery tables" do
@@ -4459,34 +4387,6 @@ Unrelated
         C.instance_eval { prepend T }
       RUBY
       expect(described_class.build_discovered_prepends(program)).to eq("C" => ["T"])
-    end
-  end
-
-  # Issue #617 — a constant compound write reads a name the census sees bound as `Dynamic[top]`, and a name a file
-  # writes only through `||=` is the memoization idiom rather than a binding, so it carries its own descriptor.
-  describe "the publication census's memo descriptor" do
-    def census(source) = described_class.send(:constant_writes_for_file, parse(source))
-
-    it "files a name written only through `||=` as a memo, bare or as a path, however often" do
-      expect(census(<<~RUBY)).to eq("A" => :memo, "Conf::B" => :memo)
-        def a = (A ||= {})
-        def again = (A ||= {})
-        def b = (Conf::B ||= [])
-      RUBY
-    end
-
-    it "files every other form, and a memo the same file also writes another way, as unpublishable" do
-      writes = census(<<~RUBY)
-        A ||= 1
-        A += 1
-        B &&= 1
-        C ||= 1
-        C = 2
-        D = 1
-        D ||= 2
-        E += 1
-      RUBY
-      expect(writes).to eq(%w[A B C D E].to_h { |name| [name, :unpublishable] })
     end
   end
 end

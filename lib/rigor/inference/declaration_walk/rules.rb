@@ -199,9 +199,10 @@ module Rigor
         #
         # A PATH write takes exactly what a compact `class Holder::Thing` header at the same position takes
         # ({Source::ConstantPath.declaration_prefix}), rooted reset included. These pre-passes run before any scope
-        # exists, so the namespace cannot be resolved the way {ScopeIndexer#constant_path_write_key} resolves it for the
-        # typed table — but the two land on the same name anyway, because registering `Admin::Holder::Thing` here is
-        # what makes `Admin::Holder` a namespace {ScopeIndexer#resolved_write_namespace} knows.
+        # exists, so the namespace cannot be resolved the way {ScopeIndexer::ConstantTables.constant_path_write_key}
+        # resolves it for the typed table — but the two land on the same name anyway, because registering
+        # `Admin::Holder::Thing` here is what makes `Admin::Holder` a namespace
+        # {ScopeIndexer::ConstantTables.resolved_write_namespace} knows.
         #
         # Where the namespace is NOT under the enclosure — a top-level `Loner` written as `Loner::Made = Struct.new(…)`
         # inside `module Admin` — that qualification is a guess, and {ScopeIndexer#synthesize_namespace_prefixes} then
@@ -300,15 +301,15 @@ module Rigor
         # self IS the block's self — and a constant receiver names its own class, the same
         # convention {ScopeIndexer#singleton_class_prefix} applies to `class <<`. A receiver that renders no
         # static path — a variable, a call, a dynamic-base `expr::Bar` — is DECLINED like
-        # {ScopeIndexer#constant_path_write_key} declines dynamic write targets: `qualified_name`'s lenient
-        # render would drop the dynamic segment and file the body's defs under a class the eval
+        # {ScopeIndexer::ConstantTables.constant_path_write_key} declines dynamic write targets: `qualified_name`'s
+        # lenient render would drop the dynamic segment and file the body's defs under a class the eval
         # never opened.
         def eval_receiver_prefix(node, self_prefix, lexical_prefix, unnameable_self: false)
           receiver = node.receiver
           return self_prefix if receiver.nil? || receiver.is_a?(Prism::SelfNode)
 
           # `self::Foo` / `self::Foo::Bar` names the enclosing self's path — the same
-          # resolution {ScopeIndexer#constant_path_write_key} gives a `self::` write target. When the
+          # resolution {ScopeIndexer::ConstantTables.constant_path_write_key} gives a `self::` write target. When the
           # enclosing self names nothing ({#unnameable_eval_self?}) the read raises
           # NameError at runtime unless the constant lives on that self — so the receiver
           # declines rather than filing the body under the lexical class.
@@ -337,12 +338,12 @@ module Rigor
         # constant exists — so the first `<nesting entry>::X` the file declares
         # wins, innermost first, and the as-written name stands when no rung
         # declares it: the same `<entry>::<first segment>` walk
-        # {ScopeIndexer#resolved_write_namespace} performs for a `Foo::BAR = …` namespace,
+        # {ScopeIndexer::ConstantTables.resolved_write_namespace} performs for a `Foo::BAR = …` namespace,
         # against the same segment-approximation {lexical_nesting_for_prefix}
         # gives when no scope carries the real chain. A `S::X` declared only in
         # ANOTHER file still resolves as-written — the set
         # {#eval_file_declared_names} consults is the defining file's own answer,
-        # matching the `in_source_constants` limitation {ScopeIndexer#resolved_write_namespace}
+        # matching the `in_source_constants` limitation {ScopeIndexer::ConstantTables.resolved_write_namespace}
         # documents.
         def eval_constant_receiver_prefix(node, path_node, rendered, lexical_prefix)
           # `class << ::X = expr` spells its root on the write's target, not the
@@ -530,7 +531,7 @@ module Rigor
         # The qualified name a `Path::CONST =` write declares — the write walk's
         # own convention: `::`-rooted and `self::`-anchored paths resolve first,
         # every other base files AS WRITTEN (`S2::C = 2` inside `class S` keys
-        # `S2::C`, matching {ScopeIndexer#constant_path_write_key}'s as-written fallback
+        # `S2::C`, matching {ScopeIndexer::ConstantTables.constant_path_write_key}'s as-written fallback
         # rather than the header rule's lexical re-anchor).
         def declared_constant_write_prefix(path, qualified_prefix, unnameable_cref)
           return Source::ConstantPath.qualified_name_or_nil(path)&.split("::") if Source::ConstantPath.rooted?(path)
@@ -566,7 +567,7 @@ module Rigor
         end
 
         # `Object`'s constants ARE the top-level constants — every discovery table keys them
-        # bare, the same collapse {ScopeIndexer#self_write_name} applies — so a `self::`-anchored path
+        # bare, the same collapse {ScopeIndexer::ConstantTables.self_write_name} applies — so a `self::`-anchored path
         # rooted at `Object` drops the segment rather than filing under a name nothing else
         # produces.
         def collapse_object_owner(prefix)

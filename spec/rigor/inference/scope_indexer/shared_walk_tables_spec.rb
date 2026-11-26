@@ -171,7 +171,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer::SharedWalkTables do
     end
 
     # The scan stops where `self` is no longer the class: a nested header, a `class <<` body, and a block
-    # `ScopeIndexer.rebound_block_self` says rebinds it. A block that rebinds nothing is still the class's.
+    # `ConstantTables.rebound_block_self` says rebinds it. A block that rebinds nothing is still the class's.
     it "leaves out a mixin written where `self` is another class" do
       source = <<~RUBY
         class C
@@ -960,21 +960,23 @@ end
   end
 
   # The #3318 cut-off counts the functions a moved cluster calls back in what stays, and allows four. This one
-  # calls two: the insert of the header-nesting table, and which block rebinds `self`. The factory call an
-  # expression unwinds to, the third until #3400, is `FactoryCallResolver`'s, a sibling file.
-  it "calls two functions of the indexer, at two sites" do
+  # calls one: the insert of the header-nesting table. The other two it called, until #3400 moved them, are a
+  # sibling file's each: the factory call an expression unwinds to is `FactoryCallResolver`'s, and which block
+  # rebinds `self` is `ConstantTables`'.
+  it "calls one function of the indexer, at one site" do
     path = File.join(DeclarationFactSources::REPO_ROOT, "lib/rigor/inference/scope_indexer/shared_walk_tables.rb")
     calls = DeclarationFactSources.each_node(Prism.parse_file(path).value).filter_map do |node|
       node.name if node.is_a?(Prism::CallNode) && DeclarationFactSources.constant_name(node.receiver) == "ScopeIndexer"
     end
 
-    expect(calls).to eq(%i[add_header_nesting rebound_block_self])
+    expect(calls).to eq(%i[add_header_nesting])
   end
 
   # The module reads `EMPTY_NESTING`, `EMPTY_PREFIX`, `RECEIVER_EVAL_CALLS` and `MIXIN_CALL_NAMES` through
-  # `ScopeIndexer`'s own names and calls two of its functions, all of which `scope_indexer.rb` defines: the file
-  # requires what else it names, `FactoryCallResolver` included, and until the indexer has loaded only a call that
-  # reaches none of the six answers.
+  # `ScopeIndexer`'s own names and calls one of its functions, all of which `scope_indexer.rb` defines, and
+  # `ConstantTables.rebound_block_self` reads `OPAQUE_SELF` there as well: the file requires what else it names,
+  # `FactoryCallResolver` and `ConstantTables` included, and until the indexer has loaded only a call that reaches
+  # none of the six answers.
   def alone_probe
     <<~RUBY
       require "rigor/inference/scope_indexer/shared_walk_tables"
@@ -983,6 +985,7 @@ end
       walk = Rigor::Inference::DeclarationWalk
       named = [defined?(indexer::SuperclassesCollector), defined?(indexer::MemberLayoutsCollector),
                defined?(indexer::DefNestingsCollector), defined?(indexer::FactoryCallResolver),
+               defined?(indexer::ConstantTables),
                defined?(walk::Rules), defined?(walk::Shadow),
                walk.respond_to?(:run), defined?(Rigor::Inference::AnonymousMetaClass),
                defined?(Rigor::Source::ConstantPath), Prism::ProgramNode.method_defined?(:rigor_each_child)]
@@ -1011,8 +1014,8 @@ end
     out, err, status = RubyRun.capture("-I", lib, "-e", alone_probe)
 
     expect(status).to be_success, err
-    expect(out).to eq('[false, ["constant", "constant", "constant", "constant", "constant", "constant", true, ' \
-                      '"constant", "constant", true], ["NameError", :EMPTY_NESTING], ' \
+    expect(out).to eq('[false, ["constant", "constant", "constant", "constant", "constant", "constant", "constant", ' \
+                      'true, "constant", "constant", true], ["NameError", :EMPTY_NESTING], ' \
                       '["NoMethodError", :add_header_nesting], ["NameError", :EMPTY_PREFIX], [:x], ' \
                       '[{"#<Class:1:0>" => "P"}, [:a], true, "::B"]]')
   end

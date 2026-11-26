@@ -45,7 +45,8 @@ RSpec.describe Rigor::Inference::DeclarationWalk::Rules do
         unwrap_freeze_tail
       ]
     end
-    # The constants `ScopeIndexer` binds its own names to.
+    # The constants `ScopeIndexer` binds its own names to. `OBJECT_OWNER`'s binding moved with its one reader to
+    # `ScopeIndexer::ConstantTables` (#3400).
     let(:exported_constants) { %i[EMPTY_NESTING EMPTY_PREFIX INSTANCE_EVAL_CALLS OBJECT_OWNER RECEIVER_EVAL_CALLS] }
     # The list's floor: what the walk asks, and what the files outside the indexer ask.
     let(:walk_roots) do
@@ -148,9 +149,10 @@ RSpec.describe Rigor::Inference::DeclarationWalk::Rules do
 
     it "is the one object behind each name ScopeIndexer binds" do
       indexer = Rigor::Inference::ScopeIndexer
+      binder = Hash.new(indexer).merge(OBJECT_OWNER: indexer::ConstantTables)
 
       exported_constants.each do |name|
-        expect(indexer.const_get(name)).to equal(described_class.const_get(name)), name.to_s
+        expect(binder[name].const_get(name, false)).to equal(described_class.const_get(name)), name.to_s
       end
     end
   end

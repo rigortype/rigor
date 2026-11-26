@@ -764,8 +764,8 @@ module Rigor
 
       # Issue #644 — per-file PUBLICATION CENSUS: `{path => {qualified constant name => descriptor}}`, the
       # value-constant twin of {#class_declarations}. The descriptor (`[literal]` or
-      # `ScopeIndexer::CONSTANT_UNPUBLISHABLE`) is load-bearing and a bare name set is not: a name's published
-      # answer is a function of the WHOLE project's write set for it, so what a recheck has to detect is a
+      # `ScopeIndexer::ConstantTables::CONSTANT_UNPUBLISHABLE`) is load-bearing and a bare name set is not: a name's
+      # published answer is a function of the WHOLE project's write set for it, so what a recheck has to detect is a
       # change in the census — a value edit, a write becoming unpublishable, a second declarer appearing or
       # going away — not merely a name appearing.
       # {Incremental.changed_constant_publications} diffs it; the reader's `constant:` edge is recorded on
@@ -1470,8 +1470,8 @@ module Rigor
 
       # Issue #352 / ADR-17 — the `pre_eval:` CONSTANT publication pre-pass, the twin of the slice-2 patched-
       # METHOD registry the eager pre-passes already build. Walks each listed file's constant writes with the
-      # per-file pre-pass ({Inference::ScopeIndexer.build_in_source_constants}) under a project-seeded scope,
-      # widens each result to its erased class, and populates `@project_pre_eval_constants` — which
+      # per-file pre-pass ({Inference::ScopeIndexer::ConstantTables.build_in_source_constants}) under a project-seeded
+      # scope, widens each result to its erased class, and populates `@project_pre_eval_constants` — which
       # `project_scope_seed_tables` then seeds onto every per-file scope, so `TIMEOUT = 30` in a listed file
       # reads as `Integer` instead of `Dynamic[top]` in its consumers. The widening + multi-file conflict rules
       # live in {Inference::PreEvalConstants}.

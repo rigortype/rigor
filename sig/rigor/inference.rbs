@@ -418,7 +418,6 @@ module Rigor
     module ScopeIndexer
       def self?.index: (untyped root, default_scope: Scope) -> Hash[untyped, Scope]
       def self?.build_declaration_artifacts: (untyped root) -> [Hash[untyped, Type::t], Hash[String, Type::t]]
-      def self?.build_in_source_constants: (untyped root, Scope default_scope) -> Hash[String, Type::t]
       def self?.record_declarations: (untyped node, Array[String] qualified_prefix, Hash[untyped, Type::t] identity_table, Hash[String, Type::t] discovered) -> void
       def self?.discovered_classes_for_paths: (Array[String] paths, ?buffer: untyped) -> Hash[String, Type::t]
       def self?.discovered_def_index_for_paths: (Array[String] paths, ?buffer: untyped) -> Hash[Symbol, untyped]
@@ -426,8 +425,6 @@ module Rigor
       def self?.code_fingerprint: (String source, untyped comments) -> String
       def self?.discovered_project_index_for_paths: (Array[String] paths, ?buffer: untyped) -> Hash[Symbol, untyped]
       def self?.discovered_project_index_incremental: (Array[String] paths, seed_bundles: Hash[String, untyped], ?buffer: untyped) -> Hash[Symbol, untyped]
-      def self?.constant_writes_for_file: (untyped root) -> Hash[String, untyped]
-      def self?.constant_literal_value: (untyped rvalue) -> Array[untyped]?
       # authored: the `Set[String]` values are source paths by contract; a Set's element type stays `untyped` in sig-gen (#2177, #2317), so the generator
       # would never propose it.
       def self?.finalize_constant_writes: (Hash[String, Hash[String, untyped]] writes) -> [Hash[String, Type::Constant], Hash[String, Set[String]]]
@@ -435,6 +432,12 @@ module Rigor
 
       module ClassDeclarations
         def self?.collect_class_decls: (untyped node, Array[String] qualified_prefix, Hash[String, Type::t] accumulator, ?untyped compacts, ?untyped self_prefix, ?singleton_cref: untyped) -> void
+      end
+
+      module ConstantTables
+        def self?.build_in_source_constants: (untyped root, Scope default_scope) -> Hash[String, Type::t]
+        def self?.constant_writes_for_file: (untyped root) -> Hash[String, untyped]
+        def self?.constant_literal_value: (untyped rvalue) -> Array[untyped]?
       end
 
       class LayeredDefNestings

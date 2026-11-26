@@ -927,6 +927,15 @@ RSpec.describe Rigor::Inference::ScopeIndexer::ClassIvarIndex do
       expect(seeds(setup, declared)).to eq("FooTest" => { :@conn => "1" })
     end
 
+    # #3419 — unlike `initialize`, a declared initializer may run after code that sets the ivar it reads.
+    it "takes no evidence from a declared initializer's own reads" do
+      declared = plugin_scope(additional_initializers: [initializer(receiver_constraint: "FooTest", methods: [:setup])])
+      source = "class FooTest\ndef setup; @db.x; end\ndef connect; @db = 1; end\nend\n"
+
+      expect(seeds(source, declared)).to eq("FooTest" => { :@db => "1" })
+      expect(seeds(source)).to eq("FooTest" => { :@db => "1?" })
+    end
+
     it "keeps it when the entry names another method or another class" do
       other_method = initializer(receiver_constraint: "FooTest", methods: [:other])
       other_class = initializer(receiver_constraint: "String", methods: [:setup])

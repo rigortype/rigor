@@ -280,7 +280,7 @@ Requirements and controls:
 The server serves only the skills' `SKILL.md` and `references/*.md`
 files, each with the SHA-256 digest and size the client checks before
 using it. The binding contract is the internal spec,
-[`docs/internal-spec/mcp.md`](https://github.com/rigortype/rigor/blob/master/docs/internal-spec/mcp.md).
+[`docs/internal-spec/mcp.md`](../internal-spec/mcp.md).
 
 ## Tool reference
 

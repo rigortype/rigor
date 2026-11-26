@@ -343,7 +343,7 @@ module Rigor
       # Other methods read no `params` beyond `_meta`, and keep ignoring them.
       def tools_call(id, params)
         params = {} if params.nil?
-        return error(id, INVALID_PARAMS, "Invalid params: tools/call params must be an object") unless params.is_a?(Hash)
+        return error(id, INVALID_PARAMS, "Invalid params: tools/call params is not an object") unless params.is_a?(Hash)
 
         call_tool(id, params["name"], params["arguments"] || {})
       end

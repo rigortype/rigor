@@ -1,4 +1,4 @@
-# Slice 2 of #3400 moves the constant tables as one module, `ConstantTables`, behind four functions, takes `CONSTANT_UNPUBLISHABLE` and the binding of `OBJECT_OWNER` with it, leaves `in_effect_refinements.rb` unrequired, keeps `index`'s method-length directive, and accepts two expressions that read `Dynamic` in the self-typing scan
+# Slice 2 of #3400 moves the constant tables as one module, `ConstantTables`, behind four functions, takes `CONSTANT_UNPUBLISHABLE` and the binding of `OBJECT_OWNER` with it, leaves `in_effect_refinements.rb` unrequired, keeps `index`'s method-length directive, and accepts three expressions that read `Dynamic` in the self-typing scan
 
 - **PR:** [#3406](https://github.com/rigortype/rigor/pull/3406)
 - **Issue:** [#3400](https://github.com/rigortype/rigor/issues/3400)
@@ -97,12 +97,15 @@ keep the lines it had (11 characters or fewer for this one), or a local the base
 `SharedWalkTables`, `NodePropagation` and `DeclarationWalk::Rules`: the code keeps the shape the move gives
 it.
 
-**The ratchet.** No call site changes tier. Two expressions of `dynamic_target_key` do: the read of
-`DYNAMIC_TARGET_PREFIX` and the interpolation that holds it read `constant` at the base and `Dynamic[top]` at
-the head. `DYNAMIC_TARGET_PREFIX` is a String constant of `scope_indexer.rb`, which two files outside the
-indexer and one function that stays read, so it stays there; and the constant publication rule publishes no
-String across files (only a Symbol, an Integer, a Float, `true` and `false`), so a read of it from another
-file is `Dynamic[top]`. The function still types `String`, and its three callers read `nominal` on both sides.
+**The ratchet.** No call site changes tier. Three expressions read `Dynamic[top]` at the head that did not at
+the base: 15,728 → 15,731 over the nine files the slice touched. One is new, the `module Rigor` wrapper of
+`constant_tables.rb`, which reads `Dynamic[top]` as the wrapper of six of the other eight files does. Two
+expressions of `dynamic_target_key` change tier: the read of `DYNAMIC_TARGET_PREFIX` and the interpolation that
+holds it read `constant` at the base and `Dynamic[top]` at the head. `DYNAMIC_TARGET_PREFIX` is a String
+constant of `scope_indexer.rb`, which two files outside the indexer and one function that stays read, so it
+stays there; and the constant publication rule publishes no String across files (only a Symbol, an Integer, a
+Float, `true` and `false`), so a read of it from another file is `Dynamic[top]`. The function still types
+`String`, and its three callers read `nominal` on both sides.
 [#3392](https://github.com/rigortype/rigor/issues/3392) tracks a constant bound to another file's frozen Array
 or String; whether its landing covers a direct read was not traced.
 
@@ -120,7 +123,7 @@ One module, `ScopeIndexer::ConstantTables`, in `scope_indexer/constant_tables.rb
 another file calls and keeps 36 private. The four constants only it read move with it, `OBJECT_OWNER`'s
 binding among them, and `rules_spec.rb` follows that binding. The file requires what it names apart from
 `in_effect_refinements.rb`. `index` keeps its directive at 33 lines, the module carries a
-`Metrics/ModuleLength` directive, and the two expressions are accepted with no pin of
+`Metrics/ModuleLength` directive, and the three expressions are accepted with no pin of
 `tool/coverage_ratchet.yml` touched.
 
 The precedent for each is the amendment and the slices landed under it. The amendment moves a cluster "whole,
@@ -146,8 +149,8 @@ of `producers.yml` (six grandfathered keys, so the pin's digest moves again) and
 on `ScopeIndexer`, move the statement and its `private_constant` line; the module reads the name lexically
 with no other change, and for `OBJECT_OWNER` the example of `rules_spec.rb` goes back to asking `ScopeIndexer`
 alone. To require `in_effect_refinements.rb`, first make it require `scope.rb`. To take the directive off
-`index`, bring its three statements back within 30 lines. To win the two expressions back, widen the constant
-publication rule to a frozen String, or move `DYNAMIC_TARGET_PREFIX` when WD10 settles what stays in
-`ScopeIndexer`.
+`index`, bring its three statements back within 30 lines. To win the two expressions of `dynamic_target_key`
+back, widen the constant publication rule to a frozen String, or move `DYNAMIC_TARGET_PREFIX` when WD10
+settles what stays in `ScopeIndexer`; the wrapper's reading goes only with the file.
 Nothing outside this pull request depends on any of these yet; the next slice of #3400 reads `index` at 33
 lines and `SharedWalkTables` at one call back.

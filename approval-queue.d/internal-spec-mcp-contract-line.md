@@ -1,6 +1,6 @@
 # The binding MCP page makes the CLI-equivalence of a tool call, the fixed first content block and per-request era selection contract, and leaves message texts, `ttlMs`'s value, the tool surface's compatibility status and argument checking beyond three tools out of it
 
-- **PR:** [#PRNUM](https://github.com/rigortype/rigor/pull/PRNUM)
+- **PR:** [#3414](https://github.com/rigortype/rigor/pull/3414)
 - **Issue:** [#3402](https://github.com/rigortype/rigor/issues/3402)
 - **Class:** open-choice
 - **Precedent:** [ADR-5](../docs/adr/5-robustness-principle.md)

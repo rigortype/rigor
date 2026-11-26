@@ -1,6 +1,6 @@
 # `isError` is true for exit 64 or 70, or any non-zero exit with no stdout, as the code does, and ADR-33 WD6 now points at that rule instead of naming exit 64 alone
 
-- **PR:** [#PRNUM](https://github.com/rigortype/rigor/pull/PRNUM)
+- **PR:** [#3414](https://github.com/rigortype/rigor/pull/3414)
 - **Issue:** [#3402](https://github.com/rigortype/rigor/issues/3402)
 - **Class:** open-choice
 - **Precedent:** [ADR-33](../docs/adr/33-mcp-server.md)

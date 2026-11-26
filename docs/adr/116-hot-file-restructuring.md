@@ -15,8 +15,8 @@ with WD12's interface, the first of those designs: the call-typing order as one 
 ([below](#amendment-2026-11-19--wd12s-interface-3345)). **Amended 2026-11-25** with WD9's interface and
 how far WD10 goes before WD2
 ([below](#amendment-2026-11-25--wd9s-interface-and-how-far-wd10-goes-before-wd2-3346)). WD9 has
-landed (#3390, with the collector moves of #3389–#3397). **Re-measured 2026-11-26**: every cluster
-left in `scope_indexer.rb`, with its reason
+landed (the slices of #3387–#3397). **Re-measured 2026-11-26**: every cluster left in
+`scope_indexer.rb`, with its reason
 ([below](#re-measure-2026-11-26--what-is-left-in-the-file)).
 
 Grounding: [`docs/notes/20260923-hot-file-churn-audit.md`](../notes/20260923-hot-file-churn-audit.md)
@@ -862,48 +862,53 @@ function's name as a Hash key; they are not edges.
 - *A row.* Its entries are chosen: a table's builder, or, for a row that is a library, each
   function another row calls. Its members follow from the graph: the entries, and every function
   they dominate (each call path to it from another row's entry passes through one of this row's).
-  The 23 rows hold each of the 619 functions once.
+  The 23 rows hold each of the 619 functions once. A nested class, or a constant whose value has
+  a body (`MethodTables` is a `Struct` with one), counts with the one row that reads it, and so do
+  the calls its methods make on the module.
 - *Calls back* counts the distinct functions of other rows that a row calls. A call on a module
   that has left the file is not one.
 - *Lines* counts a row's functions with the comments above them, and the constants and nested
-  classes only that row reads. The rows hold 10,998 of the 11,173 lines. Of the rest, 99 are the
-  file's frame (its requires, header comment, `module_function` and closing lines), and 76 are 15
-  constants and the `HookBlockSpans` module, which more than one row reads.
+  classes only that row reads. The seven constants WD10 keeps count with the first row, whichever
+  rows read them. The rows hold 11,000 of the 11,173 lines. Of the rest, 99 are the file's frame
+  (its requires, header comment, `module_function` and closing lines), and 74 are 15 constants and
+  the `HookBlockSpans` module: more than one row reads each, except `EMPTY_NESTING`, which only
+  modules that have left read.
 - *Callers* in other files are calls on `ScopeIndexer` under `lib/`.
 
 A *candidate* meets the cut-off behind few entries. This section commits to none: each is a slice
-of its own, under "Every slice" above.
+of its own, under "Every slice" above. [#3400](https://github.com/rigortype/rigor/issues/3400)
+holds the candidate moves and the deletion in the last row.
 
 | Cluster | Functions · lines of code · lines | Calls back | Callers | Why it stays, or what would move it |
 | --- | --- | --- | --- | --- |
-| `index`, `recording_evaluator`, `seed_struct_fold_safe` and the three delegators to `NodePropagation` | 6 · 54 · 165 | 8: the builders and merges it runs | 16 files (`index`), `statement_evaluator.rb` (`refined_class_name`) | **WD10.** The per-node scope index keeps the name. The node-class lists `NodePropagation` reads lexically and the constants other files read (`TOP_LEVEL_DEF_KEY`, `DYNAMIC_TARGET_PREFIX`, `CONSTANT_MEMO`, `EMPTY_PATH_SET`) stay with it. |
+| `index`, `recording_evaluator`, `seed_struct_fold_safe` and the three delegators to `NodePropagation` (`propagate`, `with_unentered_evaluator`, `refined_class_name`) | 6 · 54 · 188 | 8: the builders and merges it runs | 16 files (`index`), `statement_evaluator.rb` (`refined_class_name`) | **WD10 ([#3401](https://github.com/rigortype/rigor/issues/3401)).** The per-node scope index keeps the name. Its lines count the seven constants "WD10 keeps its place" leaves with it: the three node-class lists `NodePropagation` reads lexically, and the four other files read (`TOP_LEVEL_DEF_KEY`, `DYNAMIC_TARGET_PREFIX`, `CONSTANT_MEMO`, `EMPTY_PATH_SET`). Beyond that paragraph's list, the three delegators join what stays: `index` calls two and `StatementEvaluator` the third. |
 | The per-file merges over the seed: `seed_discovered_methods`, `merge_project_method_indexes`, `seed_constant_tables` and what only they call | 24 · 224 · 396 | 14: seven builders and seven merges | `index` (3 sites), `ConstantIvarValue` | **WD2 ([#1194](https://github.com/rigortype/rigor/issues/1194)).** WD2's "per-file-over-seed merge", which names `merge_project_method_indexes`. |
-| The cross-file fold: its cross-file entries (`discovered_project_index_for_paths`, `scan_summary_for_paths`, …), the per-file build (`accumulate_project_index`), `fold_file_index`, `finalize_def_index` with the extends fold and the compact-header renames, and the kind and contest merges | 85 · 772 · 1,367 | 18 | four files at 9 sites (`incremental_session.rb`, `runner/project_pre_passes.rb`, `project_seed_tables.rb`, `protection/discovery_seed.rb`); the per-file merges, the methods table, the declaration artifacts | **WD2 (#1194).** |
-| The header-nesting insert and merges (`add_header_nesting`, `merge_header_nestings` and six more) | 8 · 41 · 83 | 0 | the fold, the per-file merges, `SharedWalkTables` (`add_header_nesting`) | **WD2 (#1194).** [#3398](https://github.com/rigortype/rigor/issues/3398) is why the insert did not leave with U4: apart from the bucket merge it calls, it falls out of the producers list. |
+| The cross-file fold: its cross-file entries (`discovered_project_index_for_paths`, `scan_summary_for_paths`, …), the per-file build (`accumulate_project_index`), `fold_file_index`, `finalize_def_index` with the extends fold and the compact-header renames, and the kind and contest merges | 85 · 772 · 1,364 | 18 | four files at 9 sites (`incremental_session.rb`, `runner/project_pre_passes.rb`, `project_seed_tables.rb`, `protection/discovery_seed.rb`); the per-file merges, the methods table, the declaration artifacts | **WD2 (#1194).** "What was measured" counts 72 functions by closure from four roots. This row is cut by dominance from the fold's own entries: it adds the cross-file entries and the per-file build (24 functions), and leaves 11 of the 72 to the rows they are entries of (the header-nesting and refinement merges, `dynamic_target_key`, `replaced_visibility_mark`). |
+| The header-nesting insert and merges (`add_header_nesting`, `merge_header_nestings` and six more) | 8 · 41 · 83 | 0 | the fold, the per-file merges, `SharedWalkTables` (`add_header_nesting`) | **WD2 (#1194)** for the seven merges. The insert, `add_header_nesting`, is the collector's side, not WD2's. It stays for [#3398](https://github.com/rigortype/rigor/issues/3398): apart from the bucket merge it calls, it falls out of the producers list, which is why it did not leave with U4. |
 | The seed-bundle codec (`build_seed_bundle`, `bundle_to_file_index` and three more) | 5 · 73 · 134 | 0 | `discovered_project_index_incremental` | **WD2 (#1194).** |
-| The constant tables: the in-source walk (`build_in_source_constants`, 9 functions), the publication census (`constant_write_census`, 22) and the write-target rules both ask (`rebound_block_self`, `self_write_name`, …, 9) | 40 · 336 · 758 | 2: `census_body_scope`, `census_nesting`. Apart, the three call 6, 6 and 1 | `index`, the per-file merges, the fold, the mixin tables; `pre_eval_constants.rb`, `ConstantIvarValue`, `SharedWalkTables` | **Candidate**, as one module behind four entries. |
+| The constant tables: the in-source walk (`build_in_source_constants`, 9 functions), the publication census (`constant_write_census`, 22) and the write-target rules both ask (`rebound_block_self`, `self_write_name`, …, 9) | 40 · 336 · 751 | 2: `census_body_scope`, `census_nesting`. Apart, the three call 6, 6 and 1 | `index`, the per-file merges, the fold, the mixin tables; `pre_eval_constants.rb`, `ConstantIvarValue`, `SharedWalkTables` | **Candidate**, as one module behind four entries. |
 | The mutated-carrier widening (`widen_mutated_constants`, `widen_mutated_cvars`, `census_mutated_type` and four more) | 7 · 71 · 129 | 0 | `index` (2 sites), `ConstantIvarValue`, `MutatedElementCensus` (2 sites) | **Candidate.** `MutatedElementCensus` calls two of them back and is called by a third. |
 | The alias def-node pass (`apply_alias_def_nodes`), with `AliasMap` | 11 · 151 · 268 | 1: `follow_slot_writer` | `build_methods_and_def_nodes` | **Candidate.** One entry, called once. |
 | The mixin effects and taints (`mixin_effects`, the `taint_*` families, …), which the mixin and extend walks both ask | 31 · 220 · 411 | 3: `mixin_call_view`, `lexical_self_receiver?`, `opaque_mixin_argument?` | the two walks, five functions each, through eight entries | **Candidate**, alone or with the mixin tables. |
 | The declaration artifacts (`build_declaration_artifacts`) | 6 · 102 · 174 | 4: the resolver below and three of the fold's (`compact_header_renames`, `rename_compact_name`, `synthesize_namespace_prefixes`) | `index`, `pre_eval_constants.rb` | **Candidate**, at the cut-off itself. |
 | The factory-call resolver (`resolve_meta_factory_call` and two helpers) | 3 · 19 · 28 | 0 | the methods table, the declaration artifacts, `SharedWalkTables` (2 sites) | **Candidate**, small. U4 weighed taking it and left it: two of its callers have nothing to do with a member layout. |
 | The singleton-class sources (`record_singleton_class_sources`) | 4 · 31 · 52 | 2: `singleton_receiver_constant_name`, `surface_rewriting_call?` | the fold's per-file build | **Candidate**, small. |
-| The refinement readers (`refine_target`, `refine_call?`, `refinement_table`, `merge_refinement_tables`, …) | 14 · 89 · 164 | 1: `build_methods_and_def_nodes` | ten files at 21 sites; five functions of the file | **Meets the cut-off and stays.** 11 of the 14 are entries, the shape `LeafNodes` went back for (#3319). |
+| The refinement readers (`refine_target`, `refine_call?`, `refinement_table`, `merge_refinement_tables`, …) | 14 · 89 · 164 | 1: `build_methods_and_def_nodes` | ten files at 21 sites; five functions of the file and `MethodTables` | **Meets the cut-off and stays.** 11 of the 14 are entries, the shape `LeafNodes` went back for (#3319). |
 | The census scope (`census_body_scope`, `census_nesting`) | 2 · 7 · 21 | 0 | the class ivar index (4 sites), the constant tables (2), `ClassCvarCensus` (2) | **Meets the cut-off and stays** unless a slice takes it: both are entries. |
 | The class ivar index (`build_class_ivar_index`), with `MethodEffectResolver` and `BindingTargets` | 94 · 994 · 1,812 | 5: `census_body_scope`, `def_side`, `def_receiver_targets_lexical_self?`, `attr_macro`, `each_attr_macro_name` | `index` | **One over. Candidate** once its slice says which helper moves, as U4's did: it calls four when the census scope is not in the file. |
 | The mixin tables (`mixin_tables`) | 17 · 169 · 329 | 11: the eight entries of the effects and taints, `rebound_block_self`, `mixin_call_view`, `lexical_self_receiver?` | the per-file merges, the fold | **Over.** With the effects and taints: 48 functions and four calls back. |
 | The extend tables (`extend_tables`) | 34 · 359 · 590 | 20: the same eight and 12 recognisers | the per-file merges, the fold | **Over.** |
-| The methods table (`build_methods_and_def_nodes`), with `MethodTables` | 131 · 1,302 · 2,277 | 37: 30 recognisers, three of the fold's kind merges, two refinement readers, the resolver, the alias pass | the per-file merges, the fold, the refinement readers | **Over.** Leaving, it would also drop `supersede_def_nodes` from the producers list (#3398). |
+| The methods table (`build_methods_and_def_nodes`), with `MethodTables` | 131 · 1,302 · 2,271 | 44: 30 recognisers, nine refinement readers (seven of them from `MethodTables`), three of the fold's kind merges, the resolver, the alias pass | the per-file merges, the fold, the refinement readers | **Over.** Leaving, it would also drop `supersede_def_nodes` from the producers list (#3398). |
 | Singleton defs (`build_singleton_def_tables`), with `SingletonDefTable` | 13 · 198 · 329 | 11, all recognisers | the per-file merges, the fold | **Over.** |
 | The deferred ranges (`build_deferred_ranges`) | 11 · 199 · 303 | 6, all recognisers | the per-file merges, the fold | **Over.** |
 | Visibility (`build_method_visibility_tables`), with `VisibilityTable` | 33 · 436 · 759 | 11, all recognisers | the per-file merges, the fold | **Over.** |
-| The recognisers the walkers share (`literal_method_name`, `constant_receiver_candidates`, `def_side`, `mixin_call_view`, `statements_of`, …) | 38 · 239 · 440 | 0 | 96 functions of the file at 148 sites; seven files at 14 | **Stays.** 33 of the 38 are entries. The table of rejected alternatives has a module of them at 20 entries for 22. |
-| `self_singleton_class?` and `def_singleton?` | 2 · 6 · 9 | 3 | none, in `lib/`, `spec/` or `tool/` | **Nothing calls them.** A follow-up deletes them, as R1 deleted `meta_new_body_prefix`. |
+| The recognisers the walkers share (`literal_method_name`, `constant_receiver_candidates`, `def_side`, `mixin_call_view`, `statements_of`, …) | 38 · 239 · 435 | 0 | 96 functions of the file at 148 sites; seven files at 14 | **Stays.** 33 of the 38 are entries. The table of rejected alternatives has a module of them at 20 entries for 22. |
+| `self_singleton_class?` and `def_singleton?` | 2 · 6 · 9 | 3 | none, in `lib/`, `spec/` or `tool/` | **Nothing calls them.** #3400 deletes them, as R1 deleted `meta_new_body_prefix`. |
 
 **Read with the table.**
 
-- *The candidates.* The seven rows marked so are 102 functions and 1,820 lines; with the class
-  ivar index, the census scope and the mixin tables, 215 functions and 3,982 lines. Five `sig/`
+- *The candidates.* The seven rows marked so are 102 functions and 1,813 lines; with the class
+  ivar index, the census scope and the mixin tables, 215 functions and 3,975 lines. Five `sig/`
   rows are theirs (three in the constant tables, two in the declaration artifacts), and 100 rows
   of `producers.yml` name their functions, 51 of them the class ivar index's.
 - *Order.* A move lowers its neighbours' counts. With the constant tables and the resolver out,
@@ -912,10 +917,11 @@ of its own, under "Every slice" above.
 - *Over the cut-off.* The methods table, singleton defs, the deferred ranges, visibility and the
   extend tables each call between 6 and 30 of the 38 recognisers. With the recognisers, the mixin
   tables, the effects and taints and the alias pass they are 319 functions and 3,273 lines of code
-  that call back seven. A unit of that size is WD10's question, not a collector move. Two recorder
-  families in the methods table meet the cut-off without an entry of their own: the refine census
-  (19 functions, two calls back, six entries from the walker) and the hook-extend recorders (19,
-  two, five entries).
+  that call back 14: nine refinement readers, the three kind merges, the resolver and
+  `rebound_block_self`. A unit of that size is WD10's question (#3401), not a collector move. Two
+  recorder families in the methods table meet the cut-off without an entry of their own: the
+  refine census (19 functions, two calls back, six entries from the walker) and the hook-extend
+  recorders (19, two, five entries).
 - *The producers gate (#3398).* Rule (v) follows a table parameter into a writer of the same file
   only. The gate's own scan was run with the calls between one row and the rest of the file cut,
   as a file boundary would cut them. Of the file's 189 rule-(v) writers, three then leave the
@@ -926,7 +932,8 @@ of its own, under "Every slice" above.
 
 *Done when* above holds with this table: the walk names nothing of `ScopeIndexer` and `Rules`'
 public list is pinned (`spec/rigor/inference/declaration_walk/rules_spec.rb`), the six slices
-landed, and every cluster left is named, the fold and the codec as WD2's.
+landed, and every cluster left is named, the fold and the codec as WD2's. WD10 is handed on to
+#3401.
 
 ## Rejected / deferred alternatives
 

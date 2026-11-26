@@ -1529,11 +1529,8 @@ module Rigor
           when Prism::InstanceVariableWriteNode
             stmt.name == target && !nil_literal_value?(stmt.value) ? :assigned : :falls_through_unassigned
           when Prism::CallNode
-            if unconditional_call_assigns?(stmt, target, class_name, effects, depth, visiting)
-              :assigned
-            else
-              :falls_through_unassigned
-            end
+            assigns = unconditional_call_assigns?(stmt, target, class_name, effects, depth, visiting)
+            assigns ? :assigned : :falls_through_unassigned
           else
             :falls_through_unassigned
           end

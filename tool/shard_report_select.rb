@@ -30,7 +30,10 @@
 # Usage: ruby tool/shard_report_select.rb DOWNLOAD_DIR OUTPUT_DIR
 #   DOWNLOAD_DIR is download-artifact's unmerged output: one directory per artifact, or the files at its
 #   top level when only one artifact matched.
-#   OUTPUT_DIR receives the chosen `binpacker-report-<shard>.json` files for `binpacker shards-check`.
+#   OUTPUT_DIR receives the chosen `binpacker-report-<shard>.json` files for `binpacker shards-check`, and
+#   beside each the `binpacker-timings-<shard>` file that attempt wrote back, when it uploaded one, for
+#   `binpacker shards-merge`. The timing files come from the same chosen attempts as the reports, so the
+#   merge folds exactly the measurements of the partition shards-check vouched for.
 
 require "fileutils"
 require "json"
@@ -110,6 +113,8 @@ module ShardReportSelect
       end
 
       FileUtils.cp(report, File.join(output_dir, File.basename(report)))
+      timings = File.join(p.dir, "binpacker-timings-#{p.shard}")
+      FileUtils.cp(timings, File.join(output_dir, File.basename(timings))) if File.file?(timings)
     end
   end
 

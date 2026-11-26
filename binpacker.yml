@@ -18,7 +18,18 @@ profiles:
   # batches from the heaviest remaining queue. Costs a few extra
   # rspec boots per worker; a clear net win on GitHub Actions where
   # the 4-worker deviation reached 15% (65s) statically.
+  #
+  # The matrix's runners are not one machine either: the same slice, cut
+  # from the same timing file, ran 664s on one and 1208s on another
+  # (runs 45901119353 and 45907406129, shard 2). A sample taken on the
+  # slow one weighed its files heavier than their peers, and the next
+  # partition came in 36% under prediction on the shard holding them.
+  # normalize_speed records each run's samples divided by its runner's
+  # speed factor, so the history the partition is cut from stays on one
+  # scale. It cannot make a slow runner fast; it keeps one from skewing
+  # every later cut.
   ci:
     extends: default
+    normalize_speed: true
     scheduler:
       steal_enabled: true

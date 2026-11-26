@@ -386,15 +386,12 @@ jobs:
       # shard-coverage job below is what catches it when they do not. A
       # cold start (nothing resolved) skips the restore in every shard.
       #
-      # The SAVE key carries the shard index because parallel jobs cannot
-      # all save one key — the first wins and the rest warn — and the
-      # attempt so that a rerun saves fresh data instead of colliding
-      # with the key its earlier attempt already wrote.
-      #
-      # A shard's saved file stays complete rather than shrinking to its
-      # own slice: binpacker APPENDS samples and compacts to the three most
-      # recent per test, so a shard's write leaves its siblings' entries
-      # untouched.
+      # No shard saves the cache. Each writes the whole file back with only
+      # its own slice re-measured, and a cache keeps one of them, so when
+      # each shard saved its own key the next run restored one shard's
+      # measurements and the other two slices' were thrown away. The
+      # shards upload their files instead, and shard-coverage folds them
+      # into one with `binpacker shards-merge` and saves that.
       #
       # `v2` is a manual generation token, bumped to discard the history.
       # binpacker weighs a file by summing the median of every `[file, name]`
@@ -444,14 +441,13 @@ jobs:
           make test-binpacker
           BINPACKER_FLAGS="--shard ${{ matrix.shard }}/3 --report tmp/binpacker-report-${{ matrix.shard }}.json"
 
-      # Not on a merge-queue ref (#2139): the queue's throwaway ref is read by no other run, and its entry counts
-      # against the 10 GB cache budget. The restore above still reads master's timings.
-      - name: Save binpacker timing file
-        if: success() && github.event_name != 'merge_group'
-        uses: actions/cache/save@v6.1.0
-        with:
-          path: tmp/binpacker.timings
-          key: binpacker-timings-v2-${{ runner.os }}-ruby${{ matrix.ruby }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
+      # The file binpacker wrote back, under a per-shard name so the three
+      # stay apart in shard-coverage's download. Only a green shard's: a
+      # failed one's measurements are not what the cache should learn.
+      - name: Keep this shard's timing file for the merge
+        if: success()
+        shell: bash
+        run: cp tmp/binpacker.timings "tmp/binpacker-timings-${{ matrix.shard }}"
 
       # Consumed by the shard-coverage job, which is the only place a
       # partition that dropped tests can be detected. The name carries
@@ -470,6 +466,7 @@ jobs:
           path: |
             tmp/binpacker-report-${{ matrix.shard }}.json
             tmp/binpacker-provenance-${{ matrix.shard }}.json
+            tmp/binpacker-timings-${{ matrix.shard }}
           if-no-files-found: error
           retention-days: 1
 
@@ -548,9 +545,14 @@ jobs:
   #
   # Runs whenever the matrix was not outright cancelled, so a mismatch
   # still surfaces when one shard failed.
+  #
+  # It is also where the matrix's timing files become the next run's cache:
+  # the reports it vouches for and the files it merges come from the same
+  # chosen attempts (see the test job's restore step for why no shard
+  # saves its own).
   shard-coverage:
     name: Shard coverage (every test ran)
-    needs: [changes, test]
+    needs: [changes, timing-cache, test]
     runs-on: ubuntu-latest
     if: always() && needs.changes.outputs.full == 'true' && needs.changes.outputs.code == 'true' && needs.test.result != 'cancelled'
     steps:
@@ -581,6 +583,33 @@ jobs:
 
       - name: Assert the shards covered the whole suite
         run: bundle exec binpacker shards-check selected/binpacker-report-*.json
+
+      # The file every shard restored, which the merge needs to tell, per
+      # test, which shard re-measured it. Absent on a cold start.
+      - name: Restore the timing file the shards started from
+        if: needs.test.result == 'success' && github.event_name != 'merge_group' && needs.timing-cache.outputs.key != ''
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: tmp/binpacker.timings
+          key: ${{ needs.timing-cache.outputs.key }}
+          fail-on-cache-miss: true
+
+      - name: Merge the shards' timing files
+        if: needs.test.result == 'success' && github.event_name != 'merge_group'
+        shell: bash
+        run: |
+          base=()
+          [[ -f tmp/binpacker.timings ]] && base=(--base tmp/binpacker.timings)
+          bundle exec binpacker shards-merge "${base[@]}" --output tmp/binpacker.timings selected/binpacker-timings-*
+
+      # Not on a merge-queue ref (#2139): the queue's throwaway ref is read by no other run, and its entry counts
+      # against the 10 GB cache budget. The test job's restore still reads master's timings.
+      - name: Save the merged timing file
+        if: needs.test.result == 'success' && github.event_name != 'merge_group'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: tmp/binpacker.timings
+          key: binpacker-timings-v2-${{ runner.os }}-ruby4.0-${{ github.run_id }}-${{ github.run_attempt }}-merged
 
   # ── 2. RBS compatibility (3.x + 4.x) ────────────────────────────
   rbs-compat:

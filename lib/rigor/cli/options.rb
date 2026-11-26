@@ -52,6 +52,8 @@ module Rigor
       # `--config` given, is not affected.
       def config_path(value)
         raise ConfigurationError, "empty config path" if value.strip.empty?
+        # Only an MCP `config` argument can carry a NUL, which `File.directory?` raises on (#3413).
+        raise ConfigurationError, "config file not found: #{value.inspect}" if value.include?("\0")
         raise ConfigurationError, "config path is a directory: #{value}" if File.directory?(value)
         raise ConfigurationError, "config file not found: #{value}" unless File.exist?(value)
         raise ConfigurationError, "config file not readable: #{value}" unless File.readable?(value)

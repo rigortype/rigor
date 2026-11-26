@@ -175,10 +175,43 @@ Or add directly to Cline's `cline_mcp_settings.json`:
 
 ### Generic / custom MCP client
 
-`rigor mcp` speaks the [MCP stdio transport](https://spec.modelcontextprotocol.io/specification/basic/transports/#stdio):
+`rigor mcp` speaks the [MCP stdio transport](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/stdio):
 one JSON-RPC 2.0 message per line, `\n`-terminated, no
 `Content-Length` framing. Any client that follows this convention
-works. The initialization sequence:
+works.
+
+The server speaks two protocol eras and picks one per request, from
+the request alone:
+
+- **Revision 2026-07-28** (stateless). There is no handshake. Every
+  request carries `params._meta["io.modelcontextprotocol/protocolVersion"]`
+  and `params._meta["io.modelcontextprotocol/clientCapabilities"]`, and
+  every result carries `resultType: "complete"`. `server/discover`
+  returns the supported versions (`["2026-07-28"]`), the capabilities,
+  and the server info under `_meta["io.modelcontextprotocol/serverInfo"]`.
+  Every result also carries the server info under that `_meta` key.
+  A version the server does not speak gets error `-32022` with
+  `data.supported` and `data.requested`; `server/discover` without a
+  version, or a versioned request without `clientCapabilities`, gets
+  `-32602`. Claude Code probes with
+  `server/discover` first and falls back to the legacy handshake when
+  the answer does not come in time. A launch that boots slowly, such as
+  one wrapped in `nix develop`, can land on the legacy protocol; the
+  tools work the same on either.
+- **Legacy** (`initialize`, answered with `2024-11-05`). Any other
+  request without the `_meta` version field is answered exactly as
+  before this revision existed, so older clients see no change.
+
+A 2026-07-28 exchange:
+
+```
+→  {"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}
+←  {"jsonrpc":"2.0","id":1,"result":{"resultType":"complete","supportedVersions":["2026-07-28"],"capabilities":{"tools":{"listChanged":false}},"ttlMs":3600000,"cacheScope":"public","_meta":{"io.modelcontextprotocol/serverInfo":{"name":"rigor","version":"0.2.1"}}}}
+→  {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}
+←  {"jsonrpc":"2.0","id":2,"result":{"resultType":"complete","tools":[...],"ttlMs":3600000,"cacheScope":"public","_meta":{"io.modelcontextprotocol/serverInfo":{"name":"rigor","version":"0.2.1"}}}}
+```
+
+The legacy initialization sequence:
 
 ```
 →  {"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"my-agent","version":"1.0"}}}

@@ -11,7 +11,30 @@ module Rigor
     # require no reply). Tool implementations delegate to `CLI.new(argv, out:, err:).run` with StringIO capture — every
     # tool stays in sync with its CLI counterpart automatically (ADR-33 WD4).
     class Server # rubocop:disable Metrics/ClassLength
+      # The revision a legacy client (one that opens with `initialize`) is answered with. Kept at the revision this
+      # server was first written to: nothing it serves needs a later legacy revision (ADR-33 WD9).
       PROTOCOL_VERSION = "2024-11-05"
+
+      # The stateless revisions (ADR-33 WD9): a request carrying `params._meta[PROTOCOL_VERSION_KEY]` is handled by
+      # these rules, one request at a time, with no handshake before it.
+      SUPPORTED_VERSIONS = ["2026-07-28"].freeze
+      PROTOCOL_VERSION_KEY = "io.modelcontextprotocol/protocolVersion"
+      CLIENT_CAPABILITIES_KEY = "io.modelcontextprotocol/clientCapabilities"
+      SERVER_INFO_KEY = "io.modelcontextprotocol/serverInfo"
+
+      # `server/discover`'s `capabilities.extensions`. Empty until an extension is served; the Skills extension
+      # (`io.modelcontextprotocol/skills`, #3402) is added here.
+      EXTENSIONS = {}.freeze
+
+      # How long a client may cache `server/discover` and `tools/list`. Neither changes while the process runs, so the
+      # number only bounds how stale a cache that outlives a `rigor` upgrade can be. Nothing in either is per-user.
+      CACHE_TTL_MS = 3_600_000
+      CACHE_SCOPE = "public"
+
+      # JSON-RPC error codes the 2026-07-28 revision defines (-32020..-32099 are MCP's).
+      UNSUPPORTED_PROTOCOL_VERSION = -32_022
+      INVALID_PARAMS = -32_602
+      METHOD_NOT_FOUND = -32_601
 
       TOOLS = [
         {
@@ -165,23 +188,21 @@ module Rigor
       end
 
       # Dispatches a parsed JSON-RPC request hash. Returns nil for notifications (requests without an `id`).
+      #
+      # The era is read from each request, never from an earlier one (ADR-33 WD9): a request whose `params._meta` names
+      # a protocol version, and every `server/discover`, is answered by the 2026-07-28 rules; `initialize`, and
+      # anything else without that field, is the legacy protocol, answered exactly as before.
       def handle(request)
         id = request["id"]
-        method_name = request["method"]
 
         # A notification carries no `id` and requires no response.
         return nil if id.nil?
 
-        case method_name
-        when "initialize"  then handle_initialize(id)
-        when "ping"        then success(id, {})
-        when "tools/list"  then success(id, { tools: TOOLS })
-        when "tools/call"
-          call_tool(id,
-                    request.dig("params", "name"),
-                    request.dig("params", "arguments") || {})
+        meta = request_meta(request)
+        if modern?(request["method"], meta)
+          handle_modern(id, request, meta)
         else
-          error(id, -32_601, "Method not found: #{method_name.inspect}")
+          handle_legacy(id, request)
         end
       end
 
@@ -192,6 +213,90 @@ module Rigor
       SHAPE_NOTICE_TOOLS = %w[rigor_type_of rigor_explain].freeze
 
       private
+
+      def handle_legacy(id, request)
+        method_name = request["method"]
+        case method_name
+        when "initialize"  then handle_initialize(id)
+        when "ping"        then success(id, {})
+        when "tools/list"  then success(id, { tools: TOOLS })
+        when "tools/call"  then call_tool(id, request.dig("params", "name"), request.dig("params", "arguments") || {})
+        else method_not_found(id, method_name)
+        end
+      end
+
+      def handle_modern(id, request, meta)
+        refusal = modern_refusal(id, meta)
+        return refusal if refusal
+
+        method_name = request["method"]
+        case method_name
+        when "server/discover" then success(id, complete(discover_result))
+        # The revision drops `ping`; answering it costs nothing and keeps a client that still sends one connected.
+        when "ping"            then success(id, complete({}))
+        when "tools/list"      then success(id, complete(cacheable({ tools: TOOLS })))
+        when "tools/call"
+          response = call_tool(id, request.dig("params", "name"), request.dig("params", "arguments") || {})
+          response.key?("result") ? success(id, complete(response["result"])) : response
+        else method_not_found(id, method_name)
+        end
+      end
+
+      # The two `_meta` fields every 2026-07-28 request carries. A version this server does not speak is refused with
+      # the versions it does, so the client can retry with one of them.
+      def modern_refusal(id, meta)
+        version = meta[PROTOCOL_VERSION_KEY]
+        unless version.is_a?(String)
+          return error(id, INVALID_PARAMS, "Missing required params._meta[#{PROTOCOL_VERSION_KEY.inspect}]")
+        end
+        unless SUPPORTED_VERSIONS.include?(version)
+          return error(id, UNSUPPORTED_PROTOCOL_VERSION, "Unsupported protocol version",
+                       data: { supported: SUPPORTED_VERSIONS, requested: version })
+        end
+        return nil if meta[CLIENT_CAPABILITIES_KEY].is_a?(Hash)
+
+        error(id, INVALID_PARAMS, "Missing required params._meta[#{CLIENT_CAPABILITIES_KEY.inspect}]")
+      end
+
+      def discover_result
+        capabilities = { tools: { listChanged: false } }
+        capabilities[:extensions] = EXTENSIONS unless EXTENSIONS.empty?
+        {
+          supportedVersions: SUPPORTED_VERSIONS,
+          capabilities: capabilities
+        }.then { cacheable(it) }
+      end
+
+      def cacheable(result)
+        result.merge(ttlMs: CACHE_TTL_MS, cacheScope: CACHE_SCOPE)
+      end
+
+      def modern?(method_name, meta)
+        return false if method_name == "initialize"
+
+        method_name == "server/discover" || meta.key?(PROTOCOL_VERSION_KEY)
+      end
+
+      # Every 2026-07-28 result is complete, and carries the server info the revision asks each result for, beside any
+      # `_meta` the result already has (results here use symbol keys).
+      def complete(result)
+        { resultType: "complete" }.merge(result, _meta: server_info_meta.merge(result.fetch(:_meta, {})))
+      end
+
+      def server_info_meta
+        require_relative "../version"
+        { SERVER_INFO_KEY => { name: "rigor", version: Rigor::VERSION } }
+      end
+
+      def request_meta(request)
+        params = request["params"]
+        meta = params["_meta"] if params.is_a?(Hash)
+        meta.is_a?(Hash) ? meta : {}
+      end
+
+      def method_not_found(id, method_name)
+        error(id, METHOD_NOT_FOUND, "Method not found: #{method_name.inspect}")
+      end
 
       def finish_tool_result(name, args, out, err, exit_code)
         result = with_config_warnings(tool_result(out, err, exit_code), name, args, out)
@@ -228,7 +333,7 @@ module Rigor
 
       def call_tool(id, name, args)
         argv = build_argv(name, args)
-        return error(id, -32_602, "Unknown tool: #{name.inspect}") unless argv
+        return error(id, INVALID_PARAMS, "Unknown tool: #{name.inspect}") unless argv
 
         out_io = StringIO.new
         err_io = StringIO.new
@@ -373,8 +478,10 @@ module Rigor
         { "jsonrpc" => "2.0", "id" => id, "result" => result }
       end
 
-      def error(id, code, message)
-        { "jsonrpc" => "2.0", "id" => id, "error" => { "code" => code, "message" => message } }
+      def error(id, code, message, data: nil)
+        body = { "code" => code, "message" => message }
+        body["data"] = data if data
+        { "jsonrpc" => "2.0", "id" => id, "error" => body }
       end
     end
   end

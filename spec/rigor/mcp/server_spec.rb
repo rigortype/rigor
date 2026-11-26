@@ -95,6 +95,134 @@ RSpec.describe Rigor::MCP::Server do
     end
   end
 
+  # ------------------------------------------------------------------ #
+  # Revision 2026-07-28 (ADR-33 WD9): no handshake; each request names its version and the client's capabilities in
+  # `params._meta`, and each result says it is complete. Only `server.handle` runs — no CLI boot except the one
+  # tools/call example.
+  # ------------------------------------------------------------------ #
+
+  describe "revision 2026-07-28" do
+    let(:modern_meta) do
+      {
+        "io.modelcontextprotocol/protocolVersion" => "2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities" => {}
+      }
+    end
+
+    def modern(method, params = {}, meta: modern_meta)
+      request(id: "m1", method: method, params: params.merge("_meta" => meta))
+    end
+
+    it "answers server/discover with its versions, capabilities, server info and cache hints" do
+      result = modern("server/discover").fetch("result")
+
+      expect(result).to include(
+        "resultType" => "complete",
+        "supportedVersions" => ["2026-07-28"],
+        "ttlMs" => described_class::CACHE_TTL_MS,
+        "cacheScope" => "public"
+      )
+      expect(result["capabilities"]).to eq({ "tools" => { "listChanged" => false } })
+      expect(result.dig("_meta", "io.modelcontextprotocol/serverInfo"))
+        .to eq({ "name" => "rigor", "version" => Rigor::VERSION })
+    end
+
+    it "marks tools/list complete and cacheable, with the same tools the legacy list has" do
+      result = modern("tools/list").fetch("result")
+
+      expect(result).to include("resultType" => "complete", "ttlMs" => described_class::CACHE_TTL_MS,
+                                "cacheScope" => "public")
+      expect(result.dig("_meta", "io.modelcontextprotocol/serverInfo", "name")).to eq("rigor")
+      expect(result["tools"]).to eq(request(id: 2, method: "tools/list").dig("result", "tools"))
+    end
+
+    it "marks a tools/call result complete and keeps the tool's content" do
+      result = modern("tools/call", { "name" => "rigor_explain", "arguments" => { "rule" => "call.undefined-method" } })
+               .fetch("result")
+
+      expect(result["resultType"]).to eq("complete")
+      expect(result.dig("_meta", "io.modelcontextprotocol/serverInfo", "name")).to eq("rigor")
+      expect(result["isError"]).to be(false)
+      expect(result.dig("content", 0, "text")).to include("call.undefined-method")
+    end
+
+    it "keeps an unknown tool a -32602 error, with no result" do
+      resp = modern("tools/call", { "name" => "rigor_nonexistent" })
+
+      expect(resp["result"]).to be_nil
+      expect(resp.dig("error", "code")).to eq(-32_602)
+    end
+
+    it "keeps a result's own _meta beside the server info" do
+      result = server.send(:complete, { _meta: { "x" => 1 } })
+
+      expect(result[:_meta]).to include("x" => 1, "io.modelcontextprotocol/serverInfo" => hash_including(name: "rigor"))
+    end
+
+    it "still answers ping, which the revision dropped" do
+      expect(modern("ping")["result"]).to include("resultType" => "complete")
+    end
+
+    it "refuses an unsupported version with -32022, naming the supported and requested versions" do
+      resp = modern("tools/list", meta: modern_meta.merge("io.modelcontextprotocol/protocolVersion" => "1900-01-01"))
+
+      expect(resp["error"]).to include("code" => -32_022)
+      expect(resp.dig("error", "data")).to eq({ "supported" => ["2026-07-28"], "requested" => "1900-01-01" })
+    end
+
+    it "refuses a request without clientCapabilities with -32602" do
+      resp = modern("tools/list", meta: modern_meta.except("io.modelcontextprotocol/clientCapabilities"))
+
+      expect(resp.dig("error", "code")).to eq(-32_602)
+      expect(resp.dig("error", "message")).to include("clientCapabilities")
+    end
+
+    it "refuses server/discover without a protocol version with -32602" do
+      resp = request(id: 3, method: "server/discover")
+
+      expect(resp.dig("error", "code")).to eq(-32_602)
+      expect(resp.dig("error", "message")).to include("protocolVersion")
+    end
+
+    it "refuses a non-string protocol version with -32602" do
+      resp = modern("tools/list", meta: modern_meta.merge("io.modelcontextprotocol/protocolVersion" => 20_260_728))
+
+      expect(resp.dig("error", "code")).to eq(-32_602)
+    end
+
+    it "answers an unknown method with -32601" do
+      expect(modern("tools/nope").dig("error", "code")).to eq(-32_601)
+    end
+
+    it "answers initialize by the legacy handshake even when _meta names the new version" do
+      result = modern("initialize").fetch("result")
+
+      expect(result["protocolVersion"]).to eq(described_class::PROTOCOL_VERSION)
+      expect(result).not_to have_key("resultType")
+    end
+
+    it "holds no era across requests: a legacy request after a modern one is answered the legacy way" do
+      modern("server/discover")
+
+      expect(request(id: 4, method: "tools/list")["result"]).not_to have_key("resultType")
+      expect(request(id: 5, method: "ping")["result"]).to eq({})
+    end
+
+    it "treats a request whose _meta names no protocol version as legacy, clientCapabilities or not" do
+      resp = request(id: 7, method: "tools/list",
+                     params: { "_meta" => { "io.modelcontextprotocol/clientCapabilities" => {} } })
+
+      expect(resp["error"]).to be_nil
+      expect(resp["result"]).not_to have_key("resultType")
+    end
+
+    it "treats a legacy request whose _meta carries only a progress token as legacy" do
+      resp = request(id: 6, method: "tools/list", params: { "_meta" => { "progressToken" => 1 } })
+
+      expect(resp["result"]).not_to have_key("resultType")
+    end
+  end
+
   # Catalogue-only: no file I/O, so this block stays fast.
   describe "rigor_explain" do
     it "returns a JSON catalog entry for a known rule" do

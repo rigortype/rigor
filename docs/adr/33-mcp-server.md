@@ -19,9 +19,11 @@ Cline, etc.) call Rigor tools directly — `rigor_check` before suggesting a ref
 LSP and MCP serve different consumers (editors vs. AI agents) and do not overlap.
 
 MCP uses JSON-RPC 2.0 over a newline-delimited JSON stdio stream.  The protocol surface
-is significantly simpler than LSP: there are no capabilities-negotiation round-trips, no
-per-file buffer tables, and no async push notifications.  An MCP server is essentially a
-function dispatcher: `tools/list` → list available tools; `tools/call` → call one.
+is significantly simpler than LSP: there are no per-file buffer tables and no async push
+notifications.  An MCP server is essentially a function dispatcher: `tools/list` → list
+available tools; `tools/call` → call one.  The one negotiation step is the version and
+capabilities exchange — a legacy `initialize` handshake, or, from revision 2026-07-28, the
+`_meta` fields every request carries and the `server/discover` call (WD9).
 
 ## Decision
 
@@ -102,6 +104,51 @@ individual tool call does not supply its own `config` argument.  Mirrors `rigor 
 Parallel to `HANDLERS["lsp"]` in `CLI::HANDLERS`.  The entry point is
 `lib/rigor/cli/mcp_command.rb`; the server logic lives under `lib/rigor/mcp/`.
 
+### WD9 — Dual-era protocol: 2026-07-28 per request, `initialize` for legacy clients
+
+> Added 2026-11-26 ([#3402](https://github.com/rigortype/rigor/issues/3402), slice 1).
+
+Revision [2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning)
+removes the `initialize` handshake: every request carries
+`params._meta["io.modelcontextprotocol/protocolVersion"]` and
+`["io.modelcontextprotocol/clientCapabilities"]`, a server must answer `server/discover`, and
+every result carries `resultType`.  The MCP Skills extension (#3402's later slices) exists only
+on this revision, and Claude Code asks stdio servers for this revision by default
+([code.claude.com/docs/en/mcp](https://code.claude.com/docs/en/mcp)).  Legacy clients still
+open with `initialize`.
+
+`rigor mcp` serves both eras, and picks one **per request, from that request alone**:
+
+- `server/discover`, or any request other than `initialize` whose `_meta` names a protocol
+  version, takes the 2026-07-28 rules.  The version must be one of `SUPPORTED_VERSIONS`
+  (`["2026-07-28"]`) or the request gets `-32022` with `data.supported` / `data.requested`; a
+  missing or non-string version, or missing `clientCapabilities`, gets `-32602`.  Results gain
+  `resultType: "complete"` and `_meta["io.modelcontextprotocol/serverInfo"]`, which the
+  revision asks of every result; `server/discover` and `tools/list` carry `ttlMs` and
+  `cacheScope: "public"` (both are fixed for the process's life and identical for every user).
+- Everything else, `initialize` included, is the legacy protocol, byte-for-byte as before.
+
+Rationale:
+
+- **No era state.**  The spec says a dual-era server's `initialize` selects legacy semantics
+  "scoped to the stdio process", without requiring a modern request after it to fail.  Reading
+  the era off each request keeps the server as stateless as WD7 left it (the session `--config`
+  default is still the only process state) and cannot misroute a request because of an earlier
+  one.  No legacy revision sets `io.modelcontextprotocol/protocolVersion` in `_meta`, so
+  the version field separates the eras without guessing.
+- **The legacy reply stays `2024-11-05`.**  2025-11-25 is the newest legacy revision, and a
+  client can still reach the legacy path asking for it (Claude Code does when its
+  `server/discover` probe times out on a slow boot).  Nothing Rigor serves needs a later legacy
+  revision: no tool uses `title`, `outputSchema`, `structuredContent` or annotations.  Bumping
+  the answer would change what every legacy client sees for no capability gained.
+- **`ping` is still answered** under 2026-07-28, which dropped it (ADR-5: a client that still
+  pings stays connected).
+- **No required client capability.**  Every tool is read-only (WD5), so nothing needs
+  elicitation or sampling, and `-32021` is never sent.
+- **`capabilities.extensions` is the seam for #3402.**  `Server::EXTENSIONS` is empty, and
+  `server/discover` omits the key until a later slice adds `io.modelcontextprotocol/skills`.
+  Tasks and elicitation stay out (#3402 § "Decided against, for now").
+
 ## Rejected alternatives
 
 **Subprocess-per-call wrapper shell script** — cold-boots the engine on every
@@ -113,6 +160,11 @@ that mixing them in one entry point adds complexity for minimal gain.  Separate
 
 **Using an MCP Ruby gem** — the protocol is simple and adding a runtime dependency
 violates ADR-0.  Rejected.
+
+**Locking the era per process at the first request** (WD9) — a process that saw
+`initialize` would refuse 2026-07-28 requests, or the reverse.  The spec does not require it,
+it adds the first piece of protocol state to the server, and the per-request rule already
+answers every client correctly.  Rejected.
 
 ## Implementation slices
 

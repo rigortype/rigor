@@ -6,8 +6,11 @@ The
 `rigor mcp --transport stdio` subcommand ships a pure-Ruby JSON-RPC
 2.0 MCP server exposing seven tools — `rigor_check`, `rigor_type_of`,
 `rigor_triage`, `rigor_annotate`, `rigor_sig_gen`, `rigor_explain`,
-`rigor_coverage`. HTTP transport and per-session environment caching
-remain deferred.
+`rigor_coverage`; `rigor_lens` joined them in v0.4.4. HTTP transport and
+per-session environment caching remain deferred. What the server speaks
+and serves is specified in
+[`docs/internal-spec/mcp.md`](../internal-spec/mcp.md), which binds; this
+ADR keeps the reasons.
 
 ## Context
 
@@ -61,15 +64,9 @@ any improvement to `rigor check --format json` is immediately visible via
 
 ### WD5 — Seven read-only tools
 
-| MCP tool | Underlying command |
-|---|---|
-| `rigor_check` | `rigor check --format json --no-stats [paths]` |
-| `rigor_type_of` | `rigor type-of --format json FILE:LINE:COL` |
-| `rigor_triage` | `rigor triage --format json [paths]` |
-| `rigor_annotate` | `rigor annotate --no-color FILE` |
-| `rigor_sig_gen` | `rigor sig-gen --print --format json [paths]` |
-| `rigor_explain` | `rigor explain --format json [rule]` |
-| `rigor_coverage` | `rigor coverage --format json paths` |
+The tools and the argv each one runs are listed in
+[`mcp.md` § Tools](../internal-spec/mcp.md#tools); `rigor_lens` is the eighth,
+added after this WD.
 
 **Excluded:**
 
@@ -92,6 +89,11 @@ A `rigor check` run that finds diagnostics exits 1 — this is normal analysis o
 not an error.  `isError: true` is set only when the CLI exits with EXIT_USAGE (64),
 meaning bad arguments or a runtime failure.  AI clients can read `isError: false`
 JSON diagnostic arrays normally.
+
+The rule as implemented is wider: exit 70 (internal error), and any
+non-zero exit with nothing on stdout, are errors too, since no document
+came back. The exact rule is
+[`mcp.md` § Tool results](../internal-spec/mcp.md#tool-results).
 
 ### WD7 — Session-level `--config` default
 
@@ -120,12 +122,9 @@ open with `initialize`.
 `rigor mcp` serves both eras, and picks one **per request, from that request alone**:
 
 - `server/discover`, or any request other than `initialize` whose `_meta` names a protocol
-  version, takes the 2026-07-28 rules.  The version must be one of `SUPPORTED_VERSIONS`
-  (`["2026-07-28"]`) or the request gets `-32022` with `data.supported` / `data.requested`; a
-  missing or non-string version, or missing `clientCapabilities`, gets `-32602`.  Results gain
-  `resultType: "complete"` and `_meta["io.modelcontextprotocol/serverInfo"]`, which the
-  revision asks of every result; `server/discover` and `tools/list` carry `ttlMs` and
-  `cacheScope: "public"` (both are fixed for the process's life and identical for every user).
+  version, takes the 2026-07-28 rules: the version checks, the error codes, the result
+  envelope and the cache hints are in
+  [`mcp.md` § Protocol eras](../internal-spec/mcp.md#protocol-eras).
 - Everything else, `initialize` included, is the legacy protocol, byte-for-byte as before.
 
 Rationale:

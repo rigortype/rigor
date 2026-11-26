@@ -180,6 +180,11 @@ one JSON-RPC 2.0 message per line, `\n`-terminated, no
 `Content-Length` framing. Any client that follows this convention
 works.
 
+The binding description of everything below — the eras, methods,
+error codes, tool argv and result blocks — is
+[`docs/internal-spec/mcp.md`](../internal-spec/mcp.md); this section is
+the walkthrough.
+
 The server speaks two protocol eras and picks one per request, from
 the request alone:
 

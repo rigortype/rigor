@@ -153,6 +153,12 @@ RSpec.describe Rigor::MCP::Server do
       expect(resp.dig("error", "code")).to eq(-32_602)
     end
 
+    it "keeps a result's own _meta beside the server info" do
+      result = server.send(:complete, { _meta: { "x" => 1 } })
+
+      expect(result[:_meta]).to include("x" => 1, "io.modelcontextprotocol/serverInfo" => hash_including(name: "rigor"))
+    end
+
     it "still answers ping, which the revision dropped" do
       expect(modern("ping")["result"]).to include("resultType" => "complete")
     end

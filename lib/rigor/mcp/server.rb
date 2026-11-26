@@ -277,9 +277,10 @@ module Rigor
         method_name == "server/discover" || meta.key?(PROTOCOL_VERSION_KEY)
       end
 
-      # Every 2026-07-28 result is complete, and carries the server info the revision asks each result for.
+      # Every 2026-07-28 result is complete, and carries the server info the revision asks each result for, beside any
+      # `_meta` the result already has (results here use symbol keys).
       def complete(result)
-        { resultType: "complete" }.merge(result, _meta: server_info_meta)
+        { resultType: "complete" }.merge(result, _meta: server_info_meta.merge(result.fetch(:_meta, {})))
       end
 
       def server_info_meta

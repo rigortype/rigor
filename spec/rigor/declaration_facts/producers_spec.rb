@@ -22,7 +22,8 @@ require "yaml"
 # `Prism.const_get(:ClassNode)`, duck typing (`respond_to?(:superclass)`), a keyword spelled as a String, a constant
 # reached through a variable or `const_get`, a collector subclassed through a variable or `Class.new`, or rule (v)'s
 # writes outside the files `DeclarationWriterScan::SOURCES` lists, through a local alias of a parameter, through
-# `...` forwarding, into a parameter handed to a writer in another file, or from a method reached only through
+# `...` forwarding, into a parameter handed to a writer in a file that table does not list or through a call not
+# spelled on that file's module, or from a method reached only through
 # `send`, a block handed to another file, or an entry point that is neither a root of its file in that table nor
 # called from another covered file on the file's module, spelled as its full name or a trailing part of it
 # (`ScopeIndexer.x`, `Inference::ScopeIndexer.x`; an alias constant spelled otherwise is not seen). A module that
@@ -86,7 +87,11 @@ RSpec.describe "Declaration producers" do
   # `walk_singleton_superclasses`, `walk_struct_layout_meta_new?`, `walk_struct_member_layouts`,
   # `walk_superclass_declaration?`, `walk_superclass_eval_call?` and `walk_superclass_meta_new?`. None was renamed.
   # `add_header_nesting` stays where it was, and so does its key: it hands the header-nesting table to a writer in its
-  # own file, which is how rule (v) finds it.
+  # own file, which is how rule (v) finds it. Since #3398 rule (v) also follows a table handed to a writer of another
+  # listed file, so the move would now keep its row, under the new file's key.
+  # Count and digest unchanged (#3398): following a table into another listed file added one producer,
+  # `lib/rigor/inference/scope_indexer.rb#Rigor::Inference::ScopeIndexer#propagate`, recorded with a reason; no
+  # grandfathered entry moved.
   let(:grandfathered_pin) do
     { count: 366, digest: "e45f5472596e7f917befc405e2479e13b9daa72791641c4bb3a12f8feb405c27" }
   end
@@ -392,6 +397,59 @@ RSpec.describe "Declaration producers" do
 
         expect(rule_v_keys({ "lib/b.rb" => source }, table))
           .to contain_exactly("lib/b.rb#Rigor::B#enter", "lib/b.rb#Rigor::B#record")
+      end
+
+      # #3398's repro. `A#add` hands its table to `Rigor::B.merge`, a writer of another listed file, so it and
+      # `A#entry` write a table too. `Rigor::Other` names no listed module, so `far` is not followed into `B`; and
+      # a call into `B` does not make `A`'s own `merge` reachable, so `A#merge` stays unreached.
+      it "follows a table handed to a writer of another listed file, spelled on that file's module" do
+        sources = {
+          "lib/rigor/a.rb" => "module Rigor; module A; module_function; def entry(t) = add(t, 1); " \
+                              "def add(table, x) = Rigor::B.merge(table, x); def far(t) = Rigor::Other.merge(t, 1); " \
+                              "def merge(x, t) = t << x; end; end",
+          "lib/rigor/b.rb" => "module Rigor; module B; module_function; def merge(table, x) = (table[x] = 1); end; end",
+          "lib/rigor/c.rb" => "Rigor::A.entry({}); Rigor::A.far({})"
+        }
+        table = { "lib/rigor/a.rb" => { module: "Rigor::A", roots: [] },
+                  "lib/rigor/b.rb" => { module: "Rigor::B", roots: [] } }
+
+        expect(rule_v_keys(sources, table))
+          .to contain_exactly("lib/rigor/a.rb#Rigor::A#entry", "lib/rigor/a.rb#Rigor::A#add",
+                              "lib/rigor/b.rb#Rigor::B#merge")
+      end
+
+      # `Rigor::B.put` runs `B`'s own `put`, which writes nothing; `Helper#put`, a nested class's def of the same
+      # name, writes its parameter but is not what the call runs, so `A#entry` is no writer. Inside `B`'s file the rule
+      # still goes by name and lists every def of a reached name, as it did before #3398, so both `put`s are listed.
+      it "follows a call on another listed module into that module's own defs of the name only" do
+        sources = {
+          "lib/rigor/a.rb" => "module Rigor; module A; def entry(t) = Rigor::B.put(t); end; end",
+          "lib/rigor/b.rb" => "module Rigor; module B; def put(t) = t.size; " \
+                              "class Helper; def put(t) = (t[1] = 1); end; end; end",
+          "lib/rigor/c.rb" => "Rigor::A.entry({})"
+        }
+        table = { "lib/rigor/a.rb" => { module: "Rigor::A", roots: [] },
+                  "lib/rigor/b.rb" => { module: "Rigor::B", roots: [] } }
+
+        expect(rule_v_keys(sources, table))
+          .to contain_exactly("lib/rigor/b.rb#Rigor::B#put", "lib/rigor/b.rb#Rigor::B::Helper#put")
+      end
+
+      # `B#relay` writes its table only by handing it on to `D#store`, so `A#entry` writes it two files away.
+      it "follows a table through two listed files in turn" do
+        sources = {
+          "lib/rigor/a.rb" => "module Rigor; module A; def entry(t) = Rigor::B.relay(t); end; end",
+          "lib/rigor/b.rb" => "module Rigor; module B; def relay(t) = Rigor::D.store(t); end; end",
+          "lib/rigor/d.rb" => "module Rigor; module D; def store(t) = t << 1; end; end",
+          "lib/rigor/c.rb" => "Rigor::A.entry([])"
+        }
+        table = { "lib/rigor/a.rb" => { module: "Rigor::A", roots: [] },
+                  "lib/rigor/b.rb" => { module: "Rigor::B", roots: [] },
+                  "lib/rigor/d.rb" => { module: "Rigor::D", roots: [] } }
+
+        expect(rule_v_keys(sources, table))
+          .to contain_exactly("lib/rigor/a.rb#Rigor::A#entry", "lib/rigor/b.rb#Rigor::B#relay",
+                              "lib/rigor/d.rb#Rigor::D#store")
       end
 
       it "reports a root that is not a method of the module in its file" do

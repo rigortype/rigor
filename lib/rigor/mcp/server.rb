@@ -35,6 +35,8 @@ module Rigor
       UNSUPPORTED_PROTOCOL_VERSION = -32_022
       INVALID_PARAMS = -32_602
       METHOD_NOT_FOUND = -32_601
+      # JSON-RPC 2.0's own: a message that parses but is not a request object (#3411).
+      INVALID_REQUEST = -32_600
 
       TOOLS = [
         {
@@ -192,7 +194,13 @@ module Rigor
       # The era is read from each request, never from an earlier one (ADR-33 WD9): a request whose `params._meta` names
       # a protocol version, and every `server/discover`, is answered by the 2026-07-28 rules; `initialize`, and
       # anything else without that field, is the legacy protocol, answered exactly as before.
+      #
+      # A parsed line that is not a request object (a batch array, a number, a string, `true`, `false`, `null`) has no
+      # `id` to read, so it is answered `-32600` with a null `id` (JSON-RPC 2.0 § 5.1, #3411). MCP has not used batching
+      # since 2025-06-18, so a batch is refused whole.
       def handle(request)
+        return error(nil, INVALID_REQUEST, "Invalid Request: not a request object") unless request.is_a?(Hash)
+
         id = request["id"]
 
         # A notification carries no `id` and requires no response.
@@ -220,7 +228,7 @@ module Rigor
         when "initialize"  then handle_initialize(id)
         when "ping"        then success(id, {})
         when "tools/list"  then success(id, { tools: TOOLS })
-        when "tools/call"  then call_tool(id, request.dig("params", "name"), request.dig("params", "arguments") || {})
+        when "tools/call"  then tools_call(id, request["params"])
         else method_not_found(id, method_name)
         end
       end
@@ -236,7 +244,7 @@ module Rigor
         when "ping"            then success(id, complete({}))
         when "tools/list"      then success(id, complete(cacheable({ tools: TOOLS })))
         when "tools/call"
-          response = call_tool(id, request.dig("params", "name"), request.dig("params", "arguments") || {})
+          response = tools_call(id, request["params"])
           response.key?("result") ? success(id, complete(response["result"])) : response
         else method_not_found(id, method_name)
         end
@@ -329,6 +337,15 @@ module Rigor
                   capabilities: { tools: { listChanged: false } },
                   serverInfo: { name: "rigor", version: Rigor::VERSION }
                 })
+      end
+
+      # `tools/call` reads its tool from `params`, so `params` other than an object (or absent) is `-32602` (#3411).
+      # Other methods read no `params` beyond `_meta`, and keep ignoring them.
+      def tools_call(id, params)
+        params = {} if params.nil?
+        return error(id, INVALID_PARAMS, "Invalid params: tools/call params must be an object") unless params.is_a?(Hash)
+
+        call_tool(id, params["name"], params["arguments"] || {})
       end
 
       def call_tool(id, name, args)

@@ -95,6 +95,33 @@ RSpec.describe Rigor::MCP::Server do
     end
   end
 
+  # #3411 — a line that parses but is not a request object, and a tools/call whose params is not an object, are
+  # answered rather than raising out of the loop. No CLI boot: none of these reaches a tool.
+  describe "malformed messages" do
+    [[{ "jsonrpc" => "2.0", "id" => 1, "method" => "ping" }], 7, "valid", "str", true, false, nil].each do |message|
+      it "answers #{message.inspect} with -32600 and a null id" do
+        resp = JSON.parse(JSON.generate(server.handle(message)))
+
+        expect(resp["id"]).to be_nil
+        expect(resp.dig("error", "code")).to eq(-32_600)
+        expect(resp).not_to have_key("result")
+      end
+    end
+
+    [[1], "rigor_explain", 5, true].each do |params|
+      it "answers a tools/call whose params is #{params.inspect} with -32602, keeping its id" do
+        resp = request(id: 3, method: "tools/call", params: params)
+
+        expect(resp["id"]).to eq(3)
+        expect(resp.dig("error", "code")).to eq(-32_602)
+      end
+    end
+
+    it "still answers ping whose params is not an object" do
+      expect(request(id: 4, method: "ping", params: [1])).to eq("jsonrpc" => "2.0", "id" => 4, "result" => {})
+    end
+  end
+
   # ------------------------------------------------------------------ #
   # Revision 2026-07-28 (ADR-33 WD9): no handshake; each request names its version and the client's capabilities in
   # `params._meta`, and each result says it is complete. Only `server.handle` runs — no CLI boot except the one

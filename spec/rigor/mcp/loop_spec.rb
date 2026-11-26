@@ -83,6 +83,18 @@ RSpec.describe Rigor::MCP::Loop do
       expect(output.string).to be_empty
     end
 
+    # #3411 — the real server, so a non-object line reaches `Server#handle`; only ping runs, no tool.
+    it "answers a non-object line with -32600 and goes on serving" do
+      ping = JSON.generate({ "jsonrpc" => "2.0", "id" => 2, "method" => "ping" })
+      lines = ["#{JSON.generate([{ 'jsonrpc' => '2.0', 'id' => 1, 'method' => 'ping' }])}\n", "7\n", "null\n", "#{ping}\n"]
+      instance, output = make_loop(lines, Rigor::MCP::Server.new(err: StringIO.new))
+      instance.run
+
+      results = responses(output)
+      expect(results.map { |r| r.dig("error", "code") }).to eq([-32_600, -32_600, -32_600, nil])
+      expect(results.last).to eq("jsonrpc" => "2.0", "id" => 2, "result" => {})
+    end
+
     it "processes no messages when input is empty" do
       instance, output = make_loop([], server)
       instance.run

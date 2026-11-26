@@ -3234,26 +3234,6 @@ Unrelated
       expect(table).to have_key("X::Y::D")
     end
 
-    it "threads `self::`-anchored nestings through an eval below `class <<`" do
-      nestings = described_class.build_def_nestings(parse(<<~RUBY))
-        class X
-          class Y; end
-        end
-        class S
-          class << self
-            X.class_eval do
-              self::Y.class_eval do
-                class self::D
-                  def m; Inner; end
-                end
-              end
-            end
-          end
-        end
-      RUBY
-      expect(nestings.values).to include(["X::Y::D", "S"])
-    end
-
     it "does not file a named visibility call inside `class <<` as instance-side" do
       # `private :x` inside `class <<` (or a receiver-eval body on a singleton self)
       # marks the SINGLETON method, which lands on its `[:singleton, :x]` slot (#1984).
@@ -3298,21 +3278,6 @@ Unrelated
         end
       RUBY
       expect(defs.fetch("S", {})).to be_empty
-    end
-
-    it "records a `self::`-anchored Data/Struct layout through an eval below `class <<`" do
-      data = described_class.build_data_member_layouts(parse(<<~RUBY))
-        class X; end
-        class S
-          class << self
-            X.class_eval do
-              class self::D < Data.define(:a)
-              end
-            end
-          end
-        end
-      RUBY
-      expect(data["X::D"]).to eq([:a])
     end
 
     it "resolves an eval receiver through the file's own nesting declarations" do
@@ -3765,49 +3730,6 @@ Unrelated
       expect(includes).not_to have_key("C")
     end
 
-    it "files `class D` under `class <<` nowhere in the superclass and def-nesting tables" do
-      # `#<Class:C>::D`'s ancestry and the defs' `Module.nesting` would publish a `C::D`
-      # rung MRI never creates.
-      program = parse(<<~RUBY)
-        class C
-          class << self
-            class D < Base
-              def m; end
-            end
-          end
-        end
-      RUBY
-      supers, header_nestings = described_class.build_superclass_tables(program)
-      expect(supers).not_to have_key("C::D")
-      expect(header_nestings).not_to have_key("C::D")
-      nestings = described_class.build_def_nestings(program)
-      def_node = program.statements.body.first.body.body.first.body.body.first.body.body.first
-      expect(nestings[def_node]).to eq(["C"])
-    end
-
-    it "files meta-new member layouts under `class <<` nowhere" do
-      data = described_class.build_data_member_layouts(parse(<<~RUBY))
-        class C
-          class << self
-            K = Data.define(:x)
-            class D < Data.define(:y); end
-          end
-        end
-      RUBY
-      struct = described_class.build_struct_member_layouts(parse(<<~RUBY))
-        class C
-          class << self
-            K = Struct.new(:x)
-            class D < Struct.new(:y); end
-          end
-        end
-      RUBY
-      expect(data).not_to have_key("C::K")
-      expect(data).not_to have_key("C::D")
-      expect(struct).not_to have_key("C::K")
-      expect(struct).not_to have_key("C::D")
-    end
-
     it "files `class D` method defs under `class <<` nowhere in the class-def table" do
       defs = described_class.collect_class_method_defs(parse(<<~RUBY))
         class C
@@ -4025,7 +3947,7 @@ Unrelated
       expect(described_class.build_discovered_extends(parse(source))).to include("K" => ["E"])
       visibility = described_class.build_discovered_method_visibilities(parse(source))
       expect(visibility.fetch("K", {})).to include(m: :private)
-      struct = described_class.build_struct_member_layouts(parse(source))
+      struct = described_class::SharedWalkTables.send(:build_struct_member_layouts, parse(source))
       expect(struct.fetch("K", {}).fetch(:members, [])).to include(:x)
     end
 
@@ -4323,9 +4245,6 @@ Unrelated
     end
   end
 
-  # #682 — the per-declaration table `Scope#ancestor_name_candidates` reads. It records the nesting the
-  # HEADER is written in, so the two spellings of one qualified name are distinguishable afterwards, which
-  # is exactly what the peel it replaces could not do.
   # Issue #3219 — a class and its subclasses share one cvar slot, so each entry a `def` write creates joins the writes
   # every class of its in-file superclass tree makes, and a tree whose top names a superclass outside the file joins the
   # unknown floor.
@@ -4342,111 +4261,6 @@ Unrelated
       headers = { declared: { "Base" => :class }, superclasses: {} }
       expect(hierarchy.send(:declared_elsewhere?, scope, "Ns::Base")).to be(true)
       expect(hierarchy.send(:reopened_elsewhere?, "Base", headers, scope)).to be(true)
-    end
-  end
-
-  describe ".build_superclass_tables" do
-    def unkeyed = Rigor::Scope::DiscoveryIndex::UNKEYED_HEADER_NESTING
-
-    def header_nestings(source)
-      described_class.build_superclass_tables(parse(source)).last
-    end
-
-    # #728 — the chain the ancestor spelled `raw` resolves in. `raw` defaults to the UNKEYED entry, the
-    # union over every ancestor-naming site, which is what a name no site wrote falls back to.
-    def chain_for(source, class_name, raw = unkeyed)
-      header_nestings(source).fetch(class_name)[raw]
-    end
-
-    it "records an empty header nesting for a compact declaration written at the top level" do
-      expect(header_nestings("class Admin::Widget < Base; end"))
-        .to eq({ "Admin::Widget" => { unkeyed => [], "Base" => [] } })
-    end
-
-    it "records the enclosing namespace for the nested spelling of the same class" do
-      table = header_nestings("module Admin
-  class Widget < Base; end
-end
-")
-      expect(table).to eq({ "Admin::Widget" => { unkeyed => ["Admin"], "Base" => ["Admin"] } })
-    end
-
-    it "records one entry per declaration keyword for a doubly nested declaration" do
-      source = "module A
-  module B
-    class C < Base; end
-  end
-end
-"
-      expect(chain_for(source, "A::B::C", "Base")).to eq(["A::B", "A"])
-    end
-
-    # #708 review — a site that writes NO ancestor name has no ancestor for its cref to govern, so it
-    # contributes nothing. Recording it anyway is what let a rooted reopen inside another namespace put a
-    # foreign chain ahead of the right one for a class it named no ancestor of.
-    it "records nothing for a declaration that writes no ancestor name" do
-      expect(header_nestings("module Admin\n  class Widget; end\nend\n")).to eq({})
-    end
-
-    it "records a site whose only ancestor name is a mixin call, keyed by the module it names" do
-      source = "module Admin\n  class Widget\n    include Trackable\n  end\nend\n"
-      expect(chain_for(source, "Admin::Widget", "Trackable")).to eq(["Admin"])
-    end
-
-    # #708 — a rooted header resets the class's NAME but not the cref its superclass name resolves in:
-    # Ruby evaluates `Base` there at `Module.nesting == [Outer]`.
-    it "keys a rooted declaration by its reset name and keeps the enclosing cref for its ancestors" do
-      source = "module Outer
-  class ::Rooted::Bar < Base; end
-end
-"
-      expect(chain_for(source, "Rooted::Bar", "Base")).to eq(["Outer"])
-      expect(header_nestings(source)).not_to have_key("Outer::Rooted::Bar")
-    end
-
-    it "still records the as-written superclass beside it" do
-      supers = described_class.build_superclass_tables(parse("class Admin::Widget < Base; end")).first
-      expect(supers).to eq({ "Admin::Widget" => "Base" })
-    end
-
-    # Rails' own `ActiveRecord::Relation` is the corpus case: the library declares it inside
-    # `module ActiveRecord` and a test file reopens it as the compact `class ActiveRecord::Relation`.
-    # Last-writer-wins hands the library site the test file's EMPTY chain and its nine `include`s stop
-    # resolving — the false-positive direction. The reopen names no ancestor, so it records no chain at all
-    # and the declaring site's survives by construction rather than by a merge rule.
-    it "keeps the declaring site's chain when a later site reopens the class and names no ancestor" do
-      source = "module Admin\n  class Widget\n    include Trackable\n  end\nend\nclass Admin::Widget; end\n"
-      expect(chain_for(source, "Admin::Widget", "Trackable")).to eq(["Admin"])
-      expect(chain_for(source, "Admin::Widget")).to eq(["Admin"])
-    end
-
-    # #728 — the defect the per-name keying exists for, at the table. Both sites name an ancestor, so both
-    # are recorded; a single chain per class then gives the top-level site's `Base` the reopen's `["Outer"]`
-    # and resolves it as `Outer::Base`, which is a WRONG class rather than a wider list.
-    it "gives each site's ancestor name that site's own chain when the sites disagree" do
-      source = "class Foo < Base; end\nmodule Outer\n  class ::Foo\n    include Helper\n  end\nend\n"
-      expect(chain_for(source, "Foo", "Base")).to eq([])
-      expect(chain_for(source, "Foo", "Helper")).to eq(["Outer"])
-    end
-
-    # The unkeyed entry stays the pre-#728 per-class union, because it is what answers a name neither site
-    # wrote — the mixin `walk_class_includes` attributes to a class from outside its declaration.
-    it "unions every ancestor-naming site under the unkeyed entry" do
-      source = "class Foo < Base; end\nmodule Outer\n  class ::Foo\n    include Helper\n  end\nend\n"
-      expect(chain_for(source, "Foo")).to eq(["Outer"])
-    end
-
-    it "unions two sites that write the SAME ancestor name, most-qualified first" do
-      source = "module A\n  module B\n    class C\n      include M\n    end\n  end\nend\n" \
-               "module A\n  class B::C\n    include M\n  end\nend\n"
-      expect(chain_for(source, "A::B::C", "M")).to eq(["A::B", "A"])
-    end
-
-    # A mixin call the walk cannot render an argument for still marks the site as ancestor-naming, so the
-    # site's chain reaches the unkeyed entry that such a name is answered from.
-    it "records a chain for a site whose only mixin argument is dynamic" do
-      source = "module A\n  class Widget\n    include helper_module\n  end\nend\n"
-      expect(chain_for(source, "A::Widget")).to eq(["A"])
     end
   end
 

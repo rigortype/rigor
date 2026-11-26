@@ -76,8 +76,19 @@ RSpec.describe "Declaration producers" do
   # `walk_cvars_declaration?`, `walk_cvars_eval_call?`, `walk_cvars_meta_call?` and `walk_cvars_meta_new?`. None was
   # renamed. Two rows that were never grandfathered moved with them and keep their reasons (#3204):
   # `collect_body_cvar_writes` and `record_reflective_cvar_write`.
+  # Digest change, count still 366 (#3346, ADR-116 WD9 U4): 22 grandfathered keys moved from
+  # `lib/rigor/inference/scope_indexer.rb#Rigor::Inference::ScopeIndexer#` to
+  # `lib/rigor/inference/scope_indexer/shared_walk_tables.rb#Rigor::Inference::ScopeIndexer::SharedWalkTables#`:
+  # `collect_mixin_names`, `declared_ancestor_names`, `mixin_call?`, `record_anonymous_meta_superclass`,
+  # `record_data_member_layout`, `record_declaration_ancestry`, `record_mixin_names`, `record_struct_member_layout`,
+  # `walk_class_superclasses`, `walk_data_layout_meta_new?`, `walk_data_member_layouts`, `walk_def_nesting_declaration`,
+  # `walk_def_nesting_eval?`, `walk_def_nesting_meta_new?`, `walk_def_nestings`, `walk_layout_declaration`,
+  # `walk_singleton_superclasses`, `walk_struct_layout_meta_new?`, `walk_struct_member_layouts`,
+  # `walk_superclass_declaration?`, `walk_superclass_eval_call?` and `walk_superclass_meta_new?`. None was renamed.
+  # `add_header_nesting` stays where it was, and so does its key: it hands the header-nesting table to a writer in its
+  # own file, which is how rule (v) finds it.
   let(:grandfathered_pin) do
-    { count: 366, digest: "b246dd9baa95d59df446c4d5254405b8baf3c9b381d08fe425011d6d7600f30d" }
+    { count: 366, digest: "e45f5472596e7f917befc405e2479e13b9daa72791641c4bb3a12f8feb405c27" }
   end
 
   define_method(:found) do |parsed = DeclarationFactSources.parsed_under|

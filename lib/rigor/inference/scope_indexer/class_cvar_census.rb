@@ -37,7 +37,7 @@ module Rigor
         # singleton method bodies through `Scope#class_cvars_for`.
         #
         # ADR-116 WD5 — built by {ClassCvarsCollector} on the shared {DeclarationWalk}; `RIGOR_SHADOW_RULE_WALK`
-        # checks it against {#legacy_class_cvar_index}.
+        # checks it against {.legacy_class_cvar_index}.
         def build_class_cvar_index(root, default_scope)
           collector = ClassCvarsCollector.new
           DeclarationWalk.run(root, [collector],
@@ -58,7 +58,7 @@ module Rigor
         end
 
         # `def_owner` names the class a `def` leaf's cvar writes belong to when `self` is
-        # rebound — see {ScopeIndexer#walk_class_ivars}. `[]` marks a self no name covers.
+        # rebound — see {ScopeIndexer.walk_class_ivars}. `[]` marks a self no name covers.
         def walk_class_cvars(node, qualified_prefix, default_scope, accumulator, def_owner: nil,
                              singleton_cref: false)
           return unless node.is_a?(Prism::Node)
@@ -102,7 +102,7 @@ module Rigor
           end
         end
 
-        # The `K = Class.new { … }` arm of {#walk_class_cvars}: the block's `def` cvar
+        # The `K = Class.new { … }` arm of {.walk_class_cvars}: the block's `def` cvar
         # writes belong to the class the write names; its declarations stay lexical.
         def walk_cvars_meta_new?(node, qualified_prefix, default_scope, accumulator,
                                  def_owner, singleton_cref)
@@ -121,7 +121,7 @@ module Rigor
           true
         end
 
-        # The class/module arm of {#walk_class_cvars}: under an unnameable cref a
+        # The class/module arm of {.walk_class_cvars}: under an unnameable cref a
         # bare/`self::` header opens `#<singleton>::Name` — ownerless; nameable headers
         # re-anchor at a real cref.
         def walk_cvars_declaration?(node, qualified_prefix, default_scope, accumulator,
@@ -141,7 +141,7 @@ module Rigor
           true
         end
 
-        # The bare `Class.new { … }`-family call arm of {#walk_class_cvars}: the block's
+        # The bare `Class.new { … }`-family call arm of {.walk_class_cvars}: the block's
         # `def` cvar writes belong to an unnameable class.
         def walk_cvars_meta_call?(node, qualified_prefix, default_scope, accumulator,
                                   def_owner, singleton_cref)
@@ -159,7 +159,7 @@ module Rigor
           true
         end
 
-        # The eval-family arm of {#walk_class_cvars}: the block's `self` is the receiver for
+        # The eval-family arm of {.walk_class_cvars}: the block's `self` is the receiver for
         # `self::` declarations (`X.class_eval { class self::D; def m = @@x }` reads
         # `X::D::@@x`), while `@@x` writes inside `def`s keep the lexical cref either way.
         def walk_cvars_eval_call?(node, qualified_prefix, default_scope, accumulator,
@@ -243,7 +243,7 @@ module Rigor
         end
 
         # A class-body or `class_variable_set` write no `def` body's write has met yet (issue #3204): it joins an
-        # entry a creating write makes later, and {#finished_cvar_census} drops it when none does.
+        # entry a creating write makes later, and {.finished_cvar_census} drops it when none does.
         JoinOnlyCvarWrite = Data.define(:type)
 
         # Every census write unions with what the entry already holds, so the seed does not depend on the order of

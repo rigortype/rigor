@@ -73,24 +73,39 @@ table or an index.
 named by one `private_constant` line with `INSTANCE_MIXIN_NAMES`, which the extend tables read. Moving them
 divides that line in two. Leaving them keeps on the indexer three names nothing in its file reads.
 
-**The ratchet.** The cut costs the self-typing scan 17 `Dynamic` call sites (50,954 to 50,971), and 37
-expressions read a precise tier at the base and `Dynamic[top]` at the head. All 37 are in the two new files, at
-ten reads of five constants that stay in `scope_indexer.rb` (`INSTANCE_MIXIN_NAMES`, `MIXIN_KINDS`,
-`SEND_CALL_NAMES`, `ARRAY_ITERATORS`, `MIXIN_CALL_NAMES`) and in what is computed from them: read from another
-file, a constant whose value is a frozen Array literal reads `Dynamic[top]`. Every call the slice respelled
-keeps its tier. Two more expressions that read `Dynamic[top]` are new rows, the `module Rigor` wrapper of each
-new file. #3400 says of these slices: "Expect `Dynamic` call sites from cross-file Array constants (#3392)."
+**The ratchet.** The cut costs the self-typing scan 17 `Dynamic` call sites (50,969 to 50,986, on
+`b4f0318b8`), and 37 expressions read a precise tier at the base and `Dynamic[top]` at the head. All 37 are in
+the two new files, at ten reads of five constants that stay in `scope_indexer.rb` (`INSTANCE_MIXIN_NAMES`,
+`MIXIN_KINDS`, `SEND_CALL_NAMES`, `ARRAY_ITERATORS`, `MIXIN_CALL_NAMES`) and in what is computed from them.
+Every call the slice respelled keeps its tier. Two more expressions that read `Dynamic[top]` are new rows, the
+`module Rigor` wrapper of each new file.
 
-- *Move the five constants too.* Each is read on both sides of the cut: the extend tables read
-  `INSTANCE_MIXIN_NAMES` and `ARRAY_ITERATORS`, `mixin_call_view` reads `MIXIN_KINDS` and `SEND_CALL_NAMES`, and
-  the extend tables, the methods table and `SharedWalkTables` read `MIXIN_CALL_NAMES`. The reads that turn
-  `Dynamic` would be the ones left behind.
+The mechanism is the binding rule of `docs/internal-spec/inference-engine.md` § "The publication census". A
+constant publishes to other files only when exactly one file writes it, once, and the value is a frozen
+scalar literal: a Symbol, an Integer, a Float, `true` or `false`. Each of the five is `%i[…].freeze`, a call,
+which the rule withholds as a non-literal rvalue, as it withholds a bare Array as a mutable literal; the
+reader in another file is left at `Dynamic[top]`. This is not #3392's mechanism, which is a constant bound
+to another file's constant. With this slice the file splits of ADR-116 have cost the ratchet 31 call sites:
+#3390 (8), #3396 (3), #3397 (2), #3405 (1 net) and this one (17).
+
+- *Move the five constants with their readers.* It does not work: all ten reads sit on both sides of the cut.
+  The extend tables read `INSTANCE_MIXIN_NAMES` and `ARRAY_ITERATORS`, `mixin_call_view` reads `MIXIN_KINDS`
+  and `SEND_CALL_NAMES`, and the extend tables, the methods table and `SharedWalkTables` read
+  `MIXIN_CALL_NAMES`. The reads that turn `Dynamic` would be the ones left behind.
+- *Declare the five in `sig/`*, as five `Array[Symbol]` constant rows of `sig/rigor/inference.rbs`.
+  `docs/agents/measurement.md` § "The self-typing ratchet", step 1, prescribes it when a delta is the change's
+  own; the two-file probe of the review of #3415 shows that a constant declared so reads through from another
+  file (the table is in #3416); and R1 kept it as the fallback. A hand-authored row needs the review
+  `docs/agents/type-authoring.md` requires, and it states by hand what the rule could let the engine read.
+- *Change the rule.* [#3416](https://github.com/rigortype/rigor/issues/3416) proposes that a single-write
+  frozen Array of scalar literals publish across files as its erased nominal. That is the root fix, and a
+  change to a binding spec, which is not this slice's to make.
 - *Give each module its own copy of the lists.* Two objects where there was one, which is what R1 bound the
   rules' lists on `ScopeIndexer` to avoid, and two places to change a list.
-- *Leave the clusters in the file until such a constant reads through from another file.* The slice then waits
-  on an engine change nobody has scheduled.
-- *Accept it.* Precision is 0.5991 against a pin of 0.5958 and the `Dynamic` call share 0.4962 against 0.4983,
-  each better than its pin. Precision is no lower than at the base, and the share is 0.0001 higher.
+- *Leave the clusters in the file until the rule changes.* The slice then waits on #3416.
+- *Accept the sites and defer the remedy.* Precision is 0.5992 against a pin of 0.5958 and the `Dynamic` call
+  share 0.4961 against 0.4983, each better than its pin. Precision is no lower than at the base, and the share
+  is 0.0001 higher.
 
 ## Decision
 
@@ -100,8 +115,9 @@ eight functions both walks call, and `ScopeIndexer::MixinTables` in `scope_index
 alone are in the tables' mirror spec with their comments and assertions unchanged and one substitution,
 `described_class.build_discovered_x(` spelled `described_class.send(:build_discovered_x, `; the six calls
 that stay are spelled `MixinTables.send(:build_discovered_includes, …)`. The three constants move, private as
-they were, and the `private_constant` line is two lines. The 17 `Dynamic` call sites are accepted, with no pin of
-`tool/coverage_ratchet.yml` touched and no `sig/` row added.
+they were, and the `private_constant` line is two lines. The 17 `Dynamic` call sites are accepted and
+their remedy is deferred, as the coordinator ruled on the review of #3415: no pin of `tool/coverage_ratchet.yml`
+is touched and no `sig/` row is added here. #3416 is the root fix, and the five `sig/` rows are the fallback.
 
 The precedent for each is the amendment and the slices landed under it. The amendment moves a cluster "whole,
 behind its entry", and its re-measure names the effects a candidate "alone or with the mixin tables". Slice 1
@@ -130,7 +146,9 @@ make the two builders public, take them off the `private_class_method` list and 
 without `send`; the mirror spec's "exposes the entry alone" then lists three functions. To put a constant
 back on `ScopeIndexer`, move the statement and its `private_constant` name; the module reads it lexically with
 no other change. The 17 call sites come back
-when a constant whose value is a frozen Array literal reads through from another file, or when the five
-constants and their readers share a file again.
+when #3416 lands, since a single-write frozen Array of scalar literals then publishes across files; or, before
+that, with five `Array[Symbol]` rows in `sig/rigor/inference.rbs` for `INSTANCE_MIXIN_NAMES`, `MIXIN_KINDS`,
+`SEND_CALL_NAMES`, `ARRAY_ITERATORS` and `MIXIN_CALL_NAMES`, each reviewed as `docs/agents/type-authoring.md`
+requires.
 Nothing outside this pull request depends on any of these yet; the last slice of #3400 reads `scope_indexer.rb`
 at 9,039 lines under a budget of 9,100, and the grandfathered pin at the digest this slice leaves.

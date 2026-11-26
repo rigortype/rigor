@@ -3,7 +3,7 @@
 - **PR:** [#3415](https://github.com/rigortype/rigor/pull/3415)
 - **Issue:** [#3400](https://github.com/rigortype/rigor/issues/3400)
 - **Class:** gate-row
-- **Precedent:** [#3021](https://github.com/rigortype/rigor/pull/3021)
+- **Precedent:** [#2469](https://github.com/rigortype/rigor/pull/2469)
 - **Decided:** 2026-11-26
 
 ## Background
@@ -30,9 +30,11 @@ re-keys, each with the reason it had.
 - **Leave the constant in `scope_indexer.rb`, read lexically from the new file.** The list stays at 616 keys, as
   `NodePropagation` left `SELF_OPENING_BODIES` and `CLASS_BODY_DEF_BARRIERS` behind (#3311). It keeps on the
   indexer a name nothing in its file reads, it is code shaped to pass the gate, and the two reads would cross a
-  file, where a constant whose value
-  is a frozen Array literal reads `Dynamic[top]` in the self-typing scan: the slice pays 17 `Dynamic` call sites
-  for ten such reads of the five constants that have to stay, and these two would add their `.any?` calls.
+  file. By `docs/internal-spec/inference-engine.md` § "The publication census" a constant publishes to other
+  files only as a single-write frozen scalar literal, and `[Prism::DefNode, …].freeze` is a non-literal rvalue,
+  so both reads would be `Dynamic[top]` in the self-typing scan. The slice already pays 17 `Dynamic` call sites
+  for ten such reads of the five constants that have to stay (#3416), and these two would add their `.any?`
+  calls.
 - **Mark the new row `grandfathered`.** The pin's count would go from 366 to 367. A new key is not a
   grandfathered one, and the spec says so.
 
@@ -44,13 +46,20 @@ can hold stops; the constant moved here from scope_indexer.rb with the two funct
 #3400), whose module body is a row for the node-class lists that stay; it bounds a scan and derives no
 declaration context".
 
-#3021 is the precedent: it listed the helpers of the computed-send reading in the same file for the same kind
-of reason, and its entry says of `collect_local_send_names` that it "reads `LOCAL_SCOPE_BOUNDARIES` and appends
-the literals it finds", a consumer and no producer. That entry weighed restructuring the code to dodge the
-scanner and declined it. It was ratified by `e82a47057`, "Ratify the remaining five approval queue entries"
-(2026-11-15). This row is the same constant's, for the same reading, one level up: the body that defines the
-list instead of the function that reads it. The grandfathered pin keeps its count of 366; only its digest
-moves, for the ten grandfathered keys the slice re-keys.
+The precedent is the rows of the same kind the file already holds: the body of a module, listed for a
+node-class list it uses as the boundary of a scan. `Rigor::Inference::DirectIvarWrites` (#2469) and
+`Rigor::Inference::InterveningIvarReset` (#2036) each say that `NON_RUNNING_NODES` "lists a def and a class,
+module or singleton class body only as code" that does not run on the self in question, and
+`Rigor::Inference::SelfCallIvarWrites` (#1965) that it "lists `class << self` and `extend` only as code the
+proof declines to read past". Each says that it derives no declaration context or records no declaration fact,
+and each is a row with a reason of its own, not a grandfathered one. This row is one more of that kind.
+
+#3021 is the nearer row and of another kind, a function's: it listed the helpers of the computed-send reading,
+and its entry says of `collect_local_send_names` that it "reads `LOCAL_SCOPE_BOUNDARIES` and appends the
+literals it finds", a consumer and no producer. That entry weighed restructuring the code to dodge the scanner
+and declined it, and was ratified by `e82a47057`, "Ratify the remaining five approval queue entries"
+(2026-11-15). The grandfathered pin keeps its count of 366; only its digest moves, for the ten grandfathered
+keys the slice re-keys.
 
 Two mutations in the pull request hold the row to the gate: taken out of `producers.yml` it fails "lists
 exactly the producers the tree has" (X7), and marked `grandfathered` it fails "keeps the grandfathered list
@@ -60,5 +69,5 @@ closed" (X10).
 
 Move `LOCAL_SCOPE_BOUNDARIES` and its `private_constant` line back into `scope_indexer.rb`, delete the row, and
 spell nothing else: `MixinEffects` reads the name lexically. The self-typing scan then reads the two
-`LOCAL_SCOPE_BOUNDARIES.any?` calls as `Dynamic`, as it reads the calls on the five constants that stayed.
-Nothing else depends on the row.
+`LOCAL_SCOPE_BOUNDARIES.any?` calls as `Dynamic`, as it reads the calls on the five constants that stayed,
+until #3416 changes what a frozen Array publishes across files. Nothing else depends on the row.

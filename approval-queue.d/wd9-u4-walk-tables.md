@@ -102,9 +102,9 @@ where the scan had both in its `constant` tier.
   move.
 - *Accept them.* Both ratchet figures stay better than their pins.
 
-**The module's length.** One module needs `# rubocop:disable Metrics/ModuleLength` on its own line,
-as `NodePropagation` (#3311) and `DeclarationWalk::Rules` (R1) carry it. The split by table above
-needs none.
+**The module's length.** One module needs `# rubocop:disable Metrics/ModuleLength` inline on its
+`module` line, as `NodePropagation` (#3311) and `DeclarationWalk::Rules` (R1) carry it. The split by
+table above needs none.
 
 ## Decision
 

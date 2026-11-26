@@ -130,7 +130,9 @@ RSpec.describe Rigor::MCP::Server do
     it "marks tools/list complete and cacheable, with the same tools the legacy list has" do
       result = modern("tools/list").fetch("result")
 
-      expect(result).to include("resultType" => "complete", "cacheScope" => "public")
+      expect(result).to include("resultType" => "complete", "ttlMs" => described_class::CACHE_TTL_MS,
+                                "cacheScope" => "public")
+      expect(result.dig("_meta", "io.modelcontextprotocol/serverInfo", "name")).to eq("rigor")
       expect(result["tools"]).to eq(request(id: 2, method: "tools/list").dig("result", "tools"))
     end
 
@@ -139,6 +141,7 @@ RSpec.describe Rigor::MCP::Server do
                .fetch("result")
 
       expect(result["resultType"]).to eq("complete")
+      expect(result.dig("_meta", "io.modelcontextprotocol/serverInfo", "name")).to eq("rigor")
       expect(result["isError"]).to be(false)
       expect(result.dig("content", 0, "text")).to include("call.undefined-method")
     end
@@ -151,7 +154,7 @@ RSpec.describe Rigor::MCP::Server do
     end
 
     it "still answers ping, which the revision dropped" do
-      expect(modern("ping")["result"]).to eq({ "resultType" => "complete" })
+      expect(modern("ping")["result"]).to include("resultType" => "complete")
     end
 
     it "refuses an unsupported version with -32022, naming the supported and requested versions" do
@@ -197,6 +200,14 @@ RSpec.describe Rigor::MCP::Server do
 
       expect(request(id: 4, method: "tools/list")["result"]).not_to have_key("resultType")
       expect(request(id: 5, method: "ping")["result"]).to eq({})
+    end
+
+    it "treats a request whose _meta names no protocol version as legacy, clientCapabilities or not" do
+      resp = request(id: 7, method: "tools/list",
+                     params: { "_meta" => { "io.modelcontextprotocol/clientCapabilities" => {} } })
+
+      expect(resp["error"]).to be_nil
+      expect(resp["result"]).not_to have_key("resultType")
     end
 
     it "treats a legacy request whose _meta carries only a progress token as legacy" do

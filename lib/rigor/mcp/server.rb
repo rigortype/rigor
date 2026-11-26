@@ -12,8 +12,7 @@ module Rigor
     # tool stays in sync with its CLI counterpart automatically (ADR-33 WD4).
     class Server # rubocop:disable Metrics/ClassLength
       # The revision a legacy client (one that opens with `initialize`) is answered with. Kept at the revision this
-      # server was first written to: a client new enough for a later legacy revision speaks 2026-07-28 instead (ADR-33
-      # WD9).
+      # server was first written to: nothing it serves needs a later legacy revision (ADR-33 WD9).
       PROTOCOL_VERSION = "2024-11-05"
 
       # The stateless revisions (ADR-33 WD9): a request carrying `params._meta[PROTOCOL_VERSION_KEY]` is handled by
@@ -260,13 +259,11 @@ module Rigor
       end
 
       def discover_result
-        require_relative "../version"
         capabilities = { tools: { listChanged: false } }
         capabilities[:extensions] = EXTENSIONS unless EXTENSIONS.empty?
         {
           supportedVersions: SUPPORTED_VERSIONS,
-          capabilities: capabilities,
-          _meta: { SERVER_INFO_KEY => { name: "rigor", version: Rigor::VERSION } }
+          capabilities: capabilities
         }.then { cacheable(it) }
       end
 
@@ -280,8 +277,14 @@ module Rigor
         method_name == "server/discover" || meta.key?(PROTOCOL_VERSION_KEY)
       end
 
+      # Every 2026-07-28 result is complete, and carries the server info the revision asks each result for.
       def complete(result)
-        { resultType: "complete" }.merge(result)
+        { resultType: "complete" }.merge(result, _meta: server_info_meta)
+      end
+
+      def server_info_meta
+        require_relative "../version"
+        { SERVER_INFO_KEY => { name: "rigor", version: Rigor::VERSION } }
       end
 
       def request_meta(request)

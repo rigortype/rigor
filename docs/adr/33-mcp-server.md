@@ -113,7 +113,8 @@ removes the `initialize` handshake: every request carries
 `params._meta["io.modelcontextprotocol/protocolVersion"]` and
 `["io.modelcontextprotocol/clientCapabilities"]`, a server must answer `server/discover`, and
 every result carries `resultType`.  The MCP Skills extension (#3402's later slices) exists only
-on this revision, and Claude Code asks stdio servers for it by default.  Legacy clients still
+on this revision, and Claude Code asks stdio servers for this revision by default
+([code.claude.com/docs/en/mcp](https://code.claude.com/docs/en/mcp)).  Legacy clients still
 open with `initialize`.
 
 `rigor mcp` serves both eras, and picks one **per request, from that request alone**:
@@ -122,7 +123,8 @@ open with `initialize`.
   version, takes the 2026-07-28 rules.  The version must be one of `SUPPORTED_VERSIONS`
   (`["2026-07-28"]`) or the request gets `-32022` with `data.supported` / `data.requested`; a
   missing or non-string version, or missing `clientCapabilities`, gets `-32602`.  Results gain
-  `resultType: "complete"`; `server/discover` and `tools/list` carry `ttlMs` and
+  `resultType: "complete"` and `_meta["io.modelcontextprotocol/serverInfo"]`, which the
+  revision asks of every result; `server/discover` and `tools/list` carry `ttlMs` and
   `cacheScope: "public"` (both are fixed for the process's life and identical for every user).
 - Everything else, `initialize` included, is the legacy protocol, byte-for-byte as before.
 
@@ -132,11 +134,13 @@ Rationale:
   "scoped to the stdio process", without requiring a modern request after it to fail.  Reading
   the era off each request keeps the server as stateless as WD7 left it (the session `--config`
   default is still the only process state) and cannot misroute a request because of an earlier
-  one.  A legacy request's `_meta` holds at most a `progressToken`, so the version field
-  separates the eras without guessing.
-- **The legacy reply stays `2024-11-05`.**  2025-11-25 is the newest legacy revision, but a
-  client new enough for it speaks 2026-07-28 here; bumping the legacy answer would only change
-  what old clients see, for no new capability.
+  one.  No legacy revision sets `io.modelcontextprotocol/protocolVersion` in `_meta`, so
+  the version field separates the eras without guessing.
+- **The legacy reply stays `2024-11-05`.**  2025-11-25 is the newest legacy revision, and a
+  client can still reach the legacy path asking for it (Claude Code does when its
+  `server/discover` probe times out on a slow boot).  Nothing Rigor serves needs a later legacy
+  revision: no tool uses `title`, `outputSchema`, `structuredContent` or annotations.  Bumping
+  the answer would change what every legacy client sees for no capability gained.
 - **`ping` is still answered** under 2026-07-28, which dropped it (ADR-5: a client that still
   pings stays connected).
 - **No required client capability.**  Every tool is read-only (WD5), so nothing needs

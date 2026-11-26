@@ -414,10 +414,10 @@ module DeclarationWriterScan
   #   entered through eight functions, each spelled on the module: `SharedWalkTables.declaration_walk_tables`,
   #   `meta_member_names` and `meta_members_open?` from `scope_indexer.rb`, the four recorders from
   #   `superclasses_collector.rb` and `member_layouts_collector.rb`, and `recorded_ancestor_name` from
-  #   `cvar_hierarchy.rb`. Its calls of `ScopeIndexer.add_header_nesting` and `rebound_block_self` make those two
-  #   entry points of `scope_indexer.rb`. The first writes the header-nesting table and keeps its row there; moved
-  #   into this file, it would keep it here, since it hands the table to `ScopeIndexer.merge_header_nesting_bucket`
-  #   and rule (v) follows a write into another row (#3398).
+  #   `cvar_hierarchy.rb`. Its call of `ScopeIndexer.add_header_nesting` makes that function an entry point of
+  #   `scope_indexer.rb`. It writes the header-nesting table and keeps its row there; moved into this file, it would
+  #   keep it here, since it hands the table to `ScopeIndexer.merge_header_nesting_bucket` and rule (v) follows a
+  #   write into another row (#3398). Its call of `ConstantTables.rebound_block_self` enters `constant_tables.rb`.
   # - `mutated_carrier_widening.rb`, `factory_call_resolver.rb` and `singleton_class_sources.rb`: the widening of the
   #   carriers a file mutates in place, the factory call an expression unwinds to, and the constants whose singleton
   #   side a file writes to without declaring them, moved out of `scope_indexer.rb` (ADR-116 WD9, #3400). The last
@@ -430,6 +430,14 @@ module DeclarationWriterScan
   #   `FactoryCallResolver.resolve_meta_factory_call`; `SingletonClassSources.record_singleton_class_sources`. The
   #   last module's calls of `ScopeIndexer.singleton_receiver_constant_name` and `surface_rewriting_call?` make
   #   those two entry points of `scope_indexer.rb`, where neither writes a table.
+  # - `constant_tables.rb`: the typed in-source constant table, the publication census and the write-target rules
+  #   both ask, moved out of `scope_indexer.rb` (ADR-116 WD9, #3400). The writers of the typed walk's accumulator
+  #   stay rule (v)'s: `record_constant_write` and the four functions that hand it the table. It is entered through
+  #   four functions, each spelled on the module: `ConstantTables.build_in_source_constants`, `constant_write_census`
+  #   and `dynamic_target_key` from `scope_indexer.rb` (the first from `constant_ivar_value.rb` and
+  #   `pre_eval_constants.rb` too), and `rebound_block_self` from `scope_indexer.rb` and `shared_walk_tables.rb`. Its
+  #   calls of `ScopeIndexer.census_body_scope` and `census_nesting` make those two entry points of
+  #   `scope_indexer.rb`, where neither writes a table.
   SOURCES = {
     DeclarationProducerScan::RULE_V_FILE => {
       module: "Rigor::Inference::ScopeIndexer",
@@ -461,6 +469,8 @@ module DeclarationWriterScan
       { module: "Rigor::Inference::ScopeIndexer::FactoryCallResolver", roots: [] },
     "lib/rigor/inference/scope_indexer/singleton_class_sources.rb" =>
       { module: "Rigor::Inference::ScopeIndexer::SingletonClassSources", roots: [] },
+    "lib/rigor/inference/scope_indexer/constant_tables.rb" =>
+      { module: "Rigor::Inference::ScopeIndexer::ConstantTables", roots: [] },
     "lib/rigor/inference/declaration_walk/rules.rb" => { module: "Rigor::Inference::DeclarationWalk::Rules", roots: [] }
   }.freeze
 

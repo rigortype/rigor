@@ -189,7 +189,7 @@ module Rigor
         # The name the constant's `Singleton[...]` carries. Only a block-less `Class.new(Super)` borrows its
         # superclass's name (the constructed class answers lookups through `Super`'s chain and declares nothing of its
         # own); every other form — Data/Struct members, any block body — owns methods under its OWN qualified name,
-        # which is exactly what the per-file `meta_new_constant_type` answers.
+        # which is exactly what the per-file `ConstantTables.meta_new_constant_type` answers.
         def meta_new_constant_decl_name(rvalue, full, qualified_prefix, accumulator)
           return full if rvalue.block || DeclarationWalk::Rules.data_define_call?(rvalue) ||
                          DeclarationWalk::Rules.struct_new_call?(rvalue)

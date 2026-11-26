@@ -466,7 +466,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#record_compound_ivar_write: grandfathered
     Rigor::Inference::ScopeIndexer#record_concern_class_methods: 'issue #2986, files a concern module''s hook-extend entry for its ClassMethods and records each def of its class_methods blocks (and, #1592, its def node; #2997, in every body of the module, not only one that extends ActiveSupport::Concern) on Owner::ClassMethods, the module ActiveSupport evaluates that block in, and files the hook-body-call entry of each call on self in its included or prepended blocks (#3005, in every body too, under the gated hook in a body without the extend), under the module prefix the walk passes in; the instance side is the side those defs have there, and it derives no other context'
     Rigor::Inference::ScopeIndexer#record_constant_class_method_calls: 'issue #1984, records a `K.public_class_method(:x)` (or `send` of it) as K''s public singleton slot and contests K''s singleton slots for a call on `K.singleton_class`, on each class constant_receiver_candidates gives for K; it derives no context'
-    Rigor::Inference::ScopeIndexer#record_constant_write: grandfathered
     Rigor::Inference::ScopeIndexer#record_declaration_facts: grandfathered
     Rigor::Inference::ScopeIndexer#record_declarations: grandfathered
     Rigor::Inference::ScopeIndexer#record_def_body_evidence: grandfathered
@@ -518,9 +517,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#walk_class_ivars: grandfathered
     Rigor::Inference::ScopeIndexer#walk_class_methods_visibilities: 'issue #1592, walks a concern''s class_methods block for visibility under Owner::ClassMethods, the module ActiveSupport evaluates that block in, starting public; the owner is the concern prefix the walk passes in, and it derives no other context'
     Rigor::Inference::ScopeIndexer#walk_conditional_ivar_writes: grandfathered
-    Rigor::Inference::ScopeIndexer#walk_constant_write_census: grandfathered
-    Rigor::Inference::ScopeIndexer#walk_constant_write_children: grandfathered
-    Rigor::Inference::ScopeIndexer#walk_constant_writes: grandfathered
     Rigor::Inference::ScopeIndexer#walk_deferred_body: grandfathered
     Rigor::Inference::ScopeIndexer#walk_deferred_children: grandfathered
     Rigor::Inference::ScopeIndexer#walk_deferred_def_leaf: grandfathered
@@ -557,10 +553,8 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#walk_singleton_body: grandfathered
     Rigor::Inference::ScopeIndexer#walk_singleton_class_includes: grandfathered
     Rigor::Inference::ScopeIndexer#walk_singleton_class_ivars: grandfathered
-    Rigor::Inference::ScopeIndexer#walk_singleton_class_writes: grandfathered
     Rigor::Inference::ScopeIndexer#walk_singleton_def_nodes: grandfathered
     Rigor::Inference::ScopeIndexer#walk_singleton_meta_new?: grandfathered
-    Rigor::Inference::ScopeIndexer#walk_typed_declaration?: grandfathered
     Rigor::Inference::ScopeIndexer#walk_visibility_singleton_class: grandfathered
     Rigor::Inference::ScopeIndexer#write_mixin_targets: grandfathered
     Rigor::Inference::ScopeIndexer#write_singleton_slot: ADR-119 WD3, the singleton walk's one slot write, routed through SingletonDefTable so the slot's contest follows its writer; the owner and side are the walk's, it adds no context of its own
@@ -597,6 +591,15 @@ lib/rigor/inference/scope_indexer/class_declarations.rb:
     Rigor::Inference::ScopeIndexer::ClassDeclarations#collect_meta_new_constant_decls?: grandfathered
     Rigor::Inference::ScopeIndexer::ClassDeclarations#record_class_new_constant_decl: grandfathered
     Rigor::Inference::ScopeIndexer::ClassDeclarations#record_compact_header: grandfathered
+lib/rigor/inference/scope_indexer/constant_tables.rb:
+  computes: one file's two constant tables and the rules both ask, which are the type of each constant write's rvalue per qualified name, typed under the census scope of the body it sits in, and the publication census, a descriptor per name with the names the file declares and the aliases it writes; each walk threads its own prefix, self and cref through every declaration and asks DeclarationWalk::Rules for each declaration context
+  producers:
+    Rigor::Inference::ScopeIndexer::ConstantTables#record_constant_write: grandfathered
+    Rigor::Inference::ScopeIndexer::ConstantTables#walk_constant_write_census: grandfathered
+    Rigor::Inference::ScopeIndexer::ConstantTables#walk_constant_write_children: grandfathered
+    Rigor::Inference::ScopeIndexer::ConstantTables#walk_constant_writes: grandfathered
+    Rigor::Inference::ScopeIndexer::ConstantTables#walk_singleton_class_writes: grandfathered
+    Rigor::Inference::ScopeIndexer::ConstantTables#walk_typed_declaration?: grandfathered
 lib/rigor/inference/scope_indexer/cvar_hierarchy.rb:
   computes: 'issue #3219, the in-file superclass tree the class-cvar census joins each class''s cvar entries along'
   producers:

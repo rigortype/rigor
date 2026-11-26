@@ -216,7 +216,7 @@ module Rigor
         # ([#703](https://github.com/rigortype/rigor/issues/703)): `::Table::ROWS[k] = 1` names the top-level
         # constant unconditionally, so the sibling `Admin::Table::ROWS` a bare spelling would also reach is
         # untouched and keeps its empty-shape fold. This is the exemption #690 established on the WRITE side
-        # ({ScopeIndexer#constant_path_write_key}), which the two arms have to agree on: the strict render drops the
+        # ({ConstantTables.constant_path_write_key}), which the two arms have to agree on: the strict render drops the
         # root marker, so the rooted and unrooted spellings are indistinguishable by name alone.
         def path_mutation_candidates(receiver, nesting, into)
           full = Source::ConstantPath.qualified_name_or_nil(receiver)

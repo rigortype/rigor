@@ -19,8 +19,8 @@ module Rigor
     # `Dynamic[top]` everywhere else.
     #
     # This collector closes that half. It walks the `pre_eval:` files with the SAME constant pre-pass the
-    # per-file path uses ({ScopeIndexer.build_in_source_constants}) and publishes the result — widened — into
-    # the project seed. Files not listed under `pre_eval:` are untouched, so the feature is opt-in by
+    # per-file path uses ({ScopeIndexer::ConstantTables.build_in_source_constants}) and publishes the result — widened —
+    # into the project seed. Files not listed under `pre_eval:` are untouched, so the feature is opt-in by
     # construction and its cost stays proportional to the listed file count (ADR-17 WD1's cost-bounded
     # argument, which is also why slice 5's full-project two-pass stayed rejectable).
     #
@@ -71,9 +71,9 @@ module Rigor
     #
     # ## The multi-file write rule — widen on conflict, all the way to `Dynamic[top]`
     #
-    # Within one file, `ScopeIndexer#record_constant_write` unions repeated writes; that union is widened as a
-    # whole (`X = 1; X = "a"` in one file publishes `Integer | String`). ACROSS files the same union would be
-    # a type neither author can see, so the rule is **widen on conflict**: when two listed files publish the
+    # Within one file, `ScopeIndexer::ConstantTables.record_constant_write` unions repeated writes; that union is
+    # widened as a whole (`X = 1; X = "a"` in one file publishes `Integer | String`). ACROSS files the same union would
+    # be a type neither author can see, so the rule is **widen on conflict**: when two listed files publish the
     # same qualified name with different widened types, the name is dropped from the table entirely and reads
     # as `Dynamic[top]` — the widest type there is, and the one the name already had. Agreeing writes (`X = 1`
     # here, `X = 2` there — both `Integer`) are not a conflict at all, which is the point of widening first:
@@ -138,7 +138,9 @@ module Rigor
         return EMPTY unless parse_result.errors.empty?
 
         root = parse_result.value
-        ScopeIndexer.build_in_source_constants(root, declaration_seeded_scope(root, scope_builder.call(path)))
+        ScopeIndexer::ConstantTables.build_in_source_constants(
+          root, declaration_seeded_scope(root, scope_builder.call(path))
+        )
       rescue StandardError
         EMPTY
       end

@@ -92,7 +92,7 @@ RSpec.describe Rigor::Inference::ScopeIndexer::LiteralReceiverMutations do
     # level unconditionally, so the `Admin::Table::ROWS` a bare spelling would also reach is a different
     # constant and keeps its empty-shape fold. The two spellings are indistinguishable by name alone —
     # the strict render they share drops the root marker — so the exemption has to be taken from the
-    # node, exactly as `constant_path_write_key` takes it.
+    # node, exactly as `ConstantTables.constant_path_write_key` takes it.
     it "records only the rooted candidate for a rooted path receiver" do
       result = census("module Admin\n  def self.fill(k) = ::Table::ROWS[k] = 1\nend\n")
       expect(result[:constants]).to eq(Set["Table::ROWS"])

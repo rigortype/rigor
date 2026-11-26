@@ -97,8 +97,14 @@ RSpec.describe "Declaration producers" do
   # `lib/rigor/inference/scope_indexer/singleton_class_sources.rb`, as functions of
   # `Rigor::Inference::ScopeIndexer::SingletonClassSources`, each with its reason. Neither was grandfathered, and
   # the two other modules that slice moved hold no producer.
+  # Digest change, count still 366 (#3400, ADR-116 WD9, the constant tables): six grandfathered keys moved from
+  # `lib/rigor/inference/scope_indexer.rb#Rigor::Inference::ScopeIndexer#` to
+  # `lib/rigor/inference/scope_indexer/constant_tables.rb#Rigor::Inference::ScopeIndexer::ConstantTables#`:
+  # `record_constant_write`, `walk_constant_write_census`, `walk_constant_write_children`, `walk_constant_writes`,
+  # `walk_singleton_class_writes` and `walk_typed_declaration?`. None was renamed, and the other 34 functions of the
+  # module were no producers.
   let(:grandfathered_pin) do
-    { count: 366, digest: "e45f5472596e7f917befc405e2479e13b9daa72791641c4bb3a12f8feb405c27" }
+    { count: 366, digest: "d7dbc88cad690b32fd7d0c4e8e453c17e0509a160aad31f3bed2ca91271801b6" }
   end
 
   define_method(:found) do |parsed = DeclarationFactSources.parsed_under|

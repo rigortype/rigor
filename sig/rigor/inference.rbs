@@ -434,12 +434,22 @@ module Rigor
 
       module ConstantTables
         def self?.build_in_source_constants: (untyped root, Scope default_scope) -> Hash[String, Type::t]
+
+        # The functions below are `private_class_method`. RBS cannot say that of a `def self?.` row: `private def
+        # self?.` does not parse, and a `private` section reaches the instance half alone, which `self?` makes
+        # private already. So the section says it to the reader, and a checker reads the rows as it did without it.
+        private
+
         def self?.constant_writes_for_file: (untyped root) -> Hash[String, untyped]
         def self?.constant_literal_value: (untyped rvalue) -> Array[untyped]?
       end
 
       module DeclarationArtifacts
         def self?.build_declaration_artifacts: (untyped root, ?untyped declared_names) -> [Hash[untyped, Type::t], Hash[String, Type::t]]
+
+        # `private_class_method`; the section is for the reader, as in `ConstantTables` above.
+        private
+
         def self?.record_declarations: (untyped node, Array[String] qualified_prefix, Hash[untyped, Type::t] identity_table, Hash[String, Type::t] discovered, ?untyped renames, ?untyped self_prefix, ?singleton_cref: untyped) -> void
       end
 

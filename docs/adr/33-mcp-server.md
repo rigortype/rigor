@@ -1,7 +1,7 @@
 # ADR-33 — MCP Server packaging
 
-Status: **Accepted (2026-05-27); implemented in v0.1.10.** WD10 (serving `skills/`) is
-**Proposed (2026-11-27)** and not yet decided.
+Status: **Accepted (2026-05-27); implemented in v0.1.10.** WD10 (serving `skills/`) was
+accepted on 2026-11-27.
 
 The
 `rigor mcp --transport stdio` subcommand ships a pure-Ruby JSON-RPC
@@ -152,9 +152,8 @@ Rationale:
 
 ### WD10 — Serve the gem's own `skills/` over the Skills extension
 
-> **Proposed 2026-11-27, awaiting the maintainer's decision** ([#3402](https://github.com/rigortype/rigor/issues/3402), slices 2–4).
-> Nothing below is implemented yet. Points (a)–(f) are the decisions asked for; each states the
-> recommendation this WD adopts if it is approved as written.
+> Added 2026-11-27 ([#3402](https://github.com/rigortype/rigor/issues/3402), slices 2–4). The
+> maintainer approved points (a)–(f) as recommended on 2026-11-27.
 
 `skills/` (ADR-73) reaches an agent through its own install path (`npx skills`, a copy in
 `.claude/skills/`), so a project can run one gem version's `rigor` while its agent reads another

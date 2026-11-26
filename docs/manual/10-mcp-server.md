@@ -59,7 +59,7 @@ tool, not a library. See
 ## CLI
 
 ```sh
-rigor mcp [--transport=stdio] [--config=PATH]
+rigor mcp [--transport=stdio] [--config=PATH] [--no-skills]
 ```
 
 - `--transport=stdio` — default; only value accepted in v1. HTTP
@@ -70,6 +70,9 @@ rigor mcp [--transport=stdio] [--config=PATH]
   defaults, for the session default and for a per-call `config` alike:
   the call returns `isError: true`. Without either, `Configuration.discover` walks `.rigor.yml` /
   `.rigor.dist.yml` from the working directory.
+- `--no-skills` — do not serve the bundled skills (see
+  [Bundled skills over MCP](#bundled-skills-over-mcp)); the server then
+  offers its tools only.
 
 Exit codes: 0 (clean shutdown — stdin EOF), 64 (unknown
 `--transport`).
@@ -109,8 +112,15 @@ specific project config:
 
 ### Claude Code CLI
 
-Claude Code reads MCP server definitions from its project-level
-settings. Add to `.claude/settings.json` in your project root:
+Register the server with `claude mcp add`. User scope makes it available
+in every project:
+
+```sh
+claude mcp add --scope user rigor -- rigor mcp
+```
+
+To share it with a team instead, commit a `.mcp.json` in the project
+root:
 
 ```json
 {
@@ -123,11 +133,11 @@ settings. Add to `.claude/settings.json` in your project root:
 }
 ```
 
-Or register it globally in `~/.claude/settings.json` so it is
-available in every project. Once registered, Claude Code can call
+Once registered, Claude Code can call
 `rigor_check` on files it is about to edit, use `rigor_type_of` to
 ground a suggestion, and run `rigor_triage` to understand a project's
-diagnostic shape before proposing a cleanup plan.
+diagnostic shape before proposing a cleanup plan. It also loads Rigor's
+bundled skills from the server; see the next section.
 
 ### Cursor
 
@@ -228,6 +238,49 @@ The legacy initialization sequence:
 
 All messages except `notifications/*` require a response.
 `notifications/*` carry no `id` and are silently consumed.
+
+## Bundled skills over MCP
+
+Rigor ships its Agent Skills inside the gem: the `skills/` that
+`rigor skill` lists. `rigor mcp` also serves them over the MCP Skills
+extension (`io.modelcontextprotocol/skills`). A client that implements
+the extension loads a skill from the same `rigor` binary that runs the
+tools, so a skill never describes a different Rigor version than the
+one installed, and there is nothing extra to install or update.
+
+In Claude Code (v2.1.331 or later, where MCP skills are enabled), the
+skills appear as `rigor:<skill>`, for example `/rigor:rigor-next-steps`.
+They are offered in terminal sessions, in JetBrains IDEs and in local
+Desktop sessions. They are not offered in cloud sessions, `claude -p`,
+`claude remote-control` server mode, GitHub Actions or the Agent SDK.
+
+Requirements and controls:
+
+- **Launch the installed `rigor` directly.** Claude Code only asks a
+  stdio server for the newer protocol revision, which skills need, when
+  the server starts quickly; it advises staying under 3 seconds. Do not
+  start the server through `bundle exec`, `nix develop` or `npx`. After
+  a slow start, Claude Code connects with the older protocol and may not
+  ask again for 7 days. To check, open `/mcp` and look for a
+  **Protocol** row on the `rigor` server. To ask again sooner, start
+  Claude Code with `MCP_PROTOCOL_NEGOTIATION=auto` and select
+  **Reconnect**.
+- **Turning skills off.** `rigor mcp --no-skills` serves the tools only.
+  In Claude Code you can also deny the permission rule
+  `Skill(mcp__rigor__*)`.
+- **Skills installed locally as well.** If you also installed the skills
+  into your agent's skill directory (for example with `npx skills`),
+  Claude Code lists each one twice: `rigor-next-steps` and
+  `rigor:rigor-next-steps`. Where Claude Code offers MCP skills, keep the
+  `rigor:` copy and remove the local one, because the `rigor:` copy
+  always matches the installed binary. Keep the local install for other
+  agents, and for the Claude Code surfaces listed above that do not
+  offer MCP skills.
+
+The server serves only the skills' `SKILL.md` and `references/*.md`
+files, each with the SHA-256 digest and size the client checks before
+using it. The binding contract is the internal spec,
+[`docs/internal-spec/mcp.md`](https://github.com/rigortype/rigor/blob/master/docs/internal-spec/mcp.md).
 
 ## Tool reference
 
@@ -599,6 +652,19 @@ echo '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":
 You should get a JSON response. If you get nothing or a shell error,
 `rigor` is not on your `PATH` — fix the install path first (see
 [Installing Rigor](01-installation.md)).
+
+**Claude Code shows the `rigor_*` tools but no `rigor:` skills.**
+
+Check, in this order:
+
+- `claude --version` is 2.1.331 or later, and MCP skills are on for your
+  plan and session. They are not offered in `claude -p` or cloud sessions.
+- `/mcp` shows a **Protocol** row for `rigor`. If it does not, the
+  client fell back to the older protocol, usually after a slow start.
+  Launch the installed `rigor` directly, then reconnect with
+  `MCP_PROTOCOL_NEGOTIATION=auto` (see
+  [Bundled skills over MCP](#bundled-skills-over-mcp)).
+- The server was not started with `--no-skills`.
 
 **`rigor_check` / `rigor_triage` return an empty diagnostics array on a project that has errors, or `rigor_lens` reports every file `outside_project`.**
 

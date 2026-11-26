@@ -49,11 +49,10 @@ module Rigor
               paths: {
                 type: "array",
                 items: { type: "string" },
-                description: "Files or directories to analyze (required)"
+                description: "Files or directories to analyze (defaults to configured paths)"
               },
               config: { type: "string", description: "Path to .rigor.yml (optional)" }
-            },
-            required: ["paths"]
+            }
           }
         },
         {
@@ -170,15 +169,19 @@ module Rigor
               paths: {
                 type: "array",
                 items: { type: "string" },
-                description: "Files or directories to scan (required)"
+                description: "Files or directories to scan (defaults to configured paths)"
               },
               config: { type: "string", description: "Path to .rigor.yml (optional)" }
-            },
-            required: ["paths"]
+            }
           }
         }
       ].freeze
       Ractor.make_shareable(TOOLS)
+
+      # Each tool's `inputSchema.required`, by name. `build_argv` refuses a call missing any of them, and nothing else
+      # (#3412): the schema a client reads is the check the server makes.
+      REQUIRED_ARGUMENTS = TOOLS.to_h { |tool| [tool[:name], tool.dig(:inputSchema, :required) || []] }.freeze
+      Ractor.make_shareable(REQUIRED_ARGUMENTS)
 
       # The tools that read a configuration — the ones taking a `config` argument — and so report its warnings.
       CONFIG_TOOLS = TOOLS.filter_map { |tool| tool[:name] if tool.dig(:inputSchema, :properties, :config) }.freeze
@@ -339,18 +342,21 @@ module Rigor
                 })
       end
 
-      # `tools/call` reads its tool from `params`, so `params` other than an object (or absent) is `-32602` (#3411).
+      # `tools/call` reads its tool from `params`, so `params` that is present and not an object is `-32602` (#3411).
       # Other methods read no `params` beyond `_meta`, and keep ignoring them.
       def tools_call(id, params)
         params = {} if params.nil?
         return error(id, INVALID_PARAMS, "Invalid params: tools/call params is not an object") unless params.is_a?(Hash)
 
-        call_tool(id, params["name"], params["arguments"] || {})
+        arguments = params["arguments"]
+        call_tool(id, params["name"], arguments.nil? ? {} : arguments)
       end
 
       def call_tool(id, name, args)
+        refusal = call_refusal(name, args)
+        return error(id, INVALID_PARAMS, refusal) if refusal
+
         argv = build_argv(name, args)
-        return error(id, INVALID_PARAMS, "Unknown tool: #{name.inspect}") unless argv
 
         out_io = StringIO.new
         err_io = StringIO.new
@@ -368,6 +374,19 @@ module Rigor
                   content: [{ type: "text", text: "Internal error: #{e.message}" }],
                   isError: true
                 })
+      end
+
+      # Why a `tools/call` is `-32602`, or nil when it runs. A missing argument names the argument rather than reading
+      # as an unknown tool, and `arguments` other than an object is refused before anything reads it (#3412).
+      def call_refusal(name, args)
+        return "Unknown tool: #{name.inspect}" unless REQUIRED_ARGUMENTS.key?(name)
+        return "Invalid params: arguments is not an object" unless args.is_a?(Hash)
+        return nil if build_argv(name, args)
+
+        missing = REQUIRED_ARGUMENTS.fetch(name).reject { |key| args[key] }
+        return "Missing required argument for #{name}: #{missing.join(', ')}" unless missing.empty?
+
+        "Invalid argument for #{name}: #{REQUIRED_ARGUMENTS.fetch(name).join(', ')}"
       end
 
       # A non-zero exit with nothing on stdout printed only an error; exit 1 with a document (check, lens) is a

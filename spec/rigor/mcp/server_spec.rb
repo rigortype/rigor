@@ -596,6 +596,92 @@ RSpec.describe Rigor::MCP::Server do
     end
   end
 
+  # #3412 — the inputSchema `required` lists are exactly what the server refuses a call for, and a refusal names the
+  # argument rather than reading as an unknown tool. Only `build_argv` and the refusal run: no CLI boot.
+  describe "required arguments" do
+    let(:full_arguments) do
+      {
+        "rigor_check" => { "paths" => ["lib"] },
+        "rigor_type_of" => { "file" => "a.rb", "line" => 1, "col" => 1 },
+        "rigor_triage" => { "paths" => ["lib"] },
+        "rigor_lens" => { "files" => ["a.rb"] },
+        "rigor_annotate" => { "file" => "a.rb" },
+        "rigor_sig_gen" => { "paths" => ["lib"] },
+        "rigor_explain" => { "rule" => "call" },
+        "rigor_coverage" => { "paths" => ["lib"] }
+      }
+    end
+
+    it "covers every tool" do
+      expect(full_arguments.keys).to match_array(described_class::TOOLS.map { |tool| tool[:name] })
+    end
+
+    described_class::REQUIRED_ARGUMENTS.each do |name, required|
+      it "runs #{name} with every argument, and refuses it without each required one (#{required.inspect})" do
+        arguments = full_arguments.fetch(name)
+        expect(server.send(:build_argv, name, arguments)).not_to be_nil
+        (arguments.keys - required).each do |optional|
+          expect(server.send(:build_argv, name, arguments.except(optional))).not_to be_nil
+        end
+        required.each do |key|
+          expect(server.send(:build_argv, name, arguments.except(key))).to be_nil
+        end
+      end
+    end
+
+    it "runs rigor_check and rigor_coverage without paths, leaving the paths to the configuration" do
+      expect(server.send(:build_argv, "rigor_check", {})).to eq(["check", "--format=json", "--no-stats", "--"])
+      expect(server.send(:build_argv, "rigor_coverage", {})).to eq(["coverage", "--format=json", "--"])
+    end
+
+    it "names the missing argument with -32602, not an unknown tool" do
+      resp = tool_call("rigor_type_of", { "file" => "a.rb" })
+
+      expect(resp.dig("error", "code")).to eq(-32_602)
+      expect(resp.dig("error", "message")).to eq("Missing required argument for rigor_type_of: line, col")
+    end
+
+    it "refuses a files value that is not a non-empty list of strings without calling it unknown" do
+      resp = tool_call("rigor_lens", { "files" => [5] })
+
+      expect(resp.dig("error", "code")).to eq(-32_602)
+      expect(resp.dig("error", "message")).to eq("Invalid argument for rigor_lens: files")
+    end
+
+    [nil, :absent].each do |arguments|
+      it "reads #{arguments.inspect} arguments as an empty object, so an argument-less tool runs" do
+        params = { "name" => "rigor_explain" }
+        params["arguments"] = arguments unless arguments == :absent
+        allow(Rigor::CLI).to receive(:new).and_return(instance_double(Rigor::CLI, run: 0))
+
+        resp = JSON.parse(JSON.generate(server.handle({ "id" => 7, "method" => "tools/call", "params" => params })))
+
+        expect(resp).to have_key("result")
+        expect(Rigor::CLI).to have_received(:new).with(%w[explain --format=json], out: anything, err: anything)
+      end
+    end
+
+    it "answers non-object arguments with -32602 under revision 2026-07-28 too" do
+      meta = { "io.modelcontextprotocol/protocolVersion" => "2026-07-28",
+               "io.modelcontextprotocol/clientCapabilities" => {} }
+      resp = request(id: 8, method: "tools/call",
+                     params: { "name" => "rigor_explain", "arguments" => [], "_meta" => meta })
+
+      expect(resp.dig("error", "code")).to eq(-32_602)
+      expect(resp).not_to have_key("result")
+    end
+
+    [[], "x", 5, false].each do |arguments|
+      it "answers arguments #{arguments.inspect} with -32602" do
+        resp = request(id: 6, method: "tools/call", params: { "name" => "rigor_explain", "arguments" => arguments })
+
+        expect(resp["id"]).to eq(6)
+        expect(resp.dig("error", "code")).to eq(-32_602)
+        expect(resp).not_to have_key("result")
+      end
+    end
+  end
+
   describe "flag-shaped arguments are operands, not options" do
     def text_of(resp)
       resp.dig("result", "content", 0, "text")

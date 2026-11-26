@@ -1,0 +1,3 @@
+- **[mcp]** The `rigor mcp` tool schemas' `required` lists now match what the server refuses a call without, and the refusal names the missing argument. ([#3430](https://github.com/rigortype/rigor/pull/3430))
+  - `rigor_check` and `rigor_coverage` no longer mark `paths` required: without it they run over the configured paths, as `rigor_triage` and `rigor_sig_gen` do.
+  - A missing argument used to read as `Unknown tool`, and `arguments` that is not an object raised an internal error; both are now `-32602` naming the problem ([#3412](https://github.com/rigortype/rigor/issues/3412)).

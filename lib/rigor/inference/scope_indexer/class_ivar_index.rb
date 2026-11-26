@@ -35,7 +35,7 @@ module Rigor
       # {.build_class_ivar_index} is the entry, which `ScopeIndexer.index` calls once. It walks every class and
       # module body and types each write's rvalue with no local bound; then it widens the entries for the mutations
       # the file observes, adds the read-before-write `nil`, and joins what other files and the ancestor chain
-      # contribute ({IvarContributions}) and what a signature declares ({DeclaredIvarTypes}). The other 93 functions
+      # contribute ({IvarContributions}) and what a signature declares ({DeclaredIvarTypes}). The other 98 functions
       # are private: the walk with its arms, the collectors of each kind of body, the recording steps, the held
       # `&&=` and `op=` writes, the censuses of the mutations and of the ivars a method hands back, and the
       # definite-assignment summary that finds a transient `@x = nil` ({.dead_transient_nil_writes}), with the
@@ -593,7 +593,8 @@ module Rigor
           # decision ("is this ivar truly read-before-write across the class lifetime?") is finalised at
           # `contribute_read_before_write_nil!` after the whole class body has been walked, using `init_writes` as the
           # soundness gate (an ivar written in `initialize` is initialised before any other method body runs).
-          collect_read_before_write_evidence(def_node, class_name, read_before_write, init_writes, default_scope)
+          collect_read_before_write_evidence(def_node, class_name, read_before_write, init_writes, default_scope,
+                                             singleton: singleton)
         end
 
         # ADR-38 block-form: collects ivar writes from a CallNode's block body (e.g. RSpec `before { @x = … }` /
@@ -741,9 +742,10 @@ module Rigor
         # Walks the method body in AST (== execution) order tracking ivar names whose first reference is a read. The set
         # is unioned into the class-wide `read_before_write` accumulator. For `initialize` def bodies, every write
         # target is unioned into `init_writes` instead — used by the finalisation step to suppress nil contribution for
-        # ivars the constructor guarantees are initialised.
+        # ivars the constructor guarantees are initialised. A singleton-side def (`def self.initialize`) is no
+        # initializer: `new` never calls it (#3419).
         def collect_read_before_write_evidence(def_node, class_name, read_before_write, init_writes,
-                                               default_scope = nil)
+                                               default_scope = nil, singleton: false)
           return if read_before_write.nil? || init_writes.nil?
 
           seen_writes = Set.new
@@ -754,11 +756,14 @@ module Rigor
           # initializer methods (minitest `setup`, Rails `after_initialize`, DI setters) on a constrained class. Both
           # fold their writes into `init_writes`, suppressing the read-before-write nil contribution for sibling
           # readers.
-          if def_node.name == :initialize ||
-             additional_initializer?(class_name, def_node.name, default_scope)
+          if !singleton && (def_node.name == :initialize ||
+                            additional_initializer?(class_name, def_node.name, default_scope))
             init_set = (init_writes[class_name] ||= Set.new)
             seen_writes.each { |name| init_set << name }
-            return
+            # #3419 — `initialize`'s own read of an ivar still unset is evidence too; a plugin's initializer may run
+            # after code that sets it, so it gives none.
+            read_first = EMPTY_GUARDED_IVARS
+            read_first = initializer_own_nil_reads(def_node, class_name) if def_node.name == :initialize
           end
 
           return if read_first.empty?
@@ -766,6 +771,39 @@ module Rigor
           rbw_set = (read_before_write[class_name] ||= Set.new)
           read_first.each { |name| rbw_set << name }
         end
+
+        # #3419 — the ivars `initialize` reads while they still hold `nil`: read before any write in the body, never
+        # written later in it, and read in a top-level statement that comes before the first one that may run other
+        # code of the object (a `super`, a `yield`, or a call on the implicit or `self` receiver other than
+        # `raise`/`fail`), which may set the ivar first. Nothing else runs on the instance before `initialize`.
+        def initializer_own_nil_reads(def_node, class_name)
+          all_writes = Set.new
+          detect_read_before_write(def_node.body, all_writes, Set.new, class_name)
+          prefix_writes = Set.new
+          read_first = Set.new
+          top_level_statements(def_node.body).each do |stmt|
+            break if runs_object_code?(stmt)
+
+            detect_read_before_write(stmt, prefix_writes, read_first, class_name)
+          end
+          read_first - all_writes
+        end
+
+        # True when `node` holds a `super`, a `yield`, or a call on the implicit or `self` receiver other than
+        # `raise`/`fail`, outside a nested def, class or lambda.
+        def runs_object_code?(node)
+          return false unless node.is_a?(Prism::Node)
+          return false if OBJECT_CODE_BARRIERS.any? { |klass| node.is_a?(klass) }
+          return true if node.is_a?(Prism::SuperNode) || node.is_a?(Prism::ForwardingSuperNode) ||
+                         node.is_a?(Prism::YieldNode)
+          return true if node.is_a?(Prism::CallNode) && (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode)) &&
+                         !%i[raise fail].include?(node.name)
+
+          node.compact_child_nodes.any? { |c| runs_object_code?(c) }
+        end
+
+        OBJECT_CODE_BARRIERS = [Prism::DefNode, Prism::ClassNode, Prism::ModuleNode, Prism::LambdaNode].freeze
+        private_constant :OBJECT_CODE_BARRIERS
 
         # ADR-38 — true when a loaded plugin declares `method_name` an additional initializer for `class_name` (or an
         # ancestor). Reads the plugin registry off the pre-pass scope's environment; the receiver-constraint match
@@ -1470,16 +1508,6 @@ module Rigor
         #                               scanning the suffix).
         def statement_assignment_outcome(stmt, target, class_name, effects, depth, visiting)
           case stmt
-          when Prism::InstanceVariableWriteNode
-            return :falls_through_unassigned if stmt.name != target
-
-            nil_literal_value?(stmt.value) ? :falls_through_unassigned : :assigned
-          when Prism::CallNode
-            if unconditional_call_assigns?(stmt, target, class_name, effects, depth, visiting)
-              :assigned
-            else
-              :falls_through_unassigned
-            end
           when Prism::IfNode, Prism::UnlessNode
             conditional_assignment_outcome(stmt, target, class_name, effects, depth, visiting)
           when Prism::CaseNode
@@ -1487,41 +1515,89 @@ module Rigor
           when Prism::ReturnNode
             :terminates_unassigned
           else
-            # Any other statement — including a bare `raise`/`fail`, which terminates without a completing path that
-            # observes the seed nil — is neutral: control either continues or the path never reaches method exit. Keep
-            # scanning the suffix.
+            outcome = simple_statement_outcome(stmt, target, class_name, effects, depth, visiting)
+            # #3419 — a statement that does not assign but holds a `return` anywhere (`c and return`, a loop's, a
+            # block's, a `begin`'s) may leave the method there with `target` unassigned.
+            outcome == :falls_through_unassigned && holds_return?(stmt) ? :terminates_unassigned : outcome
+          end
+        end
+
+        # The outcome of a statement that is no conditional and no `return`: a write of `target` or an unconditional
+        # same-class call that assigns it, and otherwise neutral — a bare `raise`/`fail` included, which terminates
+        # without a completing path that observes the seed nil.
+        def simple_statement_outcome(stmt, target, class_name, effects, depth, visiting)
+          case stmt
+          when Prism::InstanceVariableWriteNode
+            stmt.name == target && !nil_literal_value?(stmt.value) ? :assigned : :falls_through_unassigned
+          when Prism::CallNode
+            if unconditional_call_assigns?(stmt, target, class_name, effects, depth, visiting)
+              :assigned
+            else
+              :falls_through_unassigned
+            end
+          else
             :falls_through_unassigned
           end
+        end
+
+        # True when `node` holds a `return` that leaves the method: outside a nested def, class, module or lambda.
+        def holds_return?(node)
+          return false unless node.is_a?(Prism::Node)
+          return true if node.is_a?(Prism::ReturnNode)
+          return false if OBJECT_CODE_BARRIERS.any? { |klass| node.is_a?(klass) }
+
+          node.compact_child_nodes.any? { |c| holds_return?(c) }
         end
 
         # True when a branch body (a StatementsNode / single node) definitely assigns `target` non-nil on every path
         # that completes the method through it, OR terminates every path by raise (vacuously safe — no completing path
         # observes the seed nil). Returns false if any path can complete/return without the assignment.
-        def branch_definitely_assigns?(branch, target, class_name, effects, depth, visiting)
+        # A branch body's (a StatementsNode / single node) outcome for `target`, read as a statement's is: `:assigned`
+        # when it definitely assigns `target` non-nil on every path that completes the method through it, or ends every
+        # path by raise (vacuously safe — no completing path observes the seed nil); `:terminates_unassigned` when a
+        # path through it can return without the assignment; `:falls_through_unassigned` otherwise, an empty or absent
+        # branch included.
+        def branch_assignment_outcome(branch, target, class_name, effects, depth, visiting)
           stmts = top_level_statements(branch)
-          return false if stmts.empty?
+          return :falls_through_unassigned if stmts.empty?
 
           stmts.each do |stmt|
             outcome = statement_assignment_outcome(stmt, target, class_name, effects, depth, visiting)
-            return true if outcome == :assigned
-            return false if outcome == :terminates_unassigned
+            return outcome unless outcome == :falls_through_unassigned
           end
           # Reached the end of the branch without a definite assignment; safe only if the branch's last statement always
           # raises (no completing path falls out of it).
-          always_raises?(stmts.last)
+          always_raises?(stmts.last) ? :assigned : :falls_through_unassigned
+        end
+
+        # Joins the outcomes of the arms of a conditional or a `case`, a missing `else` arm falling through: `:assigned`
+        # when every arm assigns, `:terminates_unassigned` when an arm may return without the assignment (#3419: `return
+        # if c` is such an arm), and `:falls_through_unassigned` otherwise.
+        def join_arm_outcomes(outcomes)
+          return :assigned if outcomes.all?(:assigned)
+          return :terminates_unassigned if outcomes.include?(:terminates_unassigned)
+
+          :falls_through_unassigned
         end
 
         # `if`/`unless` is a definite assignment of `target` only when BOTH the then and else arms definitely assign (or
         # raise-out). A missing else arm means the fall-through path skips the assignment -> not definite. Modifier-form
-        # `if`/`unless` (no else, single predicate'd statement) likewise.
+        # `if`/`unless` (no else, single predicate'd statement) likewise. An `elsif` arm is read for a `return` alone:
+        # it never counts as assigning.
         def conditional_assignment_outcome(node, target, class_name, effects, depth, visiting)
           else_branch = node.is_a?(Prism::IfNode) ? node.subsequent : node.else_clause
-          return :falls_through_unassigned unless else_branch.is_a?(Prism::ElseNode)
-          return :falls_through_unassigned unless node.statements
-
-          then_ok = branch_definitely_assigns?(node.statements, target, class_name, effects, depth, visiting)
-          else_ok = branch_definitely_assigns?(else_branch.statements, target, class_name, effects, depth, visiting)
-          then_ok && else_ok ? :assigned : :falls_through_unassigned
+          then_outcome = branch_assignment_outcome(node.statements, target, class_name, effects, depth, visiting)
+          else_outcome =
+            case else_branch
+            when Prism::ElseNode
+              branch_assignment_outcome(else_branch.statements, target, class_name, effects, depth, visiting)
+            when Prism::IfNode
+              elsif_outcome = conditional_assignment_outcome(else_branch, target, class_name, effects, depth, visiting)
+              elsif_outcome == :terminates_unassigned ? elsif_outcome : :falls_through_unassigned
+            else
+              :falls_through_unassigned
+            end
+          join_arm_outcomes([then_outcome, else_outcome])
         end
 
         # `case` is a definite assignment only when there is a real `else` clause AND every `when`/`in` body plus the
@@ -1529,14 +1605,12 @@ module Rigor
         # unassigned.
         def case_assignment_outcome(node, target, class_name, effects, depth, visiting)
           else_clause = node.else_clause
-          return :falls_through_unassigned unless else_clause.is_a?(Prism::ElseNode)
-
           branches = node.conditions.map { |c| c.respond_to?(:statements) ? c.statements : nil }
-          branches << else_clause.statements
-          all_ok = branches.all? do |b|
-            branch_definitely_assigns?(b, target, class_name, effects, depth, visiting)
+          branches << else_clause&.statements
+          outcomes = branches.map do |b|
+            branch_assignment_outcome(b, target, class_name, effects, depth, visiting)
           end
-          all_ok ? :assigned : :falls_through_unassigned
+          join_arm_outcomes(outcomes)
         end
 
         # True when `node` (a single statement or its last statement) is an unconditional `raise`/`fail` call that
@@ -1897,7 +1971,8 @@ module Rigor
                              :collect_def_ivar_writes, :collect_block_ivar_writes, :collect_initializer_block_ivars,
                              :record_attr_writer_ivars, :collect_define_method_block_ivars,
                              :collect_receiver_writer_ivars, :define_method_written_ivars, :block_initializer?,
-                             :collect_read_before_write_evidence, :additional_initializer?,
+                             :collect_read_before_write_evidence, :initializer_own_nil_reads, :runs_object_code?,
+                             :additional_initializer?,
                              :class_matches_constraint?, :collect_class_body_ivar_writes,
                              :collect_define_method_argument_writes, :define_method_block_call?,
                              :method_body_block_call?, :detect_read_before_write, :detect_multi_write_target_writes,
@@ -1911,7 +1986,8 @@ module Rigor
                              :collect_singleton_method_defs, :method_definite_assigns, :ivar_write_targets,
                              :suffix_definitely_assigns_with_resolver?, :dead_transient_nil_writes,
                              :top_level_statements, :nil_literal_value?, :suffix_definitely_assigns?,
-                             :statement_assignment_outcome, :branch_definitely_assigns?,
+                             :statement_assignment_outcome, :simple_statement_outcome, :holds_return?,
+                             :branch_assignment_outcome, :join_arm_outcomes,
                              :conditional_assignment_outcome, :case_assignment_outcome, :always_raises?,
                              :unconditional_call_assigns?, :record_ivar_write, :record_compound_ivar_write,
                              :record_ivar_or_write, :record_ivar_and_write, :record_ivar_operator_write,

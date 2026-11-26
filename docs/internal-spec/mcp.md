@@ -29,7 +29,7 @@ Clients MUST NOT depend on:
 ## Process and invocation
 
 ```text
-rigor mcp [--transport=stdio] [--config=PATH]
+rigor mcp [--transport=stdio] [--config=PATH] [--no-skills]
 ```
 
 - `--transport` accepts only `stdio`, its default. Any other value writes an error to stderr and exits
@@ -38,6 +38,8 @@ rigor mcp [--transport=stdio] [--config=PATH]
 - `--config=PATH` sets the session default configuration (§ Configuration). A path that names no file
   is refused at boot: the error goes to stderr and the process exits 64 before reading input. Whether
   the file loads is not checked until a tool call reads it.
+- `--no-skills` turns off § Skills: the server then declares neither `resources` nor the extension, and
+  answers the skills methods `-32601`.
 - The process runs until its input reaches end of file, then exits 0.
 - One process serves many requests ([ADR-33](../adr/33-mcp-server.md) WD3). The session `--config` is
   its only per-session setting. Ruby code the process has loaded (Rigor, plugin gems, the bundle) is
@@ -66,7 +68,8 @@ stdout, with no `Content-Length` framing.
   not an object, MUST NOT stop the server. The server MUST answer `-32600` with `"id": null` for the
   first, a batch as one message, and `-32602` with the request's `id` for the second
   ([#3411](https://github.com/rigortype/rigor/issues/3411)). A `tools/call` with no `params` is read as
-  one with empty `params`. Other methods ignore their `params` other than `_meta`. The `jsonrpc`
+  one with empty `params`. Other methods read only the `params` members their section names, beside
+  `_meta`. The `jsonrpc`
   member is not checked; clients MUST send `"jsonrpc": "2.0"`.
 
 ## Protocol eras
@@ -132,6 +135,8 @@ results carry no `resultType` and no server-info `_meta`.
 | `ping` | yes | yes | `{}`, plus the envelope under 2026-07-28 |
 | `tools/list` | yes | yes | `{"tools": [...]}`, plus the envelope and § Caching under 2026-07-28 |
 | `tools/call` | yes | yes | § Tool calls, plus the envelope under 2026-07-28 |
+| `skills/list`, `skills/get` | — | yes, unless `--no-skills` | § Skills |
+| `resources/list`, `resources/read` | — | yes, unless `--no-skills` | § Skills |
 
 Revision 2026-07-28 dropped `ping`; the server still answers it (ADR-5: a client that keeps pinging stays
 connected). Any other method MUST get `-32601`, in either era. *Implementation:* a request object with
@@ -143,30 +148,81 @@ which.
 ```json
 {"resultType": "complete",
  "supportedVersions": ["2026-07-28"],
- "capabilities": {"tools": {"listChanged": false}},
+ "capabilities": {"tools": {"listChanged": false},
+                  "resources": {},
+                  "extensions": {"io.modelcontextprotocol/skills": {}}},
  "ttlMs": 3600000, "cacheScope": "public",
  "_meta": {"io.modelcontextprotocol/serverInfo": {"name": "rigor", "version": "<Rigor::VERSION>"}}}
 ```
 
 `supportedVersions` MUST equal `SUPPORTED_VERSIONS`, the list § 2026-07-28 requests checks against.
 
-`capabilities.tools.listChanged` is `false` in both eras: the tool list MUST NOT change while the process
+`capabilities.resources` and `capabilities.extensions` are as shown unless the server runs with
+`--no-skills`, which omits both keys. `capabilities.tools.listChanged` is `false` in both eras: the tool list MUST NOT change while the process
 runs, and the server sends no `notifications/tools/list_changed`.
 
 ### Caching
 
-`server/discover` and 2026-07-28 `tools/list` results MUST carry `ttlMs` and `cacheScope: "public"`.
-Neither result varies within a process or between users, so the only staleness a cache can see is a
+`server/discover`, 2026-07-28 `tools/list`, and every § Skills result MUST carry `ttlMs` and
+`cacheScope: "public"`. None varies within a process or between users, so the only staleness a cache can see is a
 `rigor` upgrade under a running client; `ttlMs` bounds that. `tools/call` results carry neither.
 
-### Extensions (reserved)
+### Extensions
 
-`capabilities.extensions` is the seam for MCP extensions. While the server serves none, `server/discover`
-MUST omit the key rather than send an empty object. The identifier `io.modelcontextprotocol/skills` is
-reserved for serving the gem-bundled `skills/` ([#3402](https://github.com/rigortype/rigor/issues/3402)):
-this page does not specify it, and the change that serves it adds its methods, its settings object and
-its errors here. An extension is advertised and served only to 2026-07-28 requests; the legacy
-`initialize` capabilities stay `{"tools": {"listChanged": false}}`.
+`capabilities.extensions` is the seam for MCP extensions. The server serves one, the Skills extension
+(§ Skills), and MUST omit the key rather than send an empty object when it serves none (`--no-skills`).
+An extension is advertised and served only to 2026-07-28 requests; the legacy `initialize`
+capabilities stay `{"tools": {"listChanged": false}}`, and a legacy request for a § Skills method gets
+`-32601`.
+
+### Skills
+
+The server serves the gem's own `skills/` tree over the
+[Skills extension](https://modelcontextprotocol.io/extensions/skills/overview),
+`io.modelcontextprotocol/skills` ([ADR-33](../adr/33-mcp-server.md) WD10). Its settings object is
+`{}`: `directoryRead` is not offered, and `resources/directory/read` is `-32601`.
+
+**The served set.** The skills are the directories of `<gem root>/skills/` holding a `SKILL.md`. Each
+serves its `SKILL.md` and its `references/*.md`, the two globs the gemspec ships, and nothing else.
+A skill is served only when its `SKILL.md` opens with YAML front matter that has a string
+`description` and a `name` equal to the directory name. *Implementation:* a skill that fails this is
+left out, with a line on stderr, and the others are still served. The server reads the set at the
+first § Skills request, never at `server/discover` or a tool call, and serves that snapshot for the
+life of the process: a file edited on disk afterwards is not seen until the server restarts.
+
+**URIs.** A skill's URI is `skill://<name>/SKILL.md`, and a reference file's is
+`skill://<name>/references/<file>.md`.
+
+**`skills/list`.** The result is `{"skills": [<entry>, ...]}` with the envelope and § Caching. Each entry
+is:
+
+```json
+{"uri": "skill://rigor-mcp-setup/SKILL.md",
+ "frontmatter": {"name": "rigor-mcp-setup", "description": "...", "license": "MPL-2.0", "metadata": {...}},
+ "resources": [{"uri": "skill://rigor-mcp-setup/SKILL.md", "digest": "sha256:<64 hex>", "size": 5116}]}
+```
+
+- `frontmatter` MUST equal the `SKILL.md` front matter, parsed as YAML, with every field passed
+  through.
+- `resources` MUST list every served file of the skill exactly once, `SKILL.md` first. Each `digest`
+  is the lowercase hex SHA-256 of the bytes `resources/read` returns for that URI, and `size` is
+  their byte count.
+- Every skill fits on one page: the result MUST NOT carry `nextCursor`. A request with a non-null
+  `cursor` gets `-32602`, since no cursor was ever issued.
+
+**`skills/get`.** `{"uri": <a skill's SKILL.md URI>}` is answered `{"skill": <entry>}`, the same entry
+`skills/list` carries, with the envelope and § Caching. Any other `uri`, a missing one included, gets
+`-32602` with `data.uri`.
+
+**`resources/read`.** `{"uri": <a served file's URI>}` is answered
+`{"contents": [{"uri": ..., "mimeType": "text/markdown", "text": ...}]}`, with the envelope and
+§ Caching. `text` is the file's bytes as UTF-8. Any other `uri` gets `-32602` with `data.uri`, never
+an empty `contents`.
+
+**`resources/list`.** The result is `{"resources": [...]}` with the envelope and § Caching: one entry per
+served file, `{uri, name, mimeType: "text/markdown", size}`. A `SKILL.md` entry is named by its
+skill's front matter `name` and carries its `description`. A reference file is named by its path
+under `skills/`. A non-null `cursor` gets `-32602`, as for `skills/list`.
 
 ## Errors
 
@@ -174,8 +230,8 @@ its errors here. An extension is advertised and served only to 2026-07-28 reques
 | --- | --- |
 | `-32700` | A line that is not valid JSON (`"id": null`). |
 | `-32600` | A line that parses but is not a request object, a JSON-RPC batch included (`"id": null`). |
-| `-32601` | A method neither era serves. |
-| `-32602` | A 2026-07-28 request with a missing or non-string protocol version, or without `clientCapabilities`; a `tools/call` whose `params` or `arguments` is not an object; a `tools/call` naming no tool this server has, or missing an argument § Arguments says is checked. |
+| `-32601` | A method neither era serves; a § Skills method sent as a legacy request or under `--no-skills`. |
+| `-32602` | A 2026-07-28 request with a missing or non-string protocol version, or without `clientCapabilities`; a `tools/call` whose `params` or `arguments` is not an object; a `tools/call` naming no tool this server has, or missing an argument § Arguments says is checked; a `skills/get` or `resources/read` for a URI the server does not serve (with `data.uri`); a `skills/list` or `resources/list` with a `cursor`. |
 | `-32022` | A 2026-07-28 request naming a version not in `SUPPORTED_VERSIONS`, with `data.supported` and `data.requested`. |
 | `-32021` | Never sent (§ 2026-07-28 requests). |
 
@@ -303,3 +359,13 @@ the position of `content[0]` is fixed.
 argv of `rigor_check`, `rigor_type_of`, `rigor_triage` and `rigor_sig_gen`, and the `--` before the
 operands of every tool. `spec/rigor/cli/catalogue_spec.rb` ties every tool to a catalogued command
 (ADR-126 WD3) and every input property to that command's flags (#2511).
+`spec/rigor/mcp/skill_catalog_spec.rb` checks § Skills over the real `skills/` tree. It checks:
+
+- every manifest digest and size against the bytes served;
+- the front matter passed through;
+- the served set against the gemspec;
+- that every relative link stays inside its skill;
+- Claude Code's client limits of 100 skills per server, 100,000 bytes per file and 400,000 bytes per
+  skill.
+
+`server_spec.rb` pins that `server/discover` and the § Skills methods load no part of `rigor/cli`.

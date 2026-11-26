@@ -146,8 +146,8 @@ Rationale:
   pings stays connected).
 - **No required client capability.**  Every tool is read-only (WD5), so nothing needs
   elicitation or sampling, and `-32021` is never sent.
-- **`capabilities.extensions` is the seam for #3402.**  `Server::EXTENSIONS` is empty, and
-  `server/discover` omits the key until a later slice adds `io.modelcontextprotocol/skills`.
+- **`capabilities.extensions` is the seam for #3402.**  `server/discover` omitted the key until
+  WD10 added `io.modelcontextprotocol/skills`.
   Tasks and elicitation stay out (#3402 § "Decided against, for now").
 
 ### WD10 — Serve the gem's own `skills/` over the Skills extension
@@ -168,7 +168,7 @@ install and nothing to drift.
 `skills/` stays the single source. Non-Claude agents read it directly in Agent Skills form, and
 the MCP surface is a view of it, never a second copy.
 
-**The surface.** Specified in full in `mcp.md` § Extensions when this lands. It is offered only
+**The surface.** Specified in full in [`mcp.md` § Skills](../internal-spec/mcp.md#skills). It is offered only
 under 2026-07-28 (WD9). The legacy `initialize` capabilities stay `{"tools": {"listChanged": false}}`,
 and a legacy request for any method below gets `-32601`.
 

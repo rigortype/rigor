@@ -1,0 +1,2 @@
+- **[mcp]** `rigor mcp` speaks MCP protocol revision 2026-07-28, including `server/discover`, and still answers clients that open with `initialize` exactly as before. ([#3404](https://github.com/rigortype/rigor/pull/3404))
+  - Claude Code probes stdio servers for 2026-07-28 first; a server that boots too slowly for the probe is reached over the legacy handshake, with the same tools.

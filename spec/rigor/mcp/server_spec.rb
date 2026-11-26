@@ -550,7 +550,7 @@ RSpec.describe Rigor::MCP::Server do
       locked = File.join(dir, "locked.yml")
       File.write(locked, "paths: []\n")
       File.chmod(0o000, locked)
-      configs = { "a directory" => dir, "a non-string" => 5 }
+      configs = { "a directory" => dir, "a non-string" => 5, "a NUL byte" => "a\0b" }
       configs["an unreadable file"] = locked unless File.readable?(locked) # root reads anything
       configs
     end
@@ -580,6 +580,7 @@ RSpec.describe Rigor::MCP::Server do
         expected = {
           "a directory" => "config path is a directory: #{dir}",
           "a non-string" => "config file not found: 5",
+          "a NUL byte" => 'config file not found: "a\u0000b"',
           "an unreadable file" => "config file not readable: "
         }
 

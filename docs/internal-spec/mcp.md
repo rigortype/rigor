@@ -252,8 +252,9 @@ The configuration a tool call reads is, first match wins ([ADR-33](../adr/33-mcp
 A blank `config` (empty or whitespace only) names no file, so the session default applies; it MUST NOT
 reach the CLI as `--config=`. A `config` the command refuses (one naming no file, a directory or an
 unreadable file) is the command's usage error, so the call MUST be `isError: true`, with the command's
-error as `content[0]`. A `config` that is not a string reaches the command as its string form
-(`5` as `--config=5`) and is answered the same way
+error as `content[0]`. A `config` that is `null` or `false` names no file, as a blank one does; any
+other value that is not a string reaches the command as its string form (`5` as `--config=5`) and is
+answered the same way
 ([#3413](https://github.com/rigortype/rigor/issues/3413)). Relative paths, in `config` and in operands
 alike, resolve against the server's working directory.
 

@@ -9,6 +9,7 @@ require_relative "../../source/node_children"
 require_relative "../declaration_walk/rules"
 require_relative "../global_write_census"
 require_relative "../receiver_writer_call"
+require_relative "census_scope"
 require_relative "empty_seed"
 
 module Rigor
@@ -29,14 +30,14 @@ module Rigor
       # walks with their arms and recording steps, the rest of the rules, and {.constant_writes_for_file}, which
       # no file of `lib/` calls and the specs reach through `send`.
       #
-      # It asks {DeclarationWalk::Rules} for each declaration context and calls two functions left in
-      # `scope_indexer.rb`, at one site each: `ScopeIndexer.census_body_scope` (the scope a census types a body's
-      # rvalues under, which the ivar and the class-variable censuses ask too) and `ScopeIndexer.census_nesting`
-      # (the chain that scope answers `Module.nesting` with). Four constants moved with it, the ones only it read:
-      # {CONSTANT_UNPUBLISHABLE} (public, as it was), `OPAQUE_SELF_BLOCK_CALLS`, `OBJECT_OWNER` and `CensusTables`.
-      # It reads `ScopeIndexer::OPAQUE_SELF`, `RECEIVER_EVAL_CALLS`, `CONSTANT_MEMO` and `DYNAMIC_TARGET_PREFIX`
-      # lexically, as {NodePropagation} reads the indexer's constants: other rows of `scope_indexer.rb` or other
-      # files read each.
+      # It asks {DeclarationWalk::Rules} for each declaration context and {CensusScope} for two things, at one site
+      # each: {CensusScope.census_body_scope} (the scope a census types a body's rvalues under, which the ivar and
+      # the class-variable censuses ask too) and {CensusScope.census_nesting} (the chain that scope answers
+      # `Module.nesting` with). It calls nothing left in `scope_indexer.rb`. Four constants moved with it, the ones
+      # only it read: {CONSTANT_UNPUBLISHABLE} (public, as it was), `OPAQUE_SELF_BLOCK_CALLS`, `OBJECT_OWNER` and
+      # `CensusTables`. It reads `ScopeIndexer::OPAQUE_SELF`, `RECEIVER_EVAL_CALLS`, `CONSTANT_MEMO` and
+      # `DYNAMIC_TARGET_PREFIX` lexically, as {NodePropagation} reads the indexer's constants: other rows of
+      # `scope_indexer.rb` or other files read each.
       #
       # `scope_indexer.rb` requires this file, and this file does not require it back. It requires the file of
       # what else it names, with one exception: `in_effect_refinements.rb` reads `Scope::DiscoveryIndex` as it
@@ -275,8 +276,8 @@ module Rigor
           owner = self_owner.is_a?(String) ? self_owner : enclosing_prefix.join("::")
           body_scope = default_scope
           unless owner.empty?
-            body_scope = ScopeIndexer.census_body_scope(default_scope, enclosing_prefix,
-                                                        Type::Combinator.singleton_of(owner))
+            body_scope = CensusScope.census_body_scope(default_scope, enclosing_prefix,
+                                                       Type::Combinator.singleton_of(owner))
           end
           rvalue_type = meta_new_constant_type(node, full) ||
                         EmptySeed.erase(node.value, body_scope.type_of(node.value))
@@ -350,7 +351,7 @@ module Rigor
         # and the ancestor rung {Reflection.resolve_constant_type} walks is deliberately skipped, so a
         # namespace no source declares keeps the key it has today rather than moving to a guess.
         def resolved_write_namespace(namespace, qualified_prefix, scope)
-          ScopeIndexer.census_nesting(scope, qualified_prefix).each do |entry|
+          CensusScope.census_nesting(scope, qualified_prefix).each do |entry|
             candidate = "#{entry}::#{namespace}"
             return candidate if known_namespace?(candidate, scope)
           end

@@ -3588,7 +3588,7 @@ Unrelated
     end
 
     it "files `class D` method defs under `class <<` nowhere in the class-def table" do
-      defs = described_class.collect_class_method_defs(parse(<<~RUBY))
+      defs = described_class::ClassIvarIndex.send(:collect_class_method_defs, parse(<<~RUBY))
         class C
           class << self
             class D
@@ -3945,7 +3945,7 @@ Unrelated
           end
         end
       RUBY
-      defs = described_class.collect_class_method_defs(program)
+      defs = described_class::ClassIvarIndex.send(:collect_class_method_defs, program)
       expect(defs.keys).to eq(["K"])
 
       idx = described_class.index(program, default_scope: default_scope)
@@ -3965,7 +3965,7 @@ Unrelated
       RUBY
       methods, = described_class.build_methods_and_def_nodes(program)
       expect(methods).to be_empty
-      expect(described_class.collect_class_method_defs(program)).to be_empty
+      expect(described_class::ClassIvarIndex.send(:collect_class_method_defs, program)).to be_empty
     end
 
     it "anchors self:: declarations and writes inside a meta-new block on the rebound self" do
@@ -4009,7 +4009,7 @@ Unrelated
       expect(idx[program].singleton_def_for("C::K", :s)).to be_a(Prism::DefNode)
       expect(idx[program].user_def_for("C::K", :s)).to be_nil
       expect(idx[program].user_def_for("C", :s)).to be_nil
-      expect(described_class.collect_class_method_defs(program)).to be_empty
+      expect(described_class::ClassIvarIndex.send(:collect_class_method_defs, program)).to be_empty
     end
 
     it "keeps anonymous factory blocks inside a meta-new body off the enclosing class" do
@@ -4026,7 +4026,7 @@ Unrelated
           end
         end
       RUBY
-      expect(described_class.collect_class_method_defs(program)).to be_empty
+      expect(described_class::ClassIvarIndex.send(:collect_class_method_defs, program)).to be_empty
       idx = described_class.index(program, default_scope: default_scope)
       expect(idx[program].user_def_for("C", :anon)).to be_nil
       expect(idx[program].user_def_for("C::K", :anon)).to be_nil

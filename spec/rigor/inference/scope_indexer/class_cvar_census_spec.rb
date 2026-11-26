@@ -894,45 +894,62 @@ RSpec.describe Rigor::Inference::ScopeIndexer::ClassCvarCensus do
     expect(indexer.const_defined?(:JoinOnlyCvarWrite, false)).to be(false)
   end
 
-  # The #3318 cut-off counts the calls a moved cluster makes back into what stays. This one makes one, at two sites.
-  it "calls one function of the indexer, the census scope, at two sites" do
+  # The #3318 cut-off counts the calls a moved cluster makes back into what stays. This one made one, at two sites,
+  # of the census scope, which is a module of its own since #3400: it calls nothing of the indexer.
+  it "calls nothing of the indexer, and the census scope at two sites" do
     path = File.join(DeclarationFactSources::REPO_ROOT, "lib/rigor/inference/scope_indexer/class_cvar_census.rb")
-    calls = DeclarationFactSources.each_node(Prism.parse_file(path).value).filter_map do |node|
-      node.name if node.is_a?(Prism::CallNode) && DeclarationFactSources.constant_name(node.receiver) == "ScopeIndexer"
+    nodes = DeclarationFactSources.each_node(Prism.parse_file(path).value).to_a
+    calls = nodes.filter_map do |node|
+      receiver = DeclarationFactSources.constant_name(node.receiver) if node.is_a?(Prism::CallNode)
+      [receiver, node.name] if %w[ScopeIndexer CensusScope].include?(receiver)
     end
+    read = nodes.filter_map { |node| DeclarationFactSources.constant_name(node) if node.is_a?(Prism::ConstantPathNode) }
 
-    expect(calls).to eq(%i[census_body_scope census_body_scope])
+    expect(calls).to eq([["CensusScope", :census_body_scope], ["CensusScope", :census_body_scope]])
+    expect(read.grep(/\AClassIvarIndex::/)).to eq(%w[ClassIvarIndex::BindingTargets ClassIvarIndex::IVAR_BARRIER_NODES])
   end
 
-  # The module reads `EMPTY_NESTING`, `IVAR_BARRIER_NODES` and `BindingTargets` through `ScopeIndexer`'s own names
-  # and calls `ScopeIndexer.census_body_scope`, all of which `scope_indexer.rb` defines: the file requires what else
-  # it names, and until the indexer has loaded only a call that reaches none of the four answers.
-  it "loads without the indexer, with what it names, and answers only what needs nothing of the indexer" do
-    probe = <<~RUBY
+  # The module reads `EMPTY_NESTING` through `ScopeIndexer`'s own name, which `scope_indexer.rb` defines, and
+  # `IVAR_BARRIER_NODES` and `BindingTargets` on `ClassIvarIndex`, whose file it does not require: that file
+  # requires the dispatcher and so the `rbs` gem, which an unbundled child does not have. It requires what else it
+  # names, the census scope among it, and until the indexer has loaded only a call that reaches none of the three
+  # answers. The scope the gather is handed here answers what the census scope asks of one and nothing else.
+  def alone_probe
+    <<~RUBY
       require "rigor/inference/scope_indexer/class_cvar_census"
       indexer = Rigor::Inference::ScopeIndexer
       census = indexer::ClassCvarCensus
       walk = Rigor::Inference::DeclarationWalk
       named = [defined?(indexer::ClassCvarsCollector), defined?(indexer::CvarHierarchy), defined?(indexer::EmptySeed),
                defined?(walk::Rules), defined?(walk::Shadow), walk.respond_to?(:run),
-               defined?(Rigor::Type::Combinator), Prism::ProgramNode.method_defined?(:rigor_each_child)]
+               defined?(Rigor::Type::Combinator), Prism::ProgramNode.method_defined?(:rigor_each_child),
+               defined?(indexer::CensusScope), defined?(indexer::ClassIvarIndex)]
       root = Prism.parse("class C; def m = (@@a = 1); end").value
       def_node = root.statements.body.first.body.body.first
+      scope = Object.new
+      def scope.lexical_nesting = nil
+      def scope.with_self_type(_type) = self
+      def scope.with_lexical_nesting(_nesting) = self
       failure = lambda do |&call|
         call.call
       rescue NameError => e
         [e.class.name, e.name]
       end
       entry = failure.call { census.build_class_cvar_index(root, nil) }
-      gather = failure.call { census.collect_def_cvar_writes(def_node, %w[C], nil, {}) }
+      gather = failure.call { census.collect_def_cvar_writes(def_node, %w[C], scope, {}) }
       skipped = census.collect_def_cvar_writes(def_node, [], nil, {})
       finished = census.finished_cvar_census({ "C" => { a: 1, b: census::JoinOnlyCvarWrite.new(2) } })
       print [indexer.respond_to?(:index), named, entry, gather, skipped, finished].inspect
     RUBY
-    out, err, status = RubyRun.capture("-I", File.join(DeclarationFactSources::REPO_ROOT, "lib"), "-e", probe)
+  end
+
+  it "loads without the indexer, with what it names, and answers only what needs nothing of the indexer" do
+    lib = File.join(DeclarationFactSources::REPO_ROOT, "lib")
+    out, err, status = RubyRun.capture("-I", lib, "-e", alone_probe)
 
     expect(status).to be_success, err
-    expect(out).to eq('[false, ["constant", "constant", "constant", "constant", "constant", true, "constant", true], ' \
-                      '["NameError", :EMPTY_NESTING], ["NoMethodError", :census_body_scope], nil, {"C" => {a: 1}}]')
+    expect(out).to eq('[false, ["constant", "constant", "constant", "constant", "constant", true, "constant", true, ' \
+                      '"constant", nil], ["NameError", :EMPTY_NESTING], ["NameError", :ClassIvarIndex], nil, ' \
+                      '{"C" => {a: 1}}]')
   end
 end

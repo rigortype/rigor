@@ -37,7 +37,7 @@ module Rigor
         end
 
         # `def_owner` names the class a `def` leaf's ivar writes belong to when `self` is
-        # rebound — see {ScopeIndexer#walk_class_ivars}; `[]` marks a self no name covers.
+        # rebound — see {ClassIvarIndex.walk_class_ivars}; `[]` marks a self no name covers.
         def walk_published_constant_ivars(node, qualified_prefix, scope, table, def_owner: nil,
                                           singleton_cref: false)
           return unless node.is_a?(Prism::Node)

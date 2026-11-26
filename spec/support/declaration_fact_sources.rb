@@ -407,8 +407,7 @@ module DeclarationWriterScan
   #   writers of its accumulator stay rule (v)'s. It is entered through four functions, each spelled on the module:
   #   `ClassCvarCensus.build_class_cvar_index` from `scope_indexer.rb`, and `collect_def_cvar_writes`,
   #   `collect_body_cvar_writes` and `finished_cvar_census` from `class_cvars_collector.rb`. Its two calls of
-  #   `ScopeIndexer.census_body_scope` make that function an entry point of `scope_indexer.rb`, where the row's
-  #   roots reached it already and it writes no table.
+  #   `CensusScope.census_body_scope` enter `census_scope.rb` (below), which writes no table.
   # - `shared_walk_tables.rb`: the tables one shared walk builds, their recorders and the walkers the collectors
   #   replaced, moved out of `scope_indexer.rb` (ADR-116 WD9, U4). The writers of each table stay rule (v)'s. It is
   #   entered through eight functions, each spelled on the module: `SharedWalkTables.declaration_walk_tables`,
@@ -436,8 +435,8 @@ module DeclarationWriterScan
   #   four functions, each spelled on the module: `ConstantTables.build_in_source_constants`, `constant_write_census`
   #   and `dynamic_target_key` from `scope_indexer.rb` (the first from `constant_ivar_value.rb` and
   #   `pre_eval_constants.rb` too), and `rebound_block_self` from `scope_indexer.rb` and `shared_walk_tables.rb`. Its
-  #   calls of `ScopeIndexer.census_body_scope` and `census_nesting` make those two entry points of
-  #   `scope_indexer.rb`, where neither writes a table.
+  #   calls of `CensusScope.census_body_scope` and `census_nesting` enter `census_scope.rb` (below), which writes no
+  #   table.
   # - `alias_def_nodes.rb` and `declaration_artifacts.rb`: the alias def-node pass, and the declaration artifacts of
   #   one file, moved out of `scope_indexer.rb` (ADR-116 WD9, #3400). The writers of the alias map and of the
   #   def-node slots stay rule (v)'s, and so do those of the identity table and the discovered-class table. Each is
@@ -464,6 +463,17 @@ module DeclarationWriterScan
   #   accumulator it is handed would be listed, and without the row it would not be (#3398). Their calls of
   #   `ScopeIndexer.mixin_call_view`, `lexical_self_receiver?` and `opaque_mixin_argument?` make those three entry
   #   points of `scope_indexer.rb`, where none writes a table.
+  # - `census_scope.rb` and `class_ivar_index.rb`: the scope a census types a body's rvalues under, and the class
+  #   ivar index of one file, moved out of `scope_indexer.rb` (ADR-116 WD9, #3400). The writers of the index's
+  #   accumulator and of its side tables (the mutation census, the read-before-write evidence, the initializer
+  #   writes, the per-class def table) stay rule (v)'s. It is entered through `ClassIvarIndex.build_class_ivar_index`,
+  #   from `scope_indexer.rb`. `census_scope.rb` is entered through two functions, each spelled on the module:
+  #   `CensusScope.census_body_scope` from `class_ivar_index.rb`, `class_cvar_census.rb` and `constant_tables.rb`,
+  #   and `census_nesting` from the last. Neither writes a table, so the file's row adds no producer today; it has
+  #   one all the same, as `mutated_carrier_widening.rb` has: a function of it that wrote a table it is handed
+  #   would be listed, and without the row it would not be (#3398). The index's calls of `ScopeIndexer.def_side`,
+  #   `def_receiver_targets_lexical_self?`, `each_attr_macro_name` and `attr_macro` make those four entry points
+  #   of `scope_indexer.rb`, where none writes a table.
   SOURCES = {
     DeclarationProducerScan::RULE_V_FILE => {
       module: "Rigor::Inference::ScopeIndexer",
@@ -505,6 +515,10 @@ module DeclarationWriterScan
       { module: "Rigor::Inference::ScopeIndexer::MixinEffects", roots: [] },
     "lib/rigor/inference/scope_indexer/mixin_tables.rb" =>
       { module: "Rigor::Inference::ScopeIndexer::MixinTables", roots: [] },
+    "lib/rigor/inference/scope_indexer/census_scope.rb" =>
+      { module: "Rigor::Inference::ScopeIndexer::CensusScope", roots: [] },
+    "lib/rigor/inference/scope_indexer/class_ivar_index.rb" =>
+      { module: "Rigor::Inference::ScopeIndexer::ClassIvarIndex", roots: [] },
     "lib/rigor/inference/declaration_walk/rules.rb" => { module: "Rigor::Inference::DeclarationWalk::Rules", roots: [] }
   }.freeze
 

@@ -42,7 +42,7 @@ module Rigor
         end
 
         # `def_owner` names the class a `def` leaf's cvar mutations belong to when `self`
-        # is rebound — see {ScopeIndexer#walk_class_ivars}; `[]` marks a self no name covers.
+        # is rebound — see {ClassIvarIndex.walk_class_ivars}; `[]` marks a self no name covers.
         def walk_literal_receiver_mutations(node, qualified_prefix, census, nesting = EMPTY_NESTING,
                                             def_owner: nil, singleton_cref: false)
           return unless node.is_a?(Prism::Node)

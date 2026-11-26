@@ -6,6 +6,7 @@ require_relative "../../type"
 require_relative "../../source/node_children"
 require_relative "../declaration_walk/traversal"
 require_relative "../declaration_walk/rules"
+require_relative "census_scope"
 require_relative "class_cvars_collector"
 require_relative "empty_seed"
 
@@ -21,13 +22,15 @@ module Rigor
       # as the oracle `RIGOR_SHADOW_RULE_WALK` checks the collector against. {JoinOnlyCvarWrite} is the mark a
       # joining write carries until the census is finished; {CvarHierarchy}, a sibling file, reads it too.
       #
-      # It asks {DeclarationWalk::Rules} for each declaration context and calls one function left in
-      # `scope_indexer.rb`, at two sites: `ScopeIndexer.census_body_scope`, the scope a census types a body's
-      # rvalues under, which the ivar and the constant censuses also ask. `scope_indexer.rb` requires this file, and
-      # this file does not require it back. It reads `ScopeIndexer::EMPTY_NESTING`, `IVAR_BARRIER_NODES` and
-      # `BindingTargets` lexically, as {NodePropagation} reads the indexer's constants. So the file loads alone,
-      # and until `scope_indexer.rb` has loaded only {.finished_cvar_census} answers every call: the entry is a
-      # `NameError`, and a gather answers for a body it skips and is a `NoMethodError` for one it would type.
+      # It asks {DeclarationWalk::Rules} for each declaration context and {CensusScope}, at two sites, for the scope
+      # a census types a body's rvalues under, which the ivar and the constant censuses also ask. It calls nothing
+      # left in `scope_indexer.rb`. `scope_indexer.rb` requires this file, and this file does not require it back.
+      # It reads `ScopeIndexer::EMPTY_NESTING` lexically, as {NodePropagation} reads the indexer's constants, and
+      # two constants of the ivar census by a path, {ClassIvarIndex::IVAR_BARRIER_NODES} and
+      # {ClassIvarIndex::BindingTargets}. It does not require that module's file, which requires the dispatcher and
+      # so the `rbs` gem, where this one loads without either. So the file loads alone, and until
+      # `scope_indexer.rb` has loaded only {.finished_cvar_census} answers every call: the entry is a `NameError`,
+      # and a gather answers for a body it skips and is a `NameError` for one it would type.
       module ClassCvarCensus
         module_function
 
@@ -58,7 +61,7 @@ module Rigor
         end
 
         # `def_owner` names the class a `def` leaf's cvar writes belong to when `self` is
-        # rebound — see {ScopeIndexer.walk_class_ivars}. `[]` marks a self no name covers.
+        # rebound — see {ClassIvarIndex.walk_class_ivars}. `[]` marks a self no name covers.
         def walk_class_cvars(node, qualified_prefix, default_scope, accumulator, def_owner: nil,
                              singleton_cref: false)
           return unless node.is_a?(Prism::Node)
@@ -183,8 +186,8 @@ module Rigor
           return if def_node.body.nil? || qualified_prefix.empty?
 
           class_name = qualified_prefix.join("::")
-          body_scope = ScopeIndexer.census_body_scope(default_scope, qualified_prefix,
-                                                      Type::Combinator.nominal_of(class_name))
+          body_scope = CensusScope.census_body_scope(default_scope, qualified_prefix,
+                                                     Type::Combinator.nominal_of(class_name))
           gather_cvar_writes(def_node.body, body_scope, class_name, accumulator, join_only: false)
         end
 
@@ -199,8 +202,8 @@ module Rigor
           return if body.nil? || qualified_prefix.empty?
 
           class_name = qualified_prefix.join("::")
-          body_scope = ScopeIndexer.census_body_scope(default_scope, qualified_prefix,
-                                                      Type::Combinator.singleton_of(class_name))
+          body_scope = CensusScope.census_body_scope(default_scope, qualified_prefix,
+                                                     Type::Combinator.singleton_of(class_name))
           gather_cvar_writes(body, body_scope, class_name, accumulator, join_only: true)
         end
 
@@ -216,10 +219,10 @@ module Rigor
           # `Dynamic[top]` floor, the rescue reference too. The floor dates from when the census keyed each class
           # alone, so a superclass's `@@c = nil` was not in a subclass's entry; #3219's {CvarHierarchy} join now
           # adds it, and the floor is kept.
-          BindingTargets.names(node, Prism::ClassVariableTargetNode).each do |name|
+          ClassIvarIndex::BindingTargets.names(node, Prism::ClassVariableTargetNode).each do |name|
             record_cvar_write(accumulator, class_name, name, Type::Combinator.untyped, join_only: join_only)
           end
-          return if IVAR_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
+          return if ClassIvarIndex::IVAR_BARRIER_NODES.any? { |klass| node.is_a?(klass) }
 
           node.rigor_each_child { |c| gather_cvar_writes(c, scope, class_name, accumulator, join_only: join_only) }
         end

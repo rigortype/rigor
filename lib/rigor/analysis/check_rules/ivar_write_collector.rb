@@ -19,8 +19,8 @@ module Rigor
       # Walks a parse tree and collects every `Prism::InstanceVariableWriteNode` inside an instance method
       # body of a `Prism::ClassNode` / `Prism::ModuleNode`, grouped by (class qualified name, ivar name).
       #
-      # The collector is the read-side companion to `Inference::ScopeIndexer#build_class_ivar_index`. The
-      # indexer unions the rvalue types into a single per-ivar carrier; this collector preserves the per-write
+      # The collector is the read-side companion to `Inference::ScopeIndexer::ClassIvarIndex.build_class_ivar_index`.
+      # The indexer unions the rvalue types into a single per-ivar carrier; this collector preserves the per-write
       # list so the `def.ivar-write-mismatch` rule can compare each write's concrete class against the first.
       #
       # Skipped on purpose:
@@ -33,7 +33,7 @@ module Rigor
       # - Class-body ivar writes outside any def — the `Module#@var` surface is a separate slice the engine
       #   doesn't yet model.
       # - Nested classes / modules / defs inside a method body are barriers, mirroring the indexer's
-      #   `IVAR_BARRIER_NODES` policy.
+      #   `ClassIvarIndex::IVAR_BARRIER_NODES` policy.
       # - Issue #2943: a write directly in a block or `class << obj` body whose `self` is provably not an instance
       #   of the class (`Other.new.instance_eval { @r = 1 }`), by the class-ivar census's rule
       #   ({Inference::CensusForeignBlock}).

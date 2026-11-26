@@ -447,7 +447,12 @@ jobs:
       - name: Keep this shard's timing file for the merge
         if: success()
         shell: bash
-        run: cp tmp/binpacker.timings "tmp/binpacker-timings-${{ matrix.shard }}"
+        # A run that recorded nothing (a slice of zero tests) leaves no file to keep, which must not fail
+        # a green shard.
+        run: |
+          if [[ -f tmp/binpacker.timings ]]; then
+            cp tmp/binpacker.timings "tmp/binpacker-timings-${{ matrix.shard }}"
+          fi
 
       # Consumed by the shard-coverage job, which is the only place a
       # partition that dropped tests can be detected. The name carries

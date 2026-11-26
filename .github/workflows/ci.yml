@@ -586,7 +586,13 @@ jobs:
 
       # The file every shard restored, which the merge needs to tell, per
       # test, which shard re-measured it. Absent on a cold start.
+      #
+      # These three steps maintain a cache; they gate nothing. So each is
+      # `continue-on-error`: a base evicted before a late "Re-run failed
+      # jobs", or a merge that fails, costs one run's measurements and
+      # must not turn the coverage check above red.
       - name: Restore the timing file the shards started from
+        continue-on-error: true
         if: needs.test.result == 'success' && github.event_name != 'merge_group' && needs.timing-cache.outputs.key != ''
         uses: actions/cache/restore@v6.1.0
         with:
@@ -595,17 +601,22 @@ jobs:
           fail-on-cache-miss: true
 
       - name: Merge the shards' timing files
+        id: merge
         if: needs.test.result == 'success' && github.event_name != 'merge_group'
+        continue-on-error: true
         shell: bash
         run: |
+          shopt -s nullglob
+          shards=(selected/binpacker-timings-*)
           base=()
           [[ -f tmp/binpacker.timings ]] && base=(--base tmp/binpacker.timings)
-          bundle exec binpacker shards-merge "${base[@]}" --output tmp/binpacker.timings selected/binpacker-timings-*
+          bundle exec binpacker shards-merge "${base[@]}" --output tmp/binpacker.timings "${shards[@]}"
 
       # Not on a merge-queue ref (#2139): the queue's throwaway ref is read by no other run, and its entry counts
       # against the 10 GB cache budget. The test job's restore still reads master's timings.
       - name: Save the merged timing file
-        if: needs.test.result == 'success' && github.event_name != 'merge_group'
+        if: needs.test.result == 'success' && github.event_name != 'merge_group' && steps.merge.outcome == 'success'
+        continue-on-error: true
         uses: actions/cache/save@v6.1.0
         with:
           path: tmp/binpacker.timings

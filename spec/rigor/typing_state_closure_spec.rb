@@ -128,12 +128,15 @@ RSpec.describe "ADR-129 G3: typing state outside a declared slot" do
       lib/rigor/inference/scope_indexer/class_declarations.rb
       lib/rigor/inference/scope_indexer/declaration_signature.rb
       lib/rigor/inference/scope_indexer/declared_param_writes.rb
+      lib/rigor/inference/scope_indexer/factory_call_resolver.rb
       lib/rigor/inference/scope_indexer/ivar_contributions.rb
       lib/rigor/inference/scope_indexer/literal_receiver_mutations.rb
+      lib/rigor/inference/scope_indexer/mutated_carrier_widening.rb
       lib/rigor/inference/scope_indexer/node_propagation.rb
       lib/rigor/inference/scope_indexer/program_globals.rb
       lib/rigor/inference/scope_indexer/published_constant_ivars.rb
       lib/rigor/inference/scope_indexer/shared_walk_tables.rb
+      lib/rigor/inference/scope_indexer/singleton_class_sources.rb
     ]
   end
 

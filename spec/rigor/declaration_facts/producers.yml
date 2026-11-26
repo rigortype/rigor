@@ -336,7 +336,7 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#accumulate_unpositioned: folds one file's unpositioned mixin edges into the project table by union; it computes no declaration context, only merges a per-file fact
     Rigor::Inference::ScopeIndexer#add_file_possible: ADR-119 WD3, the `∪ (P_f − C)` half of the possible-methods fold; it combines two tables' kinds per name and side and decides no declaration context
     Rigor::Inference::ScopeIndexer#add_header_nesting: grandfathered
-    Rigor::Inference::ScopeIndexer#add_module_function_entries: 'issue #2161, copies every named deferred-range def row whose kind is not :instance (a :both row from ModuleFunctionState.deferred_module_function?, a :singleton row from a named module_function call or from a def that record_deferred_def / def_singleton? places on the singleton side, such as def self.x, class << self or instance_eval) into the file''s visibility entries, the rows DefinerResolution.module_function_row? counts, so the --incremental diff sees one appear or vanish; it reads finished rows and decides no owner or side'
+    Rigor::Inference::ScopeIndexer#add_module_function_entries: 'issue #2161, copies every named deferred-range def row whose kind is not :instance (a :both row from ModuleFunctionState.deferred_module_function?, a :singleton row from a named module_function call or from a def that record_deferred_def / def_side places on the singleton side, such as def self.x, class << self or instance_eval) into the file''s visibility entries, the rows DefinerResolution.module_function_row? counts, so the --incremental diff sees one appear or vanish; it reads finished rows and decides no owner or side'
     Rigor::Inference::ScopeIndexer#alias_renamed_header_nestings: grandfathered
     Rigor::Inference::ScopeIndexer#apply_alias_def_nodes: grandfathered
     Rigor::Inference::ScopeIndexer#apply_class_method_visibility: 'issue #1984, applies a private_class_method / public_class_method call to the class''s singleton visibility slots as the grandfathered apply_visibility_call applies private / public to the instance ones; the owner is the visibility walk''s prefix and it derives no context'
@@ -373,7 +373,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#collect_nil_test_ivars: grandfathered
     Rigor::Inference::ScopeIndexer#collect_read_before_write_evidence: grandfathered
     Rigor::Inference::ScopeIndexer#collect_receiver_writer_ivars: the explicit-receiver arm of the ivar census walk (#2488); it resolves the receiver through eval_receiver_prefix, the resolution walk_ivars_eval_call? already gives a class_eval receiver, and records only the receiver class's attr_writer names and define_method block writes, deriving no declaration context of its own
-    Rigor::Inference::ScopeIndexer#collect_singleton_class_targets: names the constants a `class << Const` body opens, for the incremental class-declaration diff alone (#1752); it registers no declaration, so it reads no declaration context
     Rigor::Inference::ScopeIndexer#collect_singleton_method_defs: grandfathered
     Rigor::Inference::ScopeIndexer#collect_truthy_test_ivars: grandfathered
     Rigor::Inference::ScopeIndexer#concern_dependency_arguments: 'issue #2995, the constant arguments of an include or prepend statement on the module''s own self (bare, self., or a receiverless or self. send spelling), which record_concern_dependencies files as concern-dependency entries after the body''s own extend ActiveSupport::Concern (#2992); it reads one statement''s shape and decides no owner or side'
@@ -495,7 +494,6 @@ lib/rigor/inference/scope_indexer.rb:
     Rigor::Inference::ScopeIndexer#record_reflective_ivar_write: the instance_variable_set arm of the ivar census walk (#1931); it reads the class gather_ivar_writes passes in, as record_ivar_write does, and decides only whether the call is an implicit or self instance_variable_set with a literal name, deriving no declaration context of its own
     Rigor::Inference::ScopeIndexer#record_self_definer_call: 'issues #2901 and #2975, files what a send(:define_method) or define_singleton_method on self defines (the literal name, or the open-names mark for a computed one), the open-names mark of an include or prepend of a Module.new that runs a computed define_method, or the body-call entry of any other call on self, under the owner prefix the walk passes in; it takes the side from the walk too, except that a define_singleton_method records the singleton side, the side that call defines on; its excluded-name constant lists core macro names, and it decides no owner'
     Rigor::Inference::ScopeIndexer#record_self_surface_evidence: grandfathered
-    Rigor::Inference::ScopeIndexer#record_singleton_class_sources: files the constants a file's `class << Const` bodies open under that file in their own table (#1752), read only by the incremental class-declaration diff; the walk it calls names them by the lexical rule `class << X` already follows, and nothing reads them as declared
     Rigor::Inference::ScopeIndexer#record_singleton_def_node: grandfathered
     Rigor::Inference::ScopeIndexer#record_singleton_prepend: names the module a `singleton_class.prepend` on an object, or a `prepend` in a `class << obj` body, puts ahead of an object's class (#1820), and marks it as the object-extend recorder does; it reads only whether the call sits in a singleton-class body and whether its object may be an instance, which the walk passes in, and decides no owner or side
     Rigor::Inference::ScopeIndexer#recording_evaluator: 'builds the per-node scope index''s recording evaluation, for the file and for each construct the walk reaches unentered (#2196, #2056); it records which scope a node is typed under, not what a declaration is'
@@ -702,6 +700,11 @@ lib/rigor/inference/scope_indexer/shared_walk_tables.rb:
     Rigor::Inference::ScopeIndexer::SharedWalkTables#walk_superclass_declaration?: grandfathered
     Rigor::Inference::ScopeIndexer::SharedWalkTables#walk_superclass_eval_call?: grandfathered
     Rigor::Inference::ScopeIndexer::SharedWalkTables#walk_superclass_meta_new?: grandfathered
+lib/rigor/inference/scope_indexer/singleton_class_sources.rb:
+  computes: per file, the constants whose singleton side the file writes to without declaring them (a `class << Const` body, a `def Const.x`, a call on a constant that may rewrite its singleton side), for the incremental class-declaration diff alone
+  producers:
+    Rigor::Inference::ScopeIndexer::SingletonClassSources#collect_singleton_class_targets: names the constants a `class << Const` body opens, for the incremental class-declaration diff alone (#1752); it registers no declaration, so it reads no declaration context
+    Rigor::Inference::ScopeIndexer::SingletonClassSources#record_singleton_class_sources: files the constants a file's `class << Const` bodies open under that file in their own table (#1752), read only by the incremental class-declaration diff; the walk it calls names them by the lexical rule `class << X` already follows, and nothing reads them as declared
 lib/rigor/inference/scope_indexer/superclasses_collector.rb:
   computes: each class's superclass and header nesting, as a collector on the shared declaration walk
   producers:

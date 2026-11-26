@@ -63,6 +63,9 @@ require_relative "scope_indexer/literal_receiver_mutations"
 require_relative "scope_indexer/published_constant_ivars"
 require_relative "scope_indexer/class_cvar_census"
 require_relative "scope_indexer/shared_walk_tables"
+require_relative "scope_indexer/mutated_carrier_widening"
+require_relative "scope_indexer/factory_call_resolver"
+require_relative "scope_indexer/singleton_class_sources"
 
 module Rigor
   module Inference
@@ -144,7 +147,7 @@ module Rigor
       # `ivar_writer_scope:` — the scope whose project tables the #1154 declared-parameter credit reads to find the
       # ivar writers outside this file ({DeclaredParamWrites}); defaults to `default_scope`. `rigor sig-gen` indexes
       # each file under an unseeded scope, so it passes one carrying the project's tables.
-      def index(root, default_scope:, converged_loop_recording: false, widen_clauses: false, # rubocop:disable Metrics/AbcSize
+      def index(root, default_scope:, converged_loop_recording: false, widen_clauses: false, # rubocop:disable Metrics/AbcSize, Metrics/MethodLength
                 declared_ivar_types: true, ivar_writer_scope: nil)
         # Slice A-declarations. Build the declaration overrides first so every scope handed to the StatementEvaluator
         # already carries the table; structural sharing through `Scope#with_local` / `#with_fact` / `#with_self_type`
@@ -179,11 +182,13 @@ module Rigor
         # the file's OWN mutations of it: `ISPELL_STATUS = {}` with a sibling method writing
         # `ISPELL_STATUS[:key] = param` must not fold reads through the closed empty shape. One census walk
         # collects the mutated names; the two accumulators below widen their entries to the Dynamic-wrapped
-        # form, contents unpinned ({#census_mutated_type}), so reads stay honest without licensing the negative rules.
+        # form, contents unpinned ({MutatedCarrierWidening.census_mutated_type}), so reads stay honest without
+        # licensing the negative rules.
         mutations = LiteralReceiverMutations.collect_literal_receiver_mutations(root)
 
-        class_cvars = widen_mutated_cvars(ClassCvarCensus.build_class_cvar_index(root, seeded_scope),
-                                          *mutations.values_at(:cvars, :cvar_elements))
+        class_cvars = MutatedCarrierWidening.widen_mutated_cvars(
+          ClassCvarCensus.build_class_cvar_index(root, seeded_scope), *mutations.values_at(:cvars, :cvar_elements)
+        )
         seeded_scope = seeded_scope.with_discovery(seeded_scope.discovery.with(class_cvars: class_cvars))
         seeded_scope = ProgramGlobals.seed_program_globals(root, seeded_scope)
 
@@ -195,8 +200,9 @@ module Rigor
         # `pre_eval:` constant seed `Runner#project_scope_seed_tables` applies). Same-file declarations are the
         # most specific authority, exactly as `merged_classes` above resolves the same collision. Without the
         # merge, the assignment below would silently drop the project seed on every file.
-        in_source_constants = widen_mutated_constants(build_in_source_constants(root, seeded_scope),
-                                                      *mutations.values_at(:constants, :constant_elements))
+        in_source_constants = MutatedCarrierWidening.widen_mutated_constants(
+          build_in_source_constants(root, seeded_scope), *mutations.values_at(:constants, :constant_elements)
+        )
         seeded_scope = seed_constant_tables(seeded_scope, default_scope, in_source_constants, root)
         seeded_scope = PublishedConstantIvars.seed_published_constant_ivars(seeded_scope, root)
 
@@ -2405,135 +2411,6 @@ module Rigor
         accumulator.freeze
       end
 
-      NO_ELEMENT_MUTATIONS = Set.new.freeze
-      NO_CVAR_ELEMENT_MUTATIONS = {}.freeze
-
-      # `mutated_elements` — the `[name, steps]` pairs of an element mutation (#3243), widened after every whole-name
-      # mutation and shallowest first, so the table is the same whichever order the program spells them in.
-      def widen_mutated_constants(accumulator, mutated_names, mutated_elements = NO_ELEMENT_MUTATIONS)
-        return accumulator if mutated_names.empty? && mutated_elements.empty?
-
-        widened = accumulator.dup
-        mutated_names.each do |name|
-          existing = widened[name]
-          next if existing.nil?
-
-          widened[name] = census_mutated_type(existing)
-        end
-        widen_mutated_elements(widened, mutated_elements).freeze
-      end
-
-      def widen_mutated_cvars(accumulator, mutated_by_class, elements_by_class = NO_CVAR_ELEMENT_MUTATIONS)
-        return accumulator if mutated_by_class.empty? && elements_by_class.empty?
-
-        widened = accumulator.dup
-        (mutated_by_class.keys | elements_by_class.keys).each do |class_name|
-          table = widened[class_name]
-          next if table.nil?
-
-          updated = table.dup
-          mutated_by_class.fetch(class_name, NO_ELEMENT_MUTATIONS).each do |cvar|
-            existing = updated[cvar]
-            next if existing.nil?
-
-            updated[cvar] = census_mutated_type(existing)
-          end
-          widened[class_name] =
-            widen_mutated_elements(updated, elements_by_class.fetch(class_name, NO_ELEMENT_MUTATIONS)).freeze
-        end
-        widened.freeze
-      end
-
-      # `table` with the element each `[name, steps]` pair reaches widened ({MutatedElementCensus.widen}), as a copy;
-      # `table` itself when no pair reaches anything.
-      def widen_mutated_elements(table, mutated_elements)
-        return table if mutated_elements.empty?
-
-        MutatedElementCensus.ordered(mutated_elements).reduce(table) do |current, (name, steps)|
-          existing = current[name]
-          updated = existing && MutatedElementCensus.widen(existing, steps)
-          updated ? current.merge(name => updated) : current
-        end
-      end
-
-      # The type a mutated constant or class variable is read as. The census records the NAME a call mutated and not
-      # the call, so it cannot say what was stored, and `Dynamic` alone does not say it either: a read resolves through
-      # the static facet's RBS projection, where a closed `HashShape` answers its known values for any key, a `Tuple`
-      # its known elements for any index and an `Array[1 | 2]` `1 | 2`. `H = { a: 1 }; H.default = 0` read `H[:b]` as
-      # `1`, and `T = { a: 1 }; T[:b] = 2` read `T[:b]` as `1` too, so `== 0` / `== 2` folded always-falsey.
-      #
-      # Each carrier member of the facet therefore stops claiming its contents are complete. A literal shape floors to
-      # `Hash[untyped, untyped]` and a tuple to `Array[untyped]`, as ADR-58's class-level ivar census floors an ivar
-      # seed a method stores into (#1297). Unlike that census, a shape only a lookup mutator (`default=`) touched floors
-      # too, since the census does not record the method, so its present-key reads are lost as well (#1421). Keeping
-      # the literal's known values beside a `Dynamic[top]` arm left every read carrying them, and every key's at that,
-      # since the projection is not keyed, so `STATUS[:name]` answered `false | nil | Dynamic[top]` and a method
-      # declared `-> String` returning it drew `def.return-type-mismatch` although a sibling method could store
-      # anything there. An `Array` / `Hash` nominal with a value-pinned type argument gains the arm on every type
-      # argument, as the unknown-store seam gives it. A class-level nominal (`Hash.new(0)`'s
-      # `Hash[Dynamic[top], Integer]`) is left alone: a store of the same class keeps it true, and the arm would
-      # silence `COUNTS[k].upcase`. An entry already `Dynamic` is unpinned through its facet, so a carrier an RBS
-      # overload join wrapped is not left pinned.
-      def census_mutated_type(type)
-        type = type.static_facet if type.is_a?(Type::Dynamic)
-        members = type.is_a?(Type::Union) ? type.members : [type]
-        Type::Combinator.dynamic(Type::Combinator.union(*members.map { |member| census_unpinned_carrier(member) }))
-      end
-
-      # A `Difference` / `Refined` member drops to its unpinned base: a mutation can falsify the removed value or the
-      # refinement as well (`clear` empties a `non-empty-array`).
-      #
-      # Issue #3243 — a String literal floors to `String`, since the mutation can rewrite it (`S << "b"`), and an
-      # `Array` / `Hash` nominal first unpins the literal carriers its type arguments hold ({#census_unpinned_content}):
-      # `[[1]].shuffle`'s `Array[[1]]` is not value-pinned at the top, yet `SHUF[0].last` read the stale `1`.
-      def census_unpinned_carrier(member)
-        case member
-        when Type::HashShape
-          Type::Combinator.nominal_of("Hash", type_args: [Type::Combinator.untyped, Type::Combinator.untyped])
-        when Type::Tuple then Type::Combinator.nominal_of("Array", type_args: [Type::Combinator.untyped])
-        when Type::Constant then StringMutation.constant?(member) ? Type::Combinator.nominal_of("String") : member
-        when Type::Nominal
-          # The pin is tested BEFORE the content is unpinned, and on the original member: unpinning floors a
-          # literal type argument to its class (`Array["a"]` to `Array[String]`), which is a class-level argument
-          # and so not value-pinned, and the `Dynamic[top]` arm never arrived. `NS = ["a"].shuffle` with a method
-          # running `NS << 1` then kept claiming every element is a `String`, so `NS[1].odd?` — correct Ruby on the
-          # Integer that method stores — drew `call.undefined-method`. Whether the carrier held anything
-          # value-pinned at any depth is the question, and only the un-floored member can answer it.
-          pinned = UnknownStoreWidening.value_pinned_collection?(member)
-          member = census_unpinned_content(member)
-          pinned ? UnknownStoreWidening.gradual_content(member) : member
-        when Type::Difference, Type::Refined then census_unpinned_carrier(member.base)
-        else member
-        end
-      end
-
-      CENSUS_CONTENT_CLASSES = %w[Array Hash].freeze
-
-      # An `Array` / `Hash` nominal with each literal carrier its type arguments hold, at any depth, unpinned as
-      # {#census_unpinned_carrier} unpins a member — `Array[[1]]` to `Array[Array[untyped]]` — and every other
-      # argument (`Hash.new(0)`'s `Dynamic[top]` and `Integer`) left as it is. Answers `nominal` itself when nothing
-      # in it is such a carrier.
-      def census_unpinned_content(nominal)
-        return nominal unless CENSUS_CONTENT_CLASSES.include?(nominal.class_name) && !nominal.type_args.empty?
-
-        args = nominal.type_args.map { |arg| census_unpinned_argument(arg) }
-        return nominal if args.each_with_index.all? { |arg, index| arg.equal?(nominal.type_args[index]) }
-
-        Type::Combinator.nominal_of(nominal.class_name, type_args: args)
-      end
-
-      def census_unpinned_argument(arg)
-        case arg
-        when Type::Tuple, Type::HashShape then census_unpinned_carrier(arg)
-        when Type::Constant then StringMutation.constant?(arg) ? Type::Combinator.nominal_of("String") : arg
-        when Type::Nominal then census_unpinned_content(arg)
-        when Type::Union
-          members = arg.members.map { |member| census_unpinned_argument(member) }
-          members.each_with_index.all? { |member, index| member.equal?(arg.members[index]) } ? arg : Type::Combinator.union(*members)
-        else arg
-        end
-      end
-
       # Issue #352 — folds the project-wide `pre_eval:` constant seed under this file's own table.
       # Issue #644 — merges the per-file constant table OVER the project seed and records, alongside it,
       # which of those names THIS FILE declares (as last segments). The second table is the other half of
@@ -4222,7 +4099,7 @@ module Rigor
       # diagnostic on correct code. No-op for `Class.new` / `Module.new`. A splatted member list registers its literal
       # members and opens the instance side ({#record_meta_member_names}).
       def record_meta_members(factory_call, qualified_prefix, accumulator, allow_outer_block: true)
-        factory_call = resolve_meta_factory_call(factory_call, allow_outer_block: allow_outer_block)
+        factory_call = FactoryCallResolver.resolve_meta_factory_call(factory_call, allow_outer_block: allow_outer_block)
         return unless factory_call
 
         # Issue #2968 — `K = Struct.new("Named", :a)` makes one class under two names, `K` and `Struct::Named`; the
@@ -4244,34 +4121,6 @@ module Rigor
         SharedWalkTables.meta_member_names(factory_call).each do |member|
           record_method(accumulator, class_name, member, :instance)
         end
-      end
-
-      # Unwinds nested single-parent `Class.new(...)` calls to a root `Struct.new(...)` / `Data.define(...)`.
-      # A nested wrapper or factory block is declined because its method overrides belong to the intermediate
-      # superclass and cannot be attributed to the outer class's reader-override guard.
-      def resolve_meta_factory_call(call_node, allow_outer_block: true)
-        wrapped = false
-        while DeclarationWalk::Rules.class_new_call?(call_node)
-          return nil if intermediate_factory_block?(call_node, wrapped, allow_outer_block)
-
-          arguments = call_node.arguments&.arguments
-          return nil unless arguments&.one?
-
-          call_node = arguments.first
-          wrapped = true
-        end
-        return nil unless meta_factory_call?(call_node)
-        return nil if intermediate_factory_block?(call_node, wrapped, allow_outer_block)
-
-        call_node
-      end
-
-      def intermediate_factory_block?(call_node, wrapped, allow_outer_block)
-        (wrapped || !allow_outer_block) && !call_node.block.nil?
-      end
-
-      def meta_factory_call?(call_node)
-        DeclarationWalk::Rules.data_define_call?(call_node) || DeclarationWalk::Rules.struct_new_call?(call_node)
       end
 
       def record_def_method(def_node, qualified_prefix, in_singleton_class, accumulator)
@@ -4995,11 +4844,6 @@ module Rigor
         constant_receiver_candidates(object, qualified_prefix)
       end
 
-      # A bare or `self.` receiver's `singleton_class` call: `singleton_class` or `self.singleton_class`.
-      def self_singleton_class?(receiver)
-        singleton_class_of_receiver?(receiver) && lexical_self_receiver?(receiver.receiver)
-      end
-
       def singleton_class_call?(receiver, self_ok)
         return false unless receiver.is_a?(Prism::CallNode) && receiver.name == :singleton_class
         return false unless receiver.arguments.nil?
@@ -5091,10 +4935,6 @@ module Rigor
       # a `class << self` body.
       def def_context(in_singleton_class, defs_singleton)
         in_singleton_class || (defs_singleton ? :eval : false)
-      end
-
-      def def_singleton?(def_node, qualified_prefix, in_singleton_class)
-        def_side(def_node, qualified_prefix, in_singleton_class) == :singleton
       end
 
       def foreign_def?(def_node, qualified_prefix, in_singleton_class)
@@ -5303,63 +5143,11 @@ module Rigor
         acc[:deferred_ranges][path] = build_deferred_ranges(root)
         record_class_sources(acc[:class_sources], path, root, superclasses, includes, file_def_nodes,
                              acc[:compact_headers])
-        record_singleton_class_sources(acc[:singleton_class_sources], path, root)
+        SingletonClassSources.record_singleton_class_sources(acc[:singleton_class_sources], path, root)
       end
 
       # `{name => Set[path]}` for a bundle's name list (a bundle written before the list existed has none).
       def bundle_path_sets(names, path) = (names || []).to_h { |name| [name, Set[path]] }
-
-      # Issue #1752 — the constants a `class << Const` body opens in this file, and those whose singleton side a call
-      # there may rewrite ({#singleton_side_call?}). Such a body records facts about
-      # `Const`'s singleton class (a `remove_method`, a `def`) without declaring `Const`, so it stays out of
-      # `class_sources` (whose readers take a name there as one the project declares) and joins only the per-file
-      # class-declaration sets the incremental `class:` edges diff (`Runner#class_declarations`).
-      #
-      # Issue #1941 — so does a `def Const.x` (`def D.own`, or `def E.x` inside `module M`, resolved as a `class << E`
-      # receiver is): it adds to `Const`'s singleton side from a file the reader's class edge need not name. In the set,
-      # the declaration diff fires `class:` when the file gains or loses one, and
-      # `IncrementalSession#singleton_rewrite_affected` fires it when one is renamed. `def (M::E).x` records no
-      # singleton `def` at all, so it joins nothing.
-      def record_singleton_class_sources(sources, path, root)
-        collect_singleton_class_targets(root, []) { |name| (sources[name] ||= Set.new) << path }
-      end
-
-      def collect_singleton_class_targets(node, lexical_prefix, &)
-        case node
-        when Prism::ClassNode, Prism::ModuleNode
-          prefix = Source::ConstantPath.declaration_prefix(lexical_prefix, node.constant_path)
-          node.body && prefix && collect_singleton_class_targets(node.body, prefix, &)
-          return
-        when Prism::SingletonClassNode
-          rendered = singleton_receiver_constant_name(node.expression)
-          if rendered
-            yield DeclarationWalk::Rules.eval_constant_receiver_prefix(node, node.expression, rendered,
-                                                                       lexical_prefix).join("::")
-          end
-        when Prism::CallNode
-          yield_singleton_side_constant(node, node.receiver, lexical_prefix, &) if singleton_side_call?(node)
-        when Prism::DefNode
-          yield_singleton_side_constant(node, node.receiver, lexical_prefix, &)
-        end
-        node.rigor_each_child { |child| collect_singleton_class_targets(child, lexical_prefix, &) }
-      end
-
-      # A call on a constant that may rewrite its singleton side (`Const.singleton_class`,
-      # `Const.define_singleton_method`, `Const.extend(M)`, `Const.instance_eval { … }`) records facts about `Const`'s
-      # singleton methods the refinement walk reads from a file that need not declare `Const`, so the file joins the
-      # constant's set too. Written inside `Const`'s own body, the name is in the file's set already.
-      def singleton_side_call?(node)
-        node.name == :singleton_class || surface_rewriting_call?(node)
-      end
-
-      def yield_singleton_side_constant(node, receiver, lexical_prefix)
-        return unless receiver.is_a?(Prism::ConstantReadNode) || receiver.is_a?(Prism::ConstantPathNode)
-
-        rendered = singleton_receiver_constant_name(receiver)
-        return unless rendered
-
-        yield DeclarationWalk::Rules.eval_constant_receiver_prefix(node, receiver, rendered, lexical_prefix).join("::")
-      end
 
       # Issue #1097 — `[[start_offset, end_offset, name, kind, owner], ...]` for every `def` / block /
       # lambda body in the file. `Scope#*_def_shadows_call?` reads it to answer two execution-timing
@@ -10298,8 +10086,9 @@ module Rigor
       # precision is worth that risk.
       #
       # - `String` / `Array` / `Hash` literals are MUTABLE. A sibling file's `PATH << "/x"` or `LIST.push(...)`
-      #   moves the value this table pinned, and only the DECLARING file's `widen_mutated_constants` census can
-      #   see such a mutation. The composite two additionally carry the `HashShape` / `Tuple` hazard
+      #   moves the value this table pinned, and only the DECLARING file's
+      #   `MutatedCarrierWidening.widen_mutated_constants` census can see such a mutation. The composite two
+      #   additionally carry the `HashShape` / `Tuple` hazard
       #   {PreEvalConstants} documents (a closed `HashShape` makes `CONFIG.fetch(:b)` fire; a `Tuple` routes
       #   through `ShapeDispatch` instead of the RBS overload a call site relied on).
       # - `nil` declines for {PreEvalConstants}' reason: at declaration position it is a placeholder for a
@@ -11054,7 +10843,7 @@ module Rigor
       #
       # The recognised meta forms are {DeclarationWalk::Rules.meta_new_constant_rvalue?}'s four —
       # `Data.define`, `Struct.new`, `Class.new`, `Module.new` — plus the
-      # `Class.new(<factory>)` wrapper {#resolve_meta_factory_call} unwraps:
+      # `Class.new(<factory>)` wrapper {FactoryCallResolver.resolve_meta_factory_call} unwraps:
       #
       # - `Const = Data.define(*Symbol) [do ... end]`
       # - `Const = Struct.new(*Symbol [, keyword_init: ...]) [do ... end]`
@@ -11070,7 +10859,8 @@ module Rigor
                                     self_prefix = nil, singleton_cref: false)
         rvalue = DeclarationWalk::Rules.meta_new_rvalue(node)
         factory_call = rvalue.is_a?(Prism::CallNode) &&
-                       (resolve_meta_factory_call(rvalue) || DeclarationWalk::Rules.meta_new_constant_rvalue?(rvalue))
+                       (FactoryCallResolver.resolve_meta_factory_call(rvalue) ||
+                        DeclarationWalk::Rules.meta_new_constant_rvalue?(rvalue))
         return false unless factory_call
 
         child_prefix = DeclarationWalk::Rules.meta_new_child_prefix(node, qualified_prefix, self_prefix)

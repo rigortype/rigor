@@ -1,6 +1,7 @@
 # ADR-33 — MCP Server packaging
 
-Status: **Accepted (2026-05-27); implemented in v0.1.10.**
+Status: **Accepted (2026-05-27); implemented in v0.1.10.** WD10 (serving `skills/`) is
+**Proposed (2026-11-27)** and not yet decided.
 
 The
 `rigor mcp --transport stdio` subcommand ships a pure-Ruby JSON-RPC
@@ -149,6 +150,137 @@ Rationale:
   `server/discover` omits the key until a later slice adds `io.modelcontextprotocol/skills`.
   Tasks and elicitation stay out (#3402 § "Decided against, for now").
 
+### WD10 — Serve the gem's own `skills/` over the Skills extension
+
+> **Proposed 2026-11-27, awaiting the maintainer's decision** ([#3402](https://github.com/rigortype/rigor/issues/3402), slices 2–4).
+> Nothing below is implemented yet. Points (a)–(f) are the decisions asked for; each states the
+> recommendation this WD adopts if it is approved as written.
+
+`skills/` (ADR-73) reaches an agent through its own install path (`npx skills`, a copy in
+`.claude/skills/`), so a project can run one gem version's `rigor` while its agent reads another
+version's skills. `rigor-upgrade`, `rigor-next-steps` and each skill's "load the version-current
+copy" step (`rigor skill --full`) exist to paper over that drift. The
+[Skills extension](https://modelcontextprotocol.io/extensions/skills/overview)
+(`io.modelcontextprotocol/skills`, beta) lets an MCP server serve skills itself. Claude Code
+(v2.1.331+) offers a server's skills as `<server>:<skill>`, so a client connected to `rigor mcp`
+would load `rigor:rigor-next-steps` from the binary it is already running, with nothing else to
+install and nothing to drift.
+
+`skills/` stays the single source. Non-Claude agents read it directly in Agent Skills form, and
+the MCP surface is a view of it, never a second copy.
+
+**The surface.** Specified in full in `mcp.md` § Extensions when this lands. It is offered only
+under 2026-07-28 (WD9). The legacy `initialize` capabilities stay `{"tools": {"listChanged": false}}`,
+and a legacy request for any method below gets `-32601`.
+
+- `server/discover` declares `capabilities.resources: {}` and
+  `capabilities.extensions["io.modelcontextprotocol/skills"]: {}`. The extension requires the
+  `resources` capability. `directoryRead` is not declared: every entry carries a complete manifest,
+  so the client never needs to list a directory.
+- `skills/list` returns one entry per skill: `uri` (`skill://<name>/SKILL.md`), `frontmatter` (the
+  SKILL.md YAML front matter, parsed and passed through unchanged), and `resources`, a complete
+  manifest of every served file as `{uri, digest: "sha256:<hex>", size}`. The result carries
+  `resultType`, `ttlMs` and `cacheScope: "public"`. Eighteen skills fit one page, so no
+  `nextCursor` is ever sent, and a `cursor` the server never issued gets `-32602`.
+- `skills/get` takes `{uri}`, answers `{skill: <entry>}` for every served skill, and answers
+  `-32602` for any other URI.
+- `resources/read` serves each manifest file as one `text` content with `mimeType: "text/markdown"`.
+  An unknown URI gets `-32602` with `data.uri`, never an empty `contents`.
+- `resources/list` is required once `resources` is declared; (f) says what it lists.
+
+The digests and sizes are computed from the bytes the process serves, and the size is the UTF-8
+byte length. The client verifies each file against the manifest and the front matter against the
+SKILL.md it reads, so a manifest built from one read of a file and content served from a later read
+would fail verification after an in-place edit. The server therefore reads the served set once per
+process, at the first skills or resources request, and serves every later request from that frozen
+snapshot. Discover and tool calls never read it. The served set is 39 files and 308,891 bytes today.
+
+**Gates.** Three new specs:
+
+- The digest and size of every manifest entry match the bytes `resources/read` returns for it, and
+  every entry's `frontmatter` equals the front matter of its SKILL.md.
+- Claude Code's client limits hold over the real `skills/` tree: at most 100 skills per server,
+  100,000 bytes per file and 400,000 bytes per skill. These are tighter than the spec's 512 files /
+  16 MiB, and a client drops a skill that breaks them; the page does not say whether it warns. The
+  limits are read as decimal kilobytes, the stricter reading. Today the largest skill,
+  `rigor-project-init`, is 74,792 bytes in 7 files, and the largest file is 21,646 bytes.
+- Every directory name equals its front matter `name`, and every relative link in a served file
+  resolves to another served file.
+
+Claude Code's limits are a client's and may change. The gate pins them as named constants with the
+page they came from, so a change to them edits one line.
+
+**(a) Where the skills are served from: the gem's install directory.** The server reads
+`<gem root>/skills/`, located from `__dir__` exactly as `rigor skill` already does
+(`CLI::SkillCommand::SKILLS_ROOT`), and serves the gemspec's two globs, `skills/*/SKILL.md` and
+`skills/*/references/*.md`. That keeps the served set in lockstep with the binary, which is the
+point of #3402. The server applies the globs itself rather than serving the directory, so a source
+checkout serves exactly what the gem would ship. The `evals/` and `scripts/` directories some skills
+carry for authoring stay out, and no served file links to them. Both read paths share one constant
+so they cannot disagree. A build-time snapshot is rejected (see below).
+
+**(b) On by default; `rigor mcp --no-skills` turns it off.** Serving skills adds a capability.
+It changes no tool and no legacy reply, and a client that does not implement the extension ignores
+it. Behind a flag, the users who would benefit most, the ones who never installed the skills
+locally, would never see them. A user who wants the server to be tools-only has
+`--no-skills`, which also drops `capabilities.resources`. Claude Code users can also deny
+`Skill(mcp__rigor__*)` client-side. This is still a default users see change, which is why it is
+asked rather than decided.
+
+**(c) Links out of a skill become GitHub URLs, and a gate stops new ones.**
+`skills/rigor-plugin-review/SKILL.md` links three binding specs as `../../docs/internal-spec/*.md`.
+The gem does not ship `docs/internal-spec/`, so the links already lead nowhere in an installed gem,
+and over MCP they resolve against `skill://` to nothing. `rigor docs` serves only the manual and the
+handbook (ADR-74), so it cannot stand in. The links become
+`https://github.com/rigortype/rigor/blob/master/docs/internal-spec/<file>.md`, the form the skills
+already use for their web fallbacks. The relative-link gate above keeps a fourth from landing. A
+`master` link can describe a newer contract than the installed gem; the plugin contract is
+versioned in the page itself, which is the reader's check.
+
+**(d) Slow boots: no server change; document running `rigor` directly.** The fallback seen in
+#3404's smoke test was measured, 2026-11-27, on this machine:
+
+- a cold Ruby boot of `rigor mcp` answers `server/discover` in about 0.14 s, because `rigor/cli` and
+  the engine load at the first `tools/call` (WD4). `require "rigor/cli"` alone takes 0.04 s;
+- `nix develop --command true` took 53 s on its first evaluation in a fresh worktree and 0.76 s warm.
+
+The delay is the Flake's evaluation, which only a contributor's checkout pays. Discover already
+answers before the engine loads, so there is nothing to make faster in the server. The work that
+remains is to keep it that way, and to tell users what is at stake:
+
+- a spec pins that `server/discover`, `skills/list`, `skills/get` and `resources/read` load neither
+  `rigor/cli` nor the engine;
+- the manual and `rigor-mcp-setup` say to launch the installed `rigor` (the mise shim or the gem's
+  bin stub), never through `bundle exec`, `nix develop` or `npx`. Claude Code's troubleshooting
+  advice names 3 seconds as the start-up time to stay under. Its docs say that with
+  `MCP_PROTOCOL_NEGOTIATION` unset it "can skip asking a stdio server for 7 days", for example
+  after the server exits when asked. A legacy connection is never offered skills, so the docs also
+  say how to check (the `/mcp` page's Protocol row) and how to re-probe
+  (`MCP_PROTOCOL_NEGOTIATION=auto`, then Reconnect).
+
+**(e) Duplicates: document, do not detect.** A user who installed `skills/` locally and also
+connects `rigor mcp` sees each skill twice in Claude Code, as `rigor-next-steps` and
+`rigor:rigor-next-steps`. Claude Code's docs say nothing about precedence between the two. The
+server cannot see a client's local skills, and refusing to serve them would punish the user it is
+meant for. The docs say:
+
+- keep the MCP copy where Claude Code offers MCP skills, which is the terminal, JetBrains and local
+  Desktop sessions, and remove the local copy there;
+- keep the local install for every other agent, and for the Claude Code surfaces that do not offer
+  MCP skills: cloud sessions, `claude -p`, `claude remote-control` server mode, GitHub Actions and
+  the Agent SDK.
+
+Each skill's "load the version-current copy" step stays. It is a no-op for an MCP-served copy and
+still needed for a local one, and one source serves both.
+
+**(f) `resources/list` lists the served files.** Declaring `resources` makes `resources/list`
+mandatory, and the 2026-07-28 spec says the answer is the resources currently available. It
+permits an empty list, but the skill files are available, and the Skills spec's guidance on their
+`resources/list` metadata (`mimeType: text/markdown`, `name` and `description` from the front
+matter) assumes they appear there. The cost is that a client which surfaces resources, such as
+Claude Code's `@` menu, shows about 40 Markdown files under `rigor`. An empty list would avoid
+that noise while still meeting the letter of the spec; this WD takes the honest list.
+
 ## Rejected alternatives
 
 **Subprocess-per-call wrapper shell script** — cold-boots the engine on every
@@ -165,6 +297,22 @@ violates ADR-0.  Rejected.
 `initialize` would refuse 2026-07-28 requests, or the reverse.  The spec does not require it,
 it adds the first piece of protocol state to the server, and the per-request rule already
 answers every client correctly.  Rejected.
+
+**A build-time snapshot of `skills/`** (WD10 a) — a generated file the release builds, holding
+the skills or their manifest. It adds a release step and a second copy that can drift from
+`skills/`, and buys nothing the gem directory does not already give: the installed gem's files do
+not change under a running process. Rejected.
+
+**Serving skills behind an opt-in flag** (WD10 b) — the users with no local install, the ones
+the extension helps most, would never turn it on. Rejected for an opt-out.
+
+**Detecting a local install and skipping duplicates** (WD10 e) — the server cannot see the
+client's skill directories, and a guess from the working directory would hide the version-locked
+copy from the user it exists for. Rejected.
+
+**Answering discover from a separate launcher before Ruby loads** (WD10 d) — discover already
+answers in about 0.14 s; the slow boots came from `nix develop`, which no launcher inside the gem
+can skip. Rejected.
 
 ## Implementation slices
 

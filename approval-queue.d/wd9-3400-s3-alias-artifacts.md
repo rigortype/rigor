@@ -1,4 +1,4 @@
-# Slice 3 of #3400 moves the alias def-node pass and the declaration artifacts in one pull request, as `AliasDefNodes` and `DeclarationArtifacts`, each behind one function, gives both moved `sig/` rows their `def`'s parameter list, states `private_class_method` in `sig/` by a `private` section, keeps `index`'s method-length directive, and accepts the `module Rigor` wrappers of the two new files as two more expressions that read `Dynamic` in the self-typing scan
+# Slice 3 of #3400 moves the alias def-node pass and the declaration artifacts in one pull request, as `AliasDefNodes` and `DeclarationArtifacts`, each behind one function, gives both moved `sig/` rows their `def`'s parameter list, leaves the `sig/` rows of `private_class_method` functions unmarked, keeps `index`'s method-length directive, and accepts the `module Rigor` wrappers of the two new files as two more expressions that read `Dynamic` in the self-typing scan
 
 - **PR:** [#3409](https://github.com/rigortype/rigor/pull/3409)
 - **Issue:** [#3400](https://github.com/rigortype/rigor/issues/3400)
@@ -28,7 +28,8 @@ slice. Seven things were open.
   the artifacts read.
 - The two rows of `sig/` the artifacts have. Each lists fewer parameters than its `def`.
 - How `sig/` says that a declared function is `private_class_method`. The review of #3406 asked it of two rows
-  of `ConstantTables`, and the same question holds for `DeclarationArtifacts.record_declarations`.
+  of `ConstantTables`, and the same question holds for `DeclarationArtifacts.record_declarations`. The review
+  of this pull request then counted 63 such rows in `sig/`, none of them marked.
 - `index`, which slice 2 left at 33 lines under a directive, calls the artifacts' entry first.
 - What the move costs the self-typing ratchet.
 
@@ -72,22 +73,31 @@ check accepts, since an overload may omit an optional parameter.
   it declares beside these. The types the rows already state are kept.
 - *Delete the rows.* That takes the declared types of the two tables away from the entry's callers.
 
-**`private_class_method` in `sig/`.** Three rows declare a function its module makes private: `ConstantTables`'
-`constant_writes_for_file` and `constant_literal_value`, and `DeclarationArtifacts.record_declarations`. Spelled
-`def self?.` beside the entries, they read as public. Each spelling was tried against RBS 4.2.0, the provenance
-gate's own auditor and `rigor check`:
+**`private_class_method` in `sig/`.** `sig/` declares 63 functions that Ruby makes private on the singleton, and
+no row says so; [#3410](https://github.com/rigortype/rigor/issues/3410) lists them by module. Three are this
+slice's: `ConstantTables`' `constant_writes_for_file` and `constant_literal_value`, which the review of #3406
+asked to be marked, and `DeclarationArtifacts.record_declarations`, which the slice moves. Each spelling was
+tried on those three against RBS 4.2.0, the provenance gate's own auditor and `rigor check`:
 
 | Spelling | RBS | The provenance gate | `rigor check` |
 | --- | --- | --- | --- |
 | `private def self?.x` | does not parse: "`self?` method cannot have visibility" | | |
 | `private def self.x` | the singleton method, private; no instance half | the row no longer joins its `def`: the three turn `synthetic_source`, the parameter-shape check compares 1,132 rows where it compared 1,135 (its floor is 1,132), and the file's unmarked residue is 69 against a pin of 68 | as `def self?.` |
 | `private def self.x` and `private def x` | both halves, private | not run: its first row is the one above, which the gate does not join, and each function would have two rows | not run |
-| a `private` section over `def self?.x` | the singleton half stays public; the instance half is private, as `self?` makes it already | as `def self?.`: 538 residue rows, 68 in the file, 1,135 compared, each row joined to its `def`; each `private` member is one more row that is no method | as `def self?.` |
+| a `private` section over `def self?.x` | the singleton half stays public; the instance half is private, as `self?` makes it already. The section runs to the block's `end`: an instance `def x` added below it later is private too, and a `def self.x` is not | as `def self?.`: 538 residue rows, 68 in the file, 1,135 compared, each row joined to its `def`; each `private` member is one more row that is no method | as `def self?.` |
 | a comment on the row | no change | no change | no change |
 
 `rigor check` reads none of them as a visibility: over a two-file project, a call of the function on the module
 from another file draws no diagnostic under any spelling, and its arity is held to the declaration under all of
 them.
+
+- *A `private` section over the three rows.* The first push of this pull request had it. It moves no gate and
+  informs nobody: RBS reads it as nothing for the singleton half of a `self?` row, and Rigor reads no singleton
+  privacy from RBS. Marking three rows also makes the other 60 read as public by contrast, and the section runs
+  to the block's `end`, where it would take in an instance row added later.
+- *One convention for all 63.* That is a decision of its own, with the gate's reading of `private def self.` to
+  settle first. It is #3410.
+- *Leave the three unmarked*, plain `def self?.` rows like the other 60, until #3410 decides.
 
 **`index`.** Its first statement holds the call of the entry. Spelled on the module it still fits the two lines
 it had (110 columns), so `index` is 33 lines against `Metrics/MethodLength`'s 30, as slice 2 left it. Checked
@@ -110,8 +120,9 @@ brings, not a precision the move gave up.
 One pull request. Two modules, `ScopeIndexer::AliasDefNodes` in `scope_indexer/alias_def_nodes.rb` and
 `ScopeIndexer::DeclarationArtifacts` in `scope_indexer/declaration_artifacts.rb`, each showing its one entry and
 keeping the rest private; `AliasMap` and `EMPTY_RENAMES` move with them. Both moved `sig/` rows take their
-`def`'s parameter list. The three rows of private functions stand under a `private` section of their module's
-block, with a comment that says the section is for the reader. `index` keeps its directive.
+`def`'s parameter list. The three rows of private functions stay plain `def self?.` rows, unmarked like the
+other 60 of `sig/`; the convention for all 63 is #3410, and the marking the review of #3406 asked for is
+resolved by deferring to it. `index` keeps its directive.
 The two wrappers are accepted with no pin of `tool/coverage_ratchet.yml` touched.
 
 The precedent for each is the amendment and the slices landed under it. The amendment moves a cluster "whole,
@@ -120,10 +131,9 @@ pull request and is the precedent for `index`'s directive; the re-measure counts
 nested classes with it, and slices 1 and 2 moved theirs the same way. U1 to U3
 ([#3393](https://github.com/rigortype/rigor/pull/3393)) gave `collect_class_decls`' row its `def`'s list for the
 same `call.wrong-arity`, and the brief asked the same of `record_declarations`; `build_declaration_artifacts`
-is the row the self-check held, so it follows. For the `private` section there is no precedent in `sig/`, which
-had no `private` anywhere: of the RBS forms tried it is the one that moves no gate, and the coordinator named
-it as the form to try first; a comment alone would say the same in no RBS at all. What the section does not do
-is make the singleton half private to a checker that reads RBS visibility, and the comment over each says so.
+is the row the self-check held, so it follows. For the rows of private functions `sig/` has no convention to
+follow, since none of the 63 is marked: leaving these three as they are keeps `sig/` uniform, which is what the
+coordinator ruled on the review of this pull request, and the table above is the evidence #3410 starts from.
 
 Four smaller choices follow landed slices and need no ruling. Comment links to a module function are spelled
 with a dot, `{.x}` inside the module and `{AliasDefNodes.x}` or `{ScopeIndexer::DeclarationArtifacts.x}` outside
@@ -140,10 +150,10 @@ mirror spec, its rows in `typing_state_closure_spec.rb` and `DeclarationWriterSc
 again), its block of `sig/rigor/inference.rbs` where it has one, and the calls spelled on it. To put `AliasMap`
 or `EMPTY_RENAMES` back on `ScopeIndexer`, move the statement; the module reads the name lexically with no other
 change. To take a `sig/` row back to its short list, first make every call of the function on its module pass
-no more arguments than the row lists. To spell the three private rows another way, delete the `private` member
-and its comment from each block: the rows are `def self?.` under it as they were, so nothing else moves. To
-take the directive off `index`, bring its statements back within 30 lines. The wrappers' reading goes only
-with the files.
+no more arguments than the row lists. To mark the rows of private functions, take the convention #3410 settles
+and apply it to all 63; these three are plain rows, so nothing of this slice has to be undone first. To take
+the directive off `index`, bring its statements back within 30 lines. The wrappers' reading goes only with the
+files.
 Nothing outside this pull request depends on any of these yet; the next slice of #3400 reads `index` at 33
 lines, `scope_indexer.rb` at 9,772 lines under a budget of 9,800, and the grandfathered pin at the digest this
 slice leaves.

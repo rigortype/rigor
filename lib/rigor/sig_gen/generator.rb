@@ -2653,8 +2653,8 @@ module Rigor
 
       # Returns a closure that looks up `:@<attr_name>` in the class-ivar accumulator carried by the first scope
       # the indexer associated with this file. The accumulator is populated by
-      # `ScopeIndexer#build_class_ivar_index` before any statement evaluation runs, so the lookup works even
-      # when attr_* declarations come before the corresponding ivar writes lexically.
+      # `ScopeIndexer::ClassIvarIndex.build_class_ivar_index` before any statement evaluation runs, so the lookup
+      # works even when attr_* declarations come before the corresponding ivar writes lexically.
       #
       # When `obs_ivar_map` is non-empty (i.e. `--params=observed` was used), it acts as a fallback: if the ivar
       # pre-pass resolved the type to `nil` or `Dynamic[top]` — typically because `@ivar = param` inside

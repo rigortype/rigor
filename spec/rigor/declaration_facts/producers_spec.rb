@@ -123,8 +123,27 @@ RSpec.describe "Declaration producers" do
   # twelve of the mixin effects and taints (`mixin_effects.rb`), moved with the reasons they had; none of those was
   # grandfathered. One row is new and has a reason of its own: the body of `MixinEffects`, which names node classes
   # since `LOCAL_SCOPE_BOUNDARIES` moved into it.
+  # Digest change, count still 366 (#3400, ADR-116 WD9, the class ivar index): 43 grandfathered keys moved from
+  # `lib/rigor/inference/scope_indexer.rb#Rigor::Inference::ScopeIndexer#` to
+  # `lib/rigor/inference/scope_indexer/class_ivar_index.rb#Rigor::Inference::ScopeIndexer::ClassIvarIndex#`:
+  # `accumulate_ivar_type`, `collect_anonymous_meta_defs?`, `collect_block_ivar_writes`, `collect_call_method_defs?`,
+  # `collect_class_body_ivar_writes`, `collect_class_method_defs`, `collect_decl_method_defs`,
+  # `collect_def_ivar_writes`, `collect_defined_test_ivars`, `collect_eval_method_defs?`,
+  # `collect_explicit_return_ivars`, `collect_initializer_block_ivars`, `collect_meta_new_method_defs?`,
+  # `collect_nil_test_ivars`, `collect_read_before_write_evidence`, `collect_singleton_method_defs`,
+  # `collect_truthy_test_ivars`, `detect_multi_write_target_writes`, `detect_read_before_write`,
+  # `gather_aliased_mutations`, `gather_ivar_writes`, `ivar_write_targets`, `merge_held_ivar_writes!`,
+  # `method_definite_assigns`, `record_aliased_ivar_mutations!`, `record_attr_writer_ivars`,
+  # `record_collected_method_def`, `record_compound_ivar_write`, `record_ivar_and_write`,
+  # `record_ivar_mutator_call`, `record_ivar_operator_write`, `record_ivar_or_write`, `record_ivar_write`,
+  # `record_multi_write_ivars`, `seed_operator_only_ivars!`, `walk_class_ivars`, `walk_conditional_ivar_writes`,
+  # `walk_ivars_declaration`, `walk_ivars_eval_call?`, `walk_ivars_leaf?`, `walk_ivars_meta_call?`,
+  # `walk_ivars_meta_new?` and `walk_singleton_class_ivars`. None was renamed. The module's other eight rows moved
+  # with the reasons they had, and its other 43 functions were no producers. One row is new and has a reason of its
+  # own: the body of `ClassIvarIndex`, which names node classes since `IVAR_BARRIER_NODES` moved into it. The two
+  # functions of the census scope (`census_scope.rb`) were no producers.
   let(:grandfathered_pin) do
-    { count: 366, digest: "152238d9ca04c4a5d808a24e377cef7824bf9abb623ba948758634bc79a06493" }
+    { count: 366, digest: "78a52ce1ed52777f49b847faa7ad36993491da8d49684885e56b256fa7bddf21" }
   end
 
   define_method(:found) do |parsed = DeclarationFactSources.parsed_under|

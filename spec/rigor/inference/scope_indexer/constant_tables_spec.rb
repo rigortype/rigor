@@ -634,15 +634,17 @@ RSpec.describe Rigor::Inference::ScopeIndexer::ConstantTables do
     expect(constants.reject { |name| described_class.const_defined?(name, false) }).to eq([])
   end
 
-  # The #3318 cut-off counts the functions a moved cluster calls back in what stays, and allows four. This one calls
-  # two: the scope a census types a body's rvalues under, and the chain it answers `Module.nesting` with.
-  it "calls two functions of the indexer, at one site each" do
+  # The #3318 cut-off counts the functions a moved cluster calls back in what stays, and allows four. This one called
+  # two: the scope a census types a body's rvalues under, and the chain it answers `Module.nesting` with. Both are
+  # the census scope's, a module of its own since #3400, so it calls nothing of the indexer.
+  it "calls nothing of the indexer, and two functions of the census scope at one site each" do
     path = File.join(DeclarationFactSources::REPO_ROOT, "lib/rigor/inference/scope_indexer/constant_tables.rb")
     calls = DeclarationFactSources.each_node(Prism.parse_file(path).value).filter_map do |node|
-      node.name if node.is_a?(Prism::CallNode) && DeclarationFactSources.constant_name(node.receiver) == "ScopeIndexer"
+      receiver = DeclarationFactSources.constant_name(node.receiver) if node.is_a?(Prism::CallNode)
+      [receiver, node.name] if %w[ScopeIndexer CensusScope].include?(receiver)
     end
 
-    expect(calls).to eq(%i[census_body_scope census_nesting])
+    expect(calls).to eq([["CensusScope", :census_body_scope], ["CensusScope", :census_nesting]])
   end
 
   describe "its callers" do

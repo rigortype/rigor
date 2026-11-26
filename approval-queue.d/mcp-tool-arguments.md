@@ -1,6 +1,6 @@
 # `rigor_check` and `rigor_coverage` take `paths` as optional, defaulting to the configured paths
 
-- **PR:** [#PRNUM](https://github.com/rigortype/rigor/pull/PRNUM)
+- **PR:** [#3430](https://github.com/rigortype/rigor/pull/3430)
 - **Issue:** [#3412](https://github.com/rigortype/rigor/issues/3412)
 - **Class:** open-choice
 - **Precedent:** [ADR-5](../docs/adr/5-robustness-principle.md)

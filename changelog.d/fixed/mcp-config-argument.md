@@ -1,0 +1,2 @@
+- **[mcp]** A `rigor mcp` tool call whose `config` is a directory, an unreadable file or not a string returns the command's usage error instead of an internal error. ([#3431](https://github.com/rigortype/rigor/pull/3431))
+  - The second, audit-only load of the configuration raised `Errno::EISDIR`, `Errno::EACCES` or `TypeError` and replaced the command's own message ([#3413](https://github.com/rigortype/rigor/issues/3413)).

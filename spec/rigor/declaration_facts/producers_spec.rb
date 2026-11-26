@@ -406,7 +406,7 @@ RSpec.describe "Declaration producers" do
         sources = {
           "lib/rigor/a.rb" => "module Rigor; module A; module_function; def entry(t) = add(t, 1); " \
                               "def add(table, x) = Rigor::B.merge(table, x); def far(t) = Rigor::Other.merge(t, 1); " \
-                              "def merge(t) = t << 1; end; end",
+                              "def merge(x, t) = t << x; end; end",
           "lib/rigor/b.rb" => "module Rigor; module B; module_function; def merge(table, x) = (table[x] = 1); end; end",
           "lib/rigor/c.rb" => "Rigor::A.entry({}); Rigor::A.far({})"
         }

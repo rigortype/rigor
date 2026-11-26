@@ -873,7 +873,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer::ClassIvarIndex do
       expect(c("def initialize(c); raise unless @y; end\ndef set; @y = 1; end")).to eq(:@y => "1?")
     end
 
-    # What the ivar holds once `initialize` has written it is not `nil`, whatever an earlier read of it saw.
+    # What the ivar holds once `initialize` has written it is not `nil`, whatever an earlier read of it saw. A guard:
+    # the `initialize` write exempts the ivar, as it exempts a sibling's read.
     it "takes none from an initializer's read of an ivar it writes later" do
       expect(c("def initialize; @y.foo; @y = 2; end\ndef set; @y = 1; end")).to eq(:@y => "1 | 2")
     end

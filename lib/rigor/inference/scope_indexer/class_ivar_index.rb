@@ -772,21 +772,20 @@ module Rigor
           read_first.each { |name| rbw_set << name }
         end
 
-        # #3419 — the ivars `initialize` reads while they still hold `nil`: read before any write in the body, never
-        # written later in it, and read in a top-level statement that comes before the first one that may run other
-        # code of the object (a `super`, a `yield`, or a call on the implicit or `self` receiver other than
-        # `raise`/`fail`), which may set the ivar first. Nothing else runs on the instance before `initialize`.
+        # #3419 — the ivars `initialize` reads while they still hold `nil`: read before any write, in a top-level
+        # statement that comes before the first one that may run other code of the object (a `super`, a `yield`, or a
+        # call on the implicit or `self` receiver other than `raise`/`fail`), which may set the ivar first. Nothing
+        # else runs on the instance before `initialize`. An ivar the body writes later is in `init_writes`, which
+        # keeps the `nil` out of the union.
         def initializer_own_nil_reads(def_node, class_name)
-          all_writes = Set.new
-          detect_read_before_write(def_node.body, all_writes, Set.new, class_name)
-          prefix_writes = Set.new
+          seen_writes = Set.new
           read_first = Set.new
           top_level_statements(def_node.body).each do |stmt|
             break if runs_object_code?(stmt)
 
-            detect_read_before_write(stmt, prefix_writes, read_first, class_name)
+            detect_read_before_write(stmt, seen_writes, read_first, class_name)
           end
-          read_first - all_writes
+          read_first
         end
 
         # True when `node` holds a `super`, a `yield`, or a call on the implicit or `self` receiver other than

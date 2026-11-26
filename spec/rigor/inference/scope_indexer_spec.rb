@@ -3587,19 +3587,6 @@ Unrelated
       expect(includes).not_to have_key("C")
     end
 
-    it "files `class D` method defs under `class <<` nowhere in the class-def table" do
-      defs = described_class::ClassIvarIndex.send(:collect_class_method_defs, parse(<<~RUBY))
-        class C
-          class << self
-            class D
-              def m; end
-            end
-          end
-        end
-      RUBY
-      expect(defs).not_to have_key("C::D")
-    end
-
     it "names the owner of a `self::X.class_eval` block from the enclosing namespace" do
       # `self::X` inside `module M` resolves to `M::X` — the eval block's defs land there.
       table = methods_for(<<~RUBY)

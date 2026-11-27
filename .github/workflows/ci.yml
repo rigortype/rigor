@@ -368,7 +368,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Ruby ${{ matrix.ruby }}
-        uses: ruby/setup-ruby@v1.338.0
+        uses: ruby/setup-ruby@v1.343.0
         with:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
@@ -512,7 +512,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1.338.0
+        uses: ruby/setup-ruby@v1.343.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -568,7 +568,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1.338.0
+        uses: ruby/setup-ruby@v1.343.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -651,7 +651,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1.338.0
+        uses: ruby/setup-ruby@v1.343.0
         with:
           ruby-version: "4.0"
 
@@ -709,7 +709,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1.338.0
+        uses: ruby/setup-ruby@v1.343.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -759,7 +759,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1.338.0
+        uses: ruby/setup-ruby@v1.343.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -800,7 +800,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1.338.0
+        uses: ruby/setup-ruby@v1.343.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -957,7 +957,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1.338.0
+        uses: ruby/setup-ruby@v1.343.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -1010,7 +1010,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1.338.0
+        uses: ruby/setup-ruby@v1.343.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -1037,7 +1037,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1.338.0
+        uses: ruby/setup-ruby@v1.343.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -1134,7 +1134,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1.338.0
+        uses: ruby/setup-ruby@v1.343.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -1169,7 +1169,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1.338.0
+        uses: ruby/setup-ruby@v1.343.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -1257,7 +1257,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Ruby
-        uses: ruby/setup-ruby@v1.338.0
+        uses: ruby/setup-ruby@v1.343.0
         with:
           ruby-version: "4.0"
           bundler-cache: true
@@ -1313,7 +1313,7 @@ jobs:
           persist-credentials: false
 
       - name: Install Nix
-        uses: cachix/install-nix-action@v31.11.5
+        uses: cachix/install-nix-action@v32.1.0
 
       # Keyed on the derivation's inputs, so a hash or resolution change
       # misses and a stale `sha256` can never be served from the cache.

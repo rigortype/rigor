@@ -15,12 +15,13 @@ require "fileutils"
 RSpec.describe "the truthiness exemption's constant resolution" do
   let(:published) { "MODE = :production\nLIMIT = 5\n" }
 
-  # The `flow.always-truthy-condition` lines of `c.rb`, analysed beside `a.rb`.
-  def firing_lines(reader)
+  # The `flow.always-truthy-condition` lines of `c.rb`, analysed beside `a.rb` and any `others` (`{"b.rb" => src}`).
+  def firing_lines(reader, others = {})
     Dir.mktmpdir do |dir|
       lib = File.join(dir, "lib")
       FileUtils.mkdir_p(lib)
       File.write(File.join(lib, "a.rb"), published)
+      others.each { |name, source| File.write(File.join(lib, name), source) }
       File.write(File.join(lib, "c.rb"), reader)
       configuration = Rigor::Configuration.new("paths" => [lib])
       result = guarded_run(Rigor::Analysis::Runner.new(configuration: configuration, cache_store: nil))
@@ -117,6 +118,47 @@ RSpec.describe "the truthiness exemption's constant resolution" do
       def prod? = MODE == :production
       puts 1 if AppConfig.production?
       puts 2 if prod?
+    RUBY
+  end
+
+  it "asks a singleton hop's body with the receiver as `self`, so the receiver's ancestors are rungs" do
+    # `Sub.chk?` is called from the top level and reads `LIMIT` in `class Sub < Base`, which is the file's own
+    # `Base::LIMIT` (line 5): the caller's top-level `self` has no ancestors to reach `Base` through.
+    expect(firing_lines(<<~RUBY)).to eq([5])
+      class Base; LIMIT = 9; end
+      class Sub < Base
+        def self.chk? = LIMIT == 9
+      end
+      puts 1 if Sub.chk?
+    RUBY
+  end
+
+  it "finds an implicit-self callee in a class on the class's ancestors, then at the top level" do
+    # `b.rb`'s top-level `prod?` and `Helpers#prod_too?` read `a.rb`'s `MODE`. Reached from inside a class,
+    # directly (line 9) or through an ivar seed (lines 15 and 16), each stays withheld. `Own#big?` reads the
+    # file's own `Own::LIMIT` and keeps firing through the included module (line 20).
+    expect(firing_lines(<<~RUBY, "b.rb" => "def prod? = MODE == :production\n")).to eq([20])
+      module Helpers
+        def prod_too? = MODE == :production
+      end
+      module Own
+        LIMIT = 9
+        def big? = LIMIT == 9
+      end
+      class K
+        def chk = prod? ? 1 : 2
+      end
+      class J
+        include Helpers
+        def initialize = (@p = prod?; @q = prod_too?)
+
+        def chk = @p ? 1 : 2
+        def chk_too = @q ? 1 : 2
+      end
+      class L
+        include Own
+        def chk = big? ? 1 : 2
+      end
     RUBY
   end
 

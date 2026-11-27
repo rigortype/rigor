@@ -120,10 +120,10 @@ module Rigor
         def callee_reads_published_constant?(node, scope)
           return false if scope.published_constant_names.empty? && !Analysis::DependencyRecorder.recording?
 
-          def_node = resolve_callee(node, scope)
+          def_node, body_self = resolve_callee(node, scope)
           return false if def_node.nil?
 
-          body_reads_published_constant?(def_node.body, callee_body_scope(def_node, node, scope))
+          body_reads_published_constant?(def_node.body, callee_body_scope(def_node, body_self, scope))
         rescue StandardError
           false
         end
@@ -133,15 +133,13 @@ module Rigor
         # written in the callee, not at the call: `AppConfig.production?` called from the top level reads `MODE`
         # inside `module AppConfig`. So the scope carries the `Module.nesting` the declaration walk recorded for
         # the def and the owner the call resolved it on, which are what `ExpressionTyper` types the same body
-        # under. An unrecorded nesting stays nil, and the reader peels the owner's name as it does there.
-        def callee_body_scope(def_node, call_node, scope)
-          scope.with_self_type(callee_self_type(call_node, scope))
-               .with_lexical_nesting(scope.discovery.recorded_def_nesting(def_node))
-        end
-
-        def callee_self_type(call_node, scope)
-          receiver = call_node.receiver
-          receiver.nil? || receiver.is_a?(Prism::SelfNode) ? scope.self_type : scope.type_of(receiver)
+        # under. An unrecorded nesting stays nil, and the reader peels the owner's name as it does there. A
+        # top-level def's `body_self` is nil and its unrecorded nesting is the top level's empty one, so no class
+        # the CALL sits in lends the body a namespace.
+        def callee_body_scope(def_node, body_self, scope)
+          nesting = scope.discovery.recorded_def_nesting(def_node)
+          nesting ||= [] if body_self.nil?
+          scope.with_self_type(body_self).with_lexical_nesting(nesting)
         end
 
         # `foo` / `self.foo` resolve against the enclosing self. Every other receiver resolves through its
@@ -151,36 +149,53 @@ module Rigor
         # the defect family #635 fixed in `Narrowing`, so the engine's own resolver answers it rather than a
         # walk reimplemented here. Going through the type also covers a call-chain receiver for free —
         # `KlassConfig.new.production?` types `Nominal[KlassConfig]`, whose instance table is the one to read.
+        #
+        # Answers `[def_node, body_self]`: the def and the `self` its body runs with, which is the receiver's type
+        # for a typed receiver, the owner the def was found on for an implicit self, and nil for a top-level def.
         def resolve_callee(node, scope)
           receiver = node.receiver
           return resolve_self_call(node.name, scope) if receiver.nil? || receiver.is_a?(Prism::SelfNode)
 
-          resolve_typed_receiver_call(receiver, node.name, scope)
+          receiver_type = scope.type_of(receiver)
+          [resolve_typed_receiver_call(receiver_type, node.name, scope), receiver_type]
         end
 
         # A `Singleton[X]` receiver names the singleton table (`AppConfig.production?`, a module's own
         # predicates); a `Nominal[X]` receiver names the instance one. Anything else — `Dynamic`, a constant
         # that resolves to no project class — is not a hop this walk can make.
-        def resolve_typed_receiver_call(receiver, method_name, scope)
-          receiver_type = scope.type_of(receiver)
+        def resolve_typed_receiver_call(receiver_type, method_name, scope)
           case receiver_type
           when Type::Singleton then scope.singleton_def_for(receiver_type.class_name, method_name)
           when Type::Nominal then scope.user_def_for(receiver_type.class_name, method_name)
           end
         end
 
-        # A `Singleton[X]` self (a `def self.…` body) names the singleton table; a `Nominal[X]` self names
-        # the instance one; no class at all is the top-level pseudo-class.
+        # A `Singleton[X]` self (a `def self.…` body) names the singleton table; a `Nominal[X]` self names the
+        # instance one, and the project defs of the class's instance ancestors after it (an `include`d helper, a
+        # superclass's predicate), whose body runs with the class that defines it as `self`. No class at all is the
+        # top-level pseudo-class.
+        #
+        # Issue #3437 review — a class lookup that misses falls back to the top-level table. A top-level def is a
+        # private `Object` method, so an implicit-self call reaches it from any class body; before the ivar census
+        # asked under the class's scope, its implicit-self hop resolved at the top level and found it, and a lookup
+        # that stopped at the class lost that withholding. Finding a callee can only withhold.
         def resolve_self_call(method_name, scope)
           self_type = scope.self_type
           owner = self_type.respond_to?(:class_name) ? self_type.class_name : nil
-          return scope.top_level_def_for(method_name) if owner.nil?
+          found = owner.nil? ? nil : resolve_class_self_call(self_type, owner, method_name, scope)
+          found || [scope.top_level_def_for(method_name), nil]
+        end
 
+        def resolve_class_self_call(self_type, owner, method_name, scope)
           if self_type.is_a?(Type::Singleton)
-            scope.singleton_def_for(owner, method_name)
-          else
-            scope.user_def_for(owner, method_name)
+            def_node = scope.singleton_def_for(owner, method_name)
+            return def_node && [def_node, self_type]
           end
+
+          def_node, definer = scope.user_def_through_ancestors(owner, method_name)
+          return nil if def_node.nil?
+
+          [def_node, definer == owner ? self_type : Type::Combinator.nominal_of(definer)]
         end
 
         def body_reads_published_constant?(root, scope)

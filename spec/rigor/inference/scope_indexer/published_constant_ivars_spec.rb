@@ -210,10 +210,10 @@ RSpec.describe Rigor::Inference::ScopeIndexer::PublishedConstantIvars do
     expect(described_class.constants).to be_empty
   end
 
-  it "leaves none of its 8 functions on ScopeIndexer, public or private" do
+  it "leaves none of its 9 functions on ScopeIndexer, public or private" do
     functions = described_class.private_instance_methods(false)
 
-    expect(functions.size).to eq(8)
+    expect(functions.size).to eq(9)
     expect(functions.select { |name| Rigor::Inference::ScopeIndexer.respond_to?(name, true) }).to eq([])
   end
 
@@ -225,7 +225,10 @@ RSpec.describe Rigor::Inference::ScopeIndexer::PublishedConstantIvars do
       discovery = Struct.new(:published_constant_ivars) { def with(**members) = self.class.new(*members.values) }
       scope = Struct.new(:discovery) do
         def published_constant_names = ["MODE"]
-        def published_constant?(name) = name == "MODE"
+        def published_constant?(name, rooted: false) = name == "MODE" && !rooted
+        def with_self_type(_type) = self
+        def with_lexical_nesting(_chain) = self
+        def lexical_nesting = nil
         def class_ivars_for(_name) = Hash.new(Rigor::Type::Combinator.constant_of(:production))
         def with_discovery(discovery) = self.class.new(discovery)
       end

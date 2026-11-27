@@ -166,7 +166,7 @@ module PublicApiDriftSnapshots # rubocop:disable Metrics/ModuleLength
     prepends_of(req:class_name)
     program_globals()
     project_method_name?(req:method_name)
-    published_constant?(req:name)
+    published_constant?(req:name,key:rooted)
     published_constant_ivars_for(req:class_name)
     published_constant_names()
     published_constant_sourced()

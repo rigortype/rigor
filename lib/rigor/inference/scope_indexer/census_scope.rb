@@ -9,10 +9,12 @@ module Rigor
       # #3400): {.census_body_scope}, and {.census_nesting}, the chain that scope answers `Module.nesting` with.
       # Three censuses ask for it, each a module of its own: the class ivar index ({ClassIvarIndex}, at four sites),
       # the class-variable census ({ClassCvarCensus}, at two) and the typed constant walk ({ConstantTables}, which
-      # asks for the chain alone too). Both functions are public, because another file calls each.
+      # asks for the chain alone too). A fourth, the published-constant ivar census ({PublishedConstantIvars}), types
+      # nothing and asks the truthiness guard about an rvalue under the same scope (issue #3437). Both functions are
+      # public, because another file calls each.
       #
       # It asks {DeclarationWalk::Rules} for the chain a prefix stands for, calls nothing left in `scope_indexer.rb`
-      # and reads none of its constants. `scope_indexer.rb` and the three modules require this file, and it requires
+      # and reads none of its constants. `scope_indexer.rb` and the four modules require this file, and it requires
       # none of them back. It requires the file of what it names, so it loads alone and answers there as it does
       # with the indexer loaded.
       module CensusScope

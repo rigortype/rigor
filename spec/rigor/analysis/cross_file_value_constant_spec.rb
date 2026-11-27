@@ -344,8 +344,9 @@ RSpec.describe "cross-file value constants" do
     end
 
     it "exempts a relative-qualified read of a constant this file owns" do
-      # The exemption is a suffix relation on qualified names, not the spelling: inside `module AppConfig`
-      # the reference `Nested::X` IS this file's `AppConfig::Nested::X`, so both spellings keep firing.
+      # The exemption matches the names a reference resolves to where it is written, not the spelling: inside
+      # `module AppConfig` the reference `Nested::X` IS this file's `AppConfig::Nested::X`, so both spellings
+      # keep firing.
       source = <<~RUBY
         module AppConfig
           module Nested
@@ -545,8 +546,8 @@ RSpec.describe "cross-file value constants" do
     end
 
     it "keeps firing on an alias of a constant the reading file declares" do
-      # The alias table asks its source's foreignness through the same suffix relation the local exemption
-      # uses, so a same-file rename chain stays fully reportable.
+      # The alias table asks its source's foreignness by the names the source resolves to where the alias is
+      # written, so a same-file rename chain stays fully reportable.
       source = <<~RUBY
         module Owner
           FIRST = :here

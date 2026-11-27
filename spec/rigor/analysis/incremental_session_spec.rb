@@ -3425,6 +3425,40 @@ end
         end
       end
 
+      # Issue #3437 — the hop matches a reader's own constant by the names the body's reference resolves to, and a
+      # leading `::` names the top level alone. Rooting the read keeps every return (the top-level `X` has the value
+      # of the reader's own `N::X`) and moves the constant from the reader's file to another one, so the reader stops
+      # firing. The gate's list keeps the `::`, or the two spellings would compare equal and skip the reader.
+      describe "a return-preserving edit that roots a constant the def reads" do
+        def c_file(read) = "module N; class C; def self.w(k) = #{read} == 6 ? A.v(k) : A.v(k); end; end\n"
+        def reader = "module N; X = 6; end\nputs 'hit' if N::C.w(1) == 3\n"
+
+        def tree
+          { "a.rb" => "class A; def self.v(k) = k == 5 ? k + 1 : k + 2; end\n", "t.rb" => "X = 6\n",
+            "c.rb" => c_file("X"), "r.rb" => reader }
+        end
+
+        def truthy?(recheck)
+          recheck.diagnostics.any? { |d| File.basename(d.path) == "r.rb" && d.message.include?("always truthy") }
+        end
+
+        it "re-checks the reader when the edit adds the leading `::`" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [tree, { "c.rb" => c_file("::X") }])
+            expect(basenames(rechecks.last.affected)).to include("r.rb")
+            expect(truthy?(rechecks.last)).to be(false)
+          end
+        end
+
+        it "re-checks the reader when the edit drops the leading `::`" do
+          Dir.mktmpdir do |dir|
+            rechecks = replay(dir, [tree.merge("c.rb" => c_file("::X")), { "c.rb" => c_file("X") }])
+            expect(basenames(rechecks.last.affected)).to include("r.rb")
+            expect(truthy?(rechecks.last)).to be(true)
+          end
+        end
+      end
+
       # Issue #3199 — the one hop also withholds on a constant the callee's body only probes (`defined?(B::X)`),
       # which no typing step reads, so `Scope#published_constant?` records the `constant:` edge itself. A change to
       # `B::X`'s publication alone (`c.rb` and `r.rb` untouched) must then re-check the reader; `replay` holds every

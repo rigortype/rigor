@@ -78,8 +78,7 @@ module Rigor
           return false if node.nil? || depth > MAX_DEPTH || scope.nil?
 
           case node
-          when Prism::ConstantReadNode then scope.published_constant?(node.name.to_s)
-          when Prism::ConstantPathNode then published_path?(node, scope)
+          when Prism::ConstantReadNode, Prism::ConstantPathNode then published_constant_node?(node, scope)
           when Prism::LocalVariableReadNode then scope.published_constant_sourced?(:local, node.name)
           when Prism::InstanceVariableReadNode then scope.published_constant_sourced?(:ivar, node.name)
           when Prism::CallNode then rooted_call?(node, scope, depth)
@@ -111,14 +110,6 @@ module Rigor
           callee_reads_published_constant?(node, scope)
         end
 
-        # The reference AS WRITTEN (`AppConfig::MODE`), so `Scope#published_constant?` can match its local
-        # exemption exactly rather than on the last segment. A path that renders no qualified name falls back
-        # to its own last segment, which is all there is to ask about.
-        def published_path?(node, scope)
-          rendered = constant_spelling(node)
-          !rendered.nil? && scope.published_constant?(rendered)
-        end
-
         # The one hop. Resolves the callee through the ordinary `Scope` accessors (so the ADR-46 recorder sees
         # the read and the caller gains an edge to the callee — the conservative direction) and scans its
         # body. Fails soft to false: a resolution this cannot make is not a reason to withhold.
@@ -132,9 +123,25 @@ module Rigor
           def_node = resolve_callee(node, scope)
           return false if def_node.nil?
 
-          body_reads_published_constant?(def_node.body, scope)
+          body_reads_published_constant?(def_node.body, callee_body_scope(def_node, node, scope))
         rescue StandardError
           false
+        end
+
+        # Issue #3437 — the scope the callee's body is asked under. `Scope#published_constant?` matches a file's
+        # own constant by the names a reference can resolve to WHERE IT IS WRITTEN, and the body's constants are
+        # written in the callee, not at the call: `AppConfig.production?` called from the top level reads `MODE`
+        # inside `module AppConfig`. So the scope carries the `Module.nesting` the declaration walk recorded for
+        # the def and the owner the call resolved it on, which are what `ExpressionTyper` types the same body
+        # under. An unrecorded nesting stays nil, and the reader peels the owner's name as it does there.
+        def callee_body_scope(def_node, call_node, scope)
+          scope.with_self_type(callee_self_type(call_node, scope))
+               .with_lexical_nesting(scope.discovery.recorded_def_nesting(def_node))
+        end
+
+        def callee_self_type(call_node, scope)
+          receiver = call_node.receiver
+          receiver.nil? || receiver.is_a?(Prism::SelfNode) ? scope.self_type : scope.type_of(receiver)
         end
 
         # `foo` / `self.foo` resolve against the enclosing self. Every other receiver resolves through its
@@ -183,14 +190,18 @@ module Rigor
 
         # Issue #3186 — the constant spellings the one hop's body scan would ask `Scope#published_constant?` about,
         # sorted and de-duplicated: every node {#body_reads_published_constant?} visits within its budget, in its
-        # order. The hop's answer for any reader is a function of this list and of that reader's publication
-        # tables, so the ADR-89 WD2 gate stores it beside a def's return summary and compares it on an edit: a
-        # reader the gate skips would otherwise keep a withholding (or a firing) the edited body no longer earns.
+        # order. A reference written with a leading `::` keeps it here (`::MODE`), because the question differs:
+        # it names the top level alone (issue #3437). The ADR-89 WD2 gate stores the list beside a def's return
+        # summary and compares it on an edit: a reader the gate skips would otherwise keep a withholding (or a
+        # firing) the edited body no longer earns. The hop's answer also turns on the `Module.nesting` the def is
+        # written under ({#callee_body_scope}), which no edit of the def's own text moves.
         def body_constant_spellings(root)
           spellings = []
           scan_body(root) do |node|
             spelling = constant_spelling(node)
-            spellings << spelling unless spelling.nil?
+            next if spelling.nil?
+
+            spellings << (Source::ConstantPath.rooted?(node) ? "::#{spelling}" : spelling)
           end
           spellings.uniq.sort
         end
@@ -214,13 +225,17 @@ module Rigor
           end
         end
 
+        # The reference AS WRITTEN (`AppConfig::MODE`), so `Scope#published_constant?` can match its local
+        # exemption on the names that spelling resolves to rather than on the last segment, with the leading
+        # `::` beside it: a rooted reference names the top level alone (issue #3437).
         def published_constant_node?(node, scope)
           spelling = constant_spelling(node)
-          !spelling.nil? && scope.published_constant?(spelling)
+          !spelling.nil? && scope.published_constant?(spelling, rooted: Source::ConstantPath.rooted?(node))
         end
 
-        # The name a constant reference asks the publication tables about ({#published_path?}'s rendering for a
-        # path), or nil for any other node and for a path that renders no name.
+        # The name a constant reference asks the publication tables about, un-rooted, or nil for any other node
+        # and for a path that renders no name. A path that renders no qualified name (`self::MODE`) falls back
+        # to its own last segment, which is all there is to ask about.
         def constant_spelling(node)
           case node
           when Prism::ConstantReadNode then node.name.to_s

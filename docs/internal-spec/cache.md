@@ -1635,7 +1635,10 @@ Two persisted summaries prove "nothing changed":
   ([#3186](https://github.com/rigortype/rigor/issues/3186)). A summary
   therefore MUST also hold the def's `guard_constants`: the constant
   spellings the hop's body scan visits within its node budget, sorted and
-  de-duplicated, keeping only those whose last segment some project file
+  de-duplicated, a reference written with a leading `::` keeping it (the
+  hop reads `::X` as the top level alone and `X` through the def's
+  nesting, [#3437](https://github.com/rigortype/rigor/issues/3437)),
+  keeping only those whose last segment some project file
   writes as a constant (any other spelling answers no for every reader, and
   keeping it would fail the gate on every edit that names a new class). The
   probe computes the edited def's list under its own write census, and a

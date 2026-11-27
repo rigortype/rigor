@@ -1,0 +1,35 @@
+# The truthiness exemption matches the names a reference can resolve to where it is written, not a suffix
+
+- **PR:** [#3440](https://github.com/rigortype/rigor/pull/3440)
+- **Issue:** [#3437](https://github.com/rigortype/rigor/issues/3437)
+- **Class:** open-choice
+- **Precedent:** [#1301](https://github.com/rigortype/rigor/pull/1301)
+- **Decided:** 2026-11-27
+
+## Background
+
+`flow.always-truthy-condition` is withheld on a predicate whose constancy rests on a constant another file published, unless the reading file assigns that constant itself (`docs/internal-spec/inference-engine.md` § "The truthiness withholding"). The spec bound that exemption to a suffix relation on qualified names: a local assignment exempted a reference when it equalled it or ended with `::` plus it. A file that assigns `M::MODE` therefore lost the withholding on its own top-level `MODE`, which is another file's constant, and the rule fired on correct code (#3437). The issue asked whether the exemption should match the resolved qualified name through the lexical cref instead, and left the answer open.
+
+The history shows what the suffix relation was chosen over. `61d03eca4` matched a qualified reference exactly and a bare one on its last segment, "since the lexical ladder can land anywhere". `4aec4cec7` replaced both with the suffix relation so that `Nested::X` inside `module AppConfig` matched the file's `AppConfig::Nested::X`, and said why it was "deliberately a relation over already-qualified names rather than a second ladder": the engine's ladder answers with a type and not with the candidate that won, and a walk reimplemented in the guard is what had just made its receiver resolution wrong. Neither commit weighed the over-answer #3437 reports. The reading file's cref was simply not consulted, and the spec's own asymmetry clause says the exemption is the half that must not over-answer.
+
+## Options and trade-offs
+
+- **Resolve the reference to one qualified name** and exempt it when the file assigns that name. This is the exact answer, including for a nearer constant another file assigns. It needs a ladder that names the winning candidate, which `Reflection.resolve_constant_type` does not, so the guard would carry a second walk: the thing `4aec4cec7` decided against, with the reason it gave still standing.
+- **Keep the suffix relation and require the local write to be reachable from the reference**: exempt only when the local name is `<entry>::R` for an entry of the reference site's `Module.nesting` or of the enclosing class's ancestors, or the top-level `R`; a `::`-rooted reference at the top level alone. It joins names and picks no winner, so it stays a relation over qualified names. Every such name is suffix-related to the spelling, so the new exemption is a subset of the old one and the change can only withhold. It leaves one over-answer the first option would close: a file that assigns the top-level `MODE` and reads `MODE` inside `module M`, where another file assigns `M::MODE`. That shape fires today as well.
+- **Leave the suffix relation** and document the false positive. Rejected: AGENTS.md ranks a finding on correct code above a lost one.
+
+## Decision
+
+The second option. `Scope#published_constant?` reads what the ladder reads (`Reflection.lexical_nesting_chain`, the single owner of a body's `Module.nesting` since #652, and the project entries of the `:constants` resolution chain its step 2 walks) through a private `Scope#constant_lookup_namespaces`, and joins each entry to the spelling. The reader is private to `Scope` so that `Rigor::Reflection`, a public plugin namespace under ADR-128, gains no member. #1301 is the precedent for the shape of the match: it compared census names against the ladder's candidates `<entry>::<name>` and required an exact name, rejecting a suffix match by name because it reached constants the lookup does not. This applies the same comparison to the exemption.
+
+Three things follow from the rule and were decided with it:
+
+- The guard's one interprocedural hop asks about the callee's body under the callee's recorded nesting and owner, not the caller's scope. Without that, `AppConfig.production?` called from the top level would read the callee's bare `MODE` as the top-level one and lose a firing it has today.
+- The alias census (`MODE2 = MODE`) and the instance-variable census (`@mode = MODE`) ask the same question, so they resolve the source where it is written too. The alias census is syntactic and reads no ancestry; the instance-variable census is given the scope the class-ivar index typed the rvalue under.
+- Giving the instance-variable census that scope also lets its hop resolve an implicit-self call (`@prod = prod?`) on the class instead of at the top level. That withholds one more shape, in the same direction.
+
+What the rule gives up is in the PR's "Known limits": a path write censused as written (#690) no longer exempts a bare read under the namespace it lands in, and an alias of an inherited constant reads as foreign. Both withhold.
+
+## To undo
+
+Restore `locally_declared_constant?`'s suffix scan as the answer in `lib/rigor/scope.rb` (it is still there as the pre-filter) and `census_declares_constant?` in `scope_indexer.rb`; drop `Scope#constant_lookup_namespaces`, `PublishedConstantGuard.callee_body_scope`, `PublishedConstantIvars.rvalue_scope` and the `rooted:` argument; put the spec bullet back. `PublishedConstantGuard.body_constant_spellings` keeps a leading `::` for the ADR-89 WD2 gate, which only matters while a rooted reference is asked differently. `spec/integration/truthiness_exemption_resolution_spec.rb` pins the new behaviour and would have to go with it. To take the first option later, replace the `any?` over the namespaces with a walk that stops at the first candidate some file writes (`Scope#shadowing_constant_names` holds them); the specs here stay valid under it.

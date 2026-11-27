@@ -10,14 +10,14 @@ require "yaml"
 # - the gates file differs from the dist file in that one key alone;
 # - every command of the key-off targets and steps passes `--config .rigor.gates.yml` (`--config=` too, and on a
 #   continuation line of the same command), and no command of the key-on targets passes `--config` at all;
-# - the lists below are fixed and named, so every step of ci.yml's `acceptance-gates` job that runs rigor (a `run:`
+# - the lists below are fixed and named, so every step of ci.yml's `acceptance-*` jobs that runs rigor (a `run:`
 #   naming `exe/rigor`, `make check*`, `make coverage`, or a `tool/*.rb` that drives the CLI or the runner) must be
 #   in `ci_steps`. A NEW heavy step fails here, naming itself, until it is added on the side it belongs on.
 RSpec.describe "The self-check's gates configuration" do
   def self.makefile_key_off = { "coverage" => 1, "coverage-tighten" => 1, "check-incremental" => 2 }
   def self.makefile_key_on = %w[check check-json check-plugins check-mutation-cache]
 
-  # Each acceptance-gates step that runs rigor: the Makefile target it delegates to (whose side the lists above
+  # Each acceptance-* job step that runs rigor: the Makefile target it delegates to (whose side the lists above
   # assert), or `[:off, <number of rigor commands>]` for a step that runs rigor itself with the key off.
   def self.ci_steps
     {
@@ -57,7 +57,10 @@ RSpec.describe "The self-check's gates configuration" do
 
   def acceptance_steps
     ci = YAML.safe_load_file(File.join(repo_root, ".github/workflows/ci.yml"))
-    ci.dig("jobs", "acceptance-gates", "steps").select { |step| step["run"] }
+    jobs = ci["jobs"].select { |id, _| id.start_with?("acceptance-") }
+    raise "ci.yml has no acceptance-* job" if jobs.empty?
+
+    jobs.values.flat_map { |job| job["steps"] }.select { |step| step["run"] }
   end
 
   def tool_runs_rigor?(path)
@@ -101,7 +104,7 @@ RSpec.describe "The self-check's gates configuration" do
   ci_steps.each do |name, side|
     it "keeps CI's #{name.inspect} step on its side of the split" do
       step = acceptance_steps.find { |s| s["name"] == name }
-      expect(step).not_to be_nil, "ci.yml's acceptance-gates job has no step named #{name.inspect}"
+      expect(step).not_to be_nil, "ci.yml's acceptance-* jobs have no step named #{name.inspect}"
 
       if side.is_a?(String)
         expect(step["run"].strip).to eq(side), "ci.yml step #{name.inspect} no longer runs only `#{side}`"
@@ -114,11 +117,11 @@ RSpec.describe "The self-check's gates configuration" do
     end
   end
 
-  it "lists every acceptance-gates step that runs rigor" do
+  it "lists every acceptance-* job step that runs rigor" do
     unlisted = acceptance_steps.select { |step| runs_rigor?(step["run"]) }.map { |step| step["name"] } -
                self.class.ci_steps.keys
     expect(unlisted).to be_empty,
-                        "ci.yml's acceptance-gates job runs rigor in #{unlisted.inspect}, which " \
+                        "ci.yml's acceptance-* jobs run rigor in #{unlisted.inspect}, which " \
                         "spec/rigor/self_check_gates_config_spec.rb does not list: add each to `ci_steps` on the " \
                         "side it belongs on (key off through `--config .rigor.gates.yml`, or a key-on Makefile target)"
   end

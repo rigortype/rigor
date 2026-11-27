@@ -410,7 +410,7 @@ flat_fixture_audit_spec=spec/rigor/typing_state_reachability_spec.rb
 # The inline-suppression gate reads every `# rigor:disable` under `lib/` and analyses under `.rigor.dist.yml`, so
 # an edit to either can make it fail.
 self_check_suppressions_spec=spec/rigor/self_check_suppressions_spec.rb
-# The variant-B split (#3324): which Makefile targets and acceptance-gates steps read `.rigor.gates.yml`.
+# The variant-B split (#3324): which Makefile targets and acceptance-* job steps read `.rigor.gates.yml`.
 self_check_gates_spec=spec/rigor/self_check_gates_config_spec.rb
 engine_drift_specs=(
   "$snapshot_gate_spec"

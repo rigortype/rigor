@@ -33,7 +33,7 @@ Two pieces of work ended here; neither leaves a queue to work down.
     to a tabled reason and to still firing. `make coverage`, `check-incremental`, the memo audit and the
     `type_of` shadow keep the key off through `.rigor.gates.yml`
     (`spec/rigor/self_check_gates_config_spec.rb` pins the split; a new rigor-running step in
-    `acceptance-gates` must be put on one side).
+    an `acceptance-*` job must be put on one side).
   - `make coverage` holds expression precision and the share of Dynamic call sites to one-sided pins in
     `tool/coverage_ratchet.yml` (key off): 59.58% and 49.83% at #3356; with the key on, measured by
     hand, 64.75% and 43.89%. A gain is claimed by `make coverage-tighten`; moving a pin the worse way is

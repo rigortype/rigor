@@ -203,8 +203,8 @@ is:
 ```
 
 - `frontmatter` MUST equal the `SKILL.md` front matter, parsed as YAML, with every field passed
-  through. Every scalar in a bundled skill's front matter is a string, so YAML 1.1 and YAML 1.2
-  readers agree on it.
+  through. Every key and scalar in a bundled skill's front matter is a string, so no YAML 1.1
+  boolean, integer or date reaches the entry.
 - `resources` MUST list every served file of the skill exactly once, `SKILL.md` first. Each `digest`
   is the lowercase hex SHA-256 of the bytes `resources/read` returns for that URI, and `size` is
   their byte count.
@@ -363,7 +363,7 @@ operands of every tool. `spec/rigor/cli/catalogue_spec.rb` ties every tool to a 
 `spec/rigor/mcp/skill_catalog_spec.rb` checks § Skills over the real `skills/` tree. It checks:
 
 - every manifest digest and size against the bytes served;
-- the front matter passed through, with every scalar a string;
+- the front matter passed through, with every key and scalar a string;
 - the served set against the gemspec;
 - that every relative link stays inside its skill;
 - Claude Code's client limits of 100 skills per server, 100,000 bytes per file and 400,000 bytes per

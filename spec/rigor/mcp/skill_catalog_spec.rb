@@ -154,11 +154,15 @@ RSpec.describe Rigor::MCP::SkillCatalog do
 
     # A host re-parses SKILL.md's front matter and compares it field by field with the entry (the Skills extension §
     # Verification). Psych reads YAML 1.1, where `yes`, `on` and `0755` are a boolean and an integer; a YAML 1.2 host
-    # reads a string and 755, and drops the skill. A front matter made only of strings parses the same under both.
-    it "keeps every front matter scalar a string, so every YAML reader agrees with the entry" do
+    # reads a string and 755, and drops the skill. Requiring every key and value to be a string closes those cases; it
+    # does not catch a string Psych keeps but YAML 1.2 resolves otherwise, such as `0o17`.
+    it "keeps every front matter key and scalar a string, so YAML 1.1 types cannot leak into the entry" do
       scalars = lambda do |value, path|
         case value
-        when Hash then value.flat_map { |key, child| scalars.call(child, "#{path}.#{key}") }
+        when Hash
+          value.flat_map do |key, child|
+            (key.is_a?(String) ? [] : [["#{path} key", key]]) + scalars.call(child, "#{path}.#{key}")
+          end
         when Array then value.each_with_index.flat_map { |child, index| scalars.call(child, "#{path}[#{index}]") }
         else [[path, value]]
         end
@@ -193,7 +197,7 @@ RSpec.describe Rigor::MCP::SkillCatalog do
       catalog.skills.each do |skill|
         served = skill.resources.map(&:path)
         skill.resources.each do |resource|
-          prose = resource.text.gsub(/^(```|~~~).*?^\1/m, "")
+          prose = resource.text.gsub(/^(```|~~~).*?^\1/m, "").gsub(/(`+).+?\1/, "") # fenced blocks, then code spans
           targets = prose.scan(/\]\(<?([^)\s>]+)/).flatten + # inline [text](target) and ![alt](target)
                     prose.scan(/^ {0,3}\[[^\]]+\]:\s*<?([^\s>]+)/).flatten + # reference definitions [label]: target
                     prose.scan(/\b(?:href|src)\s*=\s*["']([^"']+)["']/i).flatten # HTML links and images

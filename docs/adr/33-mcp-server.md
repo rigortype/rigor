@@ -204,8 +204,9 @@ snapshot. Discover and tool calls never read it. On 2026-11-27 the served set wa
   it warns. Pinning them for `rigor mcp`, whose skills it does not scan, and reading KB as 1,000
   bytes are both the stricter reading. Today the largest skill,
   `rigor-project-init`, is 74,792 bytes in 7 files, and the largest file is 21,646 bytes.
-- Every directory name equals its front matter `name`, every front matter scalar is a string (so a
-  YAML 1.1 reader such as Psych and a YAML 1.2 host parse it alike), and every relative link in a
+- Every directory name equals its front matter `name`, every front matter key and scalar is a string (so
+  YAML 1.1 booleans, integers and dates, which Psych reads and a YAML 1.2 host does not, cannot reach
+  the entry), and every relative link in a
   served file resolves to another served file of the same skill.
 
 Claude Code's limits are a client's and may change. The gate pins them as named constants with the

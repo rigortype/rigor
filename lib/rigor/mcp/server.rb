@@ -22,9 +22,13 @@ module Rigor
       CLIENT_CAPABILITIES_KEY = "io.modelcontextprotocol/clientCapabilities"
       SERVER_INFO_KEY = "io.modelcontextprotocol/serverInfo"
 
-      # `server/discover`'s `capabilities.extensions`. Empty until an extension is served; the Skills extension
-      # (`io.modelcontextprotocol/skills`, #3402) is added here.
-      EXTENSIONS = {}.freeze
+      # `server/discover`'s `capabilities.extensions` while skills are served (ADR-33 WD10). The Skills extension takes
+      # no optional setting here: every skill carries a complete manifest, so `directoryRead` is not offered.
+      SKILLS_EXTENSION = "io.modelcontextprotocol/skills"
+      EXTENSIONS = { SKILLS_EXTENSION => {}.freeze }.freeze
+
+      # The methods only a server that serves skills answers; with `--no-skills` they are `-32601`.
+      SKILLS_METHODS = %w[skills/list skills/get resources/list resources/read].freeze
 
       # How long a client may cache `server/discover` and `tools/list`. Neither changes while the process runs, so the
       # number only bounds how stale a cache that outlives a `rigor` upgrade can be. Nothing in either is per-user.
@@ -187,9 +191,10 @@ module Rigor
       CONFIG_TOOLS = TOOLS.filter_map { |tool| tool[:name] if tool.dig(:inputSchema, :properties, :config) }.freeze
       Ractor.make_shareable(CONFIG_TOOLS)
 
-      def initialize(config_path: nil, err: $stderr)
+      def initialize(config_path: nil, err: $stderr, skills: true)
         @config_path = config_path
         @err = err
+        @skills = skills
       end
 
       # Dispatches a parsed JSON-RPC request hash. Returns nil for notifications (requests without an `id`).
@@ -249,7 +254,53 @@ module Rigor
         when "tools/call"
           response = tools_call(id, request["params"])
           response.key?("result") ? success(id, complete(response["result"])) : response
-        else method_not_found(id, method_name)
+        else
+          return handle_skills(id, method_name, request["params"]) if @skills && SKILLS_METHODS.include?(method_name)
+
+          method_not_found(id, method_name)
+        end
+      end
+
+      # The Skills extension's methods and the `resources` methods it serves files through (ADR-33 WD10). The catalog is
+      # read at the first of these, never at discover or a tool call, and then frozen for the process. `params` is an
+      # object here: a 2026-07-28 request carries its `_meta` in it.
+      def handle_skills(id, method_name, params)
+        case method_name
+        when "skills/list"    then listing(id, params) { { skills: skill_catalog.entries } }
+        when "resources/list" then listing(id, params) { { resources: skill_catalog.resource_list } }
+        when "skills/get"     then skills_get(id, params["uri"])
+        else resources_read(id, params["uri"])
+        end
+      end
+
+      # Both lists fit one page, so no `nextCursor` is ever sent, and any cursor is one this server never issued.
+      def listing(id, params)
+        unless params["cursor"].nil?
+          return error(id, INVALID_PARAMS, "Invalid cursor",
+                       data: { cursor: params["cursor"] })
+        end
+
+        success(id, complete(cacheable(yield)))
+      end
+
+      def skills_get(id, uri)
+        skill = skill_catalog.skill(uri) if uri.is_a?(String)
+        return error(id, INVALID_PARAMS, "Skill not found", data: { uri: uri }) unless skill
+
+        success(id, complete(cacheable({ skill: skill.entry })))
+      end
+
+      def resources_read(id, uri)
+        contents = skill_catalog.contents(uri) if uri.is_a?(String)
+        return error(id, INVALID_PARAMS, "Resource not found", data: { uri: uri }) unless contents
+
+        success(id, complete(cacheable({ contents: contents })))
+      end
+
+      def skill_catalog
+        @skill_catalog ||= begin
+          require_relative "skill_catalog"
+          SkillCatalog.load(err: @err)
         end
       end
 
@@ -271,7 +322,7 @@ module Rigor
 
       def discover_result
         capabilities = { tools: { listChanged: false } }
-        capabilities[:extensions] = EXTENSIONS unless EXTENSIONS.empty?
+        capabilities.merge!(resources: {}, extensions: EXTENSIONS) if @skills
         {
           supportedVersions: SUPPORTED_VERSIONS,
           capabilities: capabilities

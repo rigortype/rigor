@@ -36,7 +36,7 @@ module Rigor
         require_relative "../mcp"
         require_relative "../version"
 
-        server = MCP::Server.new(config_path: options.fetch(:config), err: $stderr)
+        server = MCP::Server.new(config_path: options.fetch(:config), err: $stderr, skills: options.fetch(:skills))
         loop_runner = MCP::Loop.new(input: $stdin, output: $stdout, server: server)
         loop_runner.run
         0
@@ -55,13 +55,16 @@ module Rigor
                   "Session-level default config path (individual tool calls may override)") do |value|
             options[:config] = Options.config_path(value)
           end
+          opts.on("--no-skills", "Do not serve the bundled skills over the MCP Skills extension") do
+            options[:skills] = false
+          end
         end
       end
 
       private
 
       def parse_options
-        options = { transport: "stdio", config: nil }
+        options = { transport: "stdio", config: nil, skills: true }
 
         option_parser(options).parse!(@argv)
         options

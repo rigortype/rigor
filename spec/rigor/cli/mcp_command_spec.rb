@@ -19,7 +19,11 @@ RSpec.describe Rigor::CLI::McpCommand do
 
   describe "#parse_options" do
     it "defaults to the stdio transport and no config" do
-      expect(command([]).send(:parse_options)).to eq(transport: "stdio", config: nil)
+      expect(command([]).send(:parse_options)).to eq(transport: "stdio", config: nil, skills: true)
+    end
+
+    it "reads --no-skills" do
+      expect(command(["--no-skills"]).send(:parse_options)).to include(skills: false)
     end
 
     # #1992 — the --config value must name a file that exists, so the example makes one.
@@ -28,7 +32,7 @@ RSpec.describe Rigor::CLI::McpCommand do
         Dir.chdir(dir) do
           File.write("rigor.yml", "")
           options = command(["--transport=stdio", "--config=rigor.yml"]).send(:parse_options)
-          expect(options).to eq(transport: "stdio", config: "rigor.yml")
+          expect(options).to eq(transport: "stdio", config: "rigor.yml", skills: true)
         end
       end
     end

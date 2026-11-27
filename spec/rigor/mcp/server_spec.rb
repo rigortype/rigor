@@ -4,6 +4,10 @@ require "json"
 require "stringio"
 require "tmpdir"
 require "fileutils"
+require "digest"
+require "open3"
+require "rbconfig"
+require "rigor/mcp/skill_catalog"
 require "rigor/mcp"
 require "rigor/cli"
 
@@ -156,7 +160,10 @@ RSpec.describe Rigor::MCP::Server do
         "ttlMs" => described_class::CACHE_TTL_MS,
         "cacheScope" => "public"
       )
-      expect(result["capabilities"]).to eq({ "tools" => { "listChanged" => false } })
+      expect(result["capabilities"]).to eq(
+        "tools" => { "listChanged" => false }, "resources" => {},
+        "extensions" => { "io.modelcontextprotocol/skills" => {} }
+      )
       expect(result.dig("_meta", "io.modelcontextprotocol/serverInfo"))
         .to eq({ "name" => "rigor", "version" => Rigor::VERSION })
     end
@@ -254,6 +261,121 @@ RSpec.describe Rigor::MCP::Server do
       resp = request(id: 6, method: "tools/list", params: { "_meta" => { "progressToken" => 1 } })
 
       expect(resp["result"]).not_to have_key("resultType")
+    end
+
+    # ADR-33 WD10: the gem's own skills/, served over the Skills extension. The manifest digests and Claude Code's size
+    # limits are checked over the real tree in spec/rigor/mcp/skill_catalog_spec.rb; these pin the wire shape.
+    describe "the Skills extension" do
+      let(:catalog) { Rigor::MCP::SkillCatalog.load }
+      let(:skill_uri) { "skill://rigor-mcp-setup/SKILL.md" }
+
+      it "lists every bundled skill with its uri, front matter and manifest, cacheable and on one page" do
+        result = modern("skills/list").fetch("result")
+
+        expect(result).to include("resultType" => "complete", "ttlMs" => described_class::CACHE_TTL_MS,
+                                  "cacheScope" => "public")
+        expect(result).not_to have_key("nextCursor")
+        expect(result["skills"]).to eq(JSON.parse(JSON.generate(catalog.entries)))
+        expect(result["skills"].map { it["uri"] }).to include(skill_uri)
+      end
+
+      it "gets one skill by its SKILL.md uri" do
+        result = modern("skills/get", { "uri" => skill_uri }).fetch("result")
+
+        expect(result["resultType"]).to eq("complete")
+        expect(result["skill"]).to eq(JSON.parse(JSON.generate(catalog.skill(skill_uri).entry)))
+      end
+
+      it "reads a skill file as markdown text whose bytes match its manifest entry" do
+        result = modern("resources/read", { "uri" => skill_uri }).fetch("result")
+        expect(result.fetch("contents").size).to eq(1)
+        content = result.dig("contents", 0)
+        entry = modern("skills/get", { "uri" => skill_uri }).dig("result", "skill", "resources", 0)
+
+        expect(content).to include("uri" => skill_uri, "mimeType" => "text/markdown")
+        expect(content["text"].bytesize).to eq(entry["size"])
+        expect("sha256:#{Digest::SHA256.hexdigest(content['text'])}").to eq(entry["digest"])
+        expect(result).to include("ttlMs" => described_class::CACHE_TTL_MS, "cacheScope" => "public")
+      end
+
+      it "lists the served files as resources" do
+        resources = modern("resources/list").dig("result", "resources")
+
+        expect(resources.map { it["uri"] }).to match_array(catalog.skills.flat_map(&:resources).map(&:uri))
+        expect(resources.find { it["uri"] == skill_uri }).to include("name" => "rigor-mcp-setup",
+                                                                     "mimeType" => "text/markdown")
+      end
+
+      it "answers -32602 with the uri for a skill or file it does not serve" do
+        %w[skills/get resources/read].each do |method|
+          resp = modern(method, { "uri" => "skill://nope/SKILL.md" })
+
+          expect(resp["result"]).to be_nil
+          expect(resp["error"]).to include("code" => -32_602, "data" => { "uri" => "skill://nope/SKILL.md" })
+        end
+        expect(modern("skills/get", { "uri" => "skill://rigor-mcp-setup/references/x.md" }).dig("error", "code"))
+          .to eq(-32_602)
+        expect(modern("resources/read").dig("error", "code")).to eq(-32_602)
+      end
+
+      it "answers -32602 for a cursor it never issued" do
+        expect(modern("skills/list", { "cursor" => "abc" }).dig("error", "code")).to eq(-32_602)
+        expect(modern("resources/list", { "cursor" => "abc" }).dig("error", "code")).to eq(-32_602)
+      end
+
+      it "serves none of it to a legacy request" do
+        %w[skills/list skills/get resources/list resources/read].each do |method|
+          expect(request(id: 8, method: method).dig("error", "code")).to eq(-32_601)
+        end
+        expect(request(id: 8, method: "initialize").dig("result", "capabilities"))
+          .to eq({ "tools" => { "listChanged" => false } })
+      end
+
+      context "with skills turned off" do
+        subject(:server) { described_class.new(err: StringIO.new, skills: false) }
+
+        it "declares neither resources nor the extension, and answers the methods -32601" do
+          expect(modern("server/discover").dig("result",
+                                               "capabilities")).to eq({ "tools" => { "listChanged" => false } })
+          %w[skills/list skills/get resources/list resources/read].each do |method|
+            expect(modern(method).dig("error", "code")).to eq(-32_601)
+          end
+        end
+      end
+
+      it "reads the skills only at the first skills request, never at discover or a tool call" do
+        allow(Rigor::MCP::SkillCatalog).to receive(:load).and_call_original
+        modern("server/discover")
+        modern("tools/list")
+        modern("tools/call", { "name" => "rigor_explain", "arguments" => { "rule" => "call.undefined-method" } })
+        expect(Rigor::MCP::SkillCatalog).not_to have_received(:load)
+
+        modern("skills/list")
+        modern("resources/read", { "uri" => skill_uri })
+        expect(Rigor::MCP::SkillCatalog).to have_received(:load).once
+      end
+
+      # A slow boot pushes Claude Code past its server/discover probe, and a client that falls back to `initialize` is
+      # never offered skills (ADR-33 WD10 d). `exe/rigor` loads `rigor/cli` at boot (26 light files, no engine), so this
+      # pins the stronger in-process property: serving discover and the skills adds neither `rigor/cli` nor the engine.
+      it "answers discover and the skills methods without loading rigor/cli" do
+        lib = File.expand_path("../../../lib", __dir__)
+        script = <<~RUBY
+          require "rigor/mcp"
+          meta = { "io.modelcontextprotocol/protocolVersion" => "2026-07-28",
+                   "io.modelcontextprotocol/clientCapabilities" => {} }
+          server = Rigor::MCP::Server.new
+          [["server/discover", {}], ["skills/list", {}], ["resources/list", {}],
+           ["skills/get", { "uri" => "#{skill_uri}" }], ["resources/read", { "uri" => "#{skill_uri}" }]].each do |m, p|
+            raise m unless server.handle("id" => 1, "method" => m, "params" => p.merge("_meta" => meta)).key?("result")
+          end
+          puts $LOADED_FEATURES.grep(%r{/lib/rigor/cli(?:.rb|/)})
+        RUBY
+        out, status = Open3.capture2(RbConfig.ruby, "-I", lib, "-e", script, stdin_data: "")
+
+        expect(status).to be_success
+        expect(out).to be_empty
+      end
     end
   end
 

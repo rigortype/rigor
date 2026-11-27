@@ -1,0 +1,4 @@
+- **[mcp]** `rigor mcp` serves the gem-bundled skills over the MCP Skills extension, so Claude Code v2.1.331+ loads them as `rigor:<skill>` from the installed binary. ([#3423](https://github.com/rigortype/rigor/pull/3423))
+  - Each skill's manifest carries the SHA-256 digest and size of the bytes served. A spec pins Claude Code's limits of 100 skills, 100 KB per file and 400 KB per skill.
+  - `rigor mcp --no-skills` serves the tools only.
+  - The three links in `rigor-plugin-review` that pointed into the repository now point at GitHub.

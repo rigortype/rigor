@@ -44,7 +44,7 @@ A `rigor check` run goes through these stages. A change usually belongs to one o
 | `lib/rigor/inference/` | The typing engine and declaration discovery. See [Inside `inference/`](#inside-inference). | `lib/rigor/inference/statement_evaluator.rb` | `spec/rigor/inference/` |
 | `lib/rigor/language_server/` | The LSP server: one provider per request kind, buffer tables, publishing. | `lib/rigor/language_server/server.rb` | `spec/rigor/language_server/` |
 | `lib/rigor/lens/` | `rigor lens`: the `lens/v0` declaration map of the requested files, with type provenance and contract claims. | `lib/rigor/lens.rb` | `spec/rigor/lens/` |
-| `lib/rigor/mcp/` | The MCP server loop. | `lib/rigor/mcp/server.rb` | `spec/rigor/mcp/` |
+| `lib/rigor/mcp/` | The MCP server loop, and `SkillCatalog`, the frozen snapshot of `skills/` the Skills extension serves. | `lib/rigor/mcp/server.rb` | `spec/rigor/mcp/` |
 | `lib/rigor/plugin/` | The plugin API: the base class, manifest, loader, registry, trust and isolation, and the macro substrate. | `lib/rigor/plugin/base.rb` | `spec/rigor/plugin/` |
 | `lib/rigor/protection/` | Type-protection coverage by mutation: the mutator, the oracles and the mutation cache. Its scanner is `lib/rigor/inference/protection_scanner.rb`, and its commands are the `coverage*`, `mutation*` and `protection*` files of `lib/rigor/cli/`. | `lib/rigor/protection/mutation_scanner.rb` | `spec/rigor/protection/` |
 | `lib/rigor/rbs_extended/` | Parsing and checking of `%a{rigor:…}` annotations. The directive readers are in `lib/rigor/rbs_extended.rb`. | `lib/rigor/rbs_extended.rb` | `spec/rigor/rbs_extended/` |

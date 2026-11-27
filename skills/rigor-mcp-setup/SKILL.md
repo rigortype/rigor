@@ -60,10 +60,15 @@ copy — just proceed. If `rigor` is not on `PATH`, this task needs it: run
 
 ## The tools you are wiring in
 
-`rigor_check`, `rigor_type_of`, `rigor_triage`, `rigor_annotate`,
-`rigor_sig_gen`, `rigor_explain`, `rigor_coverage` — each the JSON form
-of the matching `rigor` CLI command. See the manual's **Tool reference**
-for inputs and outputs.
+`rigor_check`, `rigor_type_of`, `rigor_triage`, `rigor_lens`,
+`rigor_annotate`, `rigor_sig_gen`, `rigor_explain`, `rigor_coverage` —
+each the JSON form of the matching `rigor` CLI command. See the manual's
+**Tool reference** for inputs and outputs.
+
+The server also serves Rigor's bundled skills, this one included, over
+the MCP Skills extension. Claude Code v2.1.331+ lists them as
+`rigor:<skill>`, always matching the installed `rigor`. The manual's
+**Bundled skills over MCP** section has the requirements.
 
 ## The one stable fact
 
@@ -72,8 +77,10 @@ Every client config simply launches **`rigor mcp`** (stdio) and needs
 uses. For agents that do not inherit your shell, the `mise` shim path is
 the most reliable channel (see `rigor docs install`, or
 [Installing Rigor](https://github.com/rigortype/rigor/blob/master/docs/install.md)
-on the web). Do **not** add `rigortype` to the project's `Gemfile` — it
-is a tool, not a library.
+on the web). Launch that executable directly, never through
+`bundle exec`, `nix develop` or `npx`: a slow start makes Claude Code
+fall back to the older protocol, which has no skills. Do **not** add
+`rigortype` to the project's `Gemfile` — it is a tool, not a library.
 
 ## Procedure
 
@@ -124,6 +131,13 @@ A JSON `result` with `serverInfo.name: "rigor"` means it works; nothing
 or a shell error means `rigor` is not on the PATH the client uses. Then
 restart the client and confirm the `rigor_*` tools appear in its tool
 palette.
+
+For Claude Code, also confirm the skills: `/mcp` shows a **Protocol**
+row for `rigor`, and typing `/rigor:` offers the bundled skills. If
+the tools appear but the skills do not, follow the manual's
+Troubleshooting entry for it. If the developer also installed the
+skills locally, each appears twice; where Claude Code offers MCP skills,
+suggest keeping the `rigor:` copy and removing the local one.
 
 ## Next step
 

@@ -4,6 +4,7 @@ require "optparse"
 
 require_relative "command"
 require_relative "../rooted_glob"
+require_relative "../mcp/skill_catalog"
 
 module Rigor
   class CLI
@@ -75,9 +76,9 @@ module Rigor
           rigor skill describe --deep   (also: rigor describe --deep)
       USAGE
 
-      # The bundled skills live at `<gem_root>/skills/`. From `lib/rigor/cli/skill_command.rb` that is three directories
-      # up.
-      SKILLS_ROOT = File.expand_path("../../../skills", __dir__).freeze
+      # The bundled skills live at `<gem_root>/skills/`. `rigor mcp` serves the same tree (ADR-33 WD10), so both read
+      # one constant.
+      SKILLS_ROOT = MCP::SkillCatalog::ROOT
 
       # The parser of `rigor skill`, built without parsing anything: the catalogue reads its flags from it (ADR-126
       # WD3). The positional grammar is read by hand in {#run}, so this describes the switches and parses nothing.

@@ -192,7 +192,7 @@ byte length. The client verifies each file against the manifest and the front ma
 SKILL.md it reads, so a manifest built from one read of a file and content served from a later read
 would fail verification after an in-place edit. The server therefore reads the served set once per
 process, at the first skills or resources request, and serves every later request from that frozen
-snapshot. Discover and tool calls never read it. The served set is 39 files and 308,891 bytes today.
+snapshot. Discover and tool calls never read it. On 2026-11-27 the served set was 39 files and about 310 KB.
 
 **Gates.** Three new specs:
 
@@ -200,11 +200,13 @@ snapshot. Discover and tool calls never read it. The served set is 39 files and 
   every entry's `frontmatter` equals the front matter of its SKILL.md.
 - Claude Code's client limits hold over the real `skills/` tree: at most 100 skills per server,
   100,000 bytes per file and 400,000 bytes per skill. These are tighter than the spec's 512 files /
-  16 MiB, and a client drops a skill that breaks them; the page does not say whether it warns. The
-  limits are read as decimal kilobytes, the stricter reading. Today the largest skill,
+  16 MiB. Claude Code's page states the size limits for the skills it scans and does not say whether
+  it warns. Pinning them for `rigor mcp`, whose skills it does not scan, and reading KB as 1,000
+  bytes are both the stricter reading. Today the largest skill,
   `rigor-project-init`, is 74,792 bytes in 7 files, and the largest file is 21,646 bytes.
-- Every directory name equals its front matter `name`, and every relative link in a served file
-  resolves to another served file.
+- Every directory name equals its front matter `name`, every front matter scalar is a string (so a
+  YAML 1.1 reader such as Psych and a YAML 1.2 host parse it alike), and every relative link in a
+  served file resolves to another served file of the same skill.
 
 Claude Code's limits are a client's and may change. The gate pins them as named constants with the
 page they came from, so a change to them edits one line.
@@ -239,8 +241,9 @@ versioned in the page itself, which is the reader's check.
 **(d) Slow boots: no server change; document running `rigor` directly.** The fallback seen in
 #3404's smoke test was measured, 2026-11-27, on this machine:
 
-- a cold Ruby boot of `rigor mcp` answers `server/discover` in about 0.14 s, because `rigor/cli` and
-  the engine load at the first `tools/call` (WD4). `require "rigor/cli"` alone takes 0.04 s;
+- a cold Ruby boot of `rigor mcp` answers `server/discover` in about 0.14 s, because the engine loads
+  at the first `tools/call` (WD4). `exe/rigor` loads `rigor/cli` at boot, which takes 0.04 s and loads
+  no engine code;
 - `nix develop --command true` took 53 s on its first evaluation in a fresh worktree and 0.76 s warm.
 
 The delay is the Flake's evaluation, which only a contributor's checkout pays. Discover already

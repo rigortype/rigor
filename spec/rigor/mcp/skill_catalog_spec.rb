@@ -69,6 +69,19 @@ RSpec.describe Rigor::MCP::SkillCatalog do
       expect(err.string).to include('not serving skill "beta"')
     end
 
+    it "leaves out a skill with a file that is not valid UTF-8" do
+      write(root, "beta/SKILL.md", skill_md("beta"))
+      File.binwrite(File.join(root, "beta/references/bad.md").tap { FileUtils.mkdir_p(File.dirname(it)) }, "bad \xFF\n")
+      expect(catalog.skills.map(&:name)).to eq(["alpha"])
+      expect(err.string).to include("skill://beta/references/bad.md is not valid UTF-8")
+    end
+
+    it "says so when front matter does not parse, rather than calling it missing" do
+      write(root, "beta/SKILL.md", "---\nname: beta\ndescription: d\nmetadata:\n  date: 2026-01-01\n---\n")
+      expect(catalog.skills.map(&:name)).to eq(["alpha"])
+      expect(err.string).to include("not a YAML mapping the safe loader accepts")
+    end
+
     it "leaves out a skill without front matter" do
       write(root, "delta/SKILL.md", "# delta\n")
       expect(catalog.skills.map(&:name)).to eq(["alpha"])
@@ -114,8 +127,10 @@ RSpec.describe Rigor::MCP::SkillCatalog do
 
     # Claude Code's limits on the skills one MCP server serves (https://code.claude.com/docs/en/mcp § "Use skills from
     # MCP servers", read 2026-11-27): "Each server shows up to 100 skills" and "100 KB per text file, 400 KB per skill".
-    # They are tighter than the Skills extension's own 512 files / 16 MiB per skill, and a skill over them does not
-    # load. Read as decimal kilobytes, the stricter reading. When Claude Code changes them, change these lines.
+    # The page states the size limits for the skills it scans, and says it does not scan servers added with
+    # `claude mcp add`; pinning them for `rigor mcp` anyway is the stricter reading, as is reading KB as 1,000 bytes.
+    # They are tighter than the Skills extension's own 512 files / 16 MiB per skill. When Claude Code changes them,
+    # change these lines.
     let(:claude_code_max_skills) { 100 }
     let(:claude_code_max_file_bytes) { 100_000 }
     let(:claude_code_max_skill_bytes) { 400_000 }
@@ -137,10 +152,20 @@ RSpec.describe Rigor::MCP::SkillCatalog do
       end
     end
 
-    it "passes each SKILL.md's front matter through unchanged" do
+    # A host re-parses SKILL.md's front matter and compares it field by field with the entry (the Skills extension §
+    # Verification). Psych reads YAML 1.1, where `yes`, `on` and `0755` are a boolean and an integer; a YAML 1.2 host
+    # reads a string and 755, and drops the skill. A front matter made only of strings parses the same under both.
+    it "keeps every front matter scalar a string, so every YAML reader agrees with the entry" do
+      scalars = lambda do |value, path|
+        case value
+        when Hash then value.flat_map { |key, child| scalars.call(child, "#{path}.#{key}") }
+        when Array then value.each_with_index.flat_map { |child, index| scalars.call(child, "#{path}[#{index}]") }
+        else [[path, value]]
+        end
+      end
       catalog.skills.each do |skill|
-        served = catalog.contents(skill.uri).first.fetch(:text)
-        expect(skill.entry[:frontmatter]).to eq(described_class.parse_frontmatter(served))
+        non_strings = scalars.call(skill.entry[:frontmatter], skill.name).reject { |_, value| value.is_a?(String) }
+        expect(non_strings).to be_empty, "#{skill.uri} has non-string front matter: #{non_strings.inspect}"
       end
     end
 
@@ -169,7 +194,10 @@ RSpec.describe Rigor::MCP::SkillCatalog do
         served = skill.resources.map(&:path)
         skill.resources.each do |resource|
           prose = resource.text.gsub(/^(```|~~~).*?^\1/m, "")
-          prose.scan(/\]\(([^)\s]+)/).flatten.each do |target|
+          targets = prose.scan(/\]\(<?([^)\s>]+)/).flatten + # inline [text](target) and ![alt](target)
+                    prose.scan(/^ {0,3}\[[^\]]+\]:\s*<?([^\s>]+)/).flatten + # reference definitions [label]: target
+                    prose.scan(/\b(?:href|src)\s*=\s*["']([^"']+)["']/i).flatten # HTML links and images
+          targets.each do |target|
             next if target.match?(/\A(?:[a-z][a-z0-9+.-]*:|#)/i)
 
             resolved = File.expand_path(target.sub(/#.*\z/, ""), File.dirname(resource.path))

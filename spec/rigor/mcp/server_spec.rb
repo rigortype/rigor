@@ -343,8 +343,21 @@ RSpec.describe Rigor::MCP::Server do
         end
       end
 
+      it "reads the skills only at the first skills request, never at discover or a tool call" do
+        allow(Rigor::MCP::SkillCatalog).to receive(:load).and_call_original
+        modern("server/discover")
+        modern("tools/list")
+        modern("tools/call", { "name" => "rigor_explain", "arguments" => { "rule" => "call.undefined-method" } })
+        expect(Rigor::MCP::SkillCatalog).not_to have_received(:load)
+
+        modern("skills/list")
+        modern("resources/read", { "uri" => skill_uri })
+        expect(Rigor::MCP::SkillCatalog).to have_received(:load).once
+      end
+
       # A slow boot pushes Claude Code past its server/discover probe, and a client that falls back to `initialize` is
-      # never offered skills (ADR-33 WD10 d). Discover and the skills methods must answer before the engine loads.
+      # never offered skills (ADR-33 WD10 d). `exe/rigor` loads `rigor/cli` at boot (26 light files, no engine), so this
+      # pins the stronger in-process property: serving discover and the skills adds neither `rigor/cli` nor the engine.
       it "answers discover and the skills methods without loading rigor/cli" do
         lib = File.expand_path("../../../lib", __dir__)
         script = <<~RUBY

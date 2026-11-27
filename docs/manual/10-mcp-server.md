@@ -253,6 +253,11 @@ skills appear as `rigor:<skill>`, for example `/rigor:rigor-next-steps`.
 They are offered in terminal sessions, in JetBrains IDEs and in local
 Desktop sessions. They are not offered in cloud sessions, `claude -p`,
 `claude remote-control` server mode, GitHub Actions or the Agent SDK.
+Claude Code also limits them by plan, login, model and connection (for
+example, Team and Enterprise organisations turn them on, and a custom
+`ANTHROPIC_BASE_URL` or a cloud provider does not get them); its
+[requirements for MCP skills](https://code.claude.com/docs/en/mcp#use-skills-from-mcp-servers)
+are the authority.
 
 Requirements and controls:
 
@@ -658,7 +663,10 @@ You should get a JSON response. If you get nothing or a shell error,
 Check, in this order:
 
 - `claude --version` is 2.1.331 or later, and MCP skills are on for your
-  plan and session. They are not offered in `claude -p` or cloud sessions.
+  plan, login, model and session. They are not offered in `claude -p` or
+  cloud sessions; Claude Code's
+  [requirements for MCP skills](https://code.claude.com/docs/en/mcp#use-skills-from-mcp-servers)
+  list the rest.
 - `/mcp` shows a **Protocol** row for `rigor`. If it does not, the
   client fell back to the older protocol, usually after a slow start.
   Launch the installed `rigor` directly, then reconnect with

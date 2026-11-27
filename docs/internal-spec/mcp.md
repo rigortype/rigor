@@ -184,8 +184,8 @@ The server serves the gem's own `skills/` tree over the
 
 **The served set.** The skills are the directories of `<gem root>/skills/` holding a `SKILL.md`. Each
 serves its `SKILL.md` and its `references/*.md`, the two globs the gemspec ships, and nothing else.
-A skill is served only when its `SKILL.md` opens with YAML front matter that has a string
-`description` and a `name` equal to the directory name. *Implementation:* a skill that fails this is
+A skill is served only when its files are valid UTF-8 and its `SKILL.md` opens with YAML front matter
+that has a string `description` and a `name` equal to the directory name. *Implementation:* a skill that fails this is
 left out, with a line on stderr, and the others are still served. The server reads the set at the
 first § Skills request, never at `server/discover` or a tool call, and serves that snapshot for the
 life of the process: a file edited on disk afterwards is not seen until the server restarts.
@@ -203,7 +203,8 @@ is:
 ```
 
 - `frontmatter` MUST equal the `SKILL.md` front matter, parsed as YAML, with every field passed
-  through.
+  through. Every scalar in a bundled skill's front matter is a string, so YAML 1.1 and YAML 1.2
+  readers agree on it.
 - `resources` MUST list every served file of the skill exactly once, `SKILL.md` first. Each `digest`
   is the lowercase hex SHA-256 of the bytes `resources/read` returns for that URI, and `size` is
   their byte count.
@@ -362,7 +363,7 @@ operands of every tool. `spec/rigor/cli/catalogue_spec.rb` ties every tool to a 
 `spec/rigor/mcp/skill_catalog_spec.rb` checks § Skills over the real `skills/` tree. It checks:
 
 - every manifest digest and size against the bytes served;
-- the front matter passed through;
+- the front matter passed through, with every scalar a string;
 - the served set against the gemspec;
 - that every relative link stays inside its skill;
 - Claude Code's client limits of 100 skills per server, 100,000 bytes per file and 400,000 bytes per

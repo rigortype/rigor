@@ -21,6 +21,8 @@ module Rigor
       SKILL_FILE = "SKILL.md"
       REFERENCE_GLOB = "references/*.md"
 
+      FRONTMATTER = /\A---\r?\n(.*?)^---\r?$/m
+
       URI_SCHEME = "skill://"
       MIME_TYPE = "text/markdown"
 
@@ -59,7 +61,7 @@ module Rigor
         paths = [File.join(dir, SKILL_FILE)] + Dir.glob(REFERENCE_GLOB, base: dir).sort.map { File.join(dir, it) }
         resources = paths.map { read_resource(dir, name, it) }
         frontmatter = parse_frontmatter(resources.first.text)
-        problem = skill_problem(name, frontmatter)
+        problem = encoding_problem(resources) || skill_problem(name, resources.first.text, frontmatter)
         if problem
           err&.puts("rigor mcp: not serving skill #{name.inspect}: #{problem}")
           return nil
@@ -78,7 +80,7 @@ module Rigor
 
       # The YAML between a leading `---` line and the next `---` line, or nil when SKILL.md does not open with one.
       def self.parse_frontmatter(text)
-        match = text.match(/\A---\r?\n(.*?)^---\r?$/m)
+        match = text.valid_encoding? && text.match(FRONTMATTER)
         return nil unless match
 
         parsed = YAML.safe_load(match[1])
@@ -87,15 +89,25 @@ module Rigor
         nil
       end
 
-      def self.skill_problem(name, frontmatter)
-        return "SKILL.md has no YAML front matter" unless frontmatter
+      # A file that is not valid UTF-8 cannot be sent as JSON text, so its skill is not served at all.
+      def self.encoding_problem(resources)
+        bad = resources.find { !it.text.valid_encoding? }
+        bad && "#{bad.uri} is not valid UTF-8"
+      end
+
+      def self.skill_problem(name, text, frontmatter)
+        unless frontmatter
+          return "SKILL.md has no YAML front matter" unless text.valid_encoding? && text.match?(FRONTMATTER)
+
+          return "SKILL.md front matter is not a YAML mapping the safe loader accepts"
+        end
         return "front matter has no string `description`" unless frontmatter["description"].is_a?(String)
         return nil if frontmatter["name"] == name
 
         "front matter name #{frontmatter['name'].inspect} is not the directory name"
       end
 
-      private_class_method :read_skill, :read_resource, :skill_problem
+      private_class_method :read_skill, :read_resource, :encoding_problem, :skill_problem
 
       attr_reader :skills
 

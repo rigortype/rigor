@@ -155,6 +155,62 @@ RSpec.describe "the truthiness exemption's constant resolution" do
     RUBY
   end
 
+  it "prefers the class's own def over a top-level one of the same name" do
+    # `K#prod?` shadows `b.rb`'s constant-reading top-level `prod?`, so neither the ivar seed (line 8) nor the
+    # direct call (line 9) reads a published constant, and both keep firing.
+    expect(firing_lines(<<~RUBY, "b.rb" => "def prod? = MODE == :production\n")).to eq([8, 9])
+      class K
+        def prod? = true
+
+        def initialize
+          @p = prod?
+        end
+
+        def chk = @p ? 1 : 2
+        def chk2 = prod? ? 1 : 2
+      end
+    RUBY
+  end
+
+  it "prefers a superclass's def over a top-level one of the same name" do
+    # `Base#prod?` shadows `b.rb`'s top-level `prod?` for `K < Base` (lines 10 and 11).
+    expect(firing_lines(<<~RUBY, "b.rb" => "def prod? = MODE == :production\n")).to eq([10, 11])
+      class Base
+        def prod? = true
+      end
+
+      class K < Base
+        def initialize
+          @p = prod?
+        end
+
+        def chk = @p ? 1 : 2
+        def chk2 = prod? ? 1 : 2
+      end
+    RUBY
+  end
+
+  it "walks a singleton self's chain before the top-level table" do
+    # `Base.prod?` (line 6) and the `extend`ed `Ext#prod?` (line 13) shadow `b.rb`'s top-level `prod?` for a
+    # `def self.` body, so both keep firing.
+    expect(firing_lines(<<~RUBY, "b.rb" => "def prod? = MODE == :production\n")).to eq([6, 13])
+      class Base
+        def self.prod? = true
+      end
+
+      class K < Base
+        def self.chk = prod? ? 1 : 2
+      end
+      module Ext
+        def prod? = true
+      end
+      class E
+        extend Ext
+        def self.chk = prod? ? 1 : 2
+      end
+    RUBY
+  end
+
   it "finds an implicit-self callee on the class's ancestors, asked with its definer as `self`" do
     # `Helpers#prod?` reads `a.rb`'s `MODE`, through an ivar seed (line 12). `Own#big?` reads the file's own
     # `Own::LIMIT` and keeps firing (line 16). `Helpers#big_too?` is asked with `Helpers` as `self`, not the caller

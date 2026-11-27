@@ -113,6 +113,15 @@ RSpec.describe "tool/shard_report_select.rb" do
       expect(JSON.parse(File.read(File.join(selected, "binpacker-report-1.json")))).to eq("selected_tests" => 169)
     end
 
+    it "copies the timing file the chosen attempt wrote back, for shards-merge" do
+      File.write(File.join(artifact(shard: 1, attempt: 1, timings: "aaa"), "binpacker-timings-1"), "stale")
+      File.write(File.join(artifact(shard: 1, attempt: 2, timings: "aaa"), "binpacker-timings-1"), "fresh")
+
+      ShardReportSelect.stage(ShardReportSelect.choose(downloads), selected)
+
+      expect(File.read(File.join(selected, "binpacker-timings-1"))).to eq("fresh")
+    end
+
     it "refuses a chosen attempt that uploaded no run report rather than falling back to an older one" do
       artifact(shard: 1, attempt: 1, timings: "aaa")
       artifact(shard: 1, attempt: 2, timings: "aaa", report: nil)

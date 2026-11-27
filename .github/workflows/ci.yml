@@ -920,23 +920,112 @@ jobs:
           key: ${{ steps.restore-cache.outputs.cache-primary-key }}
 
   # ── 4b. Acceptance gates over a cold analysis ───────────────────
-  # Four gates that each need a full, uncached analysis and are otherwise
+  # Six gates that each need a full, uncached analysis and are otherwise
   # unrelated to one another. They used to be steps on the self-check matrix
   # guarded by `if: matrix.cache == 'cold'`, on the stated grounds that their
   # results are deterministic and need no warm/cold cross-check — which is
-  # precisely why they do not belong to that matrix. Parked there they made a
-  # job named "Self-check (cold)" spend 17% of itself on the self-check and
-  # 83% on this, serialised: 27s of check against 23s + 12s + 74s + 22s of
-  # gates, for a 164-196s job while its warm sibling finished in 44s.
+  # precisely why they do not belong to that matrix. As jobs of their own they
+  # still run against a fresh checkout with no `.rigor/cache` to restore from
+  # (which is all "cold" ever meant here), and no longer sit behind the
+  # self-check.
   #
-  # As their own job they still run once, still against a fresh checkout
-  # with no `.rigor/cache` to restore from (which is all "cold" ever meant
-  # here), and no longer sit behind the self-check. One job rather than one per
-  # gate while it finishes before the Tests shards; with the memo audit and the
-  # advisory type_of shadow it runs about eleven minutes. Split it if it becomes
-  # the critical path.
+  # Three jobs, not one. As one job the six ran in series for 923s on a fast
+  # runner and 1679s on a slow one (runs 45907406129 and 45913940288: every
+  # step 1.6-1.9x slower, the runner and not the change), the workflow's
+  # critical path against Tests shards of 740-820s. Runner speed cannot be
+  # chosen, so the lever is how much one job does in series: split by the
+  # fast-runner step times, the longest job is the memo audit's 428s alone.
+  # Each job costs ~15s of checkout and Ruby setup.
+  #
+  # spec/rigor/self_check_gates_config_spec.rb reads the steps of every
+  # `acceptance-*` job, so a gate moved between them stays pinned to its side
+  # of the `.rigor.gates.yml` split.
+  #
+  # Incremental-analysis gate and the type_of shadow, 228s + 102s. The job
+  # keeps the name agents/pi-harness/scripts/land-when-green.sh reads the
+  # shadow's advisory warning by (pinned by spec/tool/land_when_green_spec.rb).
   acceptance-gates:
     name: Acceptance gates (cold analysis)
+    needs: changes
+    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          submodules: false
+          persist-credentials: false
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1.338.0
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+
+      # Incremental-analysis acceptance gate (ADR-46): the incremental
+      # analyzer must produce diagnostics byte-identical to a full run.
+      # `--verify-incremental` re-analyzes a subset and serves the rest
+      # from the per-file cache, then asserts the merge equals a full
+      # `--no-cache` analysis — a mismatch would mean a stale, manufactured
+      # diagnostic. It runs roughly three analyses per target, over two
+      # targets.
+      - name: Run incremental-analysis gate
+        run: make check-incremental
+
+      # ADR-129 stage 3 — G1's shadow over Rigor's own source and the integration fixtures: every would-be hit of the
+      # type_of memo is recomputed and compared, and nothing is served, so the diagnostics are not read here. Advisory
+      # until the stage-3 corpus runs show zero mismatches; a later PR makes it a gate. Each run writes its own report,
+      # and the report check fails a missing or empty report and a run that checked nothing, so neither run can drop out
+      # unseen. Each run's exit status goes to the check too: `lib` must exit clean, and the fixtures may exit 1 on
+      # their expected diagnostics.
+      # Both runs read `.rigor.gates.yml` (`parameter_inference:` off), like the memo audit (acceptance-memo-audit).
+      - name: Run the type_of shadow (advisory)
+        continue-on-error: true
+        run: |
+          rm -f "$RUNNER_TEMP"/type-of-shadow-*.jsonl
+          RIGOR_TYPE_OF_SHADOW=1 RIGOR_TYPE_OF_SHADOW_REPORT="$RUNNER_TEMP/type-of-shadow-lib.jsonl" \
+            bundle exec exe/rigor check --config .rigor.gates.yml --no-cache --workers 0 --format json lib > /dev/null || lib_status=$?
+          RIGOR_TYPE_OF_SHADOW=1 RIGOR_TYPE_OF_SHADOW_REPORT="$RUNNER_TEMP/type-of-shadow-fixtures.jsonl" \
+            bundle exec exe/rigor check --config .rigor.gates.yml --no-cache --workers 0 --format json spec/integration/fixtures > /dev/null ||
+            fixtures_status=$?
+          if ! ruby tool/type_of_shadow_report.rb --status "lib=${lib_status:-0}:0" \
+            --status "fixtures=${fixtures_status:-0}:1" \
+            "$RUNNER_TEMP/type-of-shadow-lib.jsonl" "$RUNNER_TEMP/type-of-shadow-fixtures.jsonl"; then
+            echo "::warning title=type_of shadow (ADR-129 G1)::The advisory type_of shadow failed. See the job summary."
+            exit 1
+          fi
+
+  # The callee-floor memo audit alone, 428s: the longest gate, so the floor
+  # under the other two jobs.
+  acceptance-memo-audit:
+    name: Acceptance gates (memo audit)
+    needs: changes
+    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          submodules: false
+          persist-credentials: false
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1.338.0
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+
+      # ADR-127 WD3 — the memo audit over Rigor's own source: every hit in the callee floor's memos is recomputed and
+      # compared (`MemoAudit`), and a key that misses an input raises. A raise surfaces as an `internal analyzer
+      # error` diagnostic, so the output is kept; the exit status is the gate. `.rigor.gates.yml` keeps
+      # `parameter_inference:` off here, as for the type_of shadow in acceptance-gates: with it on, this step would
+      # take ~2.4x as long (#3324).
+      - name: Run the callee-floor memo audit
+        run: RIGOR_MEMO_AUDIT=1 bundle exec exe/rigor check --config .rigor.gates.yml --no-cache --workers 0 lib
+
+  # Precision coverage, plugin contract and mutation cache, 101s + 22s + 42s.
+  acceptance-ratchets:
+    name: Acceptance gates (coverage, plugin contract, mutation cache)
     needs: changes
     if: needs.changes.outputs.full == 'true' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
@@ -968,16 +1057,6 @@ jobs:
       - name: Run plugin-contract check
         run: make check-plugins
 
-      # Incremental-analysis acceptance gate (ADR-46): the incremental
-      # analyzer must produce diagnostics byte-identical to a full run.
-      # `--verify-incremental` re-analyzes a subset and serves the rest
-      # from the per-file cache, then asserts the merge equals a full
-      # `--no-cache` analysis — a mismatch would mean a stale, manufactured
-      # diagnostic. The longest of the four at ~74s: it runs roughly three
-      # analyses per target, over two targets.
-      - name: Run incremental-analysis gate
-        run: make check-incremental
-
       # Mutation-cache acceptance gate (#134 slice 3): the per-file
       # mutation-result cache must serve a measurement byte-identical to
       # the cold one. ADR-46 made that obligation mandatory for the
@@ -988,37 +1067,6 @@ jobs:
       # itself. It warms its own snapshot.
       - name: Run mutation-cache gate
         run: make check-mutation-cache
-
-      # ADR-127 WD3 — the memo audit over Rigor's own source: every hit in the callee floor's memos is recomputed and
-      # compared (`MemoAudit`), and a key that misses an input raises. A separate step. A raise surfaces as an
-      # `internal analyzer error` diagnostic, so the output is kept; the exit status is the gate.
-      # `.rigor.gates.yml` keeps `parameter_inference:` off here, as for the shadow below: with it on, this step
-      # would take ~2.4x as long (#3324).
-      - name: Run the callee-floor memo audit
-        run: RIGOR_MEMO_AUDIT=1 bundle exec exe/rigor check --config .rigor.gates.yml --no-cache --workers 0 lib
-
-      # ADR-129 stage 3 — G1's shadow over Rigor's own source and the integration fixtures: every would-be hit of the
-      # type_of memo is recomputed and compared, and nothing is served, so the diagnostics are not read here. Advisory
-      # until the stage-3 corpus runs show zero mismatches; a later PR makes it a gate. Each run writes its own report,
-      # and the report check fails a missing or empty report and a run that checked nothing, so neither run can drop out
-      # unseen. Each run's exit status goes to the check too: `lib` must exit clean, and the fixtures may exit 1 on
-      # their expected diagnostics.
-      # Both runs read `.rigor.gates.yml` (`parameter_inference:` off), like the memo audit above.
-      - name: Run the type_of shadow (advisory)
-        continue-on-error: true
-        run: |
-          rm -f "$RUNNER_TEMP"/type-of-shadow-*.jsonl
-          RIGOR_TYPE_OF_SHADOW=1 RIGOR_TYPE_OF_SHADOW_REPORT="$RUNNER_TEMP/type-of-shadow-lib.jsonl" \
-            bundle exec exe/rigor check --config .rigor.gates.yml --no-cache --workers 0 --format json lib > /dev/null || lib_status=$?
-          RIGOR_TYPE_OF_SHADOW=1 RIGOR_TYPE_OF_SHADOW_REPORT="$RUNNER_TEMP/type-of-shadow-fixtures.jsonl" \
-            bundle exec exe/rigor check --config .rigor.gates.yml --no-cache --workers 0 --format json spec/integration/fixtures > /dev/null ||
-            fixtures_status=$?
-          if ! ruby tool/type_of_shadow_report.rb --status "lib=${lib_status:-0}:0" \
-            --status "fixtures=${fixtures_status:-0}:1" \
-            "$RUNNER_TEMP/type-of-shadow-lib.jsonl" "$RUNNER_TEMP/type-of-shadow-fixtures.jsonl"; then
-            echo "::warning title=type_of shadow (ADR-129 G1)::The advisory type_of shadow failed. See the job summary."
-            exit 1
-          fi
 
   # ── 5. Warm-vs-cold diagnostic diff ─────────────────────────────
   # The two self-check variants must agree on every diagnostic.  Any
@@ -1317,7 +1365,7 @@ jobs:
   # merge queue always runs in full.
   required:
     name: CI required
-    needs: [changes, timing-cache, test, shard-coverage, excluded-specs, rbs-compat, lint, docs-check, self-check, self-check-diff, self-check-bleeding-edge, acceptance-gates, arity-differential, nix-package]
+    needs: [changes, timing-cache, test, shard-coverage, excluded-specs, rbs-compat, lint, docs-check, self-check, self-check-diff, self-check-bleeding-edge, acceptance-gates, acceptance-memo-audit, acceptance-ratchets, arity-differential, nix-package]
     runs-on: ubuntu-latest
     if: always() && !(github.event_name == 'pull_request' && github.event.pull_request.draft)
     steps:
@@ -1337,6 +1385,8 @@ jobs:
           SELF_CHECK_DIFF_RESULT: ${{ needs.self-check-diff.result }}
           SELF_CHECK_BLEEDING_EDGE_RESULT: ${{ needs.self-check-bleeding-edge.result }}
           ACCEPTANCE_GATES_RESULT: ${{ needs.acceptance-gates.result }}
+          ACCEPTANCE_MEMO_AUDIT_RESULT: ${{ needs.acceptance-memo-audit.result }}
+          ACCEPTANCE_RATCHETS_RESULT: ${{ needs.acceptance-ratchets.result }}
           ARITY_DIFFERENTIAL_RESULT: ${{ needs.arity-differential.result }}
           NIX_PACKAGE_RESULT: ${{ needs.nix-package.result }}
         run: |
@@ -1358,7 +1408,7 @@ jobs:
           # PR, Docs check on a code PR, Nix package when no package input
           # changed) is acceptable;
           # only an outright failure or cancellation blocks the merge.
-          for job_result in "$TIMING_CACHE_RESULT" "$TEST_RESULT" "$SHARD_COVERAGE_RESULT" "$EXCLUDED_SPECS_RESULT" "$RBS_COMPAT_RESULT" "$LINT_RESULT" "$DOCS_CHECK_RESULT" "$SELF_CHECK_RESULT" "$SELF_CHECK_DIFF_RESULT" "$SELF_CHECK_BLEEDING_EDGE_RESULT" "$ACCEPTANCE_GATES_RESULT" "$ARITY_DIFFERENTIAL_RESULT" "$NIX_PACKAGE_RESULT"; do
+          for job_result in "$TIMING_CACHE_RESULT" "$TEST_RESULT" "$SHARD_COVERAGE_RESULT" "$EXCLUDED_SPECS_RESULT" "$RBS_COMPAT_RESULT" "$LINT_RESULT" "$DOCS_CHECK_RESULT" "$SELF_CHECK_RESULT" "$SELF_CHECK_DIFF_RESULT" "$SELF_CHECK_BLEEDING_EDGE_RESULT" "$ACCEPTANCE_GATES_RESULT" "$ACCEPTANCE_MEMO_AUDIT_RESULT" "$ACCEPTANCE_RATCHETS_RESULT" "$ARITY_DIFFERENTIAL_RESULT" "$NIX_PACKAGE_RESULT"; do
             if [[ "$job_result" != "success" && "$job_result" != "skipped" ]]; then
               echo "A required job did not succeed (result: $job_result)"
               failed=1

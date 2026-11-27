@@ -365,11 +365,16 @@ RSpec.describe Rigor::Inference::ScopeIndexer::ConstantTables do
 
     # Issue #667 — the one unpublishable rvalue whose provenance is still knowable.
     describe "aliases" do
-      it "records the constant a plain write's rvalue names, qualified as written" do
-        tables = census("MODE2 = AppConfig::MODE\nM3 = MODE\nmodule M; M4 = ::Top; Foo::M5 = Bar; end\nM6 = foo::Baz\n")
+      # Issue #3437 — the rvalue is recorded as the names it can resolve to where the alias is written: the spelling
+      # behind each nesting entry, innermost first, then the spelling itself; a leading `::` leaves the spelling alone.
+      it "records the names a plain write's rvalue can resolve to, the spelling as written last" do
+        tables = census("MODE2 = AppConfig::MODE\nM3 = MODE\nmodule M; M4 = ::Top; Foo::M5 = Bar; end\n" \
+                        "M6 = foo::Baz\nmodule O; module I; M7 = Deep::X; end; end\nclass P::Q; M8 = Y; end\n")
 
-        expect(tables.aliases).to eq("MODE2" => "AppConfig::MODE", "M3" => "MODE", "M::M4" => "Top", "Foo::M5" => "Bar",
-                                     "M6" => "Baz")
+        expect(tables.aliases).to eq(
+          "MODE2" => ["AppConfig::MODE"], "M3" => ["MODE"], "M::M4" => ["Top"], "Foo::M5" => ["M::Bar", "Bar"],
+          "M6" => ["Baz"], "O::I::M7" => ["O::I::Deep::X", "O::Deep::X", "Deep::X"], "P::Q::M8" => ["P::Q::Y", "Y"]
+        )
       end
 
       it "drops a name written twice, and records none for a compound write or a key nothing names" do

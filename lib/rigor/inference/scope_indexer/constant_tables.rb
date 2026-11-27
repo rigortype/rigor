@@ -463,8 +463,9 @@ module Rigor
         # the names already recorded, so a repeat write retracts whatever either rvalue was; `declared` the
         # subset whose write NAMES its target, which is the only half {Scope#local_constant_names} may exempt
         # ([#710](https://github.com/rigortype/rigor/issues/710)).
-        # `aliases` is `{qualified target name => the constant reference its rvalue names}` for the one
-        # unpublishable rvalue shape whose provenance is still knowable ([#667](https://github.com/rigortype/rigor/issues/667)):
+        # `aliases` is `{qualified target name => the names its rvalue can resolve to}` ({.constant_alias_source})
+        # for the one unpublishable rvalue shape whose provenance is still knowable
+        # ([#667](https://github.com/rigortype/rigor/issues/667)):
         # a plain `MODE2 = AppConfig::MODE`. The census cannot publish a VALUE for it — resolving the source
         # is the typed walk's job, not this syntactic one — but it can record that the name is a rename of
         # another, which is all the withholding guard needs. `write_census` is issue #1367's {GlobalWriteCensus}, fed
@@ -617,14 +618,14 @@ module Rigor
 
             record_constant_write_census(qualified_write_name(qualified_prefix, node.name.to_s),
                                          constant_literal_value(node.value), tables,
-                                         alias_of: constant_alias_source(node.value))
+                                         alias_of: constant_alias_source(node.value, qualified_prefix))
           when Prism::ConstantPathWriteNode
             return if singleton_cref && singleton_self_write?(node.target, self_owner)
 
             record_constant_write_census(constant_path_write_name(node.target, qualified_prefix, self_owner),
                                          constant_path_write_literal(node, self_owner), tables,
                                          nameable: nameable_write_target?(node.target, self_owner),
-                                         alias_of: constant_alias_source(node.value))
+                                         alias_of: constant_alias_source(node.value, qualified_prefix))
           when Prism::ConstantOperatorWriteNode, Prism::ConstantOrWriteNode, Prism::ConstantAndWriteNode
             return if singleton_cref
 
@@ -772,14 +773,27 @@ module Rigor
           end
         end
 
-        # The constant reference an rvalue names, or nil when it names none. `AppConfig::MODE` renders
-        # qualified; a path that renders no qualified name falls back to its own last segment, which is all
-        # `Scope#published_constant?` can be asked about anyway.
-        def constant_alias_source(rvalue)
-          case rvalue
-          when Prism::ConstantReadNode then rvalue.name.to_s
-          when Prism::ConstantPathNode then Source::ConstantPath.qualified_name_or_nil(rvalue) || rvalue.name&.to_s
-          end
+        # The constant reference an rvalue names, as the names it can resolve to where it is written, or nil when
+        # it names none: the spelling behind each `Module.nesting` entry the walk's prefix stands for, innermost
+        # first, then the spelling itself, which is the top-level name and every candidate's last segment
+        # ([#3437](https://github.com/rigortype/rigor/issues/3437)). A reference written with a leading `::` names
+        # the top level alone. `AppConfig::MODE` renders qualified; a path that renders no qualified name falls
+        # back to its own last segment, which is all `Scope#published_constant?` can be asked about anyway.
+        #
+        # The walk is syntactic and has no ancestry to read, so the ancestors `Scope#published_constant?` adds for
+        # a reference are not candidates here: a `COPY = LIMIT` whose `LIMIT` the class inherits from a class this
+        # file declares reads as an alias of a foreign constant. That is the withholding direction.
+        def constant_alias_source(rvalue, qualified_prefix)
+          spelling =
+            case rvalue
+            when Prism::ConstantReadNode then rvalue.name.to_s
+            when Prism::ConstantPathNode then Source::ConstantPath.qualified_name_or_nil(rvalue) || rvalue.name&.to_s
+            end
+          return nil if spelling.nil?
+          return [spelling].freeze if Source::ConstantPath.rooted?(rvalue)
+
+          nesting = DeclarationWalk::Rules.lexical_nesting_for_prefix(qualified_prefix)
+          [*nesting.map { |entry| "#{entry}::#{spelling}" }, spelling].freeze
         end
 
         # The frozen-scalar literal fold: `[value]` for a publishable rvalue, nil to decline. The one-element

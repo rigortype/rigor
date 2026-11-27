@@ -131,7 +131,9 @@ RSpec.describe Rigor::Inference::ScopeIndexer::CensusScope do
       expect(table.transform_values(&:describe)).to eq("M::C::A" => "M::Bar", "M::D::B" => "Bar", "M::C::X" => "1")
     end
 
-    it "is called by those three modules alone, at eight sites" do
+    # Issue #3437 — the #667 instance-variable census is the fourth: it asks the truthiness guard about an rvalue
+    # under the scope the class-ivar index typed it under.
+    it "is called by those three modules and the published-constant ivar census alone, at nine sites" do
       root = File.join(DeclarationFactSources::REPO_ROOT, "lib/rigor")
       sites = Dir.glob("**/*.rb", base: root).sort.to_h do |path|
         calls = DeclarationFactSources.each_node(Prism.parse_file(File.join(root, path)).value).filter_map do |node|
@@ -144,7 +146,8 @@ RSpec.describe Rigor::Inference::ScopeIndexer::CensusScope do
       expect(sites.reject { |_path, calls| calls.empty? }).to eq(
         "inference/scope_indexer/class_cvar_census.rb" => %i[census_body_scope census_body_scope],
         "inference/scope_indexer/class_ivar_index.rb" => %i[census_body_scope] * 4,
-        "inference/scope_indexer/constant_tables.rb" => %i[census_body_scope census_nesting]
+        "inference/scope_indexer/constant_tables.rb" => %i[census_body_scope census_nesting],
+        "inference/scope_indexer/published_constant_ivars.rb" => %i[census_body_scope]
       )
     end
   end

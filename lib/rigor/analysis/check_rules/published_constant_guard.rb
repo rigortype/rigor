@@ -78,8 +78,7 @@ module Rigor
           return false if node.nil? || depth > MAX_DEPTH || scope.nil?
 
           case node
-          when Prism::ConstantReadNode then scope.published_constant?(node.name.to_s)
-          when Prism::ConstantPathNode then published_path?(node, scope)
+          when Prism::ConstantReadNode, Prism::ConstantPathNode then published_constant_node?(node, scope)
           when Prism::LocalVariableReadNode then scope.published_constant_sourced?(:local, node.name)
           when Prism::InstanceVariableReadNode then scope.published_constant_sourced?(:ivar, node.name)
           when Prism::CallNode then rooted_call?(node, scope, depth)
@@ -111,14 +110,6 @@ module Rigor
           callee_reads_published_constant?(node, scope)
         end
 
-        # The reference AS WRITTEN (`AppConfig::MODE`), so `Scope#published_constant?` can match its local
-        # exemption exactly rather than on the last segment. A path that renders no qualified name falls back
-        # to its own last segment, which is all there is to ask about.
-        def published_path?(node, scope)
-          rendered = constant_spelling(node)
-          !rendered.nil? && scope.published_constant?(rendered)
-        end
-
         # The one hop. Resolves the callee through the ordinary `Scope` accessors (so the ADR-46 recorder sees
         # the read and the caller gains an edge to the callee — the conservative direction) and scans its
         # body. Fails soft to false: a resolution this cannot make is not a reason to withhold.
@@ -129,12 +120,26 @@ module Rigor
         def callee_reads_published_constant?(node, scope)
           return false if scope.published_constant_names.empty? && !Analysis::DependencyRecorder.recording?
 
-          def_node = resolve_callee(node, scope)
+          def_node, body_self = resolve_callee(node, scope)
           return false if def_node.nil?
 
-          body_reads_published_constant?(def_node.body, scope)
+          body_reads_published_constant?(def_node.body, callee_body_scope(def_node, body_self, scope))
         rescue StandardError
           false
+        end
+
+        # Issue #3437 — the scope the callee's body is asked under. `Scope#published_constant?` matches a file's
+        # own constant by the names a reference can resolve to WHERE IT IS WRITTEN, and the body's constants are
+        # written in the callee, not at the call: `AppConfig.production?` called from the top level reads `MODE`
+        # inside `module AppConfig`. So the scope carries the `Module.nesting` the declaration walk recorded for
+        # the def and the owner the call resolved it on, which are what `ExpressionTyper` types the same body
+        # under. An unrecorded nesting stays nil, and the reader peels the owner's name as it does there. A
+        # top-level def's `body_self` is nil and its unrecorded nesting is the top level's empty one, so no class
+        # the CALL sits in lends the body a namespace.
+        def callee_body_scope(def_node, body_self, scope)
+          nesting = scope.discovery.recorded_def_nesting(def_node)
+          nesting ||= [] if body_self.nil?
+          scope.with_self_type(body_self).with_lexical_nesting(nesting)
         end
 
         # `foo` / `self.foo` resolve against the enclosing self. Every other receiver resolves through its
@@ -144,36 +149,65 @@ module Rigor
         # the defect family #635 fixed in `Narrowing`, so the engine's own resolver answers it rather than a
         # walk reimplemented here. Going through the type also covers a call-chain receiver for free —
         # `KlassConfig.new.production?` types `Nominal[KlassConfig]`, whose instance table is the one to read.
+        #
+        # Answers `[def_node, body_self]`: the def and the `self` its body runs with, which is the receiver's type
+        # for a typed receiver, the owner the def was found on for an implicit self, and nil for a top-level def.
         def resolve_callee(node, scope)
           receiver = node.receiver
           return resolve_self_call(node.name, scope) if receiver.nil? || receiver.is_a?(Prism::SelfNode)
 
-          resolve_typed_receiver_call(receiver, node.name, scope)
+          receiver_type = scope.type_of(receiver)
+          [resolve_typed_receiver_call(receiver_type, node.name, scope), receiver_type]
         end
 
         # A `Singleton[X]` receiver names the singleton table (`AppConfig.production?`, a module's own
         # predicates); a `Nominal[X]` receiver names the instance one. Anything else — `Dynamic`, a constant
         # that resolves to no project class — is not a hop this walk can make.
-        def resolve_typed_receiver_call(receiver, method_name, scope)
-          receiver_type = scope.type_of(receiver)
+        def resolve_typed_receiver_call(receiver_type, method_name, scope)
           case receiver_type
           when Type::Singleton then scope.singleton_def_for(receiver_type.class_name, method_name)
           when Type::Nominal then scope.user_def_for(receiver_type.class_name, method_name)
           end
         end
 
-        # A `Singleton[X]` self (a `def self.…` body) names the singleton table; a `Nominal[X]` self names
-        # the instance one; no class at all is the top-level pseudo-class.
+        # A `Singleton[X]` self (a `def self.…` body) names the singleton chain: the class's own `def self.`s, the
+        # modules it `extend`s, then its superclass's singleton side. A `Nominal[X]` self names the instance chain:
+        # the class's own defs, then its project ancestors' (an `include`d helper, a superclass's predicate). An
+        # ancestor-found body runs with the class that defines it as `self`. No class at all is the top-level
+        # pseudo-class.
+        #
+        # Issue #3437 review — a chain that misses falls back to the top-level table, and only then: Ruby finds the
+        # class's own or an ancestor's method first, so a def there shadows a top-level one of the same name. A
+        # top-level def is a private `Object` method, so an implicit-self call reaches it from any class body;
+        # before the ivar census asked under the class's scope, its implicit-self hop resolved at the top level and
+        # found it, and a lookup that stopped at the class lost that withholding.
         def resolve_self_call(method_name, scope)
           self_type = scope.self_type
           owner = self_type.respond_to?(:class_name) ? self_type.class_name : nil
-          return scope.top_level_def_for(method_name) if owner.nil?
+          found = owner.nil? ? nil : resolve_class_self_call(self_type, owner, method_name, scope)
+          found || [scope.top_level_def_for(method_name), nil]
+        end
 
-          if self_type.is_a?(Type::Singleton)
-            scope.singleton_def_for(owner, method_name)
-          else
-            scope.user_def_for(owner, method_name)
-          end
+        def resolve_class_self_call(self_type, owner, method_name, scope)
+          singleton = self_type.is_a?(Type::Singleton)
+          def_node, definer =
+            if singleton
+              scope.singleton_def_through_ancestors(owner, method_name)
+            else
+              scope.user_def_through_ancestors(owner, method_name)
+            end
+          return nil if def_node.nil?
+          return [def_node, self_type] if definer == owner
+
+          [def_node, definer_self_type(definer, singleton)]
+        end
+
+        # The `self` an ancestor-found body is asked with. Only its class name reaches the question
+        # ({Scope#published_constant?} reads that name's `Module.nesting` fallback and `:constants` chain), so a
+        # singleton chain's definer (a superclass's `def self.`, a module the class `extend`s) is named by its own
+        # name on the side the chain was walked.
+        def definer_self_type(definer, singleton)
+          singleton ? Type::Combinator.singleton_of(definer) : Type::Combinator.nominal_of(definer)
         end
 
         def body_reads_published_constant?(root, scope)
@@ -183,14 +217,18 @@ module Rigor
 
         # Issue #3186 — the constant spellings the one hop's body scan would ask `Scope#published_constant?` about,
         # sorted and de-duplicated: every node {#body_reads_published_constant?} visits within its budget, in its
-        # order. The hop's answer for any reader is a function of this list and of that reader's publication
-        # tables, so the ADR-89 WD2 gate stores it beside a def's return summary and compares it on an edit: a
-        # reader the gate skips would otherwise keep a withholding (or a firing) the edited body no longer earns.
+        # order. A reference written with a leading `::` keeps it here (`::MODE`), because the question differs:
+        # it names the top level alone (issue #3437). The ADR-89 WD2 gate stores the list beside a def's return
+        # summary and compares it on an edit: a reader the gate skips would otherwise keep a withholding (or a
+        # firing) the edited body no longer earns. The hop's answer also turns on the `Module.nesting` the def is
+        # written under ({#callee_body_scope}), which no edit of the def's own text moves.
         def body_constant_spellings(root)
           spellings = []
           scan_body(root) do |node|
             spelling = constant_spelling(node)
-            spellings << spelling unless spelling.nil?
+            next if spelling.nil?
+
+            spellings << (Source::ConstantPath.rooted?(node) ? "::#{spelling}" : spelling)
           end
           spellings.uniq.sort
         end
@@ -214,13 +252,17 @@ module Rigor
           end
         end
 
+        # The reference AS WRITTEN (`AppConfig::MODE`), so `Scope#published_constant?` can match its local
+        # exemption on the names that spelling resolves to rather than on the last segment, with the leading
+        # `::` beside it: a rooted reference names the top level alone (issue #3437).
         def published_constant_node?(node, scope)
           spelling = constant_spelling(node)
-          !spelling.nil? && scope.published_constant?(spelling)
+          !spelling.nil? && scope.published_constant?(spelling, rooted: Source::ConstantPath.rooted?(node))
         end
 
-        # The name a constant reference asks the publication tables about ({#published_path?}'s rendering for a
-        # path), or nil for any other node and for a path that renders no name.
+        # The name a constant reference asks the publication tables about, un-rooted, or nil for any other node
+        # and for a path that renders no name. A path that renders no qualified name (`self::MODE`) falls back
+        # to its own last segment, which is all there is to ask about.
         def constant_spelling(node)
           case node
           when Prism::ConstantReadNode then node.name.to_s

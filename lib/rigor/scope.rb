@@ -145,14 +145,23 @@ module Rigor
     # exemption, so over-answering there would UN-withhold: matching it on the last segment too would let an
     # unrelated `Local::MODE` in this file make a read of `AppConfig::MODE` fire.
     #
-    # The exemption therefore matches a **suffix relation on qualified names**, not the spelling and not the
-    # last segment: a local assignment exempts a reference when it IS that reference or ENDS with `::` plus
-    # it. That is what a lexically relative spelling resolves to — inside `module AppConfig`, the reference
-    # `Nested::X` is the file's own `AppConfig::Nested::X` — and it subsumes the bare case (`OWNED` matched
-    # by `Owner::OWNED`) without matching the unrelated `Local::MODE` above. It is deliberately a relation
-    # over already-qualified names rather than a second lexical ladder: the engine's ladder
+    # Issue #3437 — the exemption therefore matches the names the reference can RESOLVE to where it is written,
+    # not the spelling, not the last segment and not a suffix. A reference spelled `R` names `<entry>::R` for
+    # an entry of {#constant_lookup_namespaces} (this scope's `Module.nesting`, then the enclosing class's
+    # project ancestors), or the top-level `R`, and a local assignment exempts it only when it IS one of those
+    # names. Inside `module AppConfig`, `Nested::X` is the file's own `AppConfig::Nested::X` and `OWNED` inside
+    # `module Owner` is `Owner::OWNED`, so both stay exempt; a top-level `MODE` in a file that assigns
+    # `M::MODE` is not, because no rung of its lookup reaches `M`. A reference written with a leading `::`
+    # (`rooted:`) names the top level alone, as it does for the typing ladder.
+    #
+    # Every such name ends with `::` plus the spelling, so the relation is a subset of the suffix relation this
+    # replaced (it stays below as the pre-filter): the change can only withhold. It joins already-qualified
+    # names and resolves nothing, and is deliberately not a second lexical ladder: the engine's ladder
     # (`Reflection.resolve_constant_type`) answers with a TYPE and not with the candidate that won, and
     # reimplementing the walk here is the very thing that made the receiver resolution wrong once already.
+    # Not asking which candidate WINS leaves one over-answer: a file that assigns the top-level `MODE` and reads
+    # `MODE` inside `module M`, where another file assigns `M::MODE`, is exempt although the read is the other
+    # file's constant.
     #
     # Issue #667 — a third answer sits beside those two. `MODE2 = AppConfig::MODE` is assigned by this file,
     # so the exemption above releases it, yet its value is still one the author never saw: the alias only
@@ -164,14 +173,14 @@ module Rigor
     # the ADR-46 `constant:<segment>` name edge itself, whatever it answers. The guard asks it about spellings no
     # typing step reads (a `defined?(B::X)` probe, a callee body the one hop scans), and an edge left to the read
     # would let an `--incremental` run keep a verdict the moved publication no longer earns.
-    def published_constant?(name)
+    def published_constant?(name, rooted: false)
       Analysis::DependencyRecorder.read_last_segment(:constant, name) if Analysis::DependencyRecorder.active?
       names = @discovery.published_constant_names
       return true if published_constant_alias?(name)
       return false if names.empty?
       return false unless names.include?(name.split("::").last)
 
-      !locally_declared_constant?(name)
+      !locally_declared_constant?(name, rooted)
     end
 
     def published_constant_alias?(name)
@@ -180,15 +189,42 @@ module Rigor
     end
     private :published_constant_alias?
 
-    def locally_declared_constant?(reference_name)
+    # The top-level name is every unrooted lookup's last rung and a rooted reference's only one. The suffix
+    # scan is the relation issue #3437 narrowed, kept as the pre-filter: no namespace can qualify the reference
+    # into a local name unless some local name ends with it, so a file that assigns no such name never asks for
+    # the chain or the ancestors.
+    def locally_declared_constant?(reference_name, rooted)
       local = @discovery.local_constant_names
       return false if local.empty?
       return true if local.include?(reference_name)
+      return false if rooted
 
       suffix = "::#{reference_name}"
-      local.any? { |name| name.end_with?(suffix) }
+      return false unless local.any? { |name| name.end_with?(suffix) }
+
+      constant_lookup_namespaces.any? { |entry| local.include?("#{entry}#{suffix}") }
     end
-    private :locally_declared_constant?
+
+    # Issue #3437 — the namespaces whose OWN constants an unrooted reference written in this scope can name
+    # before the top level, read from what the typing ladder reads: its step 1's `Module.nesting`
+    # (`Reflection.lexical_nesting_chain`, the single owner of that chain), then the project entries of the
+    # enclosing class's `:constants` resolution chain, which its step 2 walks. The list names candidates and
+    # resolves none, so the order the ladder settles between two ancestors does not matter here.
+    #
+    # A body whose chain was recorded EMPTY is written at the top level and gets no entry: Ruby's cref there is
+    # `Object`, and the caller-derived rungs issue #716 keeps below the top level are a deliberate unsoundness
+    # of the typing ladder that an exemption must not inherit. An ancestor only RBS declares is left out: the
+    # question is about names this file assigns, and the ladder does not expand such an entry either.
+    def constant_lookup_namespaces
+      nesting = Reflection.lexical_nesting_chain(self)
+      owner = self_type.class_name if self_type.is_a?(Type::Nominal) || self_type.is_a?(Type::Singleton)
+      return nesting if nesting.empty? || owner.nil? || owner.empty?
+
+      ancestors = ResolutionChain.for(self, owner, :instance, :constants)
+      ancestors.record(self)
+      nesting + ancestors.entries.filter_map(&:name)
+    end
+    private :locally_declared_constant?, :constant_lookup_namespaces
 
     def data_member_layouts = @discovery.data_member_layouts
     def struct_member_layouts = @discovery.struct_member_layouts

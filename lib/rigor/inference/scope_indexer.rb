@@ -615,25 +615,19 @@ module Rigor
       # project published and this file does NOT itself declare. `MODE2 = AppConfig::MODE` renames a foreign
       # declaration, so the local-declaration exemption releasing `MODE2` is the wrong answer: the author can
       # see the alias but not the value. The source's own foreignness is asked against the census's
-      # `declared` half — the same suffix relation `Scope#published_constant?` uses — so a same-file
-      # `MODE2 = MODE1` pair stays fully reportable.
+      # `declared` half, by the names the source can resolve to where the alias is written
+      # ({ConstantTables.constant_alias_source}, issue #3437), so a same-file `MODE2 = MODE1` pair stays fully
+      # reportable and a top-level `MODE2 = MODE` in a file that assigns only `M::MODE` does not.
       def published_constant_alias_name_set(census, published)
         return Scope::DiscoveryIndex::EMPTY.published_constant_alias_names if census.nil?
 
-        names = census.aliases.filter_map do |target, source|
-          next unless published.include?(source.split("::").last)
-          next if census_declares_constant?(census.declared, source)
+        names = census.aliases.filter_map do |target, sources|
+          next unless published.include?(sources.last.split("::").last)
+          next if sources.any? { |name| census.declared.include?(name) }
 
           target.split("::").last
         end
         names.empty? ? Scope::DiscoveryIndex::EMPTY.published_constant_alias_names : names.to_set.freeze
-      end
-
-      def census_declares_constant?(declared, reference)
-        return true if declared.include?(reference)
-
-        suffix = "::#{reference}"
-        declared.any? { |name| name.end_with?(suffix) }
       end
 
       # Returns the per-file table unchanged (same frozen object) when nothing was seeded, so a run without `pre_eval:`

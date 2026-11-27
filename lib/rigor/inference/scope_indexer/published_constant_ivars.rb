@@ -6,6 +6,7 @@ require_relative "../../analysis/check_rules/published_constant_guard"
 require_relative "../../source/node_children"
 require_relative "../../type"
 require_relative "../declaration_walk/rules"
+require_relative "census_scope"
 
 module Rigor
   module Inference
@@ -74,7 +75,8 @@ module Rigor
           return !node.receiver.nil? if node.is_a?(Prism::DefNode)
           return false unless node.is_a?(Prism::InstanceVariableWriteNode)
 
-          record_published_constant_ivar(node, def_owner || qualified_prefix, scope, table)
+          record_published_constant_ivar(node, def_owner || qualified_prefix, rvalue_scope(scope, qualified_prefix),
+                                         table)
           true
         end
 
@@ -145,6 +147,18 @@ module Rigor
                                         def_owner: [], singleton_cref: true)
         end
 
+        # Issue #3437 — the scope the guard is asked under: the write's lexical cref, which is the walk's prefix and
+        # not the `def_owner` a rebound `self` credits the ivar to. `Scope#published_constant?` matches a file's own
+        # constant by the names a reference resolves to where it is written, so a scope with no `Module.nesting`
+        # would read every `@mode = MODE` as the top-level `MODE`. It is {CensusScope.census_body_scope}, the scope
+        # {ClassIvarIndex} typed the same rvalue under.
+        def rvalue_scope(scope, qualified_prefix)
+          return scope if qualified_prefix.empty?
+
+          CensusScope.census_body_scope(scope, qualified_prefix,
+                                        Type::Combinator.nominal_of(qualified_prefix.join("::")))
+        end
+
         # The class-ivar accumulator (already seeded when this runs) is the pre-gate: an ivar whose seed is not
         # a `Type::Constant` can never fold a predicate, so there is nothing for the mark to withhold and the
         # guard's one interprocedural hop is not worth paying for it.
@@ -160,7 +174,7 @@ module Rigor
 
         private_class_method :walk_published_constant_ivars, :walk_published_ivar_leaf?, :walk_published_ivar_meta_new?,
                              :walk_published_ivar_eval_call?, :walk_published_ivar_declaration?,
-                             :walk_singleton_published_ivars, :record_published_constant_ivar
+                             :walk_singleton_published_ivars, :record_published_constant_ivar, :rvalue_scope
       end
     end
   end

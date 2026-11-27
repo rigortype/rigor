@@ -136,7 +136,9 @@ RSpec.describe "the truthiness exemption's constant resolution" do
   it "finds an implicit-self callee in a class on the class's ancestors, then at the top level" do
     # `b.rb`'s top-level `prod?` and `Helpers#prod_too?` read `a.rb`'s `MODE`. Reached from inside a class,
     # directly (line 9) or through an ivar seed (lines 15 and 16), each stays withheld. `Own#big?` reads the
-    # file's own `Own::LIMIT` and keeps firing through the included module (line 20).
+    # file's own `Own::LIMIT` and keeps firing through the included module (line 20). `Shared#big_too?` is asked
+    # with `Shared` as `self`, not the caller `Sub`: its `LIMIT` is `a.rb`'s, which `Base::LIMIT` does not shadow
+    # from inside `Shared`, so line 28 stays withheld.
     expect(firing_lines(<<~RUBY, "b.rb" => "def prod? = MODE == :production\n")).to eq([20])
       module Helpers
         def prod_too? = MODE == :production
@@ -158,6 +160,14 @@ RSpec.describe "the truthiness exemption's constant resolution" do
       class L
         include Own
         def chk = big? ? 1 : 2
+      end
+      module Shared
+        def big_too? = LIMIT == 5
+      end
+      class Base; LIMIT = 9; end
+      class Sub < Base
+        include Shared
+        def chk = big_too? ? 1 : 2
       end
     RUBY
   end

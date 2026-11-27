@@ -133,40 +133,53 @@ RSpec.describe "the truthiness exemption's constant resolution" do
     RUBY
   end
 
-  it "finds an implicit-self callee in a class on the class's ancestors, then at the top level" do
-    # `b.rb`'s top-level `prod?` and `Helpers#prod_too?` read `a.rb`'s `MODE`. Reached from inside a class,
-    # directly (line 9) or through an ivar seed (lines 15 and 16), each stays withheld. `Own#big?` reads the
-    # file's own `Own::LIMIT` and keeps firing through the included module (line 20). `Shared#big_too?` is asked
-    # with `Shared` as `self`, not the caller `Sub`: its `LIMIT` is `a.rb`'s, which `Base::LIMIT` does not shadow
-    # from inside `Shared`, so line 28 stays withheld.
-    expect(firing_lines(<<~RUBY, "b.rb" => "def prod? = MODE == :production\n")).to eq([20])
+  it "falls back to the top-level table for an implicit-self callee in a class" do
+    # `b.rb`'s top-level `prod?` reads `a.rb`'s `MODE`. Reached from inside a class, directly (line 2) or through
+    # an ivar seed (line 9), it stays withheld. `small?` reads the file's own `LIMIT` and keeps firing (line 14).
+    expect(firing_lines(<<~RUBY, "b.rb" => "def prod? = MODE == :production\n")).to eq([14])
+      class K
+        def chk = prod? ? 1 : 2
+      end
+      class J
+        def initialize
+          @p = prod?
+        end
+
+        def chk = @p ? 1 : 2
+      end
+      LIMIT = 5
+      def small? = LIMIT == 5
+      class Q
+        def chk = small? ? 1 : 2
+      end
+    RUBY
+  end
+
+  it "finds an implicit-self callee on the class's ancestors, asked with its definer as `self`" do
+    # `Helpers#prod?` reads `a.rb`'s `MODE`, through an ivar seed (line 12). `Own#big?` reads the file's own
+    # `Own::LIMIT` and keeps firing (line 16). `Helpers#big_too?` is asked with `Helpers` as `self`, not the caller
+    # `Sub`: from inside `Helpers` its `LIMIT` is `a.rb`'s, which `Base::LIMIT` does not shadow (line 21).
+    expect(firing_lines(<<~RUBY)).to eq([16])
       module Helpers
-        def prod_too? = MODE == :production
+        def prod? = MODE == :production
+        def big_too? = LIMIT == 5
       end
       module Own
         LIMIT = 9
         def big? = LIMIT == 9
       end
-      class K
-        def chk = prod? ? 1 : 2
-      end
       class J
         include Helpers
-        def initialize = (@p = prod?; @q = prod_too?)
-
+        def initialize = (@p = prod?)
         def chk = @p ? 1 : 2
-        def chk_too = @q ? 1 : 2
       end
       class L
         include Own
         def chk = big? ? 1 : 2
       end
-      module Shared
-        def big_too? = LIMIT == 5
-      end
       class Base; LIMIT = 9; end
       class Sub < Base
-        include Shared
+        include Helpers
         def chk = big_too? ? 1 : 2
       end
     RUBY

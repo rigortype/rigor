@@ -277,6 +277,25 @@ RSpec.describe Rigor::Inference::ScopeIndexer::ConstantTables do
         .to eq("*::F" => :unpublishable, "*::H" => :unpublishable)
     end
 
+    # Issue #3407 — a target wherever Prism holds one, not only a multiple assignment's direct lefts and rights.
+    it "files a constant target under a splat, a nested target list, a `for` index and a `rescue =>` unpublishable" do
+      expect(writes("module M; x, *A = 1, 2; (B, c), *(D, *E) = 3; end\n"))
+        .to eq(%w[M::A M::B M::D M::E].to_h { |name| [name, :unpublishable] })
+      expect(writes("for F in []; end\nfor G::H in []; end\nbegin; rescue => I; rescue => J::K; end\n"))
+        .to eq(%w[F *::H I *::K].to_h { |name| [name, :unpublishable] })
+    end
+
+    it "censuses a write in a class or module header under the enclosing body, as the header runs there" do
+      expect(writes("module M; class C < (S = Object); X = 1; end; end\n"))
+        .to eq("M::S" => :unpublishable, "M::C::X" => [1])
+      expect(writes("class (A = Object)::B; end\nmodule (D = Object)::E; end\n"))
+        .to eq("A" => :unpublishable, "D" => :unpublishable)
+    end
+
+    it "records nothing for a target or a header write inside `class << self`, which lands on the singleton" do
+      expect(writes("class << self; x, *A = 1; for B in []; end; class C < (D = Object); end; end\n")).to eq({})
+    end
+
     it "walks into a write's rvalue, so the inner write of a chain is censused too" do
       expect(writes("C = D = :x\n")).to eq("C" => :unpublishable, "D" => [:x])
     end

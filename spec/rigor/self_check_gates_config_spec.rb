@@ -17,7 +17,7 @@ RSpec.describe "The self-check's gates configuration" do
   def self.makefile_key_off = { "coverage" => 1, "coverage-tighten" => 1, "check-incremental" => 2 }
   def self.makefile_key_on = %w[check check-json check-plugins check-mutation-cache]
 
-  # Each acceptance-gates step that runs rigor: the Makefile target it delegates to (whose side the lists above
+  # Each acceptance-* job step that runs rigor: the Makefile target it delegates to (whose side the lists above
   # assert), or `[:off, <number of rigor commands>]` for a step that runs rigor itself with the key off.
   def self.ci_steps
     {
@@ -117,7 +117,7 @@ RSpec.describe "The self-check's gates configuration" do
     end
   end
 
-  it "lists every acceptance-gates step that runs rigor" do
+  it "lists every acceptance-* job step that runs rigor" do
     unlisted = acceptance_steps.select { |step| runs_rigor?(step["run"]) }.map { |step| step["name"] } -
                self.class.ci_steps.keys
     expect(unlisted).to be_empty,
